@@ -1,0 +1,15 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kubernetes-dashboard
+spec:
+  template:
+    spec:
+      containers:
+        - name: kubernetes-dashboard
+          args:
+            - --auto-generate-certificates
+            # - --tls-cert-file=/tls.crt
+            # - --tls-key-file=/tls.key
+            - --namespace=kube-system

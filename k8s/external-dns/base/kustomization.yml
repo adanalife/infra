@@ -1,0 +1,7 @@
+# these were downloaded from:
+# https://github.com/kubernetes-sigs/external-dns
+resources:
+  - external-dns-deployment.yaml
+  - external-dns-serviceaccount.yaml
+  - external-dns-clusterrole.yaml
+  - external-dns-clusterrolebinding.yaml
