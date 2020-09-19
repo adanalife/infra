@@ -179,3 +179,36 @@ resource aws_iam_policy developer_assume_role {
 
   depends_on = [aws_organizations_account.account]
 }
+
+# give access to the dashcam_videos bucket
+data aws_iam_policy_document dashcam_videos {
+  dynamic statement {
+    for_each = local.accounts
+
+    content {
+      resources = [
+        "${aws_s3_bucket.dashcam_videos.arn}",
+        "${aws_s3_bucket.dashcam_videos.arn}/*"
+      ]
+
+      # read-write access
+      actions = [
+        "s3:*Object",
+        "s3:ListBucket"
+      ]
+
+      principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.admin_role}",
+          "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.developer_role}"
+        ]
+      }
+    }
+  }
+}
+
+resource aws_s3_bucket_policy dashcam_videos {
+  bucket = aws_s3_bucket.dashcam_videos.id
+  policy = data.aws_iam_policy_document.dashcam_videos.json
+}
