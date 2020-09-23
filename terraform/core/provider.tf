@@ -10,3 +10,9 @@ data aws_caller_identity current {}
 resource aws_iam_account_alias alias {
   account_alias = local.account_name
 }
+
+# let's encrypt
+# https://www.terraform.io/docs/providers/acme/index.html
+provider acme {
+  server_url = "https://acme-staging-v02.api.letsencrypt.org/directory"
+}
