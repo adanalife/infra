@@ -10,6 +10,11 @@ resource aws_s3_bucket dashcam_videos {
     }
   }
 
+  website {
+    error_document = "error.html"
+    index_document = "index.html"
+  }
+
   tags = {
     Name = "${local.account_name}-dashcam-videos"
   }
