@@ -1,6 +1,6 @@
 resource aws_db_instance tripbot {
   engine         = "postgres"
-  engine_version = "11.6"
+  engine_version = "11.8"
   instance_class = "db.t2.micro"
 
   identifier = "tripbot-db"
@@ -40,7 +40,7 @@ resource aws_security_group allow_postgres {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["108.7.224.38/32"]
+    cidr_blocks = ["108.49.156.172/32"]
   }
 
   egress {

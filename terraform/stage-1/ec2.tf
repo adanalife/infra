@@ -16,7 +16,7 @@ resource aws_security_group allow_ssh {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["108.7.224.38/32"]
+    cidr_blocks = ["108.49.156.172/32"]
   }
 
   egress {
