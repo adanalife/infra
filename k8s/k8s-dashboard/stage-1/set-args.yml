@@ -4,6 +4,10 @@ apiVersion: apps/v1
 metadata:
   name: kubernetes-dashboard
 spec:
+  selector:
+    matchLabels:
+      #TODO: is this the right selector?
+      app: kubernetes-dashboard
   template:
     spec:
       containers:
