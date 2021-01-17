@@ -32,7 +32,11 @@ output external_dns_access_key {
   value = aws_iam_access_key.external_dns.id
 }
 
-#TODO: this should be encrypted
+# the PGP-encrypted secret
 output external_dns_secret {
-  value = aws_iam_access_key.external_dns.secret
+  value = aws_iam_access_key.external_dns.encrypted_secret
+}
+
+output external_dns_role_arn {
+  value = aws_iam_role.external_dns.arn
 }
