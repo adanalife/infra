@@ -10,12 +10,15 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-route53
     solvers:
+    # - http01:
+    #     ingress:
+    #       class: traefik
     - dns01:
         route53:
           region: us-east-1
           hostedZoneID: Z05605701ECX0UCEOKZBS
           accessKeyID: AKIAWAS42L6WSH6MNBF6
           secretAccessKeySecretRef:
-            name: external-dns-user
+            name: external-dns-user-47gbdt8m5k
             key: secret-access-key
           role: arn:aws:iam::413585268653:role/ExternalDNSRole

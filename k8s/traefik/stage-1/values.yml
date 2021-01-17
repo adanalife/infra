@@ -42,10 +42,9 @@ spec:
     # from.
     service:
       enabled: true
-      type: ClusterIP
       # Additional annotations (e.g. for cloud provider specific config)
-      annotations:
-        external-dns.alpha.kubernetes.io/hostname: traefik.staging.whereisdana.today
+      # annotations:
+      #   external-dns.alpha.kubernetes.io/hostname: traefik.staging.whereisdana.today
         # service.beta.kubernetes.io/aws-load-balancer-internal: "true"
         # service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:us-east-1:...
 

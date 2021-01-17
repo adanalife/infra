@@ -226,7 +226,9 @@ resource aws_iam_policy allow_external_dns_updates {
     {
       "Effect": "Allow",
       "Action": [
+        "route53:GetChange",
         "route53:ListHostedZones",
+        "route53:ListHostedZonesByName",
         "route53:ListResourceRecordSets"
       ],
       "Resource": [
