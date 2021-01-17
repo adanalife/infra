@@ -1,0 +1,54 @@
+---
+kind: Ingress
+apiVersion: extensions/v1beta1
+metadata:
+  name: traefik-metrics
+  namespace: kube-system
+  annotations:
+    external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: traefik.staging.whereisdana.today
+      http:
+        paths:
+        - path: /metrics
+          backend:
+            serviceName: traefik-metrics
+            servicePort: metrics
+---
+# create a service for prometheus to scrape
+kind: Service
+apiVersion: v1
+metadata:
+  labels:
+    k8s-app: traefik-metrics
+  name: traefik-metrics
+  namespace: kube-system
+spec:
+  ports:
+  - name: metrics
+    port: 9100
+    targetPort: 9100
+  selector:
+    app.kubernetes.io/instance: traefik
+    app.kubernetes.io/name: traefik
+
+---
+# tell prometheus to scrape that service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: traefik-sm
+  namespace: kube-system
+spec:
+  endpoints:
+    - interval: 30s
+      port: metrics
+      scheme: http
+  selector:
+    matchLabels:
+      k8s-app: traefik-metrics
+  namespaceSelector:
+    matchNames:
+      - kube-system

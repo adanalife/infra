@@ -9,11 +9,24 @@ domainFilters:
 
 ## TXT Registry Identifier
 ##
-txtOwnerId: JVXF924Q
+txtOwnerId: Z05605701ECX0UCEOKZBS
 
 ## Prefix to create a TXT record with a name following the pattern prefix.<CNAME record>
 ##
 txtPrefix: stage-1
+
+## AWS configuration to be set via arguments/env. variables
+##
+aws:
+  ## AWS credentials
+  ##
+  credentials:
+    secretKey: ""
+    accessKey: ""
+    ## Use an existing secret with key "credentials" defined.
+    ## This ignores aws.credentials.secretKey, and aws.credentials.accessKey
+    ##
+    # secretName:
 
 ## Adjust the interval for DNS updates
 ##
