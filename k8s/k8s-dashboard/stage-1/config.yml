@@ -1,0 +1,6 @@
+# https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard#configuration
+extraArgs:
+  - --auto-generate-certificates
+  # - --tls-cert-file=/tls.crt
+  # - --tls-key-file=/tls.key
+  - --namespace=kube-system
