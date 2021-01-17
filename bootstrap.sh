@@ -4,10 +4,12 @@ g co -- k8s/traefik/stage-1/values.yml
 # external-dns
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm upgrade --install dns bitnami/external-dns -f k8s/external-dns/stage-1/config.yml -n kube-system
+kubectl apply -k k8s/external-dns/stage-1
 
 # cert-manager
 helm repo add jetstack https://charts.jetstack.io
 helm upgrade --install cert-manager --namespace kube-system jetstack/cert-manager -f k8s/cert-manager/stage-1/config.yml
+kubectl apply -k k8s/cert-manager/stage-1
 
 # k8s-dashboard
 helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
