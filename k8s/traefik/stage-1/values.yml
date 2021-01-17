@@ -19,10 +19,13 @@ spec:
     pilot:
       enabled: false
     providers:
+      kubernetesCRD:
+        enabled: true
       kubernetesIngress:
         enabled: true
         namespaces:
-          - "default"
+          - default
+          - kube-system
     globalArguments:
       - "--global.checknewversion"
       - "--metrics.prometheus=true"
@@ -33,7 +36,7 @@ spec:
     # Don't create an IngressRoute for the dashboard
     ingressRoute:
       dashboard:
-        enabled: false
+        enabled: true
 
     # Options for the main traefik service, where the entrypoints traffic comes
     # from.
