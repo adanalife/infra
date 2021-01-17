@@ -1,9 +1,9 @@
-```
+```bash
 kubectl diff -k k8s/k8s-dashboard/stage-1
 kubectl apply -k k8s/k8s-dashboard/stage-1
 
 helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
-helm install k8s-dashboard kubernetes-dashboard/kubernetes-dashboard -n kube-system -f k8s/k8s-dashboard/stage-1/config.yml
+helm upgrade --install k8s-dashboard kubernetes-dashboard/kubernetes-dashboard -n kube-system -f k8s/k8s-dashboard/stage-1/config.yml
 ```
 
 ```
