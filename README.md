@@ -8,7 +8,8 @@ brew install k3d
 # expose the container's port 80 to localhost:8081
 # and mount assets/video to the container's /video
 #TODO: pass in rancher/k3s:v1.18.6-k3s1 ??
-k3d cluster create adanalife-dev -p 8081:80@loadbalancer --volume $(pwd)/assets/video:/video
+#k3d cluster create adanalife-dev -p 8081:80@loadbalancer --volume $(pwd)/assets/video:/video
+k3d cluster create adanalife-stage-1 --volume "$(pwd)/k8s/traefik/stage-1/values.yml:/var/lib/rancher/k3s/server/manifests/traefik.yaml"
 # set up kubectl to use this cluster
 export KUBECONFIG="$(k3d kubeconfig merge adanalife-dev)"
 # create local tripbot deployment
@@ -63,4 +64,7 @@ alias login-dana-stage-developer="aws-vault login adanalife-stage-developer --du
 
 alias tf-dana-core="cd ~/danalol/tripbot/infra/terraform/core && aws-dana-core"
 alias tf-dana-stage="cd ~/danalol/tripbot/infra/terraform/stage-1 && aws-dana-stage"
+
+alias k8s-dana-stage="aws-dana-stage -- kubectl"
+alias helm-dana-stage="aws-dana-stage -- helm"
 ```
