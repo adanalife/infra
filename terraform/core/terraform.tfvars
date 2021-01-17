@@ -25,8 +25,8 @@ primary_stage_nameservers = [
 
 # these are obtained after running Terraform on stage
 secondary_stage_nameservers = [
-  "ns-1457.awsdns-54.org",
-  "ns-159.awsdns-19.com",
-  "ns-1811.awsdns-34.co.uk",
-  "ns-748.awsdns-29.net",
+  "ns-120.awsdns-15.com",
+  "ns-1319.awsdns-36.org",
+  "ns-2003.awsdns-58.co.uk",
+  "ns-609.awsdns-12.net",
 ]
