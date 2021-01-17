@@ -15,15 +15,19 @@ txtOwnerId: JVXF924Q
 ##
 txtPrefix: stage-1
 
-logLevel: "info"
+## Adjust the interval for DNS updates
+##
 interval: "10s"
-rbac:
-  create: "true"
+## Verbosity of the ExternalDNS logs. Available values are:
+## - panic, debug, info, warn, error, fatal
+##
+logLevel: info
 
+#TODO: enable these
 ## Prometheus Exporter / Metrics
 ##
 metrics:
-  enabled: true
+  enabled: false
   ## Metrics exporter pod Annotation and Labels
   ##
   # podAnnotations:
@@ -33,7 +37,7 @@ metrics:
   ## Prometheus Operator ServiceMonitor configuration
   ##
   serviceMonitor:
-    enabled: true
+    enabled: false
     ## Namespace in which Prometheus is running
     ##
     # namespace: monitoring
