@@ -11,13 +11,13 @@ spec:
         image: registry.opensource.zalan.do/teapot/external-dns:latest
         args:
         - --aws-zone-type=public
-        - --domain-filter=stage-1.dana.lol # will make ExternalDNS see only the hosted zones matching provided domain, omit to process all available hosted zones
+        - --domain-filter=staging.whereisdana.today # will make ExternalDNS see only the hosted zones matching provided domain, omit to process all available hosted zones
         - --provider=aws
         - --publish-internal-services
         - --registry=txt
         - --source=ingress
         - --source=service
-        - --txt-owner-id=Z01234567891234
+        - --txt-owner-id=Z05605701ECX0UCEOKZBS # staging.whereisdana.today
         - --txt-prefix=stage-1
       securityContext:
         fsGroup: 65534 # For ExternalDNS to be able to read Kubernetes and AWS token files
