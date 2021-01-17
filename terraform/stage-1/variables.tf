@@ -43,5 +43,3 @@ locals {
   account_name      = "${var.environment}-${var.label}"
   full_account_name = "${local.org_name}-${var.environment}-${var.label}"
 }
-
-

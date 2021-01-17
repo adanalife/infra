@@ -3,7 +3,7 @@ resource aws_route53_zone primary {
   name = var.domain
 }
 
-# manage the mathgaming.tv domain
+# manage the whereisdana.today domain
 resource aws_route53_zone secondary {
   name = var.secondary_domain
 }
