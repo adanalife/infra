@@ -21,12 +21,16 @@ aws:
   ## AWS credentials
   ##
   credentials:
-    secretKey: ""
-    accessKey: ""
     ## Use an existing secret with key "credentials" defined.
     ## This ignores aws.credentials.secretKey, and aws.credentials.accessKey
     ##
-    # secretName:
+    #TODO: figure out how to avoid hardcoding the secret ID
+    secretName: external-dns-user-g7dmf4bm9c
+
+  ## AWS Role to assume
+  ##
+  # this comes from terraform output
+  assumeRoleArn: arn:aws:iam::413585268653:role/ExternalDNSRole
 
 ## Adjust the interval for DNS updates
 ##
