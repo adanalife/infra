@@ -34,7 +34,7 @@ aws:
 
 ## Adjust the interval for DNS updates
 ##
-interval: "10s"
+interval: 1m
 ## Verbosity of the ExternalDNS logs. Available values are:
 ## - panic, debug, info, warn, error, fatal
 ##
