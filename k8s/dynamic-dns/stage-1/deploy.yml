@@ -11,7 +11,7 @@ spec:
      - name: ROUTE53_HOSTED_ZONE_ID
        value: Z05605701ECX0UCEOKZBS
      - name: ROUTE53_DOMAIN
-       value: hawthorne.staging.whereisdana.today
+       value: traefik.staging.whereisdana.today
      - name: ROUTE53_TYPE
        value: A
      - name: ROUTE53_TTL

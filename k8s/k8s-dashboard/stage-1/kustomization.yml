@@ -1,6 +1,6 @@
 bases:
   - ../base
-patchesStrategicMerge:
+resources:
   - ingress.yml
 # by default k8s-dashboard creates its own namespace,
 # this will put it in kube-system

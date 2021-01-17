@@ -7,7 +7,13 @@ metadata:
   annotations:
     external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
     kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-route53
 spec:
+  tls:
+    # this defines the secret that will be created
+    - secretName: k8s-dashboard-tls
+      hosts:
+        - k8s-dashboard.staging.whereisdana.today
   rules:
     - host: k8s-dashboard.staging.whereisdana.today
       http:
@@ -15,4 +21,4 @@ spec:
         - path: /
           backend:
             serviceName: k8s-dashboard-kubernetes-dashboard
-            servicePort: https
+            servicePort: http
