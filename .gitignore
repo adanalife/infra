@@ -21,3 +21,4 @@
 
 # k8s secrets
 k8s/external-dns/**/credentials
+k8s/external-dns/**/secret-access-key

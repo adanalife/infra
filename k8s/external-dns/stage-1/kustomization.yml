@@ -10,3 +10,4 @@ secretGenerator:
 - name: external-dns-user
   files:
   - credentials
+  - secret-access-key
