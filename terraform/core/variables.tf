@@ -33,6 +33,16 @@ variable domain {
   description = "The domain name used for DNS"
 }
 
+variable secondary_domain {
+  type        = string
+  description = "The domain name used for secondary DNS"
+}
+
+variable secondary_stage_nameservers {
+  type    = list(string)
+  default = []
+}
+
 variable account_names {
   type    = list(string)
   default = []

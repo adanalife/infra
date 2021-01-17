@@ -3,7 +3,8 @@
 email_prefix = "danadotlol+"
 email_domain = "gmail.com"
 
-domain = "dana.lol"
+domain           = "dana.lol"
+secondary_domain = "whereisdana.today"
 
 # this is where the core accounts Terraform state will live
 state_bucket = "adanalife-core-tf-state"
@@ -12,4 +13,12 @@ state_bucket = "adanalife-core-tf-state"
 # you will have to manually mess with the terraform state
 account_names = [
   "stage-1"
+]
+
+# these are obtained after running Terraform on stage
+secondary_stage_nameservers = [
+  "ns-1179.awsdns-19.org",
+  "ns-1910.awsdns-46.co.uk",
+  "ns-433.awsdns-54.com",
+  "ns-851.awsdns-42.net",
 ]

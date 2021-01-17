@@ -19,6 +19,12 @@ variable core_account_id {
   description = "The AWS account ID for the core account"
 }
 
+variable staging_domain {
+  type        = string
+  description = "The TLD used to access staging resources"
+  default     = "staging.mathgaming.tv"
+}
+
 variable rds_tripbot_username {
   type = string
 }
@@ -33,3 +39,5 @@ locals {
   account_name      = "${var.environment}-${var.label}"
   full_account_name = "${local.org_name}-${var.environment}-${var.label}"
 }
+
+

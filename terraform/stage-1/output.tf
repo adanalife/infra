@@ -8,6 +8,14 @@ output default_vpc_id {
   value       = module.default_vpc.default_vpc_id
 }
 
+output route53_name_servers {
+  value = aws_route53_zone.subdomain_zone.name_servers
+}
+
+output route53_zone_id {
+  value = aws_route53_zone.subdomain_zone.zone_id
+}
+
 output rds_tripbot_db_address {
   value = aws_db_instance.tripbot.address
 }
