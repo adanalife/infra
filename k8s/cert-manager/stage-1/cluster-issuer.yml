@@ -4,8 +4,8 @@ metadata:
   name: letsencrypt-route53
 spec:
   acme:
-    # note this is the STAGING url
-    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # server: https://acme-staging-v02.api.letsencrypt.org/directory
     email: danadotlol@gmail.com
     privateKeySecretRef:
       name: letsencrypt-route53
