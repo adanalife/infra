@@ -75,10 +75,10 @@ resource aws_iam_access_key external_dns {
 }
 
 # give the user access to the policy
-# resource aws_iam_user_policy_attachment external_dns {
-#   policy_arn = aws_iam_policy.allow_external_dns_updates.arn
-#   user       = aws_iam_user.external_dns.name
-# }
+resource aws_iam_user_policy_attachment external_dns {
+  policy_arn = aws_iam_policy.allow_external_dns_updates.arn
+  user       = aws_iam_user.external_dns.name
+}
 
 resource aws_iam_role external_dns {
   name               = var.external_dns_role

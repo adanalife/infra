@@ -216,7 +216,8 @@ resource aws_iam_policy allow_external_dns_updates {
     {
       "Effect": "Allow",
       "Action": [
-        "route53:ChangeResourceRecordSets"
+        "route53:ChangeResourceRecordSets",
+        "route53:TestDNSAnswer"
       ],
       "Resource": [
         "arn:aws:route53:::hostedzone/*"
