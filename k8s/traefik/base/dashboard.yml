@@ -1,0 +1,16 @@
+---
+# this creates a route to access the traefik dashboard
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: traefik-dashboard
+  namespace: team-infra
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: PathPrefix(`/dashboard`) || PathPrefix(`/api`)
+      services:
+        - kind: TraefikService
+          name: api@internal

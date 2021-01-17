@@ -35,21 +35,21 @@ spec:
     app.kubernetes.io/instance: traefik
     app.kubernetes.io/name: traefik
 
----
-# tell prometheus to scrape that service
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: traefik-sm
-  namespace: kube-system
-spec:
-  endpoints:
-    - interval: 30s
-      port: metrics
-      scheme: http
-  selector:
-    matchLabels:
-      k8s-app: traefik-metrics
-  namespaceSelector:
-    matchNames:
-      - kube-system
+# ---
+# # tell prometheus to scrape that service
+# apiVersion: monitoring.coreos.com/v1
+# kind: ServiceMonitor
+# metadata:
+#   name: traefik-sm
+#   namespace: kube-system
+# spec:
+#   endpoints:
+#     - interval: 30s
+#       port: metrics
+#       scheme: http
+#   selector:
+#     matchLabels:
+#       k8s-app: traefik-metrics
+#   namespaceSelector:
+#     matchNames:
+#       - kube-system
