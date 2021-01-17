@@ -9,6 +9,16 @@ resource aws_route53_zone secondary {
 }
 
 # use the stage nameservers so stage can manage its own routes
+resource aws_route53_record primary_stage_nameservers {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "staging.${aws_route53_zone.primary.name}"
+  type    = "NS"
+  ttl     = "30"
+
+  records = var.primary_stage_nameservers
+}
+
+# use the stage nameservers so stage can manage its own routes
 resource aws_route53_record secondary_stage_nameservers {
   zone_id = aws_route53_zone.secondary.zone_id
   name    = "staging.${aws_route53_zone.secondary.name}"

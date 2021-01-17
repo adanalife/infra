@@ -19,10 +19,14 @@ variable core_account_id {
   description = "The AWS account ID for the core account"
 }
 
-variable staging_domain {
+variable primary_domain {
   type        = string
-  description = "The TLD used to access staging resources"
-  default     = "staging.mathgaming.tv"
+  description = "The domain name used for DNS"
+}
+
+variable secondary_domain {
+  type        = string
+  description = "The domain name used for secondary DNS"
 }
 
 variable rds_tripbot_username {

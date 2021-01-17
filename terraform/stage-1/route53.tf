@@ -1,5 +1,9 @@
-resource aws_route53_zone subdomain_zone {
-  name = var.staging_domain
+resource aws_route53_zone primary_subdomain_zone {
+  name = "staging.${var.primary_domain}"
+}
+
+resource aws_route53_zone secondary_subdomain_zone {
+  name = "staging.${var.primary_domain}"
 }
 
 # resource aws_route53_record example {
