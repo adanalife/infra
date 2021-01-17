@@ -9,7 +9,7 @@ brew install k3d
 # and mount assets/video to the container's /video
 #TODO: pass in rancher/k3s:v1.18.6-k3s1 ??
 #k3d cluster create adanalife-dev -p 8081:80@loadbalancer --volume $(pwd)/assets/video:/video
-k3d cluster create adanalife-stage-1 --volume "$(pwd)/k8s/traefik/stage-1/values.yml:/var/lib/rancher/k3s/server/manifests/traefik.yaml" -p "8081:80@loadbalancer"
+k3d cluster create adanalife-stage-1 --volume "$(pwd)/k8s/traefik/stage-1/values.yml:/var/lib/rancher/k3s/server/manifests/traefik.yaml:ro" -p "8443:443@loadbalancer"
 # set up kubectl to use this cluster
 export KUBECONFIG="$(k3d kubeconfig merge adanalife-dev)"
 # create local tripbot deployment

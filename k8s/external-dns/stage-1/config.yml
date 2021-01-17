@@ -25,7 +25,7 @@ aws:
     ## This ignores aws.credentials.secretKey, and aws.credentials.accessKey
     ##
     #TODO: figure out how to avoid hardcoding the secret ID
-    secretName: external-dns-user-g7dmf4bm9c
+    secretName: external-dns-user-47gbdt8m5k
 
   ## AWS Role to assume
   ##
