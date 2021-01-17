@@ -19,6 +19,16 @@ variable core_account_id {
   description = "The AWS account ID for the core account"
 }
 
+variable primary_domain {
+  type        = string
+  description = "The domain name used for DNS"
+}
+
+variable secondary_domain {
+  type        = string
+  description = "The domain name used for secondary DNS"
+}
+
 variable rds_tripbot_username {
   type = string
 }

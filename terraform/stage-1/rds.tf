@@ -40,7 +40,7 @@ resource aws_security_group allow_postgres {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["108.49.156.172/32"]
+    cidr_blocks = ["108.49.156.172/32", "173.48.171.189/32"]
   }
 
   egress {

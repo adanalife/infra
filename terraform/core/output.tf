@@ -7,3 +7,19 @@ output accounts {
     { "${local.account_name}" = local.core_account_id }
   )
 }
+
+output primary_route53_zone_id {
+  value = aws_route53_zone.primary.zone_id
+}
+
+output primary_route53_name_servers {
+  value = aws_route53_zone.primary.name_servers
+}
+
+output secondary_route53_zone_id {
+  value = aws_route53_zone.secondary.zone_id
+}
+
+output secondary_route53_name_servers {
+  value = aws_route53_zone.secondary.name_servers
+}

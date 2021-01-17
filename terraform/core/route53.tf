@@ -3,6 +3,31 @@ resource aws_route53_zone primary {
   name = var.domain
 }
 
+# manage the whereisdana.today domain
+resource aws_route53_zone secondary {
+  name = var.secondary_domain
+}
+
+# use the stage nameservers so stage can manage its own routes
+resource aws_route53_record primary_stage_nameservers {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "staging.${aws_route53_zone.primary.name}"
+  type    = "NS"
+  ttl     = "30"
+
+  records = var.primary_stage_nameservers
+}
+
+# use the stage nameservers so stage can manage its own routes
+resource aws_route53_record secondary_stage_nameservers {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "staging.${aws_route53_zone.secondary.name}"
+  type    = "NS"
+  ttl     = "30"
+
+  records = var.secondary_stage_nameservers
+}
+
 #TODO: figure out how to do aliases
 # www.dana.lol.  A ALIAS d6kb0mm00m70t.cloudfront.net.
 # resource aws_route53_record www {
