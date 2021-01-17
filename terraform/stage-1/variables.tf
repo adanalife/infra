@@ -29,6 +29,11 @@ variable secondary_domain {
   description = "The domain name used for secondary DNS"
 }
 
+variable external_dns_role {
+  type    = string
+  default = "ExternalDNSRole"
+}
+
 variable rds_tripbot_username {
   type = string
 }
