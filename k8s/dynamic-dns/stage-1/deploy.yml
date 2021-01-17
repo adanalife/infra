@@ -48,4 +48,4 @@ spec:
   volumes:
     - name: aws-credentials
       secret:
-        secretName: external-dns-user-g7dmf4bm9c
+        secretName: external-dns-user
