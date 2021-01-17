@@ -16,6 +16,34 @@ spec:
     kubernetes:
       ingressEndpoint:
         useDefaultPublishedService: true
+    pilot:
+      enabled: false
+    providers:
+      kubernetesIngress:
+        enabled: true
+        namespaces:
+          - "default"
+    globalArguments:
+      - "--global.checknewversion"
+      - "--metrics.prometheus=true"
+      - "--entryPoints.metrics.address=:9100/tcp"
+      - "--metrics.prometheus.entryPoint=metrics"
+      #TODO: can i remove this?
+      # - "--serversTransport.insecureSkipVerify=true"
+    # Don't create an IngressRoute for the dashboard
+    ingressRoute:
+      dashboard:
+        enabled: false
+
+    # Options for the main traefik service, where the entrypoints traffic comes
+    # from.
+    service:
+      enabled: true
+      # Additional annotations (e.g. for cloud provider specific config)
+      annotations:
+        external-dns.alpha.kubernetes.io/hostname: traefik.staging.whereisdana.today
+        service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        # service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:us-east-1:456043747249:certificate/f531ba8a-f33d-4000-82b2-8a3f4a8f228e
     priorityClassName: "system-cluster-critical"
     image: "rancher/library-traefik"
     tolerations:
@@ -27,3 +55,37 @@ spec:
       - key: "node-role.kubernetes.io/master"
         operator: "Exists"
         effect: "NoSchedule"
+
+## Configure the deployment
+##
+#deployment:
+#  enabled: true
+#  # Additional pod annotations (e.g. for mesh injection or prometheus scraping)
+#  podAnnotations:
+#    prometheus.io/scrape: 'true'
+#  # Additional Pod labels (e.g. for filtering Pod by custom labels)
+#  podLabels:
+#    app: traefik
+
+### Create HorizontalPodAutoscaler object.
+#autoscaling:
+#  enabled: true
+#  # minReplicas: 1
+#  maxReplicas: 10
+#  metrics:
+#  - type: Resource
+#    resource:
+#      name: cpu
+#      targetAverageUtilization: 60
+#  - type: Resource
+#    resource:
+#      name: memory
+#      targetAverageUtilization: 60
+##
+## Configure ports
+#ports:
+#  web:
+#    # Added in 2.2, you can make permanent redirects via entrypoints.
+#    # https://docs.traefik.io/routing/entrypoints/#redirection
+#    redirectTo: websecure
+
