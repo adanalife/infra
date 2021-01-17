@@ -35,6 +35,7 @@ spec:
     app.kubernetes.io/instance: traefik
     app.kubernetes.io/name: traefik
 
+#TODO: bring this back
 # ---
 # # tell prometheus to scrape that service
 # apiVersion: monitoring.coreos.com/v1
