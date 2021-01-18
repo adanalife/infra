@@ -15,12 +15,29 @@ spec:
     - secretName: traefik-dashboard-tls
       hosts:
         - traefik.staging.whereisdana.today
+        - traefik-dashboard.staging.whereisdana.today
 
   rules:
-    - host: traefik.staging.whereisdana.today
+    - host: traefik-dashboard.staging.whereisdana.today
       http:
         paths:
-        - path: /dashboard
+        - path: /
           backend:
             serviceName: traefik
             servicePort: websecure
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: new-traefik
+  namespace: kube-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`traefik-dashboard.staging.whereisdana.today`)
+      kind: Rule
+      services:
+        - name: traefik
+          port: 443
