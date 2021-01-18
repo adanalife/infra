@@ -17,7 +17,7 @@ spec:
           hostedZoneID: Z05605701ECX0UCEOKZBS
           accessKeyID: AKIAWAS42L6WSH6MNBF6
           secretAccessKeySecretRef:
-            name: external-dns-user-47gbdt8m5k
+            name: aws-user
             key: secret-access-key
           role: arn:aws:iam::413585268653:role/ExternalDNSRole
 

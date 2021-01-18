@@ -20,5 +20,5 @@
 *.tfstate.backup
 
 # k8s secrets
-k8s/external-dns/**/credentials
-k8s/external-dns/**/secret-access-key
+k8s/**/credentials
+k8s/**/secret-access-key
