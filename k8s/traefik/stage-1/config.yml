@@ -40,7 +40,7 @@ ports:
 # Don't create an IngressRoute for the dashboard
 ingressRoute:
   dashboard:
-    enabled: false
+    enabled: true
 
 # Options for the main traefik service, where the entrypoints traffic comes
 # from.
