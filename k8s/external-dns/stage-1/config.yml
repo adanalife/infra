@@ -24,7 +24,7 @@ aws:
     ## Use an existing secret with key "credentials" defined.
     ## This ignores aws.credentials.secretKey, and aws.credentials.accessKey
     ##
-    secretName: external-dns-user-47gbdt8m5k
+    secretName: external-dns-user-g7dmf4bm9c
 
   ## AWS Role to assume
   ##

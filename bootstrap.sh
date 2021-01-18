@@ -4,9 +4,10 @@ helm upgrade --install traefik traefik/traefik -f k8s/traefik/stage-1/config.yml
 kubectl apply -k k8s/traefik/stage-1
 
 # external-dns
+kubectl apply -k k8s/external-dns/stage-1
+# update k8s/external-dns/stage-1/config.yml with secret name...
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm upgrade --install dns bitnami/external-dns -f k8s/external-dns/stage-1/config.yml -n kube-system
-kubectl apply -k k8s/external-dns/stage-1
 
 # cert-manager
 helm repo add jetstack https://charts.jetstack.io
