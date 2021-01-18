@@ -5,9 +5,15 @@ metadata:
   name: traefik-metrics
   namespace: kube-system
   annotations:
-    external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
+    # external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
     kubernetes.io/ingress.class: traefik
     cert-manager.io/cluster-issuer: letsencrypt-route53
+spec:
+  tls:
+    # this defines the secret that will be created
+    - secretName: traefik-dashboard-tls
+      hosts:
+        - traefik.staging.whereisdana.today
 spec:
   rules:
     - host: traefik.staging.whereisdana.today

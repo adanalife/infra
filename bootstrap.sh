@@ -1,5 +1,6 @@
-# unfuck traefik
-g co -- k8s/traefik/stage-1/values.yml
+# traefik
+helm repo add traefik https://helm.traefik.io/traefik
+helm upgrade --install traefik traefik/traefik -f k8s/traefik/stage-1/config.yml -n kube-system
 
 # external-dns
 helm repo add bitnami https://charts.bitnami.com/bitnami
