@@ -15,7 +15,7 @@ spec:
     - secretName: traefik-dashboard-tls
       hosts:
         - traefik.staging.whereisdana.today
-spec:
+
   rules:
     - host: traefik.staging.whereisdana.today
       http:

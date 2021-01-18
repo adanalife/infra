@@ -18,11 +18,16 @@ pilot:
 # Configure providers
 #
 providers:
+  kubernetesCRD:
+    enabled: true
   kubernetesIngress:
     enabled: true
     namespaces:
       - "default"
       - "kube-system"
+    # IP used for Kubernetes Ingress endpoints
+    publishedService:
+      enabled: true
 
 globalArguments:
   - "--global.checknewversion"
@@ -37,7 +42,7 @@ ports:
     # https://docs.traefik.io/routing/entrypoints/#redirection
     redirectTo: websecure
 
-# Don't create an IngressRoute for the dashboard
+# IngressRoute for the dashboard
 ingressRoute:
   dashboard:
     enabled: true
