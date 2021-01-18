@@ -1,0 +1,23 @@
+kind: Ingress
+apiVersion: extensions/v1beta1
+metadata:
+  name: traefik-ingress
+  annotations:
+    # external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
+    kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+spec:
+  tls:
+    # this defines the secret that will be created
+    - secretName: traefik-dashboard-tls
+      hosts:
+        - traefik.staging.whereisdana.today
+spec:
+  rules:
+    - host: mesa-develop-traefik.roche-prod-1.reverielabs.dev
+      http:
+        paths:
+        - path: /
+          backend:
+            serviceName: mesa-service-develop-traefik
+            servicePort: http
