@@ -1,3 +1,5 @@
+# adapted from: https://github.com/conortm/terraform-aws-s3-static-website
+
 locals {
   public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
   static_website_routing_rules  = <<EOF
