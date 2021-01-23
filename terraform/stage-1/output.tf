@@ -25,7 +25,8 @@ output secondary_route53_zone_id {
 }
 
 output rds_tripbot_db_address {
-  value = aws_db_instance.tripbot.address
+  # hack to allow for empty values
+  value = join("", aws_db_instance.tripbot.*.address)
 }
 
 output external_dns_access_key {
