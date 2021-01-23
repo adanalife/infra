@@ -18,16 +18,32 @@ account_names = [
 
 # these are obtained after running Terraform on stage
 primary_stage_nameservers = [
-  "ns-1201.awsdns-22.org",
-  "ns-14.awsdns-01.com",
-  "ns-1760.awsdns-28.co.uk",
-  "ns-592.awsdns-10.net",
+  "ns-1278.awsdns-31.org",
+  "ns-1619.awsdns-10.co.uk",
+  "ns-498.awsdns-62.com",
+  "ns-906.awsdns-49.net",
 ]
 
 # these are obtained after running Terraform on stage
 secondary_stage_nameservers = [
-  "ns-120.awsdns-15.com",
-  "ns-1319.awsdns-36.org",
-  "ns-2003.awsdns-58.co.uk",
-  "ns-609.awsdns-12.net",
+  "ns-1509.awsdns-60.org",
+  "ns-1546.awsdns-01.co.uk",
+  "ns-284.awsdns-35.com",
+  "ns-816.awsdns-38.net",
+]
+
+# these are obtained after running Terraform on prod
+primary_prod_nameservers = [
+  "ns-1301.awsdns-34.org",
+  "ns-1813.awsdns-34.co.uk",
+  "ns-293.awsdns-36.com",
+  "ns-772.awsdns-32.net",
+]
+
+# these are obtained after running Terraform on prod
+secondary_prod_nameservers = [
+  "ns-1487.awsdns-57.org",
+  "ns-1548.awsdns-01.co.uk",
+  "ns-326.awsdns-40.com",
+  "ns-798.awsdns-35.net",
 ]
