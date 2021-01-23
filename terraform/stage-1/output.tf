@@ -25,7 +25,7 @@ output secondary_route53_zone_id {
 }
 
 output rds_tripbot_db_address {
-  value = aws_db_instance.tripbot.address
+  value = aws_db_instance.tripbot.0.address
 }
 
 output external_dns_access_key {
