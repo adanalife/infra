@@ -38,6 +38,7 @@ variable rds_tripbot_username {
   type = string
 }
 
+#TODO: replace with terraform password generator
 variable rds_tripbot_password {
   type = string
 }
