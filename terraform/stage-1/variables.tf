@@ -45,6 +45,8 @@ variable rds_tripbot_password {
 locals {
   org_name = "adanalife"
   # this is how we will refer to the account in other places
-  account_name      = "${var.environment}-${var.label}"
-  full_account_name = "${local.org_name}-${var.environment}-${var.label}"
+  account_name        = "${var.environment}-${var.label}"
+  full_account_name   = "${local.org_name}-${var.environment}-${var.label}"
+  primary_subdomain   = "${var.environment}.${var.primary_domain}"
+  secondary_subdomain = "${var.environment}.${var.secondary_domain}"
 }

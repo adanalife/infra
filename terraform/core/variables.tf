@@ -38,6 +38,16 @@ variable secondary_domain {
   description = "The domain name used for secondary DNS"
 }
 
+variable primary_prod_nameservers {
+  type    = list(string)
+  default = []
+}
+
+variable secondary_prod_nameservers {
+  type    = list(string)
+  default = []
+}
+
 variable primary_stage_nameservers {
   type    = list(string)
   default = []
