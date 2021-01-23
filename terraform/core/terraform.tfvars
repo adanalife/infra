@@ -12,7 +12,8 @@ state_bucket = "adanalife-core-tf-state"
 # note that the order of these matters, and if you remove them
 # you will have to manually mess with the terraform state
 account_names = [
-  "stage-1"
+  "stage-1",
+  "prod-1"
 ]
 
 # these are obtained after running Terraform on stage
