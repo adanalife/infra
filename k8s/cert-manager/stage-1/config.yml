@@ -1,0 +1,13 @@
+# https://artifacthub.io/packages/helm/jetstack/cert-manager
+
+installCRDs: true
+
+# ingressShim:
+#   defaultACMEChallengeType: dns01
+#   defaultACMEDNS01ChallengeProvider=route53
+#   defaultIssuerName=letsencrypt-prod
+#   defaultIssuerKind=ClusterIssuer
+
+
+#TODO:
+#prometheus.servicemonitor.enabled: true

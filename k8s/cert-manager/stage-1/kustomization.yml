@@ -1,0 +1,9 @@
+namespace: kube-system
+
+resources:
+  - cluster-issuer.yml
+
+secretGenerator:
+- name: aws-user
+  files:
+  - secret-access-key

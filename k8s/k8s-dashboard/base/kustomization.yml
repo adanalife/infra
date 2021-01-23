@@ -1,10 +1,4 @@
-# these were downloaded from:
-# https://github.com/kubernetes/dashboard/blob/master/aio/deploy/recommended.yaml
-# and
-# https://github.com/alexandreroman/k8s-dashboard-loadbalancer/blob/master/k8s-dashboard-loadbalancer.yml
-# and
+# this was downloaded from:
 # https://github.com/hashicorp/learn-terraform-provision-eks-cluster/blob/master/kubernetes-dashboard-admin.rbac.yaml
 resources:
-  - recommended.yml
-  - k8s-dashboard-loadbalancer.yml
   - kubernetes-dashboard-admin.rbac.yml

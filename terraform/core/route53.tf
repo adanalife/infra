@@ -81,6 +81,17 @@ resource aws_route53_record develop {
   records = ["localhost"]
 }
 
+# this is just a friendly alias to make SSH easier
+#TODO: update stream server to set this programatically
+# stream.local.whereisdana.today
+resource aws_route53_record stream_local {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "stream.local.${var.secondary_domain}"
+  type    = "A"
+  ttl     = "300"
+  records = ["10.111.253.168"]
+}
+
 
 resource aws_route53_record tripbot {
   zone_id = aws_route53_zone.primary.zone_id

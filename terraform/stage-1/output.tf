@@ -27,3 +27,16 @@ output secondary_route53_zone_id {
 output rds_tripbot_db_address {
   value = aws_db_instance.tripbot.address
 }
+
+output external_dns_access_key {
+  value = aws_iam_access_key.external_dns.id
+}
+
+# the PGP-encrypted secret
+output external_dns_secret {
+  value = aws_iam_access_key.external_dns.encrypted_secret
+}
+
+output external_dns_role_arn {
+  value = aws_iam_role.external_dns.arn
+}

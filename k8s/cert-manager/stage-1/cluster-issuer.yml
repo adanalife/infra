@@ -1,0 +1,27 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-route53
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-route53
+
+    solvers:
+    - dns01:
+        route53:
+          region: us-east-1
+          hostedZoneID: Z05605701ECX0UCEOKZBS
+          accessKeyID: AKIAWAS42L6WSH6MNBF6
+          secretAccessKeySecretRef:
+            name: aws-user-km8b84g222
+            key: secret-access-key
+          role: arn:aws:iam::413585268653:role/ExternalDNSRole
+
+    # we could use this one if port 80 was open
+    # - http01:
+    #     ingress:
+    #       class: traefik

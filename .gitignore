@@ -18,3 +18,7 @@
 .terraform
 *.plan
 *.tfstate.backup
+
+# k8s secrets
+k8s/**/credentials
+k8s/**/secret-access-key
