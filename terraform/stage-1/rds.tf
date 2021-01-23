@@ -1,6 +1,6 @@
 resource aws_db_instance tripbot {
   # only create on stage for now
-  count = "${var.environment == "stage" ? 1 : 0}"
+  count = var.environment == "stage" ? 1 : 0
 
   engine         = "postgres"
   engine_version = "11.8"

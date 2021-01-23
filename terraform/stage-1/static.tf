@@ -27,13 +27,13 @@ resource "aws_acm_certificate" "secondary_static_site" {
 }
 
 resource "aws_s3_bucket" "static_website" {
-  bucket = "${local.secondary_static_site}"
+  bucket = local.secondary_static_site
 
   website {
     index_document = "index.html"
     error_document = "error.html"
 
-    routing_rules = "${length(var.static_site_public_dir) > 0 ? local.static_website_routing_rules : ""}"
+    routing_rules = length(var.static_site_public_dir) > 0 ? local.static_website_routing_rules : ""
   }
 }
 
@@ -57,8 +57,8 @@ data "aws_iam_policy_document" "static_website_read_with_secret" {
 }
 
 resource "aws_s3_bucket_policy" "static_website_read_with_secret" {
-  bucket = "${aws_s3_bucket.static_website.id}"
-  policy = "${data.aws_iam_policy_document.static_website_read_with_secret.json}"
+  bucket = aws_s3_bucket.static_website.id
+  policy = data.aws_iam_policy_document.static_website_read_with_secret.json
 }
 
 locals {
@@ -67,9 +67,9 @@ locals {
 
 resource "aws_cloudfront_distribution" "cdn" {
   origin {
-    domain_name = "${aws_s3_bucket.static_website.website_endpoint}"
-    origin_path = "${local.public_dir_with_leading_slash}"
-    origin_id   = "${local.s3_origin_id}"
+    domain_name = aws_s3_bucket.static_website.website_endpoint
+    origin_path = local.public_dir_with_leading_slash
+    origin_id   = local.s3_origin_id
 
     custom_origin_config {
       http_port              = 80
@@ -103,7 +103,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   }
 
   default_cache_behavior {
-    target_origin_id = "${local.s3_origin_id}"
+    target_origin_id = local.s3_origin_id
     allowed_methods  = ["GET", "HEAD"]
     cached_methods   = ["GET", "HEAD"]
 
@@ -135,12 +135,12 @@ resource "aws_route53_record" "alias" {
   # count = "${length(var.zone_id) > 0 ? 1 : 0}"
 
   zone_id = aws_route53_zone.secondary_subdomain_zone.zone_id
-  name    = "${local.secondary_static_site}"
+  name    = local.secondary_static_site
   type    = "A"
 
   alias {
-    name                   = "${aws_cloudfront_distribution.cdn.domain_name}"
-    zone_id                = "${aws_cloudfront_distribution.cdn.hosted_zone_id}"
+    name                   = aws_cloudfront_distribution.cdn.domain_name
+    zone_id                = aws_cloudfront_distribution.cdn.hosted_zone_id
     evaluate_target_health = false
   }
 }
