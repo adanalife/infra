@@ -1,6 +1,7 @@
 # adapted from: https://github.com/conortm/terraform-aws-s3-static-website
 
 locals {
+  s3_origin_id                  = "cloudfront-distribution-origin-${local.secondary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
   public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
   static_website_routing_rules  = <<EOF
 [{
@@ -59,10 +60,6 @@ data "aws_iam_policy_document" "static_website_read_with_secret" {
 resource "aws_s3_bucket_policy" "static_website_read_with_secret" {
   bucket = aws_s3_bucket.static_website.id
   policy = data.aws_iam_policy_document.static_website_read_with_secret.json
-}
-
-locals {
-  s3_origin_id = "cloudfront-distribution-origin-${local.secondary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
 }
 
 resource "aws_cloudfront_distribution" "cdn" {
@@ -145,76 +142,73 @@ resource "aws_route53_record" "alias" {
   }
 }
 
-# resource "aws_s3_bucket" "redirect" {
-#   count = "${length(var.redirects)}"
+resource "aws_s3_bucket" "naked_redirect" {
+  bucket = "${local.secondary_static_site}_redirect"
 
-#   bucket = "${element(var.redirects, count.index)}"
+  website {
+    redirect_all_requests_to = "https://${local.secondary_static_site}"
+  }
+}
 
-#   website {
-#     redirect_all_requests_to = "https://${local.secondary_static_site}"
-#   }
-# }
+resource "aws_cloudfront_distribution" "naked_redirect" {
 
-# resource "aws_cloudfront_distribution" "redirect" {
-#   count = "${length(var.redirects)}"
+  origin {
+    domain_name = aws_s3_bucket.naked_redirect.website_endpoint
+    origin_id   = "cloudfront-distribution-origin-naked.s3.amazonaws.com"
 
-#   origin {
-#     domain_name = "${element(aws_s3_bucket.redirect.*.website_endpoint, count.index)}"
-#     origin_id   = "cloudfront-distribution-origin-${element(var.redirects, count.index)}.s3.amazonaws.com"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2", "TLSv1.1", "TLSv1"]
+    }
+  }
 
-#     custom_origin_config {
-#       http_port              = 80
-#       https_port             = 443
-#       origin_protocol_policy = "http-only"
-#       origin_ssl_protocols   = ["TLSv1.2", "TLSv1.1", "TLSv1"]
-#     }
-#   }
+  comment         = "CDN for ${aws_s3_bucket.naked_redirect.name} S3 Bucket (redirect)"
+  enabled         = true
+  is_ipv6_enabled = true
+  aliases         = ["${element(var.redirects, count.index)}"]
 
-#   comment         = "CDN for ${element(var.redirects, count.index)} S3 Bucket (redirect)"
-#   enabled         = true
-#   is_ipv6_enabled = true
-#   aliases         = ["${element(var.redirects, count.index)}"]
+  default_cache_behavior {
+    target_origin_id = "cloudfront-distribution-origin-${element(var.redirects, count.index)}.s3.amazonaws.com"
+    allowed_methods  = ["GET", "HEAD"]
+    cached_methods   = ["GET", "HEAD"]
 
-#   default_cache_behavior {
-#     target_origin_id = "cloudfront-distribution-origin-${element(var.redirects, count.index)}.s3.amazonaws.com"
-#     allowed_methods  = ["GET", "HEAD"]
-#     cached_methods   = ["GET", "HEAD"]
+    forwarded_values {
+      query_string = false
 
-#     forwarded_values {
-#       query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
 
-#       cookies {
-#         forward = "none"
-#       }
-#     }
+    viewer_protocol_policy = "redirect-to-https"
+  }
 
-#     viewer_protocol_policy = "redirect-to-https"
-#   }
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
 
-#   restrictions {
-#     geo_restriction {
-#       restriction_type = "none"
-#     }
-#   }
+  viewer_certificate {
+    acm_certificate_arn      = "${var.cert_arn}"
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.1_2016"
+  }
+}
 
-#   viewer_certificate {
-#     acm_certificate_arn      = "${var.cert_arn}"
-#     ssl_support_method       = "sni-only"
-#     minimum_protocol_version = "TLSv1.1_2016"
-#   }
-# }
+resource "aws_route53_record" "redirect" {
+  count = "${length(var.zone_id) > 0 ? length(var.redirects) : 0}"
 
-# resource "aws_route53_record" "redirect" {
-#   count = "${length(var.zone_id) > 0 ? length(var.redirects) : 0}"
+  zone_id = "${var.zone_id}"
+  # Work-around (see: https://github.com/hashicorp/terraform/issues/11210)
+  name = "${length(var.redirects) > 0 ? element(concat(var.redirects, list("")), count.index) : ""}"
+  type = "A"
 
-#   zone_id = "${var.zone_id}"
-#   # Work-around (see: https://github.com/hashicorp/terraform/issues/11210)
-#   name = "${length(var.redirects) > 0 ? element(concat(var.redirects, list("")), count.index) : ""}"
-#   type = "A"
-
-#   alias {
-#     name                   = "${element(aws_cloudfront_distribution.redirect.*.domain_name, count.index)}"
-#     zone_id                = "${element(aws_cloudfront_distribution.redirect.*.hosted_zone_id, count.index)}"
-#     evaluate_target_health = false
-#   }
-# }
+  alias {
+    name                   = "${element(aws_cloudfront_distribution.redirect.*.domain_name, count.index)}"
+    zone_id                = "${element(aws_cloudfront_distribution.redirect.*.hosted_zone_id, count.index)}"
+    evaluate_target_health = false
+  }
+}
