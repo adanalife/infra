@@ -85,12 +85,22 @@ resource aws_route53_record status {
   records = ["stats.uptimerobot.com"]
 }
 
-resource aws_route53_record root {
+resource aws_route53_record www {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "www.${var.domain}"
   type    = "CNAME"
   ttl     = "300"
-  records = ["static.stage.whereisdana.today"]
+  #TODO: this should be prod
+  records = ["static.stage.${var.domain}"]
+}
+
+resource aws_route53_record secondary_www {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "www.${var.secondary_domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  #TODO: this should be prod
+  records = ["static.stage.${var.secondary_domain}"]
 }
 
 resource aws_route53_record keybase {
