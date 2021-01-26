@@ -147,6 +147,23 @@ resource aws_route53_record certbot {
   records = ["3DnnRt02WD645OYeOEAuR2cw7--WiWT3YSP_RMlaNu0"]
 }
 
+#TODO: these outputs are in terraform
+# https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate#domain_validation_options
+# {
+#   "domain_name" = "whereisdana.today"
+#   "resource_record_name" = "_d46343568ad4b9c25798547b884240d2.whereisdana.today."
+#   "resource_record_type" = "CNAME"
+#   "resource_record_value" = "_29d1178545d68c41fc5993163b8249c7.vtqfhvjlcp.acm-validations.aws."
+# },
+resource aws_route53_record secondary_acm_validation {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "_d46343568ad4b9c25798547b884240d2.${var.secondary_domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["_29d1178545d68c41fc5993163b8249c7.vtqfhvjlcp.acm-validations.aws."]
+}
+
+
 #TODO: is this being used anywhere?
 # resource aws_route53_record twitch_scripts {
 #   zone_id = aws_route53_zone.primary.zone_id

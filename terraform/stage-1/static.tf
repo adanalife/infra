@@ -1,8 +1,8 @@
 # adapted from: https://github.com/conortm/terraform-aws-s3-static-website
 
 locals {
-  s3_origin_id                  = "cloudfront-distribution-origin-${local.secondary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
   public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
+  s3_origin_id                  = "cloudfront-distribution-origin-${local.secondary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
   static_website_routing_rules  = <<EOF
 [{
     "Condition": {
@@ -18,9 +18,14 @@ locals {
 EOF
 }
 
+#TODO: do something with the output
+# output acm {
+#   value = aws_acm_certificate.secondary_static_site.domain_validation_options
+# }
 resource "aws_acm_certificate" "secondary_static_site" {
-  domain_name       = local.secondary_static_site
-  validation_method = "DNS"
+  domain_name               = local.secondary_static_site
+  subject_alternative_names = [var.secondary_domain]
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
