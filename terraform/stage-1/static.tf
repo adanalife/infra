@@ -90,7 +90,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  aliases             = ["${local.secondary_static_site}"]
+  aliases             = [var.secondary_domain, local.secondary_static_site]
 
   custom_error_response {
     error_code         = 403

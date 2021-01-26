@@ -48,6 +48,19 @@ resource aws_route53_record secondary_stage_nameservers {
   records = var.secondary_stage_nameservers
 }
 
+resource aws_route53_record naked_secondary {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = var.secondary_domain
+  type    = "A"
+
+  # https://docs.aws.amazon.com/general/latest/gr/s3.html#s3_website_region_endpoints
+  alias {
+    name                   = "s3-website-us-east-1.amazonaws.com."
+    zone_id                = "Z2O1EMRO9K5GLX" # us-east-1
+    evaluate_target_health = false
+  }
+}
+
 #TODO: figure out how to do aliases
 # www.dana.lol.  A ALIAS d6kb0mm00m70t.cloudfront.net.
 # resource aws_route53_record www {
