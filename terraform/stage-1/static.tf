@@ -33,15 +33,36 @@ resource "aws_acm_certificate" "secondary_static_site" {
 }
 
 resource "aws_s3_bucket" "static_website" {
+  #TODO: rename to primary
   bucket = local.secondary_static_site
 
   website {
     index_document = "index.html"
     error_document = "404.html"
 
-    routing_rules = length(var.static_site_public_dir) > 0 ? local.static_website_routing_rules : ""
+    routing_rules = <<EOF
+[{
+    "Redirect": {
+        "Protocol": "https",
+        "HostName": "www.twitch.tv",
+        "ReplaceKeyPrefixWith": "ADanaLife_",
+        "HttpRedirectCode": "301"
+    }
+}]
+EOF
   }
 }
+
+# resource "aws_s3_bucket" "secondary_static_website" {
+#   bucket = local.secondary_static_site
+
+#   website {
+#     index_document = "index.html"
+#     error_document = "404.html"
+
+#     routing_rules = length(var.static_site_public_dir) > 0 ? local.static_website_routing_rules : ""
+#   }
+# }
 
 data "aws_iam_policy_document" "static_website_read_with_secret" {
   statement {
