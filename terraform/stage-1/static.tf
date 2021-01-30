@@ -1,21 +1,7 @@
 # adapted from: https://github.com/conortm/terraform-aws-s3-static-website
 
 locals {
-  # public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
   s3_origin_id = "cloudfront-distribution-origin-${local.primary_static_site}.s3.amazonaws.com/${var.static_site_public_dir}"
-  # static_website_routing_rules  = <<EOF
-  # [{
-  #   "Condition": {
-  #       "KeyPrefixEquals": "${var.static_site_public_dir}/${var.static_site_public_dir}/"
-  #   },
-  #   "Redirect": {
-  #       "Protocol": "https",
-  #       "HostName": "${local.secondary_static_site}",
-  #       "ReplaceKeyPrefixWith": "",
-  #       "HttpRedirectCode": "301"
-  #   }
-  # }]
-  # EOF
 }
 
 resource "aws_acm_certificate" "primary_static_site" {
