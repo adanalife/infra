@@ -48,6 +48,19 @@ resource aws_route53_record secondary_stage_nameservers {
   records = var.secondary_stage_nameservers
 }
 
+resource aws_route53_record naked_primary {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = var.domain
+  type    = "A"
+
+  # https://docs.aws.amazon.com/general/latest/gr/s3.html#s3_website_region_endpoints
+  alias {
+    name                   = "s3-website-us-east-1.amazonaws.com."
+    zone_id                = "Z3AQBSTGFYJSTF" # us-east-1
+    evaluate_target_health = false
+  }
+}
+
 resource aws_route53_record naked_secondary {
   zone_id = aws_route53_zone.secondary.zone_id
   name    = var.secondary_domain
@@ -103,18 +116,16 @@ resource aws_route53_record www {
   name    = "www.${var.domain}"
   type    = "CNAME"
   ttl     = "300"
-  #TODO: this should be prod
-  records = ["static.stage.${var.domain}"]
+  records = ["static.prod.${var.domain}"]
 }
 
-resource aws_route53_record secondary_www {
-  zone_id = aws_route53_zone.secondary.zone_id
-  name    = "www.${var.secondary_domain}"
-  type    = "CNAME"
-  ttl     = "300"
-  #TODO: this should be prod
-  records = ["static.stage.${var.secondary_domain}"]
-}
+# resource aws_route53_record secondary_www {
+#   zone_id = aws_route53_zone.secondary.zone_id
+#   name    = "www.${var.secondary_domain}"
+#   type    = "CNAME"
+#   ttl     = "300"
+#   records = ["static.prod.${var.secondary_domain}"]
+# }
 
 resource aws_route53_record keybase {
   zone_id = aws_route53_zone.primary.zone_id

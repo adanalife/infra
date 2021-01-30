@@ -126,17 +126,21 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  # aliases             = [var.secondary_domain, local.secondary_static_site]
+  aliases = [
+    var.primary_domain,
+    "www.${var.primary_domain}",
+    local.primary_static_site
+  ]
 
-  custom_error_response {
-    error_code         = 403
-    response_page_path = "/error.html"
-    response_code      = 404
-  }
+  # custom_error_response {
+  #   error_code         = 403
+  #   response_page_path = "/error.html"
+  #   response_code      = 404
+  # }
 
   custom_error_response {
     error_code         = 404
-    response_page_path = "/error.html"
+    response_page_path = "/404.html"
     response_code      = 404
   }
 
@@ -169,16 +173,14 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
   }
 }
 
-resource "aws_route53_record" "alias" {
-  # count = "${length(var.zone_id) > 0 ? 1 : 0}"
+# resource "aws_route53_record" "primary_alias" {
+#   name    = local.primary_static_site
+#   type    = "A"
+#   zone_id = aws_route53_zone.primary_subdomain_zone.zone_id
 
-  zone_id = aws_route53_zone.secondary_subdomain_zone.zone_id
-  name    = local.primary_static_site
-  type    = "A"
-
-  alias {
-    name                   = aws_cloudfront_distribution.primary_cdn.domain_name
-    zone_id                = aws_cloudfront_distribution.primary_cdn.hosted_zone_id
-    evaluate_target_health = false
-  }
-}
+#   alias {
+#     name                   = aws_cloudfront_distribution.primary_cdn.domain_name
+#     zone_id                = aws_cloudfront_distribution.primary_cdn.hosted_zone_id
+#     evaluate_target_health = false
+#   }
+# }
