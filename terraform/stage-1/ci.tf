@@ -15,7 +15,7 @@ data aws_iam_policy_document ci_service_account_policy {
 
     principals {
       identifiers = [
-        aws_iam_user.ci.arn #, "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ReverieContinuousIntegrationRole"
+        aws_iam_user.ci.arn
       ]
       type = "AWS"
     }
