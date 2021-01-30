@@ -56,7 +56,7 @@ resource aws_route53_record naked_secondary {
   # https://docs.aws.amazon.com/general/latest/gr/s3.html#s3_website_region_endpoints
   alias {
     name                   = "s3-website-us-east-1.amazonaws.com."
-    zone_id                = "Z2O1EMRO9K5GLX" # us-east-1
+    zone_id                = "Z3AQBSTGFYJSTF" # us-east-1
     evaluate_target_health = false
   }
 }
