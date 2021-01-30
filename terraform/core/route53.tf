@@ -48,7 +48,7 @@ resource aws_route53_record secondary_stage_nameservers {
   records = var.secondary_stage_nameservers
 }
 
-resource aws_route53_record naked_primary {
+resource aws_route53_record primary_naked {
   zone_id = aws_route53_zone.primary.zone_id
   name    = var.domain
   type    = "A"
@@ -61,7 +61,15 @@ resource aws_route53_record naked_primary {
   }
 }
 
-resource aws_route53_record naked_secondary {
+resource "aws_route53_record" "primary_naked_acm_cert_validation" {
+  name    = var.primary_naked_acm_dns_name
+  records = [var.primary_naked_acm_dns_record]
+  ttl     = 60
+  type    = var.primary_naked_acm_dns_type
+  zone_id = aws_route53_zone.primary.zone_id
+}
+
+resource aws_route53_record secondary_naked {
   zone_id = aws_route53_zone.secondary.zone_id
   name    = var.secondary_domain
   type    = "A"
@@ -74,34 +82,31 @@ resource aws_route53_record naked_secondary {
   }
 }
 
-#TODO: figure out how to do aliases
-# www.dana.lol.  A ALIAS d6kb0mm00m70t.cloudfront.net.
-# resource aws_route53_record www {
-#   zone_id = aws_route53_zone.primary.zone_id
-#   name    = "www.${var.domain}"
-#   type    = "A"
-#   ttl     = "300"
+resource aws_route53_record primary_www {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "www.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["static.prod.${var.domain}"]
+}
 
-#   alias {
-#     name                   = "${aws_elb.main.dns_name}"
-#     zone_id                = "${aws_elb.main.zone_id}"
-#     evaluate_target_health = true
-#   }
-# }
+resource "aws_route53_record" "primary_www_acm_cert_validation" {
+  name    = var.primary_www_acm_dns_name
+  records = [var.primary_www_acm_dns_record]
+  ttl     = 60
+  type    = var.primary_www_acm_dns_type
+  zone_id = aws_route53_zone.primary.zone_id
+}
 
+resource aws_route53_record secondary_www {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "www.${var.secondary_domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["static.prod.${var.secondary_domain}"]
+}
 
-#TODO: is this an A alias?
-# dana.lol ALIAS www.dana.lol.
-# resource aws_route53_record naked {
-#   zone_id = aws_route53_zone.primary.zone_id
-#   name    = "www.${var.domain}"
-#   type    = "A"
-#   ttl     = "300"
-#   records = ["${aws_eip.lb.public_ip}"]
-# }
-
-#TODO: create this as an alias
-# staging.dana.lol.  ALIAS A dykrdvs8xqodx.cloudfront.net. 
+#TODO: create staging.dana.lol alias
 
 resource aws_route53_record status {
   zone_id = aws_route53_zone.primary.zone_id
@@ -110,22 +115,6 @@ resource aws_route53_record status {
   ttl     = "300"
   records = ["stats.uptimerobot.com"]
 }
-
-resource aws_route53_record www {
-  zone_id = aws_route53_zone.primary.zone_id
-  name    = "www.${var.domain}"
-  type    = "CNAME"
-  ttl     = "300"
-  records = ["static.prod.${var.domain}"]
-}
-
-# resource aws_route53_record secondary_www {
-#   zone_id = aws_route53_zone.secondary.zone_id
-#   name    = "www.${var.secondary_domain}"
-#   type    = "CNAME"
-#   ttl     = "300"
-#   records = ["static.prod.${var.secondary_domain}"]
-# }
 
 resource aws_route53_record keybase {
   zone_id = aws_route53_zone.primary.zone_id
@@ -154,7 +143,6 @@ resource aws_route53_record stream_local {
   records = ["10.111.253.168"]
 }
 
-
 resource aws_route53_record tripbot {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "tripbot.${var.domain}"
@@ -180,20 +168,3 @@ resource aws_route53_record certbot {
 #   ttl     = "300"
 #   records = ["172.3.109.123"]
 # }
-
-
-resource "aws_route53_record" "primary_naked_acm_cert_validation" {
-  name    = var.primary_naked_acm_dns_name
-  records = [var.primary_naked_acm_dns_record]
-  ttl     = 60
-  type    = var.primary_naked_acm_dns_type
-  zone_id = aws_route53_zone.primary.zone_id
-}
-
-resource "aws_route53_record" "primary_www_acm_cert_validation" {
-  name    = var.primary_www_acm_dns_name
-  records = [var.primary_www_acm_dns_record]
-  ttl     = 60
-  type    = var.primary_www_acm_dns_type
-  zone_id = aws_route53_zone.primary.zone_id
-}
