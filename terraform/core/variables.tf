@@ -84,3 +84,29 @@ variable developer_role {
   default     = "DeveloperUser"
   description = "The name of the role which is created in child accounts in order to access them"
 }
+
+variable primary_www_acm_dns_name {
+  type = string
+}
+
+variable primary_www_acm_dns_record {
+  type = string
+}
+
+variable primary_www_acm_dns_type {
+  type    = string
+  default = "CNAME"
+}
+
+variable primary_naked_acm_dns_name {
+  type = string
+}
+
+variable primary_naked_acm_dns_record {
+  type = string
+}
+
+variable primary_naked_acm_dns_type {
+  type    = string
+  default = "CNAME"
+}

@@ -45,7 +45,7 @@ variable rds_tripbot_password {
 
 variable static_site_public_dir {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"
-  default     = "public"
+  type        = string
 }
 
 # a secret string between CloudFront and S3 to control access

@@ -47,3 +47,11 @@ secondary_prod_nameservers = [
   "ns-326.awsdns-40.com",
   "ns-798.awsdns-35.net",
 ]
+
+# these come from the ACM page on prod
+primary_www_acm_dns_name   = "_8648ab8ec2619662cf8cab0fcbd7e4bf.www.dana.lol."
+primary_www_acm_dns_record = "_5c4c1563d4296f6f72aff30f7e5779f9.vtqfhvjlcp.acm-validations.aws."
+
+# these come from the ACM page on prod
+primary_naked_acm_dns_name   = "_942d58be16fbe12ca6b55b2c4729d7a9.dana.lol."
+primary_naked_acm_dns_record = "_466cddc22b97c9c41ea57c0adf6a26a5.vtqfhvjlcp.acm-validations.aws."
