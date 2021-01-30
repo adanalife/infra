@@ -138,11 +138,11 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
   #   response_code      = 404
   # }
 
-  custom_error_response {
-    error_code         = 404
-    response_page_path = "/404.html"
-    response_code      = 404
-  }
+  # custom_error_response {
+  #   error_code         = 404
+  #   response_page_path = "/404.html"
+  #   response_code      = 404
+  # }
 
   default_cache_behavior {
     target_origin_id = local.s3_origin_id
@@ -173,14 +173,14 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
   }
 }
 
-# resource "aws_route53_record" "primary_alias" {
-#   name    = local.primary_static_site
-#   type    = "A"
-#   zone_id = aws_route53_zone.primary_subdomain_zone.zone_id
+resource "aws_route53_record" "primary_alias" {
+  name    = local.primary_static_site
+  type    = "A"
+  zone_id = aws_route53_zone.primary_subdomain_zone.zone_id
 
-#   alias {
-#     name                   = aws_cloudfront_distribution.primary_cdn.domain_name
-#     zone_id                = aws_cloudfront_distribution.primary_cdn.hosted_zone_id
-#     evaluate_target_health = false
-#   }
-# }
+  alias {
+    name                   = aws_cloudfront_distribution.primary_cdn.domain_name
+    zone_id                = aws_cloudfront_distribution.primary_cdn.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
