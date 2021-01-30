@@ -149,7 +149,7 @@ resource aws_route53_record tripbot {
   name    = "tripbot.${var.domain}"
   type    = "A"
   ttl     = "300"
-  records = ["172.3.109.123"]
+  records = ["173.48.171.189"]
 }
 
 resource aws_route53_record certbot {
