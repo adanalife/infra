@@ -56,5 +56,5 @@ primary_www_acm_dns_record = "_5c4c1563d4296f6f72aff30f7e5779f9.vtqfhvjlcp.acm-v
 primary_naked_acm_dns_name   = "_942d58be16fbe12ca6b55b2c4729d7a9.dana.lol."
 primary_naked_acm_dns_record = "_466cddc22b97c9c41ea57c0adf6a26a5.vtqfhvjlcp.acm-validations.aws."
 
-secondary_naked_acm_dns_name   = "_d46343568ad4b9c25798547b884240d2.whereisdana.today"
-secondary_naked_acm_dns_record = "_29d1178545d68c41fc5993163b8249c7.vtqfhvjlcp.acm-validations.aws."
+# secondary_naked_acm_dns_name   = "_d46343568ad4b9c25798547b884240d2.whereisdana.today"
+# secondary_naked_acm_dns_record = "_29d1178545d68c41fc5993163b8249c7.vtqfhvjlcp.acm-validations.aws."

@@ -207,10 +207,10 @@ resource "aws_route53_record" "primary_www_acm_cert_validation" {
 #   "resource_record_value" = "_29d1178545d68c41fc5993163b8249c7.vtqfhvjlcp.acm-validations.aws."
 # },
 # aws_s3_bucket.secondary_redirect
-resource aws_route53_record secondary_naked_acm_cert_validation {
-  name    = var.secondary_naked_acm_dns_name
-  records = [var.secondary_naked_acm_dns_record]
-  ttl     = 60
-  type    = var.secondary_naked_acm_dns_type
-  zone_id = aws_route53_zone.secondary.zone_id
-}
+# resource aws_route53_record secondary_naked_acm_cert_validation {
+#   name    = aws_s3_bucket.secondary_redirect.domain_validation_options[var.secondary_domain].resource_record_name
+#   records = [aws_s3_bucket.secondary_redirect.domain_validation_options[var.secondary_domain].resource_record_value]
+#   ttl     = 60
+#   type    = aws_s3_bucket.secondary_redirect.domain_validation_options[var.secondary_domain].resource_record_type
+#   zone_id = aws_route53_zone.secondary.zone_id
+# }

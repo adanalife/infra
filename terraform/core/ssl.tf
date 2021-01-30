@@ -1,24 +1,19 @@
-# resource "aws_acm_certificate" "primary_static_site" {
-#   domain_name = var.domain
-#   subject_alternative_names = [
-#     "static.prod.${var.domain}",
-#     "www.${var.domain}"
-#   ]
-#   validation_method = "DNS"
+resource "aws_acm_certificate" "secondary_static_site" {
+  domain_name = var.secondary_domain
+  # subject_alternative_names = [
+  #   "www.${var.secondary_domain}"
+  # ]
+  validation_method = "DNS"
 
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-# }
+  lifecycle {
+    create_before_destroy = true
+  }
+}
 
 
-# output primary_ssl_cert_arn {
-#   value = aws_acm_certificate.primary_static_site.arn
-# }
-
-# resource "aws_route53_record" "primary_cert_validation" {
+# resource "aws_route53_record" "secondary_cert_validation" {
 #   for_each = {
-#     for dvo in aws_acm_certificate.primary_static_site.domain_validation_options : dvo.domain_name => {
+#     for dvo in aws_acm_certificate.secondary_static_site.domain_validation_options : dvo.domain_name => {
 #       name   = dvo.resource_record_name
 #       record = dvo.resource_record_value
 #       type   = dvo.resource_record_type
@@ -30,15 +25,6 @@
 #   records         = [each.value.record]
 #   ttl             = 60
 #   type            = each.value.type
-#   zone_id         = aws_route53_zone.primary.zone_id
-# }
-
-# resource "aws_acm_certificate" "secondary_static_site" {
-#   domain_name               = var.secondary_domain
-#   # subject_alternative_names = ["static.prod.${var.secondary_domain}"]
-#   validation_method         = "DNS"
-
-#   lifecycle {
-#     create_before_destroy = true
-#   }
+#   zone_id         = aws_route53_zone.secondary.zone_id
+#   depends_on      = [aws_acm_certificate.secondary_static_site]
 # }
