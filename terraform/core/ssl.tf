@@ -1,7 +1,10 @@
 resource "aws_acm_certificate" "primary_static_site" {
-  domain_name               = var.domain
-  subject_alternative_names = ["static.prod.${var.domain}"]
-  validation_method         = "DNS"
+  domain_name = var.domain
+  subject_alternative_names = [
+    "static.prod.${var.domain}",
+    "www.${var.domain}"
+  ]
+  validation_method = "DNS"
 
   lifecycle {
     create_before_destroy = true
