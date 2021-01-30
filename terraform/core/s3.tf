@@ -45,6 +45,16 @@ resource aws_s3_bucket primary_redirect {
   website {
     error_document = "error.html"
     index_document = "index.html"
+
+    routing_rules = <<EOF
+[{
+    "Redirect": {
+        "Protocol": "https",
+        "HostName": "www.dana.lol",
+        "HttpRedirectCode": "301"
+    }
+}]
+EOF
   }
 
   tags = {
@@ -78,6 +88,17 @@ resource aws_s3_bucket secondary_redirect {
   website {
     error_document = "error.html"
     index_document = "index.html"
+
+    routing_rules = <<EOF
+[{
+    "Redirect": {
+        "Protocol": "https",
+        "HostName": "www.twitch.tv",
+        "ReplaceKeyPrefixWith": "ADanaLife_",
+        "HttpRedirectCode": "301"
+    }
+}]
+EOF
   }
 
   tags = {
