@@ -1,8 +1,8 @@
 # adapted from: https://github.com/conortm/terraform-aws-s3-static-website
 
 locals {
-  public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
-  s3_origin_id                  = "cloudfront-distribution-origin-${local.primary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
+  # public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
+  s3_origin_id = "cloudfront-distribution-origin-${local.primary_static_site}.s3.amazonaws.com/${var.static_site_public_dir}"
   # static_website_routing_rules  = <<EOF
   # [{
   #   "Condition": {
@@ -44,7 +44,7 @@ data "aws_iam_policy_document" "static_website_read_with_secret" {
   statement {
     sid       = "1"
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.static_website.arn}${local.public_dir_with_leading_slash}/*"]
+    resources = ["${aws_s3_bucket.static_website.arn}/${var.static_site_public_dir}/*"]
 
     principals {
       type        = "AWS"
@@ -67,7 +67,7 @@ resource "aws_s3_bucket_policy" "static_website_read_with_secret" {
 resource "aws_cloudfront_distribution" "primary_cdn" {
   origin {
     domain_name = aws_s3_bucket.static_website.website_endpoint
-    origin_path = local.public_dir_with_leading_slash
+    origin_path = "/${var.static_site_public_dir}"
     origin_id   = local.s3_origin_id
 
     custom_origin_config {
