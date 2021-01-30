@@ -35,10 +35,9 @@ resource aws_iam_policy ci {
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "S3ReadOnlyAccess",
+            "Sid": "S3ReadWriteAccess",
             "Action": [
-              "s3:GetObject",
-              "s3:HeadBucket",
+              "s3:*Object",
               "s3:ListBucket"
             ],
             "Effect": "Allow",
