@@ -33,6 +33,31 @@ variable domain {
   description = "The domain name used for DNS"
 }
 
+variable secondary_domain {
+  type        = string
+  description = "The domain name used for secondary DNS"
+}
+
+variable primary_prod_nameservers {
+  type    = list(string)
+  default = []
+}
+
+variable secondary_prod_nameservers {
+  type    = list(string)
+  default = []
+}
+
+variable primary_stage_nameservers {
+  type    = list(string)
+  default = []
+}
+
+variable secondary_stage_nameservers {
+  type    = list(string)
+  default = []
+}
+
 variable account_names {
   type    = list(string)
   default = []
@@ -58,4 +83,30 @@ variable developer_role {
   type        = string
   default     = "DeveloperUser"
   description = "The name of the role which is created in child accounts in order to access them"
+}
+
+variable primary_www_acm_dns_name {
+  type = string
+}
+
+variable primary_www_acm_dns_record {
+  type = string
+}
+
+variable primary_www_acm_dns_type {
+  type    = string
+  default = "CNAME"
+}
+
+variable primary_naked_acm_dns_name {
+  type = string
+}
+
+variable primary_naked_acm_dns_record {
+  type = string
+}
+
+variable primary_naked_acm_dns_type {
+  type    = string
+  default = "CNAME"
 }

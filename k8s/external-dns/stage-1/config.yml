@@ -1,0 +1,75 @@
+## Limit possible target zones by domain suffixes (optional)
+##
+domainFilters:
+  - staging.whereisdana.today
+
+## Allow external-dns to publish DNS records for ClusterIP services
+##
+# publishInternalServices: false
+
+## TXT Registry Identifier
+##
+txtOwnerId: Z05605701ECX0UCEOKZBS
+
+## Prefix to create a TXT record with a name following the pattern prefix.<CNAME record>
+##
+txtPrefix: stage-1
+
+## AWS configuration to be set via arguments/env. variables
+##
+aws:
+  ## AWS credentials
+  ##
+  credentials:
+    ## Use an existing secret with key "credentials" defined.
+    ## This ignores aws.credentials.secretKey, and aws.credentials.accessKey
+    ##
+    secretName: external-dns-user-g7dmf4bm9c
+
+  ## AWS Role to assume
+  ##
+  # this comes from terraform output
+  assumeRoleArn: arn:aws:iam::413585268653:role/ExternalDNSRole
+
+## Adjust the interval for DNS updates
+##
+interval: 1m
+## Verbosity of the ExternalDNS logs. Available values are:
+## - panic, debug, info, warn, error, fatal
+##
+logLevel: info
+
+#TODO: enable these
+## Prometheus Exporter / Metrics
+##
+metrics:
+  enabled: false
+  ## Metrics exporter pod Annotation and Labels
+  ##
+  # podAnnotations:
+  #   prometheus.io/scrape: "true"
+  #   prometheus.io/port: "7979"
+
+  ## Prometheus Operator ServiceMonitor configuration
+  ##
+  serviceMonitor:
+    enabled: false
+    ## Namespace in which Prometheus is running
+    ##
+    # namespace: monitoring
+
+    ## Interval at which metrics should be scraped.
+    ## ref: https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#endpoint
+    ##
+    # interval: 10s
+
+    ## Timeout after which the scrape is ended
+    ## ref: https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#endpoint
+    ##
+    # scrapeTimeout: 10s
+
+    ## ServiceMonitor selector labels
+    ## ref: https://github.com/bitnami/charts/tree/master/bitnami/prometheus-operator#prometheus-configuration
+    ##
+    # selector:
+    #   prometheus: my-prometheus

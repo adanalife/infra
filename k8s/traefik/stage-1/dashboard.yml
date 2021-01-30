@@ -1,0 +1,43 @@
+---
+kind: Ingress
+apiVersion: extensions/v1beta1
+metadata:
+  name: traefik
+  namespace: kube-system
+  annotations:
+    external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
+    kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+
+spec:
+  tls:
+    # this defines the secret that will be created
+    - secretName: traefik-dashboard-tls
+      hosts:
+        - traefik.staging.whereisdana.today
+        - traefik-dashboard.staging.whereisdana.today
+
+  rules:
+    - host: traefik-dashboard.staging.whereisdana.today
+      http:
+        paths:
+        - path: /
+          backend:
+            serviceName: traefik
+            servicePort: websecure
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: new-traefik
+  namespace: kube-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`traefik-dashboard.staging.whereisdana.today`)
+      kind: Rule
+      services:
+        - name: traefik
+          port: 443

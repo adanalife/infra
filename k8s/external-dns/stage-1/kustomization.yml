@@ -1,6 +1,5 @@
-bases:
-  - ../base
-patchesStrategicMerge:
-  - set-role.yml
-  - set-args.yml
-  - set-rbac.yml
+namespace: kube-system
+secretGenerator:
+- name: external-dns-user
+  files:
+  - credentials

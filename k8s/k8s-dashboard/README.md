@@ -1,14 +1,14 @@
-This stuff installs [kubernetes-dashboard](https://github.com/kubernetes/dashboard).
+```bash
+kubectl diff -k k8s/k8s-dashboard/stage-1
+kubectl apply -k k8s/k8s-dashboard/stage-1
 
-This was built following the [Provision an EKS cluster](https://learn.hashicorp.com/terraform/kubernetes/provision-eks-cluster) guide.
-
-To add SSL certs, follow [these instructions](https://github.com/kubernetes/dashboard/blob/master/docs/user/installation.md#recommended-setup)
-
-Once it's built you can test it by running:
+helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+helm upgrade --install k8s-dashboard kubernetes-dashboard/kubernetes-dashboard -n kube-system -f k8s/k8s-dashboard/stage-1/config.yml
+```
 
 ```bash
-kubectl proxy
-open http://127.0.0.1:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
-# or
-open http://localhost:8001/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/
+Get the Kubernetes Dashboard URL by running:
+  export POD_NAME=$(kubectl get pods -n kube-system -l "app.kubernetes.io/name=kubernetes-dashboard,app.kubernetes.io/instance=k8s-dashboard" -o jsonpath="{.items[0].metadata.name}")
+  echo https://127.0.0.1:8443/
+  kubectl -n kube-system port-forward $POD_NAME 8443:8443
 ```

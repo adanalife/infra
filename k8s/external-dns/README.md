@@ -1,3 +1,10 @@
-This stuff installs [external-dns](https://github.com/kubernetes-sigs/external-dns).
 
-This was built following the [Setting up ExternalDNS for Services on AWS](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md) guide.
+```bash
+# install the secret
+cp k8s/external-dns/stage-1/credentials{.example,}
+vim k8s/external-dns/stage-1/credentials
+
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm upgrade --install dns bitnami/external-dns -f k8s/external-dns/stage-1/config.yml -n kube-system
+kubectl apply -k k8s/external-dns/stage-1
+```

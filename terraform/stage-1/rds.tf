@@ -1,4 +1,7 @@
 resource aws_db_instance tripbot {
+  # only create on stage for now
+  count = var.environment == "stage" ? 1 : 0
+
   engine         = "postgres"
   engine_version = "11.8"
   instance_class = "db.t2.micro"
@@ -40,7 +43,7 @@ resource aws_security_group allow_postgres {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["108.49.156.172/32"]
+    cidr_blocks = ["108.49.156.172/32", "173.48.171.189/32"]
   }
 
   egress {
