@@ -23,7 +23,3 @@ output secondary_route53_zone_id {
 output secondary_route53_name_servers {
   value = aws_route53_zone.secondary.name_servers
 }
-
-output primary_ssl_cert_arn {
-  value = aws_acm_certificate.primary_static_site.arn
-}
