@@ -56,9 +56,9 @@ resource random_password static_site_secret {
 locals {
   org_name = "adanalife"
   # this is how we will refer to the account in other places
-  account_name          = "${var.environment}-${var.label}"
-  full_account_name     = "${local.org_name}-${var.environment}-${var.label}"
-  primary_subdomain     = "${var.environment}.${var.primary_domain}"
-  secondary_subdomain   = "${var.environment}.${var.secondary_domain}"
-  secondary_static_site = "static.${local.secondary_subdomain}"
+  account_name        = "${var.environment}-${var.label}"
+  full_account_name   = "${local.org_name}-${var.environment}-${var.label}"
+  primary_subdomain   = "${var.environment}.${var.primary_domain}"
+  secondary_subdomain = "${var.environment}.${var.secondary_domain}"
+  primary_static_site = "static.${local.primary_subdomain}"
 }

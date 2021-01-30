@@ -2,54 +2,28 @@
 
 locals {
   public_dir_with_leading_slash = "${length(var.static_site_public_dir) > 0 ? "/${var.static_site_public_dir}" : ""}"
-  s3_origin_id                  = "cloudfront-distribution-origin-${local.secondary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
-  static_website_routing_rules  = <<EOF
-[{
-    "Condition": {
-        "KeyPrefixEquals": "${var.static_site_public_dir}/${var.static_site_public_dir}/"
-    },
-    "Redirect": {
-        "Protocol": "https",
-        "HostName": "${local.secondary_static_site}",
-        "ReplaceKeyPrefixWith": "",
-        "HttpRedirectCode": "301"
-    }
-}]
-EOF
-}
-
-#TODO: do something with the output
-# output acm {
-#   value = aws_acm_certificate.secondary_static_site.domain_validation_options
-# }
-resource "aws_acm_certificate" "secondary_static_site" {
-  domain_name               = local.secondary_static_site
-  subject_alternative_names = [var.secondary_domain]
-  validation_method         = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
+  s3_origin_id                  = "cloudfront-distribution-origin-${local.primary_static_site}.s3.amazonaws.com${local.public_dir_with_leading_slash}"
+  # static_website_routing_rules  = <<EOF
+  # [{
+  #   "Condition": {
+  #       "KeyPrefixEquals": "${var.static_site_public_dir}/${var.static_site_public_dir}/"
+  #   },
+  #   "Redirect": {
+  #       "Protocol": "https",
+  #       "HostName": "${local.secondary_static_site}",
+  #       "ReplaceKeyPrefixWith": "",
+  #       "HttpRedirectCode": "301"
+  #   }
+  # }]
+  # EOF
 }
 
 resource "aws_s3_bucket" "static_website" {
-  #TODO: rename to primary
-  bucket = local.secondary_static_site
+  bucket = local.primary_static_site
 
   website {
     index_document = "index.html"
     error_document = "404.html"
-
-    routing_rules = <<EOF
-[{
-    "Redirect": {
-        "Protocol": "https",
-        "HostName": "www.twitch.tv",
-        "ReplaceKeyPrefixWith": "ADanaLife_",
-        "HttpRedirectCode": "301"
-    }
-}]
-EOF
   }
 }
 
@@ -61,6 +35,16 @@ EOF
 #     error_document = "404.html"
 
 #     routing_rules = length(var.static_site_public_dir) > 0 ? local.static_website_routing_rules : ""
+# routing_rules = <<EOF
+# [{
+# "Redirect": {
+#     "Protocol": "https",
+#     "HostName": "www.twitch.tv",
+#     "ReplaceKeyPrefixWith": "ADanaLife_",
+#     "HttpRedirectCode": "301"
+# }
+# }]
+# EOF
 #   }
 # }
 
@@ -88,7 +72,7 @@ resource "aws_s3_bucket_policy" "static_website_read_with_secret" {
   policy = data.aws_iam_policy_document.static_website_read_with_secret.json
 }
 
-resource "aws_cloudfront_distribution" "cdn" {
+resource "aws_cloudfront_distribution" "primary_cdn" {
   origin {
     domain_name = aws_s3_bucket.static_website.website_endpoint
     origin_path = local.public_dir_with_leading_slash
@@ -107,11 +91,11 @@ resource "aws_cloudfront_distribution" "cdn" {
     }
   }
 
-  comment             = "CDN for ${local.secondary_static_site} S3 Bucket"
+  comment             = "CDN for ${local.primary_static_site} S3 Bucket"
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  aliases             = [var.secondary_domain, local.secondary_static_site]
+  # aliases             = [var.secondary_domain, local.secondary_static_site]
 
   custom_error_response {
     error_code         = 403
@@ -148,7 +132,8 @@ resource "aws_cloudfront_distribution" "cdn" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.secondary_static_site.arn
+    #TODO: make variable
+    acm_certificate_arn      = "arn:aws:acm:us-east-1:729863845087:certificate/4d2bd5e3-6884-4bdc-ba8e-c379268f71bd"
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.1_2016"
   }
@@ -158,12 +143,12 @@ resource "aws_route53_record" "alias" {
   # count = "${length(var.zone_id) > 0 ? 1 : 0}"
 
   zone_id = aws_route53_zone.secondary_subdomain_zone.zone_id
-  name    = local.secondary_static_site
+  name    = local.primary_static_site
   type    = "A"
 
   alias {
-    name                   = aws_cloudfront_distribution.cdn.domain_name
-    zone_id                = aws_cloudfront_distribution.cdn.hosted_zone_id
+    name                   = aws_cloudfront_distribution.primary_cdn.domain_name
+    zone_id                = aws_cloudfront_distribution.primary_cdn.hosted_zone_id
     evaluate_target_health = false
   }
 }
