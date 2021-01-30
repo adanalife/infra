@@ -5,12 +5,9 @@ locals {
 }
 
 resource "aws_acm_certificate" "primary_static_site" {
-  domain_name = var.primary_domain
-  subject_alternative_names = [
-    "www.${var.primary_domain}",
-    local.primary_static_site
-  ]
-  validation_method = "DNS"
+  domain_name               = local.primary_static_site
+  subject_alternative_names = var.primary_acm_cert_alternative_names
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
@@ -73,11 +70,8 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  aliases = [
-    var.primary_domain,
-    "www.${var.primary_domain}",
-    local.primary_static_site
-  ]
+
+  aliases = concat([local.primary_static_site], var.primary_acm_cert_alternative_names)
 
   # custom_error_response {
   #   error_code         = 403

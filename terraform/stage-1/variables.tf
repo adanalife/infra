@@ -48,6 +48,11 @@ variable static_site_public_dir {
   type        = string
 }
 
+variable primary_acm_cert_alternative_names {
+  type    = list(string)
+  default = []
+}
+
 # a secret string between CloudFront and S3 to control access
 resource random_password static_site_secret {
   length = 32
