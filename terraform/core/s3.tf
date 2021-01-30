@@ -31,8 +31,8 @@ resource aws_s3_bucket_public_access_block dashcam_videos {
 }
 
 # an empty S3 bucket that serves as a redirect
-resource aws_s3_bucket primary_redirect {
-  bucket = "${var.domain}-test"
+resource aws_s3_bucket primary_naked_redirect {
+  bucket = var.domain
   acl    = "private"
 
   website {
@@ -51,13 +51,13 @@ EOF
   }
 
   tags = {
-    Name = "${var.domain}-test"
+    Name = var.domain
   }
 }
 
 # an empty S3 bucket that serves as a redirect
-resource aws_s3_bucket secondary_redirect {
-  bucket = "${var.secondary_domain}-test"
+resource aws_s3_bucket secondary_naked_redirect {
+  bucket = var.secondary_domain
   acl    = "private"
 
   website {
@@ -77,6 +77,6 @@ EOF
   }
 
   tags = {
-    Name = "${var.secondary_domain}-test"
+    Name = var.secondary_domain
   }
 }
