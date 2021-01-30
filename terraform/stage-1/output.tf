@@ -50,3 +50,7 @@ output ci_user_access_key {
 output ci_user_secret {
   value = aws_iam_access_key.ci.encrypted_secret
 }
+
+output ci_role_arn {
+  value = aws_iam_role.ci.arn
+}
