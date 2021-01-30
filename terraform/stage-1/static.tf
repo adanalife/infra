@@ -31,24 +31,6 @@ resource "aws_acm_certificate" "primary_static_site" {
   }
 }
 
-
-# resource "aws_route53_record" "primary_cert_validation" {
-#   for_each = {
-#     for dvo in aws_acm_certificate.primary_static_site.domain_validation_options : dvo.domain_name => {
-#       name   = dvo.resource_record_name
-#       record = dvo.resource_record_value
-#       type   = dvo.resource_record_type
-#     }
-#   }
-
-#   allow_overwrite = true
-#   name            = each.value.name
-#   records         = [each.value.record]
-#   ttl             = 60
-#   type            = each.value.type
-#   zone_id         = aws_route53_zone.primary.zone_id
-# }
-
 resource "aws_s3_bucket" "static_website" {
   bucket = local.primary_static_site
 
@@ -57,27 +39,6 @@ resource "aws_s3_bucket" "static_website" {
     error_document = "404.html"
   }
 }
-
-# resource "aws_s3_bucket" "secondary_static_website" {
-#   bucket = local.secondary_static_site
-
-#   website {
-#     index_document = "index.html"
-#     error_document = "404.html"
-
-#     routing_rules = length(var.static_site_public_dir) > 0 ? local.static_website_routing_rules : ""
-# routing_rules = <<EOF
-# [{
-# "Redirect": {
-#     "Protocol": "https",
-#     "HostName": "www.twitch.tv",
-#     "ReplaceKeyPrefixWith": "ADanaLife_",
-#     "HttpRedirectCode": "301"
-# }
-# }]
-# EOF
-#   }
-# }
 
 data "aws_iam_policy_document" "static_website_read_with_secret" {
   statement {
@@ -170,17 +131,5 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
     acm_certificate_arn      = aws_acm_certificate.primary_static_site.arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.1_2016"
-  }
-}
-
-resource "aws_route53_record" "primary_alias" {
-  name    = local.primary_static_site
-  type    = "A"
-  zone_id = aws_route53_zone.primary_subdomain_zone.zone_id
-
-  alias {
-    name                   = aws_cloudfront_distribution.primary_cdn.domain_name
-    zone_id                = aws_cloudfront_distribution.primary_cdn.hosted_zone_id
-    evaluate_target_health = false
   }
 }
