@@ -12,3 +12,8 @@ rds_tripbot_password = "atone7VEAL3idealize2elvish"
 
 # this is a convention set by middleman
 static_site_public_dir = "build"
+
+primary_acm_cert_alternative_names = [
+  "www.dana.lol",
+  "dana.lol"
+]

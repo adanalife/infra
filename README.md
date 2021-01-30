@@ -12,6 +12,7 @@ brew install k3d
 
 k3d cluster create adanalife-stage-1 \
   -p "8443:443@loadbalancer" \
+  -p "8080:80@loadbalancer" \
   --k3s-server-arg "--no-deploy=traefik"
 
 # set up kubectl to use this cluster
