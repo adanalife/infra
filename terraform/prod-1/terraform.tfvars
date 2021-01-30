@@ -14,6 +14,6 @@ rds_tripbot_password = "atone7VEAL3idealize2elvish"
 static_site_public_dir = "build"
 
 primary_acm_cert_alternative_names = [
-  "www.${var.primary_domain}",
-  var.primary_domain
+  "www.dana.lol",
+  "dana.lol"
 ]

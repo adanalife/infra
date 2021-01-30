@@ -12,6 +12,10 @@ resource "aws_acm_certificate" "primary_static_site" {
   lifecycle {
     create_before_destroy = true
   }
+
+  tags = {
+    Name = local.primary_static_site
+  }
 }
 
 resource "aws_s3_bucket" "static_website" {
