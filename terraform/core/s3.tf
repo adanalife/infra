@@ -42,7 +42,7 @@ resource aws_s3_bucket primary_naked_redirect {
     routing_rules = <<EOF
 [{
     "Redirect": {
-        "Protocol": "https",
+        "Protocol": "http",
         "HostName": "www.dana.lol",
         "HttpRedirectCode": "301"
     }
