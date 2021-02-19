@@ -129,6 +129,15 @@ resource aws_route53_record keybase {
   records = ["keybase-site-verification=4c5lF70z6Zp4jBKt7lDhS9PT-fJ5xFTip_2H_qBkZ1c"]
 }
 
+# for verifying Brave browser
+resource aws_route53_record brave {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = var.domain
+  type    = "TXT"
+  ttl     = "300"
+  records = ["brave-ledger-verification=9422ad35f6a8d886d6636c1ef09d84e950b5c1bf2ab28d28f00d0acc613aac79"]
+}
+
 resource aws_route53_record develop {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "develop.${var.domain}"
