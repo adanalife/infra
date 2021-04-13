@@ -80,3 +80,11 @@ EOF
     Name = var.secondary_domain
   }
 }
+
+resource "aws_glacier_vault" "dashcam" {
+  name = "Dashcam"
+
+  tags = {
+    Name = "Dashcam"
+  }
+}
