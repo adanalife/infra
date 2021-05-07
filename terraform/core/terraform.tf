@@ -4,7 +4,10 @@ terraform {
     # we don't strictly require v2.65, and should
     # probably move to v3.0 when it gets released
     # c.p. terraform.io/docs/providers/aws/index.html
-    aws = "~> 2.65"
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 2.65"
+    }
   }
 
   backend "s3" {
