@@ -3,7 +3,7 @@ resource aws_db_instance tripbot {
   count = var.environment == "stage" ? 1 : 0
 
   engine         = "postgres"
-  engine_version = "11.8"
+  engine_version = "11.10"
   instance_class = "db.t2.micro"
 
   identifier = "tripbot-db"

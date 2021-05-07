@@ -187,7 +187,7 @@ data aws_iam_policy_document dashcam_videos {
 
     content {
       resources = [
-        "${aws_s3_bucket.dashcam_videos.arn}",
+        aws_s3_bucket.dashcam_videos.arn,
         "${aws_s3_bucket.dashcam_videos.arn}/*"
       ]
 
