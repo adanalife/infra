@@ -1,13 +1,16 @@
 terraform {
-  required_version = ">= 0.13"
+  required_version = ">= 0.14"
   required_providers {
     # c.p. terraform.io/docs/providers/aws/index.html
     aws = {
       source  = "hashicorp/aws"
       version = "~> 3.39"
     }
+    # random is used for creating random strings (passwords usually)
+    # c.p. terraform.io/docs/providers/random/index.html
     random = {
-      source = "hashicorp/random"
+      source  = "hashicorp/random"
+      version = "~> 3.1"
     }
   }
 
