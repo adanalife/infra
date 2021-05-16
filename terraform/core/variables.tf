@@ -38,6 +38,17 @@ variable "secondary_domain" {
   description = "The domain name used for secondary DNS"
 }
 
+variable "status_domain" {
+  type        = string
+  description = "The domain name for the status page"
+}
+
+variable "uptimerobot_path" {
+  type        = string
+  default     = "8oJ79sjzBN"
+  description = "The path from the UptimeRobot URL for the status page"
+}
+
 variable "primary_prod_nameservers" {
   type    = list(string)
   default = []
