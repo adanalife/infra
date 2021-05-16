@@ -1,0 +1,30 @@
+name: Terraform Stuff
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+jobs:
+  cancel-currently-running: # Kill any existing runs of this workflow on this branch.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rokroskar/workflow-run-cleanup-action@v0.3.2
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+  terraform-stuff:
+    runs-on: self-hosted
+    strategy:
+      matrix:
+        terraform-dirs: [terraform/bootstrap, terraform/core, terraform/prod-1, terraform/stage-1]
+    defaults:
+      run:
+        working-directory: ${{ matrix.terraform-dirs }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: "0.15"
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check -diff
