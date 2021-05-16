@@ -115,11 +115,23 @@ resource "aws_route53_record" "secondary_www" {
 
 resource "aws_route53_record" "status" {
   zone_id = aws_route53_zone.primary.zone_id
-  name    = "status.${var.domain}"
-  type    = "CNAME"
-  ttl     = "300"
-  records = ["stats.uptimerobot.com"]
+  name    = var.status_domain
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.status_redirect.domain_name
+    zone_id                = aws_cloudfront_distribution.status_redirect.hosted_zone_id
+    evaluate_target_health = false
+  }
 }
+
+# resource "aws_route53_record" "status" {
+#   zone_id = aws_route53_zone.primary.zone_id
+#   name    = var.status_domain
+#   type    = "CNAME"
+#   ttl     = "300"
+#   records = ["stats.uptimerobot.com"]
+# }
 
 resource "aws_route53_record" "keybase" {
   zone_id = aws_route53_zone.primary.zone_id

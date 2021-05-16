@@ -131,7 +131,7 @@ resource "aws_cloudfront_distribution" "status_redirect" {
   aliases = [var.status_domain]
 
   default_cache_behavior {
-    target_origin_id = local.s3_origin_id
+    target_origin_id = local.s3_origin_id_status
     allowed_methods  = ["GET", "HEAD"]
     cached_methods   = ["GET", "HEAD"]
 
