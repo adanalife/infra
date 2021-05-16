@@ -1,9 +1,9 @@
-resource aws_db_instance tripbot {
+resource "aws_db_instance" "tripbot" {
   # only create on stage for now
   count = var.environment == "stage" ? 1 : 0
 
   engine         = "postgres"
-  engine_version = "11.10"
+  engine_version = "13"
   instance_class = "db.t2.micro"
 
   identifier = "tripbot-db"
@@ -25,7 +25,7 @@ resource aws_db_instance tripbot {
   final_snapshot_identifier = "tripbot-db-final-snapshot"
 }
 
-resource aws_security_group allow_postgres {
+resource "aws_security_group" "allow_postgres" {
   name        = "allow-postgres"
   description = "This group allows Postgres connections"
   vpc_id      = module.default_vpc.vpc_id
