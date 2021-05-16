@@ -5,7 +5,7 @@ locals {
 }
 
 # loop over user_data and create the users
-resource aws_iam_user user {
+resource "aws_iam_user" "user" {
   count = length(local.user_data)
   name  = local.user_data[count.index]["user"]
   tags = {
@@ -15,7 +15,7 @@ resource aws_iam_user user {
 }
 
 # loop over group_data and put developers in Developer group
-resource aws_iam_group_membership developers {
+resource "aws_iam_group_membership" "developers" {
   name  = "developers-group-membership"
   users = local.group_data[aws_iam_group.developer.name]
   group = aws_iam_group.developer.name

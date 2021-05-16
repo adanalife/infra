@@ -1,4 +1,4 @@
-resource aws_s3_bucket terraform_state_storage_s3 {
+resource "aws_s3_bucket" "terraform_state_storage_s3" {
   bucket        = var.state_bucket
   acl           = "private"
   force_destroy = false
@@ -23,7 +23,7 @@ resource aws_s3_bucket terraform_state_storage_s3 {
 }
 
 # prevent this bucket from going public
-resource aws_s3_bucket_public_access_block terraform_state {
+resource "aws_s3_bucket_public_access_block" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state_storage_s3.id
 
   block_public_acls       = true
