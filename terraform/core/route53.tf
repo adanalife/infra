@@ -125,14 +125,6 @@ resource "aws_route53_record" "status" {
   }
 }
 
-# resource "aws_route53_record" "status" {
-#   zone_id = aws_route53_zone.primary.zone_id
-#   name    = var.status_domain
-#   type    = "CNAME"
-#   ttl     = "300"
-#   records = ["stats.uptimerobot.com"]
-# }
-
 resource "aws_route53_record" "keybase" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "_keybase.${var.domain}"
