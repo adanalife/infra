@@ -1,8 +1,8 @@
-resource aws_route53_zone primary_subdomain_zone {
+resource "aws_route53_zone" "primary_subdomain_zone" {
   name = local.primary_subdomain
 }
 
-resource aws_route53_zone secondary_subdomain_zone {
+resource "aws_route53_zone" "secondary_subdomain_zone" {
   name = local.secondary_subdomain
 }
 
