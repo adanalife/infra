@@ -1,0 +1,23 @@
+name: Terraform Stuff
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+jobs:
+  terraform-stuff:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        terraform-dirs: [terraform/bootstrap, terraform/core, terraform/prod-1, terraform/stage-1]
+    defaults:
+      run:
+        working-directory: ${{ matrix.terraform-dirs }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: "0.15"
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check -diff
