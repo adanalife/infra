@@ -166,7 +166,7 @@ resource "aws_route53_record" "tripbot" {
   name    = "tripbot.${var.domain}"
   type    = "A"
   ttl     = "300"
-  records = ["173.48.171.189"]
+  records = ["108.20.171.89"]
 }
 
 resource "aws_route53_record" "certbot" {
