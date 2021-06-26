@@ -62,6 +62,9 @@ resource "aws_key_pair" "dana" {
 }
 
 resource "aws_instance" "tripbot" {
+  # only create on prod for now
+  count = var.environment == "prod" ? 1 : 0
+
   ami           = "ami-0c3e87333771b10a6" # ubuntu 21.04
   instance_type = "t3.micro"              # free tier
   key_name      = aws_key_pair.dana.key_name
@@ -80,6 +83,6 @@ resource "aws_instance" "tripbot" {
   }
 }
 
-output "tripbot_ip_address" {
-  value = aws_instance.tripbot.public_dns
-}
+# output "tripbot_ip_address" {
+#   value = aws_instance.tripbot.public_dns
+# }
