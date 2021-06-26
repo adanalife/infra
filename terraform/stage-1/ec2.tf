@@ -38,8 +38,8 @@ resource "aws_security_group" "allow_tripbot_access" {
 
   ingress {
     description = "HTTP from everywhere"
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 4569
+    to_port     = 4569
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
