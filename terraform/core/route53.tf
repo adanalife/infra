@@ -164,9 +164,17 @@ resource "aws_route53_record" "stream_local" {
 resource "aws_route53_record" "tripbot" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "tripbot.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["tripbot.prod.${var.domain}"]
+}
+
+resource "aws_route53_record" "hawthorne" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "hawthorne.${var.domain}"
   type    = "A"
   ttl     = "300"
-  records = ["173.48.171.189"]
+  records = ["108.20.171.89"]
 }
 
 resource "aws_route53_record" "certbot" {

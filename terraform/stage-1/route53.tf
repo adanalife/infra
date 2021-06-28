@@ -25,3 +25,15 @@ resource "aws_route53_record" "primary_static_site" {
     evaluate_target_health = false
   }
 }
+
+resource "aws_route53_record" "tripbot" {
+  # only create on prod for now
+  count = var.environment == "prod" ? 1 : 0
+
+  zone_id = aws_route53_zone.primary_subdomain_zone.zone_id
+  name    = "tripbot.${aws_route53_zone.primary_subdomain_zone.name}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = [aws_instance.tripbot.0.public_dns]
+}
+
