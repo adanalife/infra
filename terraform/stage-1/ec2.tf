@@ -19,6 +19,14 @@ resource "aws_security_group" "allow_ssh" {
     cidr_blocks = ["173.48.171.189/32", "108.20.171.89/32"]
   }
 
+  ingress {
+    description = "SSH from manaca"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["73.219.98.219/32"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
