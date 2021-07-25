@@ -23,3 +23,14 @@ resource "aws_iam_group_policy_attachment" "admin_assume_role" {
 
   depends_on = [aws_organizations_account.account]
 }
+
+# create a group for BillingAccess users
+resource "aws_iam_group" "billing_access" {
+  name = "BillingAccess"
+}
+
+resource "aws_iam_group_policy_attachment" "billing_access" {
+  group      = aws_iam_group.billing_access.name
+  policy_arn = aws_iam_policy.billing_access.arn
+  depends_on = [aws_iam_group.billing_access]
+}
