@@ -180,6 +180,25 @@ resource "aws_iam_policy" "developer_assume_role" {
   depends_on = [aws_organizations_account.account]
 }
 
+# this allows users to view billing details
+resource "aws_iam_policy" "billing_access" {
+  name   = "AllowBillingAccess"
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "aws-portal:ViewBilling"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+EOF
+}
+
 # give access to the dashcam_videos bucket
 data "aws_iam_policy_document" "dashcam_videos" {
   dynamic "statement" {

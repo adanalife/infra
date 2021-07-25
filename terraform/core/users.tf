@@ -20,3 +20,10 @@ resource "aws_iam_group_membership" "developers" {
   users = local.group_data[aws_iam_group.developer.name]
   group = aws_iam_group.developer.name
 }
+
+# loop over group_data and put users in BillingAccess group
+resource "aws_iam_group_membership" "billing_access" {
+  name  = "billing-access-group-membership"
+  users = local.group_data[aws_iam_group.billing_access.name]
+  group = aws_iam_group.billing_access.name
+}
