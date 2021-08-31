@@ -46,6 +46,14 @@ resource "aws_security_group" "allow_postgres" {
     cidr_blocks = ["108.49.156.172/32", "173.48.171.189/32", "108.20.171.89/32"]
   }
 
+  ingress {
+    description = "Postgres from aarons"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["73.16.124.8/32"]
+  }
+
   #TODO: associate an elastic IP
   ingress {
     description = "Postgres from tripbot"
