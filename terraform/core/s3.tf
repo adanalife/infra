@@ -1,4 +1,4 @@
-resource aws_s3_bucket dashcam_videos {
+resource "aws_s3_bucket" "dashcam_videos" {
   bucket = "${local.account_name}-dashcam-videos"
   acl    = "private"
 
@@ -21,7 +21,7 @@ resource aws_s3_bucket dashcam_videos {
 }
 
 # prevent this bucket from ever going public
-resource aws_s3_bucket_public_access_block dashcam_videos {
+resource "aws_s3_bucket_public_access_block" "dashcam_videos" {
   bucket = aws_s3_bucket.dashcam_videos.id
 
   block_public_acls       = true
@@ -31,7 +31,7 @@ resource aws_s3_bucket_public_access_block dashcam_videos {
 }
 
 # an empty S3 bucket that serves as a redirect
-resource aws_s3_bucket primary_naked_redirect {
+resource "aws_s3_bucket" "primary_naked_redirect" {
   bucket = var.domain
   acl    = "private"
 
@@ -56,7 +56,7 @@ EOF
 }
 
 # an empty S3 bucket that serves as a redirect
-resource aws_s3_bucket secondary_naked_redirect {
+resource "aws_s3_bucket" "secondary_naked_redirect" {
   bucket = var.secondary_domain
   acl    = "private"
 
@@ -78,6 +78,32 @@ EOF
 
   tags = {
     Name = var.secondary_domain
+  }
+}
+
+# an empty S3 bucket that serves as a redirect
+resource "aws_s3_bucket" "status_redirect" {
+  bucket = var.status_domain
+  acl    = "private"
+
+  website {
+    error_document = "error.html"
+    index_document = "index.html"
+
+    routing_rules = <<EOF
+[{
+    "Redirect": {
+        "Protocol": "https",
+        "HostName": "stats.uptimerobot.com",
+        "ReplaceKeyWith": "${var.uptimerobot_path}",
+        "HttpRedirectCode": "301"
+    }
+}]
+EOF
+  }
+
+  tags = {
+    Name = var.status_domain
   }
 }
 
