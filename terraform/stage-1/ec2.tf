@@ -16,7 +16,7 @@ resource "aws_security_group" "allow_ssh" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["173.48.171.189/32", "108.20.171.89/32"]
+    cidr_blocks = ["68.239.30.152/32"]
   }
 
   ingress {
@@ -33,6 +33,14 @@ resource "aws_security_group" "allow_ssh" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["73.16.124.8/32"]
+  }
+
+  ingress {
+    description = "SSH from fifty-six"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["73.119.107.252/32"]
   }
 
   egress {

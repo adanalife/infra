@@ -174,7 +174,7 @@ resource "aws_route53_record" "hawthorne" {
   name    = "hawthorne.${var.domain}"
   type    = "A"
   ttl     = "300"
-  records = ["108.20.171.89"]
+  records = ["68.239.30.152"]
 }
 
 resource "aws_route53_record" "certbot" {
