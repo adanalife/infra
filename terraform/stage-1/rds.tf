@@ -5,7 +5,7 @@ resource "aws_db_instance" "tripbot" {
   count = 0
 
   engine         = "postgres"
-  engine_version = "11.12"
+  engine_version = "13"
   instance_class = "db.t3.micro"
 
   identifier = "tripbot-db"
