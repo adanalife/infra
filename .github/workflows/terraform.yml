@@ -14,7 +14,7 @@ jobs:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: hashicorp/setup-terraform@v1
         with:
           terraform_version: "0.15"
