@@ -15,7 +15,7 @@ jobs:
         working-directory: ${{ matrix.terraform-dirs }}
     steps:
       - uses: actions/checkout@v2
-      - uses: hashicorp/setup-terraform@v1
+      - uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: "0.15"
       - name: Terraform fmt
