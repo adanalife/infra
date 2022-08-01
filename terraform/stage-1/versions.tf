@@ -4,7 +4,7 @@ terraform {
     # c.p. terraform.io/docs/providers/aws/index.html
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.39"
+      version = "~> 4.24"
     }
     # random is used for creating random strings (passwords usually)
     # c.p. terraform.io/docs/providers/random/index.html
