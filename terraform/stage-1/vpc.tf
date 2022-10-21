@@ -1,7 +1,7 @@
 # this is the VPC that comes pre-installed in every AWS account
 module "default_vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 2.78"
+  version = "~> 3.18"
 
   create_vpc         = false
   manage_default_vpc = true
