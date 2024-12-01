@@ -12,7 +12,8 @@ jobs:
         # note that the bootstrap dir is not included here, that's
         # because it isn't used much and as such it's on a really
         # old version of terraform
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/stage-1]
+        # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     defaults:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
@@ -23,7 +24,7 @@ jobs:
           aws-region: us-east-1
           aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
-          role-to-assume: CITerraformRole
+          role-to-assume: arn:aws:iam::413585268653:role/CITerraformRole
       - uses: hashicorp/setup-terraform@v1
         with:
           terraform_version: "1.5"
