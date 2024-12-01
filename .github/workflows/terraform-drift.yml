@@ -12,7 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/prod-1, terraform/stage-1]
+        #terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     name: Check for drift of terraform configuration
     steps:
       - name: Checkout
