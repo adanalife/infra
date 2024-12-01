@@ -36,4 +36,3 @@ resource "aws_route53_record" "tripbot" {
   ttl     = "300"
   records = [aws_instance.tripbot.0.public_dns]
 }
-
