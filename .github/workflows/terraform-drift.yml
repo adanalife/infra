@@ -17,11 +17,12 @@ jobs:
     steps:
       - run: ls -al
       - run: ls -al ..
+      - run: ls -al ../infra
       - run: pwd
       - run: ls -al ../..
       - run: ls -al ../../..
       - run: env | grep GITHUB
-      - run: .github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
+      - run: ../infra/.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
       - name: Checkout
         uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
