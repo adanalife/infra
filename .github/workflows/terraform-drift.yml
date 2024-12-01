@@ -15,12 +15,13 @@ jobs:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     name: Check for drift of terraform configuration
     steps:
+      - run: ls -al
       - run: ls -al ..
       - run: pwd
       - run: ls -al ../..
       - run: ls -al ../../..
       - run: env | grep GITHUB
-      - run: ../../scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
+      - run: .github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
       - name: Checkout
         uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
