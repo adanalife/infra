@@ -31,9 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        #TODO: get this running on core
+        #TODO: get this running on core (needs CI user setup)
+        #TODO: get this running on prod (needs way to pass in prod creds)
         # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
-        terraform-dirs: [terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/stage-1]
     defaults:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
