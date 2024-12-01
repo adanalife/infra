@@ -161,7 +161,7 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
     actions = ["sts:AssumeRole", "sts:TagSession"]
 
     principals {
-      type        = "AWS"
+      type = "AWS"
       identifiers = [
         aws_iam_user.ci.arn
       ]
