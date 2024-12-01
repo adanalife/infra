@@ -19,24 +19,24 @@ jobs:
         working-directory: ${{ matrix.terraform-dirs }}
     steps:
       - uses: actions/checkout@v2
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: us-east-1
-          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
-          role-to-assume: arn:aws:iam::413585268653:role/CITerraformRole
       - uses: hashicorp/setup-terraform@v1
         with:
           terraform_version: "1.5"
           # this was suggested by the terraform-report action
           terraform_wrapper: false
       - run: terraform fmt -check -diff
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::413585268653:role/CITerraformRole
       - run: terraform init
       - run: terraform plan -lock=false -out terraform.plan
       # generate plain output
-      - run: terraform show -no-color terraform.plan > terraform.text
+      - run: terraform show -no-color terraform.plan | tee terraform.text
       # generate json output
-      - run: terraform show -json terraform.plan > terraform.json
+      - run: terraform show -json terraform.plan | tee terraform.json
       - uses: ahmadnassri/action-terraform-report@v4
         with:
           # tell the action the plan outputs
