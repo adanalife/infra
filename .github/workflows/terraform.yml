@@ -18,7 +18,7 @@ jobs:
         working-directory: ${{ matrix.terraform-dirs }}
     steps:
       - uses: actions/checkout@v2
-      - uses: hashicorp/setup-terraform@v1
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.5"
       - run: terraform fmt -check -diff
@@ -39,7 +39,7 @@ jobs:
         working-directory: ${{ matrix.terraform-dirs }}
     steps:
       - uses: actions/checkout@v2
-      - uses: hashicorp/setup-terraform@v1
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.5"
           # this was suggested by the terraform-report action
