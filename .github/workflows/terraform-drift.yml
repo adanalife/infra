@@ -17,19 +17,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - run: ls -al
-      - run: ls -al ..
-      - run: ls -al ../infra
-      - run: pwd
-      - run: ls -al ../..
-      - run: ls -al ../../..
-      - run: env | grep GITHUB
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
-          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets["CI_${{ matrix.terraform-dirs | split: '/' | first }}_AWS_ACCESS_KEY_ID"] }}
+          aws-secret-access-key: ${{ secrets["CI_${{ matrix.terraform-dirs | split: '/' | first }}_AWS_SECRET_ACCESS_KEY"] }}
+          #aws-access-key-id: ${{ secrets["CI_${{ matrix.terraform-dirs | replace('/', '_') }}_AWS_ACCESS_KEY_ID"] }}
+          #aws-secret-access-key: ${{ secrets["CI_${{ matrix.terraform-dirs | replace('/', '_') }}_AWS_SECRET_ACCESS_KEY"] }}
+          #aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          #aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
       - name: Check for drift
         uses: dflook/terraform-check@v1
