@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5"
+          terraform_version: "1.8"
       - run: terraform fmt -check -diff
 
   terraform-plan:
@@ -31,9 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/stage-1]
-        #TODO: get this running on all of them
+        #TODO: get this running on core (needs CI user setup)
+        #TODO: get this running on prod (needs way to pass in prod creds)
         # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/stage-1]
     defaults:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
@@ -49,12 +50,11 @@ jobs:
           aws-region: us-east-1
           aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
-          #TODO: get this working for the other accounts
-          role-to-assume: arn:aws:iam::413585268653:role/CITerraformRole
+          role-to-assume: CITerraformRole
       - run: terraform init
       - run: terraform plan -lock=false -out terraform.plan
       # generate plain output
-      - run: terraform show -no-color terraform.plan | tee terraform.text
+      - run: terraform show -no-color terraform.plan > terraform.text
       # generate json output
       - run: terraform show -json terraform.plan | tee terraform.json
       - uses: ahmadnassri/action-terraform-report@v4
