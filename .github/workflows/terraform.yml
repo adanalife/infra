@@ -31,9 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # terraform-dirs: [terraform/stage-1]
-        #TODO: get this running on all of them
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        #TODO: get this running on core
+        # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/prod-1, terraform/stage-1]
     defaults:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
