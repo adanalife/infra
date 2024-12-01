@@ -1,6 +1,8 @@
 name: Check for infrastructure drift
 
 on:
+  #TODO: remove this
+  pull_request:
   schedule:
     # every morning
     - cron:  "0 8 * * *"
