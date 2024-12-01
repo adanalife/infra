@@ -23,6 +23,7 @@ jobs:
           # role-skip-session-tagging: true
           # aws-access-key-id: $CI
           role-to-assume: arn:aws:iam::704461573429:role/CIRole
+          aws-region: us-east-1
       - uses: hashicorp/setup-terraform@v1
         with:
           terraform_version: "1.5"
