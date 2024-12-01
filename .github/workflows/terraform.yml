@@ -27,8 +27,8 @@ jobs:
     permissions:
       # Grants permission to create or update PR comments
       issues: write
-      # Allows the workflow to access repository files
       contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     strategy:
       matrix:
