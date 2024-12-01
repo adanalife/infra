@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# this script is a helper that allows us to set ENV vars
+# based on which terraform directory we're using
+
 # Set DEPLOY_ENV based on the input directory
 case $1 in
   terraform/core)
