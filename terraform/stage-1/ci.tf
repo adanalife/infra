@@ -83,72 +83,6 @@ resource "aws_iam_role_policy_attachment" "ci_role_access" {
 
 ## ci-terraform
 # create a special terraform role with extra permissions
-# resource "aws_iam_role" "ci_terraform" {
-#   name               = "CITerraformRole"
-#   #TODO: custom policy here?
-#   assume_role_policy = data.aws_iam_policy_document.ci_service_account_policy.json
-# }
-#
-# resource "aws_iam_policy" "ci_terraform" {
-#   name   = "AllowAccessForTerraform"
-#   policy = <<EOF
-# {
-#     "Version": "2012-10-17",
-#     "Statement": [
-#         {
-#             "Sid": "S3ReadWriteAccess",
-#             "Action": [
-#               "s3:*Object",
-#               "s3:ListBucket"
-#             ],
-#             "Effect": "Allow",
-#             "Resource": [
-#                 "*"
-#             ]
-#         }
-#     ]
-# }
-# EOF
-# }
-#
-# # give the CI terraform role access to the terraform policy
-# resource "aws_iam_role_policy_attachment" "ci_terraform" {
-#   role       = aws_iam_role.ci_terraform.name
-#   policy_arn = aws_iam_policy.ci_terraform.arn
-# }
-#
-# # this lets the CI user assume role into a CITerraformRole
-# data "aws_iam_policy_document" "ci_terraform_assume_role" {
-#   statement {
-#     actions = ["sts:AssumeRole"]
-#     principals {
-#       type        = "AWS"
-#       identifiers = [
-#         aws_iam_role.ci_terraform.arn
-#       ]
-#     }
-#   }
-# }
-#
-# # create a new policy with the assume_role permissions
-# resource "aws_iam_policy" "ci_terraform_assume_role" {
-#   name   = "AllowCIUserToAssumeTerraformRole"
-#   policy = data.aws_iam_policy_document.ci_terraform_assume_role.json
-# }
-#
-# # attach the assume_role policy to the ci user
-# resource "aws_iam_user_policy_attachment" "ci_terraform" {
-#   policy_arn = aws_iam_policy.ci_terraform_assume_role.arn
-#   user       = aws_iam_user.ci.name
-# }
-
-# resource "aws_iam_group_policy_attachment" "ci_terraform_assume_role" {
-#   group      = var.developer_group
-#   policy_arn = aws_iam_policy.ci_terraform_assume_role.arn
-#
-#   depends_on = [aws_organizations_account.account]
-# }
-
 # IAM Role for CI Terraform
 resource "aws_iam_role" "ci_terraform" {
   name               = "CITerraformRole"
@@ -158,18 +92,23 @@ resource "aws_iam_role" "ci_terraform" {
 # Trust policy for the CI Terraform Role
 data "aws_iam_policy_document" "ci_terraform_trust_policy" {
   statement {
-    actions = ["sts:AssumeRole", "sts:TagSession"]
+    actions = [
+      "sts:AssumeRole",
+      "sts:TagSession"
+    ]
 
     principals {
       type = "AWS"
       identifiers = [
+        # be mindful of who you give access to!
         aws_iam_user.ci.arn
       ]
     }
   }
 }
 
-# IAM Policy for CI Terraform
+# IAM Policy for CI Terraform Role
+# this is expected to be very permissive
 resource "aws_iam_policy" "ci_terraform" {
   name   = "AllowAccessForTerraform"
   policy = <<EOF
@@ -198,6 +137,8 @@ resource "aws_iam_role_policy_attachment" "ci_terraform" {
   policy_arn = aws_iam_policy.ci_terraform.arn
 }
 
+# attach the default readonly AWS Managed Policy
+#TODO: this is crazy generous and a bad idea, but it's enough for now
 data "aws_iam_policy" "admin_read_only" {
   name = "ReadOnlyAccess"
 }
@@ -207,16 +148,7 @@ resource "aws_iam_role_policy_attachment" "ci_terraform_admin_read_only" {
   policy_arn = data.aws_iam_policy.admin_read_only.arn
 }
 
-# data "aws_iam_policy" "s3_full_access" {
-#   name = "AmazonS3FullAccess"
-# }
-#
-# resource "aws_iam_role_policy_attachment" "ci_terraform_s3_full_access" {
-#   role       = aws_iam_role.ci_terraform.name
-#   policy_arn = data.aws_iam_policy.s3_full_access.arn
-# }
-
-# Policy to allow CI User to Assume Terraform Role
+# add Policy to allow CI User to Assume Terraform Role
 resource "aws_iam_policy" "ci_terraform_assume_role" {
   name   = "AllowCIUserToAssumeTerraformRole"
   policy = data.aws_iam_policy_document.ci_terraform_assume_role.json
