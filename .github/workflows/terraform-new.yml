@@ -13,8 +13,9 @@ jobs:
       matrix:
         terraform-dirs: [terraform/stage-1]
     name: Create a plan for an example terraform configuration
-    # env:
-    #   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      # required in order to comment on MRs
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
