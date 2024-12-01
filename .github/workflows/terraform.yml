@@ -27,10 +27,18 @@ jobs:
       - uses: hashicorp/setup-terraform@v1
         with:
           terraform_version: "1.5"
-      - name: Terraform fmt
-        id: fmt
-        run: terraform fmt -check -diff
-      - name: Terraform init
-        run: terraform init
-      - name: Terraform diff
-        run: terraform diff
+          # this was suggested by the terraform-report action
+          terraform_wrapper: false
+      - run: terraform fmt -check -diff
+      - run: terraform init
+      - run: terraform plan -lock=false -out terraform.plan
+      # generate plain output
+      - run: terraform show -no-color terraform.plan > terraform.text
+      # generate json output
+      - run: terraform show -json terraform.plan > terraform.json
+      - uses: ahmadnassri/action-terraform-report@v4
+        with:
+          # tell the action the plan outputs
+          terraform-text: ${{ github.workspace }}/terraform.text
+          terraform-json: ${{ github.workspace }}/terraform.json
+          remove-stale-reports: true
