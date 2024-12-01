@@ -19,8 +19,9 @@ jobs:
         uses: actions/checkout@v4
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
         env:
-          CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
-          CI_CORE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}
+          #TODO: using stage creds for now
+          CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          CI_CORE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
           CI_PROD_AWS_ACCESS_KEY_ID: ${{ secrets.CI_PROD_AWS_ACCESS_KEY_ID }}
           CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
           CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
