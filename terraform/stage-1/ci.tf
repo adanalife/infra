@@ -158,7 +158,7 @@ resource "aws_iam_role" "ci_terraform" {
 # Trust policy for the CI Terraform Role
 data "aws_iam_policy_document" "ci_terraform_trust_policy" {
   statement {
-    actions = ["sts:AssumeRole"]
+    actions = ["sts:AssumeRole", "sts:TagSession"]
 
     principals {
       type        = "AWS"
