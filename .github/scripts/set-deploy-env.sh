@@ -4,8 +4,10 @@
 case $1 in
   terraform/core)
     #echo "DEPLOY_ENV=core" >> $GITHUB_STATE
-    echo "AWS_ACCESS_KEY_ID=${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-    echo "AWS_SECRET_ACCESS_KEY=${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+    echo "AWS_ACCESS_KEY_ID=${{ secrets.CI_AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+    echo "AWS_SECRET_ACCESS_KEY=${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+    #echo "AWS_ACCESS_KEY_ID=${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+    #echo "AWS_SECRET_ACCESS_KEY=${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
     ;;
   terraform/prod-1)
     #echo "DEPLOY_ENV=prod" >> $GITHUB_STATE
