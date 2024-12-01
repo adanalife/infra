@@ -5,14 +5,30 @@ on:
       - 'terraform/**'
       - '.github/workflows/terraform.yml'
 jobs:
-  terraform-stuff:
+  terraform-fmt:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         # note that the bootstrap dir is not included here, that's
         # because it isn't used much and as such it's on a really
         # old version of terraform
+        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+    defaults:
+      run:
+        working-directory: ${{ matrix.terraform-dirs }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: "1.5"
+      - run: terraform fmt -check -diff
+
+  terraform-plan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
         terraform-dirs: [terraform/stage-1]
+        #TODO: get this running on all of them
         # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     defaults:
       run:
@@ -30,6 +46,7 @@ jobs:
           aws-region: us-east-1
           aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          #TODO: get this working for the other accounts
           role-to-assume: arn:aws:iam::413585268653:role/CITerraformRole
       - run: terraform init
       - run: terraform plan -lock=false -out terraform.plan
@@ -37,14 +54,8 @@ jobs:
       - run: terraform show -no-color terraform.plan | tee terraform.text
       # generate json output
       - run: terraform show -json terraform.plan | tee terraform.json
-        #TODO: remove this
-      - run: ls -al
-      - run: pwd
       - uses: ahmadnassri/action-terraform-report@v4
         with:
-          # tell the action the plan outputs
           terraform-text: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.text
           terraform-json: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.json
-          # terraform-text: ./terraform.text
-          # terraform-json: ./terraform.json
           remove-stale-reports: true
