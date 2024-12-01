@@ -45,6 +45,16 @@ resource "aws_iam_policy" "ci" {
                 "${aws_s3_bucket.static_website.arn}",
                 "${aws_s3_bucket.static_website.arn}/*"
             ]
+        },
+        {
+            "Sid": "SessionManagement",
+            "Action": [
+              "sts:TagSession"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "*"
+            ]
         }
     ]
 }
