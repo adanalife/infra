@@ -9,7 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/bootstrap, terraform/core, terraform/prod-1, terraform/stage-1]
+        # note that the bootstrap dir is not included here, that's
+        # because it isn't used much and as such it's on a really
+        # old version of terraform
+        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     defaults:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
