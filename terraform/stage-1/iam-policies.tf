@@ -1,3 +1,5 @@
+#TODO: these would benefit greatly from being converted to data blocks
+
 # these are the permissions that Developer users get
 resource "aws_iam_policy" "developer_role" {
   name   = "AllowAccessForDeveloperRole"

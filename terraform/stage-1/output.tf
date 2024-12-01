@@ -1,3 +1,6 @@
+#TODO: consider adding a message that says something to the effect of:
+# visit the website at: https://static.stage.dana.lol/
+
 output "default_vpc_cidr" {
   description = "The CIDR block of the entire VPC"
   value       = module.default_vpc.default_vpc_cidr_block
@@ -30,12 +33,14 @@ output "rds_tripbot_db_address" {
 }
 
 output "external_dns_access_key" {
-  value = aws_iam_access_key.external_dns.id
+  value     = aws_iam_access_key.external_dns.id
+  sensitive = true
 }
 
 # the PGP-encrypted secret
 output "external_dns_secret" {
-  value = aws_iam_access_key.external_dns.encrypted_secret
+  value     = aws_iam_access_key.external_dns.encrypted_secret
+  sensitive = true
 }
 
 output "external_dns_role_arn" {
@@ -43,12 +48,14 @@ output "external_dns_role_arn" {
 }
 
 output "ci_user_access_key" {
-  value = aws_iam_access_key.ci.id
+  value     = aws_iam_access_key.ci.id
+  sensitive = true
 }
 
 # the PGP-encrypted secret
 output "ci_user_secret" {
-  value = aws_iam_access_key.ci.encrypted_secret
+  value     = aws_iam_access_key.ci.encrypted_secret
+  sensitive = true
 }
 
 output "ci_role_arn" {
