@@ -116,3 +116,35 @@ resource "aws_iam_role_policy_attachment" "ci_terraform" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform.arn
 }
+
+# this lets the CI user assume role into a CITerraformRole
+data "aws_iam_policy_document" "ci_terraform_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "AWS"
+      identifiers = [
+        aws_iam_role.ci_terraform.arn
+      ]
+    }
+  }
+}
+
+# create a new policy with the assume_role permissions
+resource "aws_iam_policy" "ci_terraform_assume_role" {
+  name   = "AllowCIUserToAssumeTerraformRole"
+  policy = data.aws_iam_policy_document.ci_terraform_assume_role.json
+}
+
+# attach the assume_role policy to the ci user
+resource "aws_iam_user_policy_attachment" "ci_terraform" {
+  policy_arn = aws_iam_policy.ci_terraform_assume_role.arn
+  user       = aws_iam_user.ci.name
+}
+
+# resource "aws_iam_group_policy_attachment" "ci_terraform_assume_role" {
+#   group      = var.developer_group
+#   policy_arn = aws_iam_policy.ci_terraform_assume_role.arn
+#
+#   depends_on = [aws_organizations_account.account]
+# }
