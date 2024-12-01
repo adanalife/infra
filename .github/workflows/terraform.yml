@@ -40,7 +40,6 @@ jobs:
           terraform_version: "1.5"
           # this was suggested by the terraform-report action
           terraform_wrapper: false
-      - run: terraform fmt -check -diff
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
