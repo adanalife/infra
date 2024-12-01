@@ -1,4 +1,4 @@
-name: Create terraform plan
+name: Terraform Stuff
 
 on:
   pull_request:
@@ -16,7 +16,6 @@ jobs:
     strategy:
       matrix:
         terraform-dirs: [terraform/stage-1, terraform/prod-1]
-    name: Create a plan for an example terraform configuration
     env:
       # required in order to comment on MRs
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,7 +49,6 @@ jobs:
     strategy:
       matrix:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
-    name: Validate terraform configuration
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,7 +62,6 @@ jobs:
     strategy:
       matrix:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
-    name: Check formatting of terraform files
     steps:
       - name: Checkout
         uses: actions/checkout@v4
