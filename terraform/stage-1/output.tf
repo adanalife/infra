@@ -33,13 +33,13 @@ output "rds_tripbot_db_address" {
 }
 
 output "external_dns_access_key" {
-  value = aws_iam_access_key.external_dns.id
+  value     = aws_iam_access_key.external_dns.id
   sensitive = true
 }
 
 # the PGP-encrypted secret
 output "external_dns_secret" {
-  value = aws_iam_access_key.external_dns.encrypted_secret
+  value     = aws_iam_access_key.external_dns.encrypted_secret
   sensitive = true
 }
 
@@ -48,13 +48,13 @@ output "external_dns_role_arn" {
 }
 
 output "ci_user_access_key" {
-  value = aws_iam_access_key.ci.id
+  value     = aws_iam_access_key.ci.id
   sensitive = true
 }
 
 # the PGP-encrypted secret
 output "ci_user_secret" {
-  value = aws_iam_access_key.ci.encrypted_secret
+  value     = aws_iam_access_key.ci.encrypted_secret
   sensitive = true
 }
 
