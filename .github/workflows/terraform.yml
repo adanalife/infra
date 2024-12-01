@@ -1,65 +1,74 @@
-name: Terraform Stuff
+name: Create terraform plan
+
 on:
   pull_request:
     paths:
       - 'terraform/**'
       - '.github/workflows/terraform.yml'
-jobs:
-  terraform-fmt:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # note that the bootstrap dir is not included here, that's
-        # because it isn't used much and as such it's on a really
-        # old version of terraform
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
-    defaults:
-      run:
-        working-directory: ${{ matrix.terraform-dirs }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.8"
-      - run: terraform fmt -check -diff
 
-  terraform-plan:
-    permissions:
-      # grant dependabot extra permissions (so it can write comment on PRs)
-      pull-requests: write
-      contents: read
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        #TODO: get this running on core (needs CI user setup)
-        #TODO: get this running on prod (needs way to pass in prod creds)
-        # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
-        terraform-dirs: [terraform/stage-1]
-    defaults:
-      run:
-        working-directory: ${{ matrix.terraform-dirs }}
+        terraform-dirs: [terraform/stage-1, terraform/prod-1]
+    name: Create a plan for an example terraform configuration
+    env:
+      # required in order to comment on MRs
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.5"
-          # this was suggested by the terraform-report action
-          terraform_wrapper: false
+      - name: Checkout
+        uses: actions/checkout@v4
+      - run: pwd
+      - run: ls -al
+      - run: ls -al ..
+      - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
+        env:
+          CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
+          CI_CORE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}
+          CI_PROD_AWS_ACCESS_KEY_ID: ${{ secrets.CI_PROD_AWS_ACCESS_KEY_ID }}
+          CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
+          CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
-          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
-      - run: terraform init
-      - run: terraform plan -lock=false -out terraform.plan
-      # generate plain output
-      - run: terraform show -no-color terraform.plan > terraform.text
-      # generate json output
-      - run: terraform show -json terraform.plan | tee terraform.json
-      - uses: ahmadnassri/action-terraform-report@v4
+      - name: terraform plan
+        uses: dflook/terraform-plan@v1
         with:
-          terraform-text: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.text
-          terraform-json: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.json
-          remove-stale-reports: true
-          custom-header: ":robot: Terraform Report for `${{ matrix.terraform-dirs }}`"
+          path: ${{ matrix.terraform-dirs }}
+
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+    name: Validate terraform configuration
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: terraform validate
+        uses: dflook/terraform-validate@v1
+        with:
+          path: ${{ matrix.terraform-dirs }}
+
+  fmt:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+    name: Check formatting of terraform files
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: terraform fmt
+        uses: dflook/terraform-fmt-check@v1
+        with:
+          path: ${{ matrix.terraform-dirs }}
