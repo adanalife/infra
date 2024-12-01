@@ -21,8 +21,8 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
-          aws-access-key-id: ${{ secrets["CI_${{ matrix.terraform-dirs | split: '/' | first }}_AWS_ACCESS_KEY_ID"] }}
-          aws-secret-access-key: ${{ secrets["CI_${{ matrix.terraform-dirs | split: '/' | first }}_AWS_SECRET_ACCESS_KEY"] }}
+          aws-access-key-id: ${{ secrets["CI_${{ matrix.terraform-dirs == 'terraform/core' && 'core' || matrix.terraform-dirs == 'terraform/prod-1' && 'prod' || 'stage' }}_AWS_ACCESS_KEY_ID"] }}
+          aws-secret-access-key: ${{ secrets["CI_${{ matrix.terraform-dirs == 'terraform/core' && 'core' || matrix.terraform-dirs == 'terraform/prod-1' && 'prod' || 'stage' }}_AWS_SECRET_ACCESS_KEY"] }}
           #aws-access-key-id: ${{ secrets["CI_${{ matrix.terraform-dirs | replace('/', '_') }}_AWS_ACCESS_KEY_ID"] }}
           #aws-secret-access-key: ${{ secrets["CI_${{ matrix.terraform-dirs | replace('/', '_') }}_AWS_SECRET_ACCESS_KEY"] }}
           #aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
