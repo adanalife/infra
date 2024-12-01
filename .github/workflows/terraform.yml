@@ -54,7 +54,7 @@ jobs:
       - run: terraform init
       - run: terraform plan -lock=false -out terraform.plan
       # generate plain output
-      - run: terraform show -no-color terraform.plan | tee terraform.text
+      - run: terraform show -no-color terraform.plan > terraform.text
       # generate json output
       - run: terraform show -json terraform.plan | tee terraform.json
       - uses: ahmadnassri/action-terraform-report@v4
