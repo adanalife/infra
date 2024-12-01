@@ -185,6 +185,13 @@ resource "aws_route53_record" "certbot" {
   records = ["3DnnRt02WD645OYeOEAuR2cw7--WiWT3YSP_RMlaNu0"]
 }
 
+resource "aws_route53_record" "bluesky_verification" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "_atproto.${var.domain}"
+  type    = "TXT"
+  ttl     = "300"
+  records = ["did=did:plc:3eikvksr7ojyaywda47uz5t7"]
+}
 
 #TODO: is this being used anywhere?
 # resource aws_route53_record twitch_scripts {
