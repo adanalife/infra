@@ -15,8 +15,15 @@ jobs:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     name: Check for drift of terraform configuration
     steps:
+      - run: ./scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
       - name: Checkout
         uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: CITerraformRole
       - name: Check for drift
         uses: dflook/terraform-check@v1
         with:
