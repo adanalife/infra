@@ -58,3 +58,4 @@ jobs:
           terraform-text: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.text
           terraform-json: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.json
           remove-stale-reports: true
+          custom-header: ":robot: Terraform Report for `${{ matrix.terraform-dirs }}`"
