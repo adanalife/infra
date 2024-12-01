@@ -18,6 +18,11 @@ jobs:
         working-directory: ${{ matrix.terraform-dirs }}
     steps:
       - uses: actions/checkout@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # role-skip-session-tagging: true
+          # aws-access-key-id: $CI
+          role-to-assume: arn:aws:iam::704461573429:role/CIRole
       - uses: hashicorp/setup-terraform@v1
         with:
           terraform_version: "1.5"
