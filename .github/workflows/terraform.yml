@@ -1,7 +1,4 @@
 name: Terraform Stuff
-permissions:
-  # Grants permission to create or update PR comments
-  issues: write
 on:
   pull_request:
     paths:
@@ -27,6 +24,11 @@ jobs:
       - run: terraform fmt -check -diff
 
   terraform-plan:
+    permissions:
+      # Grants permission to create or update PR comments
+      issues: write
+      # Allows the workflow to access repository files
+      contents: read
     runs-on: ubuntu-latest
     strategy:
       matrix:
