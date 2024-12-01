@@ -24,7 +24,7 @@ jobs:
       - run: ls -al ../..
       - run: ls -al ../../..
       - run: env | grep GITHUB
-      - run: ../infra/.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
+      - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
