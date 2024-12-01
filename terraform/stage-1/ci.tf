@@ -198,6 +198,24 @@ resource "aws_iam_role_policy_attachment" "ci_terraform" {
   policy_arn = aws_iam_policy.ci_terraform.arn
 }
 
+data "aws_iam_policy" "admin_read_only" {
+  name = "ReadOnlyAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_admin_read_only" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = data.aws_iam_policy.admin_read_only.arn
+}
+
+# data "aws_iam_policy" "s3_full_access" {
+#   name = "AmazonS3FullAccess"
+# }
+#
+# resource "aws_iam_role_policy_attachment" "ci_terraform_s3_full_access" {
+#   role       = aws_iam_role.ci_terraform.name
+#   policy_arn = data.aws_iam_policy.s3_full_access.arn
+# }
+
 # Policy to allow CI User to Assume Terraform Role
 resource "aws_iam_policy" "ci_terraform_assume_role" {
   name   = "AllowCIUserToAssumeTerraformRole"
@@ -218,4 +236,3 @@ data "aws_iam_policy_document" "ci_terraform_assume_role" {
     resources = [aws_iam_role.ci_terraform.arn]
   }
 }
-
