@@ -10,13 +10,20 @@ resource "aws_s3_bucket" "dashcam_videos" {
     }
   }
 
-  website {
-    error_document = "error.html"
-    index_document = "index.html"
-  }
-
   tags = {
     Name = "${local.account_name}-dashcam-videos"
+  }
+}
+
+resource "aws_s3_bucket_website_configuration" "dashcam_videos" {
+  bucket = aws_s3_bucket.dashcam_videos.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
   }
 }
 
@@ -35,6 +42,7 @@ resource "aws_s3_bucket" "primary_naked_redirect" {
   bucket = var.domain
   acl    = "private"
 
+  #TODO: use aws_s3_bucket_website_configuration instead
   website {
     error_document = "error.html"
     index_document = "index.html"
@@ -60,6 +68,7 @@ resource "aws_s3_bucket" "secondary_naked_redirect" {
   bucket = var.secondary_domain
   acl    = "private"
 
+  #TODO: use aws_s3_bucket_website_configuration instead
   website {
     error_document = "error.html"
     index_document = "index.html"
@@ -86,6 +95,7 @@ resource "aws_s3_bucket" "status_redirect" {
   bucket = var.status_domain
   acl    = "private"
 
+  #TODO: use aws_s3_bucket_website_configuration instead
   website {
     error_document = "error.html"
     index_document = "index.html"
