@@ -26,9 +26,9 @@ jobs:
   terraform-plan:
     permissions:
       # Grants permission to create or update PR comments
-      issues: write
+      # issues: write
       contents: read
-      pull-requests: read
+      pull-requests: write
     runs-on: ubuntu-latest
     strategy:
       matrix:
