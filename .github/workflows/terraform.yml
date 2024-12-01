@@ -32,9 +32,8 @@ jobs:
     strategy:
       matrix:
         #TODO: get this running on core (needs CI user setup)
-        #TODO: get this running on prod (needs way to pass in prod creds)
         # terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
-        terraform-dirs: [terraform/stage-1]
+        terraform-dirs: [terraform/stage-1, terraform/prod-1]
     defaults:
       run:
         working-directory: ${{ matrix.terraform-dirs }}
@@ -45,11 +44,19 @@ jobs:
           terraform_version: "1.5"
           # this was suggested by the terraform-report action
           terraform_wrapper: false
+      - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
+        env:
+          CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
+          CI_CORE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}
+          CI_PROD_AWS_ACCESS_KEY_ID: ${{ secrets.CI_PROD_AWS_ACCESS_KEY_ID }}
+          CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
+          CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
-          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
       - run: terraform init
       - run: terraform plan -lock=false -out terraform.plan
