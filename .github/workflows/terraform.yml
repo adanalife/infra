@@ -59,3 +59,5 @@ jobs:
           terraform-json: ${{ github.workspace }}/${{ matrix.terraform-dirs }}/terraform.json
           remove-stale-reports: true
           custom-header: ":robot: Terraform Report for `${{ matrix.terraform-dirs }}`"
+          # manually specify github token so dependabot can comment on MR
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
