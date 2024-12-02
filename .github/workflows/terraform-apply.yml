@@ -31,8 +31,8 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "terraform_dir=terraform/${{ github.event.inputs.environment }}" >> $GITHUB_ENV
           elif [[ "${{ github.event.comment.body }}" =~ ^/apply ]]; then
-            terraform_dir=$(echo "${{ github.event.comment.body }}" | cut -d' ' -f2)
-            echo "terraform_dir=$terraform_dir" >> $GITHUB_ENV
+            short_env=$(echo "${{ github.event.comment.body }}" | cut -d' ' -f2)
+            echo "terraform_dir=terraform/$short_env" >> $GITHUB_ENV
           else
             echo "Unsupported trigger source."
             exit 1
