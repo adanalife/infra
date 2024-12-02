@@ -34,40 +34,37 @@ resource "aws_iam_role" "ci" {
   assume_role_policy = data.aws_iam_policy_document.ci_service_account_policy.json
 }
 
-#TODO: convert this to the data block format
-#TODO: needs: AccessDenied: User: arn:aws:sts::413585268653:assumed-role/CITerraformRole/GitHubActions is not authorized to perform: s3:PutEncryptionConfiguration on resource: "arn:aws:s3:::static.stage.dana.lol" because no identity-based policy allows the s3:PutEncryptionConfiguration action
-#TODO: needs access to terraform state bucket
+data "aws_iam_policy_document" "ci" {
+  dynamic "statement" {
+    # the core account doesnt have a static website bucket
+    for_each = local.account_name != "adanalife-core" ? [1] : []
+    content {
+      sid    = "S3ReadWriteAccess"
+      effect = "Allow"
+
+      resources = [
+        aws_s3_bucket.static_website.arn,
+        "${aws_s3_bucket.static_website.arn}/*",
+      ]
+
+      actions = [
+        "s3:*Object",
+        "s3:ListBucket",
+      ]
+    }
+  }
+
+  statement {
+    sid       = "SessionManagement"
+    effect    = "Allow"
+    resources = ["*"]
+    actions   = ["sts:TagSession"]
+  }
+}
+
 resource "aws_iam_policy" "ci" {
   name   = "AllowAccessForContinuousIntegration"
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "S3ReadWriteAccess",
-            "Action": [
-              "s3:*Object",
-              "s3:ListBucket"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "${aws_s3_bucket.static_website.arn}",
-                "${aws_s3_bucket.static_website.arn}/*"
-            ]
-        },
-        {
-            "Sid": "SessionManagement",
-            "Action": [
-              "sts:TagSession"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "*"
-            ]
-        }
-    ]
-}
-EOF
+  policy = data.aws_iam_policy_document.ci.json
 }
 
 # give the CI user access to the policy
@@ -111,6 +108,8 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
 
 # IAM Policy for CI Terraform Role
 # this is expected to be very permissive
+#TODO: needs: AccessDenied: User: arn:aws:sts::413585268653:assumed-role/CITerraformRole/GitHubActions is not authorized to perform: s3:PutEncryptionConfiguration on resource: "arn:aws:s3:::static.stage.dana.lol" because no identity-based policy allows the s3:PutEncryptionConfiguration action
+#TODO: needs access to terraform state bucket
 resource "aws_iam_policy" "ci_terraform" {
   name   = "AllowAccessForTerraform"
   policy = <<EOF
@@ -169,4 +168,19 @@ data "aws_iam_policy_document" "ci_terraform_assume_role" {
 
     resources = [aws_iam_role.ci_terraform.arn]
   }
+}
+
+output "ci_user_access_key" {
+  value     = aws_iam_access_key.ci.id
+  sensitive = true
+}
+
+# the PGP-encrypted secret
+output "ci_user_secret" {
+  value     = aws_iam_access_key.ci.encrypted_secret
+  sensitive = true
+}
+
+output "ci_role_arn" {
+  value = aws_iam_role.ci.arn
 }

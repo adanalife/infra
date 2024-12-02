@@ -16,24 +16,21 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/stage-1, terraform/prod-1]
+        terraform-dirs: [terraform/core, terraform/stage-1, terraform/prod-1]
     env:
       # required in order to comment on MRs
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - run: pwd
-      - run: ls -al
-      - run: ls -al ..
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
         env:
           CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
           CI_CORE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}
           CI_PROD_AWS_ACCESS_KEY_ID: ${{ secrets.CI_PROD_AWS_ACCESS_KEY_ID }}
           CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
-          CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
-          CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_STAGE_AWS_ACCESS_KEY_ID }}
+          CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_STAGE_AWS_SECRET_ACCESS_KEY }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
