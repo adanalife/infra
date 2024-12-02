@@ -1,0 +1,39 @@
+name: Apply Terraform
+
+on:
+  workflow_dispatch:
+#  pull_request:
+#    paths:
+#      - '.github/workflows/terraform-drift.yml'
+
+jobs:
+  check_drift:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        terraform-dirs: [terraform/stage-1]
+        #terraform-dirs: [terraform/prod-1, terraform/stage-1]
+        #TODO: add core when we get ENV vars for it
+        #terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+    name: Check for drift of terraform configuration
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
+        env:
+          #CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
+          #CI_CORE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_CORE_AWS_SECRET_ACCESS_KEY }}
+          #CI_PROD_AWS_ACCESS_KEY_ID: ${{ secrets.CI_PROD_AWS_ACCESS_KEY_ID }}
+          #CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
+          CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: CITerraformRole
+      - name: Check for drift
+        uses: dflook/terraform-apply@v1
+        with:
+          path: ${{ matrix.terraform-dirs }}
