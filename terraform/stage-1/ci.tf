@@ -35,6 +35,8 @@ resource "aws_iam_role" "ci" {
 }
 
 #TODO: convert this to the data block format
+#TODO: needs: AccessDenied: User: arn:aws:sts::413585268653:assumed-role/CITerraformRole/GitHubActions is not authorized to perform: s3:PutEncryptionConfiguration on resource: "arn:aws:s3:::static.stage.dana.lol" because no identity-based policy allows the s3:PutEncryptionConfiguration action
+#TODO: needs access to terraform state bucket
 resource "aws_iam_policy" "ci" {
   name   = "AllowAccessForContinuousIntegration"
   policy = <<EOF
