@@ -53,20 +53,6 @@ data "aws_iam_policy_document" "ci" {
       ]
     }
   }
-  # statement {
-  #   sid    = "S3ReadWriteAccess"
-  #   effect = "Allow"
-  #
-  #   resources = [
-  #     "${aws_s3_bucket.static_website.arn}",
-  #     "${aws_s3_bucket.static_website.arn}/*",
-  #   ]
-  #
-  #   actions = [
-  #     "s3:*Object",
-  #     "s3:ListBucket",
-  #   ]
-  # }
 
   statement {
     sid       = "SessionManagement"
