@@ -2,9 +2,9 @@ name: Apply Terraform
 
 on:
   # trigger with PR comment
-  issue_comment:
-    types:
-      - created
+  # issue_comment:
+  #   types:
+  #     - created
   # manually trigger build
   workflow_dispatch:
     inputs:
@@ -23,40 +23,40 @@ jobs:
     runs-on: ubuntu-latest
     name: Apply terraform configuration
     env:
-      # required in order to comment on MRs
+      # required in order to comment on PRs
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Debug Event Payload
-        run: echo "${{ toJson(github.event) }}"
-      - name: Determine what to check out
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.branch }}" != "" ]; then
-              echo "ref=${{ github.event.inputs.branch }}" >> $GITHUB_ENV
-            else
-              echo "ref=${{ github.ref }}" >> $GITHUB_ENV
-            fi
-          elif [ "${{ github.event_name }}" == "issue_comment" ]; then
-            if [ -n "${{ github.event.issue.pull_request.head.ref }}" ]; then
-              echo "ref=${{ github.event.issue.pull_request.head.ref }}" >> $GITHUB_ENV
-            else
-              echo "Unsupported trigger without PR branch."
-              exit 1
-            fi
-          fi
+      # - name: Debug Event Payload
+      #   run: echo "${{ toJson(github.event) }}"
+      # - name: Determine what to check out
+      #   run: |
+      #     if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+      #       if [ "${{ github.event.inputs.branch }}" != "" ]; then
+      #         echo "ref=${{ github.event.inputs.branch }}" >> $GITHUB_ENV
+      #       else
+      #         echo "ref=${{ github.ref }}" >> $GITHUB_ENV
+      #       fi
+      #     elif [ "${{ github.event_name }}" == "issue_comment" ]; then
+      #       if [ -n "${{ github.event.issue.pull_request.head.ref }}" ]; then
+      #         echo "ref=${{ github.event.issue.pull_request.head.ref }}" >> $GITHUB_ENV
+      #       else
+      #         echo "Unsupported trigger without PR branch."
+      #         exit 1
+      #       fi
+      #     fi
 
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.ref }}
+        # with:
+        #   ref: ${{ env.ref }}
 
       - name: Determine terraform dir
         shell: bash
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "terraform_dir=terraform/${{ github.event.inputs.environment }}" >> $GITHUB_ENV
-          elif [[ "${{ github.event.comment.body }}" =~ ^/apply ]]; then
-            short_env=$(echo "${{ github.event.comment.body }}" | cut -d' ' -f2)
-            echo "terraform_dir=terraform/$short_env" >> $GITHUB_ENV
+          # elif [[ "${{ github.event.comment.body }}" =~ ^/apply ]]; then
+          #   short_env=$(echo "${{ github.event.comment.body }}" | cut -d' ' -f2)
+          #   echo "terraform_dir=terraform/$short_env" >> $GITHUB_ENV
           else
             echo "Unsupported trigger source."
             exit 1
