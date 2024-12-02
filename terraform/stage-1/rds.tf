@@ -9,7 +9,7 @@ resource "aws_db_instance" "tripbot" {
   instance_class = "db.t3.micro"
 
   identifier = "tripbot-db"
-  db_name       = "tripbot"
+  db_name    = "tripbot"
   username   = var.rds_tripbot_username
   password   = var.rds_tripbot_password
 
