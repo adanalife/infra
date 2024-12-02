@@ -36,6 +36,7 @@ jobs:
           else
             echo "Unsupported trigger source."
             exit 1
+          fi
         #TODO: update the script so we dont _have_ to pass in a terraform path
       - run: ./.github/scripts/set-deploy-env.sh ${{ env.terraform_dir }}
         env:
