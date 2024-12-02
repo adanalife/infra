@@ -183,3 +183,18 @@ data "aws_iam_policy_document" "ci_terraform_assume_role" {
     resources = [aws_iam_role.ci_terraform.arn]
   }
 }
+
+output "ci_user_access_key" {
+  value     = aws_iam_access_key.ci.id
+  sensitive = true
+}
+
+# the PGP-encrypted secret
+output "ci_user_secret" {
+  value     = aws_iam_access_key.ci.encrypted_secret
+  sensitive = true
+}
+
+output "ci_role_arn" {
+  value = aws_iam_role.ci.arn
+}
