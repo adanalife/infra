@@ -1,13 +1,15 @@
-resource aws_db_instance tripbot {
+resource "aws_db_instance" "tripbot" {
   # only create on stage for now
-  count = var.environment == "stage" ? 1 : 0
+  # count = var.environment == "stage" ? 1 : 0
+  # disable the db
+  count = 0
 
   engine         = "postgres"
-  engine_version = "11.8"
-  instance_class = "db.t2.micro"
+  engine_version = "13"
+  instance_class = "db.t3.micro"
 
   identifier = "tripbot-db"
-  name       = "tripbot"
+  db_name    = "tripbot"
   username   = var.rds_tripbot_username
   password   = var.rds_tripbot_password
 
@@ -25,7 +27,7 @@ resource aws_db_instance tripbot {
   final_snapshot_identifier = "tripbot-db-final-snapshot"
 }
 
-resource aws_security_group allow_postgres {
+resource "aws_security_group" "allow_postgres" {
   name        = "allow-postgres"
   description = "This group allows Postgres connections"
   vpc_id      = module.default_vpc.vpc_id
@@ -43,7 +45,24 @@ resource aws_security_group allow_postgres {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["108.49.156.172/32", "173.48.171.189/32"]
+    cidr_blocks = ["68.239.30.152/32"]
+  }
+
+  ingress {
+    description = "Postgres from aarons"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["73.16.124.8/32"]
+  }
+
+  #TODO: associate an elastic IP
+  ingress {
+    description = "Postgres from tripbot"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["3.82.196.113/32"]
   }
 
   egress {

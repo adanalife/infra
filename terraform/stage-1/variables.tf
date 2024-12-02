@@ -1,60 +1,60 @@
 # prod, stage, dev
-variable environment {
+variable "environment" {
   type = string
 }
 
-variable label {
+variable "label" {
   type        = string
   description = "An identifier for this particular environment"
   default     = "1"
 }
 
-variable region {
+variable "region" {
   type    = string
   default = "us-east-1"
 }
 
-variable core_account_id {
+variable "core_account_id" {
   type        = string
   description = "The AWS account ID for the core account"
 }
 
-variable primary_domain {
+variable "primary_domain" {
   type        = string
   description = "The domain name used for DNS"
 }
 
-variable secondary_domain {
+variable "secondary_domain" {
   type        = string
   description = "The domain name used for secondary DNS"
 }
 
-variable external_dns_role {
+variable "external_dns_role" {
   type    = string
   default = "ExternalDNSRole"
 }
 
-variable rds_tripbot_username {
+variable "rds_tripbot_username" {
   type = string
 }
 
 #TODO: replace with terraform password generator
-variable rds_tripbot_password {
+variable "rds_tripbot_password" {
   type = string
 }
 
-variable static_site_public_dir {
+variable "static_site_public_dir" {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"
   type        = string
 }
 
-variable primary_acm_cert_alternative_names {
+variable "primary_acm_cert_alternative_names" {
   type    = list(string)
   default = []
 }
 
 # a secret string between CloudFront and S3 to control access
-resource random_password static_site_secret {
+resource "random_password" "static_site_secret" {
   length = 32
 }
 

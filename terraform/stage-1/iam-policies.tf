@@ -1,5 +1,7 @@
+#TODO: these would benefit greatly from being converted to data blocks
+
 # these are the permissions that Developer users get
-resource aws_iam_policy developer_role {
+resource "aws_iam_policy" "developer_role" {
   name   = "AllowAccessForDeveloperRole"
   policy = <<EOF
 {
@@ -23,7 +25,7 @@ EOF
 }
 
 # this allows users to browse around the AWS web console
-resource aws_iam_policy basic_web_console_viewing {
+resource "aws_iam_policy" "basic_web_console_viewing" {
   name   = "AllowBasicWebConsoleViewing"
   policy = <<EOF
 {
@@ -206,7 +208,7 @@ resource aws_iam_policy basic_web_console_viewing {
 EOF
 }
 
-resource aws_iam_policy allow_external_dns_updates {
+resource "aws_iam_policy" "allow_external_dns_updates" {
   name = "AllowExternalDNSUpdates"
 
   policy = <<EOF

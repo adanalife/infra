@@ -42,7 +42,7 @@ data "aws_iam_policy_document" "static_website_read_with_secret" {
     condition {
       test     = "StringEquals"
       variable = "aws:UserAgent"
-      values   = ["${random_password.static_site_secret.result}"]
+      values   = [random_password.static_site_secret.result]
     }
   }
 }

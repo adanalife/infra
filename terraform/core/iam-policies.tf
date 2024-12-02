@@ -1,4 +1,4 @@
-resource aws_iam_policy self_management {
+resource "aws_iam_policy" "self_management" {
   name   = "AllowUsersToManageTheirOwnAccounts"
   policy = <<EOF
 {
@@ -94,8 +94,8 @@ EOF
 
 # give admin users access to the state bucket
 # (on all accounts)
-data aws_iam_policy_document bucket_policy {
-  dynamic statement {
+data "aws_iam_policy_document" "bucket_policy" {
+  dynamic "statement" {
     for_each = local.accounts
 
     content {
@@ -110,7 +110,7 @@ data aws_iam_policy_document bucket_policy {
     }
   }
 
-  dynamic statement {
+  dynamic "statement" {
     for_each = local.accounts
 
     content {
@@ -128,7 +128,7 @@ data aws_iam_policy_document bucket_policy {
   depends_on = [aws_organizations_account.account]
 }
 
-resource aws_s3_bucket_policy terraform_state {
+resource "aws_s3_bucket_policy" "terraform_state" {
   bucket = var.state_bucket
   policy = data.aws_iam_policy_document.bucket_policy.json
 
@@ -136,8 +136,8 @@ resource aws_s3_bucket_policy terraform_state {
 }
 
 # this lets a user assume role into a AdminUser
-data aws_iam_policy_document admin_assume_role {
-  dynamic statement {
+data "aws_iam_policy_document" "admin_assume_role" {
+  dynamic "statement" {
     # loop over each account and create an AdminUser IAM policy document
     for_each = local.accounts
 
@@ -151,7 +151,7 @@ data aws_iam_policy_document admin_assume_role {
 }
 
 # create a new policy with the assume_role permissions
-resource aws_iam_policy admin_assume_role {
+resource "aws_iam_policy" "admin_assume_role" {
   name   = "AllowAdminsToAssumeRoleInAccounts"
   policy = data.aws_iam_policy_document.admin_assume_role.json
 
@@ -159,8 +159,8 @@ resource aws_iam_policy admin_assume_role {
 }
 
 # this lets a user assume role into a DeveloperUser
-data aws_iam_policy_document developer_assume_role {
-  dynamic statement {
+data "aws_iam_policy_document" "developer_assume_role" {
+  dynamic "statement" {
     for_each = local.accounts
 
     content {
@@ -173,21 +173,40 @@ data aws_iam_policy_document developer_assume_role {
 }
 
 # create a new policy with the assume_role permissions
-resource aws_iam_policy developer_assume_role {
+resource "aws_iam_policy" "developer_assume_role" {
   name   = "AllowDevelopersToAssumeRoleInAccounts"
   policy = data.aws_iam_policy_document.developer_assume_role.json
 
   depends_on = [aws_organizations_account.account]
 }
 
+# this allows users to view billing details
+resource "aws_iam_policy" "billing_access" {
+  name   = "AllowBillingAccess"
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "aws-portal:ViewBilling"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+EOF
+}
+
 # give access to the dashcam_videos bucket
-data aws_iam_policy_document dashcam_videos {
-  dynamic statement {
+data "aws_iam_policy_document" "dashcam_videos" {
+  dynamic "statement" {
     for_each = local.accounts
 
     content {
       resources = [
-        "${aws_s3_bucket.dashcam_videos.arn}",
+        aws_s3_bucket.dashcam_videos.arn,
         "${aws_s3_bucket.dashcam_videos.arn}/*"
       ]
 
@@ -208,7 +227,7 @@ data aws_iam_policy_document dashcam_videos {
   }
 }
 
-resource aws_s3_bucket_policy dashcam_videos {
+resource "aws_s3_bucket_policy" "dashcam_videos" {
   bucket = aws_s3_bucket.dashcam_videos.id
   policy = data.aws_iam_policy_document.dashcam_videos.json
 }
