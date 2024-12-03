@@ -1,16 +1,13 @@
 name: Terraform Stuff
-
 on:
   pull_request:
     paths:
       - 'terraform/**'
       - '.github/workflows/terraform.yml'
       - '.github/workflows/terraform-apply.yml'
-
 permissions:
   contents: read
   pull-requests: write
-
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -41,7 +38,6 @@ jobs:
         uses: dflook/terraform-plan@v1
         with:
           path: ${{ matrix.terraform-dirs }}
-
   validate:
     runs-on: ubuntu-latest
     strategy:
@@ -54,7 +50,6 @@ jobs:
         uses: dflook/terraform-validate@v1
         with:
           path: ${{ matrix.terraform-dirs }}
-
   fmt:
     runs-on: ubuntu-latest
     strategy:

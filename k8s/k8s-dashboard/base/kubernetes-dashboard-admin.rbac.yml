@@ -1,7 +1,6 @@
 # downloaded from:
 # https://raw.githubusercontent.com/hashicorp/learn-terraform-provision-eks-cluster/master/kubernetes-dashboard-admin.rbac.yaml
 # this can be removed when we add user accounts
----
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -18,6 +17,6 @@ roleRef:
   kind: ClusterRole
   name: cluster-admin
 subjects:
-- kind: ServiceAccount
-  name: admin-user
-  namespace: kube-system
+  - kind: ServiceAccount
+    name: admin-user
+    namespace: kube-system

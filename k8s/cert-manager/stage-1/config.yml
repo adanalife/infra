@@ -8,6 +8,5 @@ installCRDs: true
 #   defaultIssuerName=letsencrypt-prod
 #   defaultIssuerKind=ClusterIssuer
 
-
 #TODO:
 #prometheus.servicemonitor.enabled: true

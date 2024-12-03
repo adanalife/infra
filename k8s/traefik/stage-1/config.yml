@@ -9,11 +9,9 @@ deployment:
   # Additional Pod labels (e.g. for filtering Pod by custom labels)
   podLabels:
     app: traefik
-
 # deactivate Pilot integration
 pilot:
   enabled: false
-
 #
 # Configure providers
 #
@@ -28,25 +26,21 @@ providers:
     # IP used for Kubernetes Ingress endpoints
     publishedService:
       enabled: true
-
 globalArguments:
   - "--global.checknewversion"
   - "--metrics.prometheus=true"
   - "--entryPoints.metrics.address=:9100/tcp"
   - "--metrics.prometheus.entryPoint=metrics"
-
 # Configure ports
 ports:
   web:
     # Added in 2.2, you can make permanent redirects via entrypoints.
     # https://docs.traefik.io/routing/entrypoints/#redirection
     redirectTo: websecure
-
 # IngressRoute for the dashboard
 ingressRoute:
   dashboard:
     enabled: true
-
 # Options for the main traefik service, where the entrypoints traffic comes
 # from.
 service:

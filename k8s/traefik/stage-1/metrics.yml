@@ -1,4 +1,3 @@
----
 kind: Ingress
 apiVersion: extensions/v1beta1
 metadata:
@@ -18,10 +17,10 @@ spec:
     - host: traefik.staging.whereisdana.today
       http:
         paths:
-        - path: /metrics
-          backend:
-            serviceName: traefik-metrics
-            servicePort: metrics
+          - path: /metrics
+            backend:
+              serviceName: traefik-metrics
+              servicePort: metrics
 ---
 # create a service for prometheus to scrape
 kind: Service
@@ -33,9 +32,9 @@ metadata:
   namespace: kube-system
 spec:
   ports:
-  - name: metrics
-    port: 9100
-    targetPort: 9100
+    - name: metrics
+      port: 9100
+      targetPort: 9100
   selector:
     app.kubernetes.io/instance: traefik
     app.kubernetes.io/name: traefik

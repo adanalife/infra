@@ -3,7 +3,6 @@
 protocolHttp: true
 service:
   externalPort: 9090
-
 extraArgs:
   # - --auto-generate-certificates
   # - --tls-cert-file=/tls.crt

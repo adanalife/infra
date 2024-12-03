@@ -1,5 +1,4 @@
 name: Apply Terraform
-
 on:
   # trigger with PR comment
   # issue_comment:
@@ -17,7 +16,6 @@ on:
           - prod-1
           - stage-1
           - core
-
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -45,11 +43,9 @@ jobs:
       #         exit 1
       #       fi
       #     fi
-
       - uses: actions/checkout@v4
         # with:
         #   ref: ${{ env.ref }}
-
       - name: Determine terraform dir
         shell: bash
         run: |
