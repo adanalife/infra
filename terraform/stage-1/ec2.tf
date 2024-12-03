@@ -138,6 +138,6 @@ resource "aws_instance" "tripbot_server" {
 }
 
 output "tripbot_ip_address" {
-  value = var.environment == "stage" ? aws_instance.tripbot_server[0].public_dns : aws_instance.tripbot[0].public_dns
+  value     = var.environment == "stage" ? aws_instance.tripbot_server[0].public_dns : aws_instance.tripbot[0].public_dns
   sensitive = true
 }
