@@ -25,7 +25,7 @@ resource "aws_security_group" "allow_ssh" {
 
 resource "aws_security_group" "allow_tripbot_access" {
   name        = "allow-tripbot-access"
-  description = "This group allows access to tripbot's HTTP server"
+  description = "This group allows access to tripbots HTTP server"
   vpc_id      = module.default_vpc.vpc_id
 
   ingress {

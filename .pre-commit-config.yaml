@@ -2,14 +2,50 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
-      - id: trailing-whitespace
+      # Git style
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-vcs-permalinks
+      - id: forbid-new-submodules
+      - id: no-commit-to-branch
+
+      # Common errors
       - id: end-of-file-fixer
+      - id: trailing-whitespace
       - id: check-yaml
         args: [--allow-multiple-documents]
-      - id: debug-statements
-      - id: double-quote-string-fixer
-      - id: name-tests-test
-      - id: requirements-txt-fixer
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+
+      # Cross platform
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+      # Security
+      - id: detect-aws-credentials
+        args: ['--allow-missing-credentials']
+      - id: detect-private-key
+
+      # - id: debug-statements
+      # - id: double-quote-string-fixer
+      # - id: name-tests-test
+ #
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.2
+    hooks:
+      - id: terraform_fmt
+        exclude: terraform/bootstrap
+      #TODO: this was generating a diff in github workflow
+      # - id: terraform_validate
+      #   exclude: terraform/bootstrap
+      #TODO: this required a number of (fairly easy) changes
+      # - id: terraform_tflint
+      #   exclude: terraform/bootstrap
+      # never tried these before
+      # - id: terraform_trivy
+      # - id: infracost_breakdown
+
   - repo: https://github.com/google/yamlfmt
     rev: v0.10.0
     hooks:
