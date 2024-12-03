@@ -38,7 +38,6 @@ jobs:
       #       fi
       #     elif [ "${{ github.event_name }}" == "issue_comment" ]; then
       #       if [ -n "${{ github.event.issue.pull_request.head.ref }}" ]; then
-      #         #TODO: use https://github.com/dflook/terraform-github-actions/tree/main/terraform-apply#issue_comment
       #         echo "ref=${{ github.event.issue.pull_request.head.ref }}" >> $GITHUB_ENV
       #       else
       #         echo "Unsupported trigger without PR branch."
