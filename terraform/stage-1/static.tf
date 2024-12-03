@@ -22,9 +22,17 @@ resource "aws_acm_certificate" "primary_static_site" {
 resource "aws_s3_bucket" "static_website" {
   bucket = local.primary_static_site
 
-  website {
-    index_document = "index.html"
-    error_document = "404.html"
+}
+
+resource "aws_s3_bucket_website_configuration" "static_website" {
+  bucket = aws_s3_bucket.static_website.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "404.html"
   }
 }
 
@@ -54,7 +62,7 @@ resource "aws_s3_bucket_policy" "static_website_read_with_secret" {
 
 resource "aws_cloudfront_distribution" "primary_cdn" {
   origin {
-    domain_name = aws_s3_bucket.static_website.website_endpoint
+    domain_name = aws_s3_bucket_website_configuration.static_website.website_endpoint
     origin_path = "/${var.static_site_public_dir}"
     origin_id   = local.s3_origin_id
 
