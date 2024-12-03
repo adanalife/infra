@@ -11,37 +11,37 @@ resource "aws_security_group" "allow_ssh" {
     cidr_blocks = ["172.3.109.123/32"]
   }
 
-  ingress {
-    description = "SSH from hawthorne"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["68.239.30.152/32"]
-  }
-
-  ingress {
-    description = "SSH from manaca"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["73.219.98.219/32"]
-  }
-
-  ingress {
-    description = "SSH from aarons"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["73.16.124.8/32"]
-  }
-
-  ingress {
-    description = "SSH from fifty-six"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["73.119.107.252/32"]
-  }
+  # ingress {
+  #   description = "SSH from hawthorne"
+  #   from_port   = 22
+  #   to_port     = 22
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["68.239.30.152/32"]
+  # }
+  #
+  # ingress {
+  #   description = "SSH from manaca"
+  #   from_port   = 22
+  #   to_port     = 22
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["73.219.98.219/32"]
+  # }
+  #
+  # ingress {
+  #   description = "SSH from aarons"
+  #   from_port   = 22
+  #   to_port     = 22
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["73.16.124.8/32"]
+  # }
+  #
+  # ingress {
+  #   description = "SSH from fifty-six"
+  #   from_port   = 22
+  #   to_port     = 22
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["73.119.107.252/32"]
+  # }
 
   egress {
     from_port   = 0
@@ -57,7 +57,7 @@ resource "aws_security_group" "allow_ssh" {
 
 resource "aws_security_group" "allow_tripbot_access" {
   name        = "allow-tripbot-access"
-  description = "This group allows access to tripbot"
+  description = "This group allows access to tripbot's HTTP server"
   vpc_id      = module.default_vpc.vpc_id
 
   ingress {
@@ -86,10 +86,10 @@ resource "aws_key_pair" "dana" {
 }
 
 resource "aws_instance" "tripbot" {
-  # only create on prod for now
-  count = var.environment == "prod" ? 1 : 0
+  # only create on stage for now
+  count = var.environment == "stage" ? 1 : 0
 
-  ami           = "ami-0c3e87333771b10a6" # ubuntu 21.04
+  ami           = "ami-0c3e87333771b10a6" # ubuntu 24.04
   instance_type = "t3.micro"              # free tier
   key_name      = aws_key_pair.dana.key_name
 
@@ -107,6 +107,7 @@ resource "aws_instance" "tripbot" {
   }
 }
 
-# output "tripbot_ip_address" {
-#   value = aws_instance.tripbot.public_dns
-# }
+output "tripbot_ip_address" {
+  value = aws_instance.tripbot.public_dns
+  sensitive = true
+}
