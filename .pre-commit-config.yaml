@@ -36,8 +36,12 @@ repos:
     hooks:
       - id: terraform_fmt
         exclude: terraform/bootstrap
-      - id: terraform_validate
-        exclude: terraform/bootstrap
+      #TODO: this was generating a diff in github workflow
+      # - id: terraform_validate
+      #   exclude: terraform/bootstrap
+      #TODO: this required a number of (fairly easy) changes
       # - id: terraform_tflint
-      # - id: terraform_tfsec
+      #   exclude: terraform/bootstrap
+      # never tried these before
+      # - id: terraform_trivy
       # - id: infracost_breakdown
