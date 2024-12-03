@@ -11,38 +11,6 @@ resource "aws_security_group" "allow_ssh" {
     cidr_blocks = ["172.3.109.123/32"]
   }
 
-  # ingress {
-  #   description = "SSH from hawthorne"
-  #   from_port   = 22
-  #   to_port     = 22
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["68.239.30.152/32"]
-  # }
-  #
-  # ingress {
-  #   description = "SSH from manaca"
-  #   from_port   = 22
-  #   to_port     = 22
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["73.219.98.219/32"]
-  # }
-  #
-  # ingress {
-  #   description = "SSH from aarons"
-  #   from_port   = 22
-  #   to_port     = 22
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["73.16.124.8/32"]
-  # }
-  #
-  # ingress {
-  #   description = "SSH from fifty-six"
-  #   from_port   = 22
-  #   to_port     = 22
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["73.119.107.252/32"]
-  # }
-
   egress {
     from_port   = 0
     to_port     = 0
