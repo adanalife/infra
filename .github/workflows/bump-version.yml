@@ -1,21 +1,25 @@
 name: Bump Version
 on:
   push:
-    branches:
-      - master
+    # branches:
+    #   - master
 
 jobs:
-  build:
+  bump-version:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: '0'
     - name: Bump version and push tag
-      id: bump-version
-      uses: anothrNick/github-tag-action@1.71.0
+      uses: jaumann/github-bumpversion-action@v0.0.7
       env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         DEFAULT_BUMP: patch
-        WITH_V: true
+        DRY_RUN: true
+    # - name: Push changes
+    #   uses: ad-m/github-push-action@master
+    #   with:
+    #     github_token: ${{ secrets.GITHUB_TOKEN }}
+    #     tags: true
