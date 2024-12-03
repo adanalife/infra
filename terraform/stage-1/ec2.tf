@@ -108,6 +108,8 @@ resource "aws_instance" "tripbot" {
 }
 
 output "tripbot_ip_address" {
-  value = aws_instance.tripbot.public_dns
+  # only show on stage for now
+  count = var.environment == "stage" ? 1 : 0
+  value = aws_instance.tripbot[count.index].public_dns
   sensitive = true
 }
