@@ -132,6 +132,44 @@ data "aws_iam_policy_document" "bucket_policy" {
     }
   }
 
+  # give terraform role access to the core state file
+  #TODO: refactor this so it's no longer a dynamic statement
+  dynamic "statement" {
+    for_each = [local.core_account_id]
+
+    content {
+      sid       = "put-state-${local.core_account_id}"
+      resources = ["arn:aws:s3:::${var.state_bucket}/${local.account_name}.tfstate"]
+      actions   = ["s3:PutObject"]
+
+      principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
+        ]
+      }
+    }
+  }
+
+  # give terraform role access to the core state file
+  #TODO: refactor this so it's no longer a dynamic statement
+  dynamic "statement" {
+    for_each = [local.core_account_id]
+
+    content {
+      sid       = "list-bucket-${local.core_account_id}"
+      resources = ["arn:aws:s3:::${var.state_bucket}"]
+      actions   = ["s3:ListBucket"]
+
+      principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
+        ]
+      }
+    }
+  }
+
   depends_on = [aws_organizations_account.account]
 }
 
