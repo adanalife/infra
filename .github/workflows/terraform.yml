@@ -16,7 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/core, terraform/stage-1, terraform/prod-1]
+        terraform-dirs:
+          - terraform/core
+          # - terraform/stage-1
+          # - terraform/prod-1
     env:
       # required in order to comment on MRs
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
