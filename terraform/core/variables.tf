@@ -96,6 +96,12 @@ variable "developer_role" {
   description = "The name of the role which is created in child accounts in order to access them"
 }
 
+variable "ci_terraform_role" {
+  type        = string
+  default     = "CITerraformRole"
+  description = "The CI role that has permission to run terraform apply (near-admin)"
+}
+
 variable "primary_www_acm_dns_name" {
   type = string
 }
