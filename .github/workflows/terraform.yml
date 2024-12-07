@@ -38,6 +38,8 @@ jobs:
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
       - run: aws sts get-caller-identity
+      - run: aws s3 ls adanalife-core-tf-state/ || true
+      - run: aws s3 ls adanalife-core-tf-state/adanalife-core.tfstate || true
       - name: terraform plan
         uses: dflook/terraform-plan@v1
         with:
