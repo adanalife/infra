@@ -106,73 +106,16 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
   }
 }
 
-data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
-  # Allow access to the current environment's state file (only)
-  statement {
-    sid    = "AllowS3AccessToStatefile"
-    effect = "Allow"
-
-    actions = [
-      "s3:GetObject",
-      "s3:HeadObject",
-      "s3:PutObject"
-    ]
-
-    resources = [
-      "arn:aws:s3:::adanalife-core-tf-state/${local.account_name}.tfstate",
-    ]
-  }
-
-  # Allow listing the bucket but restrict to the specific file
-  statement {
-    sid    = "AllowListBucketForStateFile"
-    effect = "Allow"
-
-    actions = [
-      "s3:ListBucket",
-    ]
-
-    resources = [
-      "arn:aws:s3:::adanalife-core-tf-state",
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "s3:prefix"
-      values   = ["${local.account_name}.tfstate"]
-    }
-  }
-
-  # Deny access to all other objects in the bucket
-  statement {
-    sid    = "DenyAccessToOtherStateFiles"
-    effect = "Deny"
-
-    actions = [
-      "s3:*",
-    ]
-
-    resources = [
-      "arn:aws:s3:::adanalife-core-tf-state/*",
-    ]
-
-    condition {
-      test     = "StringNotEquals"
-      variable = "s3:object-key"
-      values   = ["${local.account_name}.tfstate"]
-    }
-  }
-}
-
 # data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
-#   # Allow access to the current env's state file (only)
+#   # Allow access to the current environment's state file (only)
 #   statement {
 #     sid    = "AllowS3AccessToStatefile"
 #     effect = "Allow"
 #
 #     actions = [
-#       "s3:*Object",
-#       "s3:ListBucket",
+#       "s3:GetObject",
+#       "s3:HeadObject",
+#       "s3:PutObject"
 #     ]
 #
 #     resources = [
@@ -180,9 +123,29 @@ data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
 #     ]
 #   }
 #
-#   # Deny access to other state bucket
+#   # Allow listing the bucket but restrict to the specific file
 #   statement {
-#     sid    = "DenyAccessToStateBucket"
+#     sid    = "AllowListBucketForStateFile"
+#     effect = "Allow"
+#
+#     actions = [
+#       "s3:ListBucket",
+#     ]
+#
+#     resources = [
+#       "arn:aws:s3:::adanalife-core-tf-state",
+#     ]
+#
+#     condition {
+#       test     = "StringEquals"
+#       variable = "s3:prefix"
+#       values   = ["${local.account_name}.tfstate"]
+#     }
+#   }
+#
+#   # Deny access to all other objects in the bucket
+#   statement {
+#     sid    = "DenyAccessToOtherStateFiles"
 #     effect = "Deny"
 #
 #     actions = [
@@ -190,24 +153,61 @@ data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
 #     ]
 #
 #     resources = [
-#       "arn:aws:s3:::adanalife-core-tf-state",
 #       "arn:aws:s3:::adanalife-core-tf-state/*",
 #     ]
-#   }
 #
+#     condition {
+#       test     = "StringNotEquals"
+#       variable = "s3:object-key"
+#       values   = ["${local.account_name}.tfstate"]
+#     }
+#   }
 # }
-
-# Create the IAM Policy resource using the data block
-resource "aws_iam_policy" "ci_terraform_state_bucket_access" {
-  name   = "CITerraformStateBucketAccess"
-  policy = data.aws_iam_policy_document.ci_terraform_state_bucket_access.json
-}
-
-# Attach the policy to the CI Terraform Role
-resource "aws_iam_role_policy_attachment" "ci_terraform" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_state_bucket_access.arn
-}
+#
+# # data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
+# #   # Allow access to the current env's state file (only)
+# #   statement {
+# #     sid    = "AllowS3AccessToStatefile"
+# #     effect = "Allow"
+# #
+# #     actions = [
+# #       "s3:*Object",
+# #       "s3:ListBucket",
+# #     ]
+# #
+# #     resources = [
+# #       "arn:aws:s3:::adanalife-core-tf-state/${local.account_name}.tfstate",
+# #     ]
+# #   }
+# #
+# #   # Deny access to other state bucket
+# #   statement {
+# #     sid    = "DenyAccessToStateBucket"
+# #     effect = "Deny"
+# #
+# #     actions = [
+# #       "s3:*",
+# #     ]
+# #
+# #     resources = [
+# #       "arn:aws:s3:::adanalife-core-tf-state",
+# #       "arn:aws:s3:::adanalife-core-tf-state/*",
+# #     ]
+# #   }
+# #
+# # }
+#
+# # Create the IAM Policy resource using the data block
+# resource "aws_iam_policy" "ci_terraform_state_bucket_access" {
+#   name   = "CITerraformStateBucketAccess"
+#   policy = data.aws_iam_policy_document.ci_terraform_state_bucket_access.json
+# }
+#
+# # Attach the policy to the CI Terraform Role
+# resource "aws_iam_role_policy_attachment" "ci_terraform" {
+#   role       = aws_iam_role.ci_terraform.name
+#   policy_arn = aws_iam_policy.ci_terraform_state_bucket_access.arn
+# }
 
 
 #TODO: empty this, then set env-specific lists (stage and prod will probable be identical)

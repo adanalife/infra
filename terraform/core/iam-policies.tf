@@ -140,7 +140,7 @@ data "aws_iam_policy_document" "bucket_policy" {
     content {
       sid       = "put-state-${local.core_account_id}"
       resources = ["arn:aws:s3:::${var.state_bucket}/${local.account_name}.tfstate"]
-      actions   = ["s3:PutObject"]
+      actions   = ["s3:PutObject", "s3:GetObject"]
 
       principals {
         type = "AWS"
