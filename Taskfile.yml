@@ -22,14 +22,14 @@ tasks:
       - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
 
   # `aws-vault login` opens the AWS web console in browser
-  tf-login-stage:
+  aws-login-stage:
     cmds:
       - aws-vault login adanalife-stage
 
-  tf-login-prod:
+  aws-login-prod:
     cmds:
       - aws-vault login adanalife-prod
 
-  tf-login-core:
+  aws-login-core:
     cmds:
       - aws-vault login adanalife-core
