@@ -94,12 +94,12 @@ EOF
 
 # give admin/terraform users access to the state bucket
 # (on all accounts)
-#NOTE: there is a policy in each account that prevents the terraform role from reading other accounts
 data "aws_iam_policy_document" "bucket_policy" {
   dynamic "statement" {
     for_each = local.accounts
 
     content {
+      # allow access to the statefile for the given account
       sid       = "put-state-${local.accounts[statement.key].name}"
       resources = ["arn:aws:s3:::${var.state_bucket}/${local.accounts[statement.key].name}.tfstate"]
       actions   = ["s3:PutObject"]
@@ -133,6 +133,7 @@ data "aws_iam_policy_document" "bucket_policy" {
   }
 
   # give terraform role access to the core state file
+  # (this is separate because core is not part of local.accounts)
   #TODO: refactor this so it's no longer a dynamic statement
   dynamic "statement" {
     for_each = [local.core_account_id]
@@ -152,6 +153,7 @@ data "aws_iam_policy_document" "bucket_policy" {
   }
 
   # give terraform role access to the core state file
+  # (this is separate because core is not part of local.accounts)
   #TODO: refactor this so it's no longer a dynamic statement
   dynamic "statement" {
     for_each = [local.core_account_id]
