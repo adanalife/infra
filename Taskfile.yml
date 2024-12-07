@@ -1,0 +1,33 @@
+version: '3'
+
+tasks:
+  tf-stage:
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform apply
+
+  tf-prod:
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform apply
+
+  tf-core:
+    dir: terraform/core
+    cmds:
+      # we cant use session tokens when making IAM changes
+      - aws-vault exec adanalife-core --no-session -- terraform apply
+
+  tf-stage-init:
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform init
+
+  tf-prod-init:
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform init
+
+  tf-core-init:
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core -- terraform init
