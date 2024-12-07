@@ -114,6 +114,8 @@ data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
 
     actions = [
       "s3:GetObject",
+      "s3:HeadObject",
+      "s3:PutObject"
     ]
 
     resources = [
@@ -147,7 +149,7 @@ data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
     effect = "Deny"
 
     actions = [
-      "s3:GetObject",
+      "s3:*",
     ]
 
     resources = [
