@@ -92,8 +92,9 @@ resource "aws_iam_policy" "self_management" {
 EOF
 }
 
-# give admin users access to the state bucket
+# give admin/terraform users access to the state bucket
 # (on all accounts)
+#TODO: refactor & prevent the CITerraform role from having access to _all_ state files
 data "aws_iam_policy_document" "bucket_policy" {
   dynamic "statement" {
     for_each = local.accounts
@@ -104,8 +105,11 @@ data "aws_iam_policy_document" "bucket_policy" {
       actions   = ["s3:PutObject"]
 
       principals {
-        type        = "AWS"
-        identifiers = ["arn:aws:iam::${local.accounts[statement.key].id}:role/${var.admin_role}"]
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.admin_role}",
+          "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.ci_terraform_role}"
+        ]
       }
     }
   }
@@ -119,8 +123,11 @@ data "aws_iam_policy_document" "bucket_policy" {
       actions   = ["s3:ListBucket"]
 
       principals {
-        type        = "AWS"
-        identifiers = ["arn:aws:iam::${local.accounts[statement.key].id}:role/${var.admin_role}"]
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.admin_role}",
+          "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.ci_terraform_role}"
+        ]
       }
     }
   }
