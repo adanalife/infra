@@ -143,8 +143,9 @@ variable "managed_iam_policies_for_terraform" {
   default = [
     #TODO: remove this at the end and add individual read-only policies
     "ReadOnlyAccess",
-    "AmazonS3FullAccess",
     "AmazonEC2FullAccess",
+    "AmazonRoute53FullAccess",
+    "AmazonS3FullAccess",
     "IAMFullAccess",
   ]
 }
