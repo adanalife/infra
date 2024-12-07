@@ -40,7 +40,7 @@ jobs:
       - run: aws sts get-caller-identity
       - run: aws s3 ls adanalife-core-tf-state/ || true
       - run: aws s3 ls adanalife-core-tf-state/adanalife-core.tfstate || true
-      - run: aws s3api head-object --bucket adanalife-core-tf-state --key adanalife-core.tfstate
+      - run: aws s3api head-object --bucket adanalife-core-tf-state --key adanalife-core.tfstate || true
       - name: terraform plan
         uses: dflook/terraform-plan@v1
         with:
