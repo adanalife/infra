@@ -137,17 +137,28 @@ resource "aws_iam_role_policy_attachment" "ci_terraform" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform.arn
 }
+variable "managed_iam_policies_for_terraform" {
+  description = "List of managed IAM policies to attach to the CI role"
+  type        = list(string)
+  default = [
+    #TODO: remove this at the end and add individual read-only policies
+    "ReadOnlyAccess",
+    "AmazonS3FullAccess",
+    "AmazonEC2FullAccess"
+  ]
+}
 
-# attach the default readonly AWS Managed Policy
-#TODO: this is crazy generous and a bad idea, but it's enough for now
-data "aws_iam_policy" "admin_read_only" {
-  name = "ReadOnlyAccess"
+data "aws_iam_policy" "managed_aws_iam_policies" {
+  count = length(var.managed_iam_policies_for_terraform)
+  name  = var.managed_iam_policies_for_terraform[count.index]
 }
 
 resource "aws_iam_role_policy_attachment" "ci_terraform_admin_read_only" {
+  count      = length(var.managed_iam_policies_for_terraform)
   role       = aws_iam_role.ci_terraform.name
-  policy_arn = data.aws_iam_policy.admin_read_only.arn
+  policy_arn = data.aws_iam_policy.managed_aws_iam_policies[count.index].arn
 }
+
 
 # add Policy to allow CI User to Assume Terraform Role
 resource "aws_iam_policy" "ci_terraform_assume_role" {
