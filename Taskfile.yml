@@ -21,6 +21,15 @@ tasks:
       # We can't use session tokens when making IAM changes
       - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
 
-  tf-login:
+  # `aws-vault login` opens the AWS web console in browser
+  tf-login-stage:
+    cmds:
+      - aws-vault login adanalife-stage
+
+  tf-login-prod:
     cmds:
       - aws-vault login adanalife-prod
+
+  tf-login-core:
+    cmds:
+      - aws-vault login adanalife-core
