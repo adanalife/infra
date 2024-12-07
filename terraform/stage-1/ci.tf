@@ -144,14 +144,14 @@ resource "aws_iam_policy" "ci_terraform_state_bucket_access" {
   policy = data.aws_iam_policy_document.ci_terraform_state_bucket_access.json
 }
 
-
-
 # Attach the policy to the CI Terraform Role
 resource "aws_iam_role_policy_attachment" "ci_terraform" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_state_bucket_access.arn
 }
 
+
+#TODO: empty this, then set env-specific lists (stage and prod will probable be identical)
 variable "managed_iam_policies_for_terraform" {
   description = "List of managed IAM policies to attach to the CI role"
   type        = list(string)
