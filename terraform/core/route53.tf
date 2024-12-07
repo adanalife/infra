@@ -95,14 +95,6 @@ resource "aws_route53_record" "primary_www" {
   records = ["static.prod.${var.domain}"]
 }
 
-resource "aws_route53_record" "primary_www_acm_cert_validation" {
-  name    = var.primary_www_acm_dns_name
-  records = [var.primary_www_acm_dns_record]
-  ttl     = 60
-  type    = var.primary_www_acm_dns_type
-  zone_id = aws_route53_zone.primary.zone_id
-}
-
 resource "aws_route53_record" "secondary_www" {
   zone_id = aws_route53_zone.secondary.zone_id
   name    = "www.${var.secondary_domain}"
@@ -111,7 +103,30 @@ resource "aws_route53_record" "secondary_www" {
   records = ["static.prod.${var.secondary_domain}"]
 }
 
-#TODO: create staging.dana.lol alias
+resource "aws_route53_record" "primary_staging" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "staging.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["static.stage.${var.domain}"]
+}
+
+resource "aws_route53_record" "secondary_staging" {
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "staging.${var.secondary_domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["static.stage.${var.secondary_domain}"]
+}
+
+resource "aws_route53_record" "primary_www_acm_cert_validation" {
+  name    = var.primary_www_acm_dns_name
+  records = [var.primary_www_acm_dns_record]
+  ttl     = 60
+  type    = var.primary_www_acm_dns_type
+  zone_id = aws_route53_zone.primary.zone_id
+}
+
 
 resource "aws_route53_record" "status" {
   zone_id = aws_route53_zone.primary.zone_id
