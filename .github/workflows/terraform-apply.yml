@@ -1,8 +1,6 @@
 name: Apply Terraform
 
 on:
-  #TODO: revertme
-  pull_request:
   # trigger with PR comment
   # issue_comment:
   #   types:

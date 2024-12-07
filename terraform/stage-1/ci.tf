@@ -141,9 +141,10 @@ variable "managed_iam_policies_for_terraform" {
   description = "List of managed IAM policies to attach to the CI role"
   type        = list(string)
   default = [
-    # attach the default readonly AWS Managed Policy
-    #TODO: this is crazy generous and a bad idea, but it's enough for now
-    "ReadOnlyAccess"
+    #TODO: remove this at the end and add individual read-only policies
+    "ReadOnlyAccess",
+    "AmazonS3FullAccess",
+    "AmazonEC2FullAccess"
   ]
 }
 
