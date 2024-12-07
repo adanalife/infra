@@ -11,8 +11,5 @@ terraform {
   backend "s3" {
     bucket = "adanalife-core-tf-state"
     key    = "adanalife-core.tfstate"
-    # assume_role = {
-    #   role_arn = "arn:aws:iam::${local.core_account_id}:role/Terraform"
-    # }
   }
 }
