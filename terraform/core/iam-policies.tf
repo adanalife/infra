@@ -94,12 +94,12 @@ EOF
 
 # give admin/terraform users access to the state bucket
 # (on all accounts)
-#TODO: refactor & prevent the CITerraform role from having access to _all_ state files
 data "aws_iam_policy_document" "bucket_policy" {
   dynamic "statement" {
     for_each = local.accounts
 
     content {
+      # allow access to the statefile for the given account
       sid       = "put-state-${local.accounts[statement.key].name}"
       resources = ["arn:aws:s3:::${var.state_bucket}/${local.accounts[statement.key].name}.tfstate"]
       actions   = ["s3:PutObject"]
@@ -127,6 +127,46 @@ data "aws_iam_policy_document" "bucket_policy" {
         identifiers = [
           "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.admin_role}",
           "arn:aws:iam::${local.accounts[statement.key].id}:role/${var.ci_terraform_role}"
+        ]
+      }
+    }
+  }
+
+  # give terraform role access to the core state file
+  # (this is separate because core is not part of local.accounts)
+  #TODO: refactor this so it's no longer a dynamic statement
+  dynamic "statement" {
+    for_each = [local.core_account_id]
+
+    content {
+      sid       = "put-state-${local.core_account_id}"
+      resources = ["arn:aws:s3:::${var.state_bucket}/${local.account_name}.tfstate"]
+      actions   = ["s3:PutObject", "s3:GetObject"]
+
+      principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
+        ]
+      }
+    }
+  }
+
+  # give terraform role access to the core state file
+  # (this is separate because core is not part of local.accounts)
+  #TODO: refactor this so it's no longer a dynamic statement
+  dynamic "statement" {
+    for_each = [local.core_account_id]
+
+    content {
+      sid       = "list-bucket-${local.core_account_id}"
+      resources = ["arn:aws:s3:::${var.state_bucket}"]
+      actions   = ["s3:ListBucket"]
+
+      principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
         ]
       }
     }
