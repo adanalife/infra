@@ -94,7 +94,7 @@ EOF
 
 # give admin/terraform users access to the state bucket
 # (on all accounts)
-#TODO: refactor & prevent the CITerraform role from having access to _all_ state files
+#NOTE: there is a policy in each account that prevents the terraform role from reading other accounts
 data "aws_iam_policy_document" "bucket_policy" {
   dynamic "statement" {
     for_each = local.accounts

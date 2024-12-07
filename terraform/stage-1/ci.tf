@@ -106,47 +106,61 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
   }
 }
 
-# IAM Policy for CI Terraform Role
-# this is expected to be very permissive
-#TODO: needs: AccessDenied: User: arn:aws:sts::413585268653:assumed-role/CITerraformRole/GitHubActions is not authorized to perform: s3:PutEncryptionConfiguration on resource: "arn:aws:s3:::static.stage.dana.lol" because no identity-based policy allows the s3:PutEncryptionConfiguration action
-#TODO: needs access to terraform state bucket
-resource "aws_iam_policy" "ci_terraform" {
-  name   = "AllowAccessForTerraform"
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "S3ReadWriteAccess",
-            "Action": [
-              "s3:*Object",
-              "s3:ListBucket"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "*"
-            ]
-        }
+data "aws_iam_policy_document" "ci_terraform_state_bucket_access" {
+  # Deny access to other state bucket
+  statement {
+    sid    = "DenyAccessToStateBucket"
+    effect = "Deny"
+
+    actions = [
+      "s3:*",
     ]
+
+    resources = [
+      "arn:aws:s3:::adanalife-core-tf-state",
+      "arn:aws:s3:::adanalife-core-tf-state/*",
+    ]
+  }
+
+  # Allow access to the current env's state file (only)
+  statement {
+    sid    = "AllowS3AccessToStatefile"
+    effect = "Allow"
+
+    actions = [
+      "s3:*Object",
+      "s3:ListBucket",
+    ]
+
+    resources = [
+      "arn:aws:s3:::adanalife-core-tf-state/${local.account_name}.tfstate",
+    ]
+  }
 }
-EOF
+
+# Create the IAM Policy resource using the data block
+resource "aws_iam_policy" "ci_terraform_state_bucket_access" {
+  name   = "CITerraformStateBucketAccess"
+  policy = data.aws_iam_policy_document.ci_terraform_state_bucket_access.json
 }
+
+
 
 # Attach the policy to the CI Terraform Role
 resource "aws_iam_role_policy_attachment" "ci_terraform" {
   role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform.arn
+  policy_arn = aws_iam_policy.ci_terraform_state_bucket_access.arn
 }
+
 variable "managed_iam_policies_for_terraform" {
   description = "List of managed IAM policies to attach to the CI role"
   type        = list(string)
   default = [
-    #TODO: remove this at the end and add individual read-only policies
-    "ReadOnlyAccess",
     "AmazonEC2FullAccess",
     "AmazonRoute53FullAccess",
     "AmazonS3FullAccess",
     "IAMFullAccess",
+    "ReadOnlyAccess", #TODO: remove this after a while & add individual read-only policies
   ]
 }
 
@@ -155,7 +169,7 @@ data "aws_iam_policy" "managed_aws_iam_policies" {
   name  = var.managed_iam_policies_for_terraform[count.index]
 }
 
-resource "aws_iam_role_policy_attachment" "ci_terraform_admin_read_only" {
+resource "aws_iam_role_policy_attachment" "ci_terraform_managed_policy" {
   count      = length(var.managed_iam_policies_for_terraform)
   role       = aws_iam_role.ci_terraform.name
   policy_arn = data.aws_iam_policy.managed_aws_iam_policies[count.index].arn
