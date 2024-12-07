@@ -1,0 +1,35 @@
+version: '3'
+
+vars:
+  # use like this: task tf-stage --tf_action=init
+  TF_ACTION: apply # Default action is 'apply'
+
+tasks:
+  tf-stage:
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform {{.TF_ACTION}}
+
+  tf-prod:
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform {{.TF_ACTION}}
+
+  tf-core:
+    dir: terraform/core
+    cmds:
+      # We can't use session tokens when making IAM changes
+      - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
+
+  # `aws-vault login` opens the AWS web console in browser
+  aws-login-stage:
+    cmds:
+      - aws-vault login adanalife-stage
+
+  aws-login-prod:
+    cmds:
+      - aws-vault login adanalife-prod
+
+  aws-login-core:
+    cmds:
+      - aws-vault login adanalife-core
