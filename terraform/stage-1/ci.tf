@@ -54,6 +54,22 @@ data "aws_iam_policy_document" "ci" {
     }
   }
 
+  dynamic "statement" {
+    for_each = local.account_name != "adanalife-core" ? [1] : []
+    content {
+      sid    = "CloudFrontInvalidation"
+      effect = "Allow"
+
+      resources = [
+        aws_cloudfront_distribution.primary_cdn.arn,
+      ]
+
+      actions = [
+        "cloudfront:CreateInvalidation",
+      ]
+    }
+  }
+
   statement {
     sid       = "SessionManagement"
     effect    = "Allow"
