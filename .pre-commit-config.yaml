@@ -30,12 +30,13 @@ repos:
       # - id: debug-statements
       # - id: double-quote-string-fixer
       # - id: name-tests-test
- #
-  - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.96.2
-    hooks:
-      - id: terraform_fmt
-        exclude: terraform/bootstrap
+
+  #TODO: bring this back
+  # - repo: https://github.com/antonbabenko/pre-commit-terraform
+  #   rev: v1.96.2
+  #   hooks:
+  #     - id: terraform_fmt
+  #       exclude: terraform/bootstrap
       #TODO: this was generating a diff in github workflow
       # - id: terraform_validate
       #   exclude: terraform/bootstrap
