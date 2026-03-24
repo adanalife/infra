@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       # Git style
       - id: check-added-large-files
@@ -30,13 +30,12 @@ repos:
       # - id: debug-statements
       # - id: double-quote-string-fixer
       # - id: name-tests-test
-
-  #TODO: bring this back
-  # - repo: https://github.com/antonbabenko/pre-commit-terraform
-  #   rev: v1.96.2
-  #   hooks:
-  #     - id: terraform_fmt
-  #       exclude: terraform/bootstrap
+ #
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.105.0
+    hooks:
+      - id: terraform_fmt
+        exclude: terraform/bootstrap
       #TODO: this was generating a diff in github workflow
       # - id: terraform_validate
       #   exclude: terraform/bootstrap
