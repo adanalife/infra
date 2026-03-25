@@ -54,7 +54,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: terraform validate
-        uses: dflook/terraform-validate@v1
+        uses: dflook/terraform-validate@v2
         with:
           path: ${{ matrix.terraform-dirs }}
 
