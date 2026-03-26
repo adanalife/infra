@@ -4,7 +4,7 @@ terraform {
     # c.p. terraform.io/docs/providers/aws/index.html
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.78"
+      version = "~> 6.38"
     }
   }
 
