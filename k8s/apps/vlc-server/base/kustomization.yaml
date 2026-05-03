@@ -6,6 +6,8 @@ resources:
   - deployment.yaml
   - service.yaml
 
-commonLabels:
-  app.kubernetes.io/name: vlc-server
-  app.kubernetes.io/part-of: tripbot
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: vlc-server
+      app.kubernetes.io/part-of: tripbot
