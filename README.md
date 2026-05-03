@@ -19,7 +19,7 @@ done
 
 # 2. Bring up the cluster, build & import images, apply manifests
 task k8s-up
-task k8s-images   # builds via tripbot/infra/docker/docker-compose.yml
+task k8s-import-images   # builds via tripbot/infra/docker/docker-compose.yml
 task k8s-apply
 
 # 3. Verify

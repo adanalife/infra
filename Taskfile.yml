@@ -45,7 +45,7 @@ tasks:
     cmds:
       - k3d cluster delete adanalife-local
 
-  k8s-images:
+  k8s-import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
