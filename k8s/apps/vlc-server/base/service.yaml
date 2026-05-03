@@ -1,0 +1,23 @@
+# Cluster-internal service. obs reaches RTSP at rtsp://vlc-server:8554,
+# tripbot reaches the HTTP API at http://vlc-server:8080.
+#
+# Host-side access for VNC/RTSP is handled by a separate LoadBalancer
+# service in overlays/local/ (k3d-only convenience).
+apiVersion: v1
+kind: Service
+metadata:
+  name: vlc-server
+spec:
+  type: ClusterIP
+  selector:
+    app: vlc-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: rtsp
+      port: 8554
+      targetPort: rtsp
+    - name: vnc
+      port: 5900
+      targetPort: vnc
