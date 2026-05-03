@@ -9,3 +9,4 @@ resources:
   - ../../apps/tripbot/overlays/local
   - ../../apps/vlc-server/overlays/local
   - ../../apps/obs/overlays/local
+  - traefik-dashboard.yaml

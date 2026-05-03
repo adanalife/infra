@@ -36,6 +36,10 @@ ports:
   - port: 443:443
     nodeFilters:
       - loadbalancer
+  # traefik dashboard / web UI (enabled by overlays/local/traefik-dashboard.yaml)
+  - port: 9000:9000
+    nodeFilters:
+      - loadbalancer
   # vlc-server RTSP — so a browser/VLC on the host can connect
   - port: 8554:8554
     nodeFilters:
