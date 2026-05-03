@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# secret.env is gitignored — copy from secret.env.example and fill in
+# values matching your tripbot/.env.development DATABASE_* vars.
+secretGenerator:
+  - name: postgres-secret
+    envs:
+      - secret.env

@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tripbot
+spec:
+  ingressClassName: traefik
+  rules:
+    # host is patched per-overlay (tripbot.localhost for local, real
+    # hostname for stage-1 / prod).
+    - host: tripbot.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tripbot
+                port:
+                  name: http
