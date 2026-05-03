@@ -10,6 +10,15 @@ secretGenerator:
     envs:
       - secret.env
 
+# Merge environment-specific values into the base ConfigMap. ENV is
+# what tripbot's main package checks at startup; without it the bot
+# refuses to boot.
+configMapGenerator:
+  - name: tripbot-config
+    behavior: merge
+    literals:
+      - ENV=development
+
 # Local Ingress hostname — `tripbot.localhost` resolves to 127.0.0.1
 # on most systems via the .localhost TLD, hitting traefik on port 80.
 patches:
