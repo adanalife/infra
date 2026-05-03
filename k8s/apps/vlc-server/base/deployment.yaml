@@ -26,15 +26,9 @@ spec:
               containerPort: 5900
             - name: rtsp
               containerPort: 8554
-          env:
-            - name: DISABLE_OBS
-              value: "true"
-            - name: DISPLAY
-              value: ":0.0"
-            - name: XDG_RUNTIME_DIR
-              value: /root/.cache/xdgr
-            - name: FONTCONFIG_PATH
-              value: /etc/fonts
+          envFrom:
+            - configMapRef:
+                name: vlc-server-config
           volumeMounts:
             - name: onscreens
               mountPath: /opt/data/run

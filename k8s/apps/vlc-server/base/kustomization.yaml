@@ -6,6 +6,19 @@ resources:
   - deployment.yaml
   - service.yaml
 
+# Constant env vars. ENV is environment-specific so it's merged in by
+# the overlay rather than baked in here.
+configMapGenerator:
+  - name: vlc-server-config
+    literals:
+      - DISABLE_OBS=true
+      - DISPLAY=:0.0
+      - XDG_RUNTIME_DIR=/root/.cache/xdgr
+      - FONTCONFIG_PATH=/etc/fonts
+      # vlc-server binary self-references this — same value as tripbot's
+      # VLC_SERVER_HOST so cross-pod and self-references match.
+      - VLC_SERVER_HOST=vlc-server:8080
+
 labels:
   - includeSelectors: false
     pairs:
