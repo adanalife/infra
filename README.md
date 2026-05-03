@@ -3,24 +3,39 @@
 
 ## running kubernetes locally
 
+Local app stack (postgres + tripbot + vlc-server + obs) on k3d. Manifests
+live in `k8s/apps/<component>/{base,overlays/local}/`; the umbrella overlay
+at `k8s/overlays/local/` wires them together. The k3d cluster config is at
+`k8s/k3d-config.yaml`.
+
 ```bash
-brew install k3d
-# expose the container's port 80 to localhost:8081
-# and mount assets/video to the container's /video
-#TODO: pass in rancher/k3s:v1.18.6-k3s1 ??
-#k3d cluster create adanalife-dev -p 8081:80@loadbalancer --volume $(pwd)/assets/video:/video
+brew install k3d kubectl
 
-k3d cluster create adanalife-stage-1 \
-  -p "8443:443@loadbalancer" \
-  -p "8080:80@loadbalancer" \
-  --k3s-server-arg "--no-deploy=traefik"
+# 1. Fill in secrets (gitignored)
+for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
+  cp $d/secret.env.example $d/secret.env
+  $EDITOR $d/secret.env
+done
 
-# set up kubectl to use this cluster
-export KUBECONFIG="$(k3d kubeconfig merge adanalife-dev)"
-# create local tripbot deployment
-kubectl apply -k infra/k8s/tripbot/stage-1/
-curl localhost:8081
+# 2. Bring up the cluster, build & import images, apply manifests
+task k8s-up
+task k8s-images   # builds via tripbot/infra/docker/docker-compose.yml
+task k8s-apply
+
+# 3. Verify
+kubectl get pods                              # all four Running
+curl -H "Host: tripbot.localhost" http://localhost/health/live
+# VNC (optional): vnc://localhost:5902 (obs), vnc://localhost:5903 (vlc)
+# RTSP (optional): rtsp://localhost:8554/dashcam
+
+# 4. Tear down
+task k8s-down
 ```
+
+The bundled traefik handles the tripbot Ingress; the bundled servicelb
+(klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared in the
+local overlays. Both are k3s-only — on EKS the same Ingress works against
+prod traefik unchanged, and LoadBalancer services are fulfilled by AWS ELB.
 
 
 
