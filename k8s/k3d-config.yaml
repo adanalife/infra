@@ -1,0 +1,42 @@
+# k3d cluster config for local app development.
+#
+# Bring up with:  task k8s-up
+# Tear down with: task k8s-down
+#
+# Notes for future EKS port:
+#   - Bundled traefik (ingress) IS portable — same Ingress manifests will
+#     work on prod traefik unchanged.
+#   - Bundled servicelb / klipper-lb is k3d/k3s-only. On EKS, LoadBalancer
+#     services are fulfilled by AWS ELB instead. The Service manifests
+#     don't change; only the implementation underneath does.
+#   - The host port mappings below (5902/5903/8554) are k3d's way of
+#     forwarding traffic into the cluster's loadbalancer. EKS does not
+#     need these — ELB exposes the LoadBalancer services directly.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: adanalife-local
+
+servers: 1
+agents: 0
+
+ports:
+  # traefik ingress (HTTP + HTTPS) — for tripbot.localhost and friends
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
+  # vlc-server RTSP — so a browser/VLC on the host can connect
+  - port: 8554:8554
+    nodeFilters:
+      - loadbalancer
+  # obs VNC
+  - port: 5902:5902
+    nodeFilters:
+      - loadbalancer
+  # vlc-server VNC
+  - port: 5903:5903
+    nodeFilters:
+      - loadbalancer
