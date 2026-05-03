@@ -27,8 +27,8 @@ spec:
               mountPath: /var/lib/postgresql/data
               subPath: pgdata
           readinessProbe:
-            exec:
-              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            tcpSocket:
+              port: postgres
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:
