@@ -1,0 +1,19 @@
+# Shared volume between vlc-server (writer) and obs (reader).
+#
+# vlc-server writes onscreen state files (middle-text.txt,
+# leaderboard.txt, etc.) here; obs reads them to render scenes.
+#
+# RWO works locally because both pods land on the same node (single-node
+# k3d, plus an explicit pod affinity on the obs Deployment). On EKS this
+# either needs RWX (EFS) or — preferably — the planned refactor to have
+# obs pull state from vlc-server over HTTP. Tracked in
+# vault/tripbot/TODO.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: onscreens
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,14 @@
+# Host-port access for the obs VNC view, k3d-only convenience.
+# Lights up host port 5902 via klipper-lb (declared in k3d-config).
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-host
+spec:
+  type: LoadBalancer
+  selector:
+    app: obs
+  ports:
+    - name: vnc
+      port: 5902
+      targetPort: vnc

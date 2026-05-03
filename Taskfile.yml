@@ -33,3 +33,33 @@ tasks:
   aws-login-core:
     cmds:
       - aws-vault login adanalife-core
+
+  # Local k3d cluster for app development. See k8s/k3d-config.yaml.
+  k8s-up:
+    desc: create the local k3d cluster
+    cmds:
+      - k3d cluster create -c k8s/k3d-config.yaml
+
+  k8s-down:
+    desc: tear down the local k3d cluster
+    cmds:
+      - k3d cluster delete adanalife-local
+
+  k8s-import-images:
+    desc: build the tripbot/vlc/obs images and import them into the local cluster
+    dir: ../tripbot
+    cmds:
+      - docker compose -f infra/docker/docker-compose.yml build
+      - k3d image import adanalife/tripbot:latest --cluster=adanalife-local
+      - k3d image import adanalife/vlc:latest --cluster=adanalife-local
+      - k3d image import adanalife/obs:latest --cluster=adanalife-local
+
+  k8s-apply:
+    desc: apply the local app manifests to the cluster
+    cmds:
+      - kubectl apply -k k8s/overlays/local
+
+  k8s-logs:
+    desc: tail logs across all app pods
+    cmds:
+      - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obs
+spec:
+  replicas: 1
+  strategy:
+    # Recreate so the RWO onscreens PVC isn't double-attached during rollout.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: obs
+  template:
+    metadata:
+      labels:
+        app: obs
+    spec:
+      # Pin obs to the same node as vlc-server so they can both mount
+      # the RWO onscreens PVC. Defensive — k3d here is single-node
+      # anyway, but this keeps the manifest correct on any topology.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: vlc-server
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: obs
+          image: adanalife/obs:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: vnc
+              containerPort: 5900
+          envFrom:
+            - configMapRef:
+                name: obs-config
+            - secretRef:
+                name: obs-secret
+          volumeMounts:
+            # Reads onscreen state files written by vlc-server. The
+            # PVC itself is owned by the vlc-server kustomization.
+            - name: onscreens
+              mountPath: /opt/data/run
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            # 3Gi instead of 2Gi: OBS's preview canvas tips it over
+            # 2Gi when enabled. Preview is normally disabled for the
+            # actual stream, so keeping the headroom modest.
+            limits:
+              memory: 3Gi
+      volumes:
+        - name: onscreens
+          persistentVolumeClaim:
+            claimName: onscreens

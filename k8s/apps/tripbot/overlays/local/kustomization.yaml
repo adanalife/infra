@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# secret.env is gitignored — copy from secret.env.example.
+secretGenerator:
+  - name: tripbot-secret
+    envs:
+      - secret.env
+
+# Merge environment-specific values into the base ConfigMap. ENV is
+# what tripbot's main package checks at startup; without it the bot
+# refuses to boot.
+configMapGenerator:
+  - name: tripbot-config
+    behavior: merge
+    literals:
+      - ENV=development
+
+# Local Ingress hostname — `tripbot.localhost` resolves to 127.0.0.1
+# on most systems via the .localhost TLD, hitting traefik on port 80.
+patches:
+  - target:
+      kind: Ingress
+      name: tripbot
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tripbot.localhost

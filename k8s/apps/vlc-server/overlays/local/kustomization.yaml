@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - host-access.yaml
+
+# Merge environment-specific config into the base ConfigMap. vlc-server
+# shares tripbot's config package, so it needs the same env-var surface
+# even though most of these values are stubs in local. For stage/prod
+# the secret values would move into a real Secret — TODO.
+configMapGenerator:
+  - name: vlc-server-config
+    behavior: merge
+    literals:
+      - ENV=development
+      - DATABASE_HOST=postgres
+      - DATABASE_USER=tripbot_docker
+      - DATABASE_PASS=hunter2
+      - DATABASE_DB=tripbot_docker
+      - CHANNEL_NAME=adanalife
+      - BOT_USERNAME=adanalife_bot
+      - TWITCH_CLIENT_ID=stub
+      - TWITCH_CLIENT_SECRET=stub
+      - TWITCH_AUTH_TOKEN=oauth:stub
+      - TWILIO_ACCT_SID=stub
+      - TWILIO_AUTH_TOKEN=stub
+      - TWILIO_FROM_NUM=+15555550100
+      - TWILIO_TO_NUM=+15555550101
+      - TRIPBOT_HTTP_AUTH=stub
+      - DISABLE_TWITCH_WEBHOOKS=true
+
+# Mount the dashcam video dir from the host (k3d-only).
+patches:
+  - path: dashcam-hostpath.yaml

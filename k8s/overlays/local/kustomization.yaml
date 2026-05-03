@@ -1,0 +1,12 @@
+# Umbrella overlay — `kubectl apply -k k8s/overlays/local` brings up
+# the entire app stack (postgres, tripbot, vlc-server, obs) on a local
+# k3d cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../apps/postgres/overlays/local
+  - ../../apps/tripbot/overlays/local
+  - ../../apps/vlc-server/overlays/local
+  - ../../apps/obs/overlays/local
+  - traefik-dashboard.yaml

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vlc-server
+spec:
+  replicas: 1
+  strategy:
+    # Recreate so the RWO onscreens PVC isn't double-attached during rollout.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vlc-server
+  template:
+    metadata:
+      labels:
+        app: vlc-server
+    spec:
+      containers:
+        - name: vlc-server
+          image: adanalife/vlc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: vnc
+              containerPort: 5900
+            - name: rtsp
+              containerPort: 8554
+          envFrom:
+            - configMapRef:
+                name: vlc-server-config
+          volumeMounts:
+            - name: onscreens
+              mountPath: /opt/data/run
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: onscreens
+          persistentVolumeClaim:
+            claimName: onscreens
