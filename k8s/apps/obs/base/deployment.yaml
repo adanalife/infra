@@ -46,8 +46,11 @@ spec:
             requests:
               cpu: 200m
               memory: 512Mi
+            # 3Gi instead of 2Gi: OBS's preview canvas tips it over
+            # 2Gi when enabled. Preview is normally disabled for the
+            # actual stream, so keeping the headroom modest.
             limits:
-              memory: 2Gi
+              memory: 3Gi
       volumes:
         - name: onscreens
           persistentVolumeClaim:
