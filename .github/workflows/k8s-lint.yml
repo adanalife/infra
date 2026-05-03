@@ -1,0 +1,40 @@
+name: k8s lint
+
+on:
+  pull_request:
+    paths:
+      - 'k8s/**'
+      - '.github/workflows/k8s-lint.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'k8s/**'
+      - '.github/workflows/k8s-lint.yml'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k3d
+        run: curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      # Empty cluster — no port mappings or volume mounts. We only need
+      # an API server to dry-run against.
+      - name: Create cluster
+        run: k3d cluster create lint --no-lb
+
+      # secret.env files are gitignored — stub them from the .example
+      # templates so kustomize can build.
+      - name: Stub secret.env files
+        run: |
+          for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
+            cp "$d/secret.env.example" "$d/secret.env"
+          done
+
+      - name: Kustomize build
+        run: kubectl kustomize k8s/overlays/local > /tmp/built.yaml
+
+      - name: Server-side dry-run apply
+        run: kubectl apply --dry-run=server -k k8s/overlays/local
