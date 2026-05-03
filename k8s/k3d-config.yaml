@@ -20,6 +20,14 @@ metadata:
 servers: 1
 agents: 0
 
+# Mount host paths into the k3d node so pod hostPath volumes can reach
+# them. k3d nodes are themselves containers, so without this the host
+# filesystem isn't visible to pods.
+volumes:
+  - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
+    nodeFilters:
+      - server:*
+
 ports:
   # traefik ingress (HTTP + HTTPS) — for tripbot.localhost and friends
   - port: 80:80
