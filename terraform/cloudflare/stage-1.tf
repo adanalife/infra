@@ -57,7 +57,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
     ingress = [
       {
         hostname = "tripbot.${cloudflare_zone.whalecore.name}"
-        service  = "http://tripbot.default.svc.cluster.local:80"
+        service  = "http://tripbot.default.svc.cluster.local:8080"
       },
       # Catch-all (cloudflared requires this as the last rule).
       {
