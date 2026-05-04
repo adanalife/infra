@@ -90,7 +90,10 @@ tasks:
     desc: write cloudflared tunnel token from terraform output to secret.env
     dir: terraform/cloudflare
     cmds:
-      - echo "TUNNEL_TOKEN=$(terraform output -raw cloudflared_tunnel_token)" > ../../k8s/platform/cloudflared/overlays/stage-1/secret.env
+      # aws-vault wrap is required: terraform output reads remote state
+      # in core's S3 bucket. See [[vault/infra/TODO]] for the longer-term
+      # cleanup item on the AWS/non-AWS terraform mixing.
+      - echo "TUNNEL_TOKEN=$(aws-vault exec adanalife-core -- terraform output -raw cloudflared_tunnel_token)" > ../../k8s/platform/cloudflared/overlays/stage-1/secret.env
 
   k8s-logs:
     desc: tail logs across all app pods
