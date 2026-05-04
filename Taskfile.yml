@@ -21,24 +21,25 @@ tasks:
       # We can't use session tokens when making IAM changes
       - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
 
-  # Cloudflare resources — Pages project + the stage-1 tunnel/Access
-  # used by `k8s/overlays/stage-1`. Provider auth is via
-  # CLOUDFLARE_API_TOKEN; the S3 backend uses the default AWS
-  # credential chain.
-  #
-  # Detects the host's current public IP via ifconfig.me and writes
-  # it to a gitignored home_cidrs.auto.tfvars on every invocation.
-  # File-based vars stay stable across plan/apply (env vars don't,
-  # which broke v5 with "Can't change variable when applying a saved
-  # plan"). Bonus: the Cloudflare Access policy auto-tracks IP
-  # rotation between applies.
-  tf-cloudflare:
-    dir: terraform/cloudflare
+  # Edit the home_cidrs allowlist (Cloudflare Access policy on
+  # tripbot.whalecore.com). Pulls the current value from Secrets
+  # Manager into $EDITOR as a JSON array of CIDR strings, validates
+  # JSON on save, then writes back. terraform reads the new value
+  # via data source on the next `task tf-stage`.
+  update-home-ip:
+    desc: edit the stage-1/home-cidrs JSON list in Secrets Manager
     cmds:
       - |
-        ip=$(curl -fsS ifconfig.me) || { echo "could not detect home IP"; exit 1; }
-        echo "home_cidrs = [\"$ip/32\"]" > home_cidrs.auto.tfvars
-      - terraform {{.TF_ACTION}}
+        tmp=$(mktemp)
+        trap 'rm -f "$tmp"' EXIT
+        aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
+          --secret-id stage-1/home-cidrs --query SecretString --output text \
+          | jq . > "$tmp"
+        ${EDITOR:-vi} "$tmp"
+        jq empty < "$tmp" || { echo "invalid JSON — aborting"; exit 1; }
+        aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+          --secret-id stage-1/home-cidrs --secret-string "file://$tmp" >/dev/null
+        echo "home-cidrs updated. Run 'task tf-stage' to apply."
 
   # `aws-vault login` opens the AWS web console in browser
   aws-login-stage:
@@ -83,17 +84,14 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/stage-1
 
-  # Pulls the tunnel token out of cloudflare terraform state and writes
+  # Pulls the tunnel token out of stage-1 terraform state and writes
   # it to the cloudflared secret.env. Run once after the first
-  # `task tf-cloudflare`, and re-run if the tunnel is recreated.
+  # `task tf-stage`, and re-run if the tunnel is recreated.
   k8s-tunnel-token:
     desc: write cloudflared tunnel token from terraform output to secret.env
-    dir: terraform/cloudflare
+    dir: terraform/stage-1
     cmds:
-      # aws-vault wrap is required: terraform output reads remote state
-      # in core's S3 bucket. See [[vault/infra/TODO]] for the longer-term
-      # cleanup item on the AWS/non-AWS terraform mixing.
-      - echo "TUNNEL_TOKEN=$(aws-vault exec adanalife-core -- terraform output -raw cloudflared_tunnel_token)" > ../../k8s/platform/cloudflared/overlays/stage-1/secret.env
+      - echo "TUNNEL_TOKEN=$(aws-vault exec adanalife-stage -- terraform output -raw cloudflared_tunnel_token)" > ../../k8s/platform/cloudflared/overlays/stage-1/secret.env
 
   k8s-logs:
     desc: tail logs across all app pods

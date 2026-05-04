@@ -53,6 +53,36 @@ variable "primary_acm_cert_alternative_names" {
   default = []
 }
 
+# Cloudflare ----------------------------------------------------------
+
+variable "cloudflare_account_id" {
+  type        = string
+  description = "Cloudflare account ID"
+}
+
+variable "project_name" {
+  type        = string
+  description = "Cloudflare Pages project name"
+}
+
+variable "github_repo_owner" {
+  type        = string
+  description = "GitHub repository owner for the Pages project"
+  default     = "adanalife"
+}
+
+variable "github_repo_name" {
+  type        = string
+  description = "GitHub repository name for the Pages project"
+  default     = "website"
+}
+
+variable "production_branch" {
+  type        = string
+  description = "Git branch used for production deployments of the Pages project"
+  default     = "master"
+}
+
 # a secret string between CloudFront and S3 to control access
 resource "random_password" "static_site_secret" {
   length = 32

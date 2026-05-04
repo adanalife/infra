@@ -52,41 +52,49 @@ Wires the cluster to a Cloudflare Tunnel — TLS and IP allowlisting are
 handled at the Cloudflare edge, no port-forwarding, no in-cluster certs.
 DNS lives on Cloudflare under `whalecore.com`, our dedicated stage-1 /
 experimental domain; nothing about this touches the Route53 zones for
-`whereisdana.today` or `dana.lol`. Cloudflare resources live in
-`terraform/cloudflare/`.
+`whereisdana.today` or `dana.lol`. Cloudflare resources live alongside
+AWS resources in `terraform/stage-1/` (`cloudflare-*.tf`); the Cloudflare
+API token and the home-IP allowlist are stored in AWS Secrets Manager.
 
 ```bash
-# 1. Set the Cloudflare API token (Zone:Zone:Edit, Account:Cloudflare
-#    Tunnel:Edit, Account:Cloudflare Pages:Edit, Account:Access:Apps and
-#    Policies:Edit, Zone:DNS:Edit, Zone:Zone Settings:Edit). Home IP
-#    auto-detected by the Taskfile target via ifconfig.me each run.
-export CLOUDFLARE_API_TOKEN=cf-pat-...
-
-# 2. First-time only — enable Cloudflare Access (Zero Trust) at
+# 1. First-time only — enable Cloudflare Access (Zero Trust) at
 #    https://dash.cloudflare.com → Zero Trust. Free tier; pick a team
 #    name. Required before Access policies can be created.
 
-# 3. Apply Cloudflare side — creates the whalecore.com zone, tunnel,
-#    ingress config, DNS record, Access app + IP allow policy.
-task tf-cloudflare
+# 2. First apply — creates the SM secret containers (with placeholders)
+#    and the AWS resources. Cloudflare resources fail because the
+#    placeholder token can't authenticate. Expected.
+task tf-stage
 
-# 4. First-time only — point whalecore.com's nameservers at Cloudflare.
+# 3. Populate the secrets out-of-band. The Cloudflare API token needs
+#    these scopes: Zone:Edit, Tunnel:Edit, Pages:Edit, Access:Apps and
+#    Policies:Edit, DNS:Edit, Zone Settings:Edit.
+aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+  --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
+task update-home-ip   # opens stage-1/home-cidrs in $EDITOR; JSON array of CIDRs
+
+# 4. Second apply — creates the whalecore.com zone, tunnel, ingress
+#    config, DNS record, Access app + IP allow policy, and the Pages
+#    project.
+task tf-stage
+
+# 5. First-time only — point whalecore.com's nameservers at Cloudflare.
 #    Get the values from terraform output:
-aws-vault exec adanalife-core -- sh -c 'cd terraform/cloudflare \
-  && terraform output -json whalecore_name_servers | jq -r ".[]"'
+aws-vault exec adanalife-stage -- sh -c 'cd terraform/stage-1 \
+  && terraform output -json stage_1_zone_name_servers | jq -r ".[]"'
 #    Update the NS records at whalecore.com's registrar to those values.
 #    Cloudflare will mark the zone "Active" once propagation completes
 #    (minutes to hours).
 
-# 5. Write the tunnel token from terraform output into the kustomize
+# 6. Write the tunnel token from terraform output into the kustomize
 #    secret.env (re-run any time the tunnel is recreated).
 task k8s-tunnel-token
 
-# 6. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
+# 7. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
 #    plus the cloudflared Deployment.
 task k8s-apply-stage-1
 
-# 7. Verify (after Cloudflare marks the zone Active in step 4).
+# 8. Verify (after Cloudflare marks the zone Active in step 5).
 curl https://tripbot.whalecore.com/health/live
 #   from an allowlisted IP → 200 OK
 #   from a non-allowlisted IP → Cloudflare Access challenge page
