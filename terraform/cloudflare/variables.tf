@@ -26,9 +26,12 @@ variable "production_branch" {
   default     = "master"
 }
 
-# Pass via env: TF_VAR_home_cidrs='["203.0.113.42/32"]'
-# Get current public IP: curl ifconfig.me
+# Sourced from a gitignored home_cidrs.auto.tfvars that the
+# `tf-cloudflare` Taskfile target rewrites from `curl ifconfig.me`
+# on every invocation. Marked sensitive so the value is redacted
+# from `terraform plan` / `apply` output.
 variable "home_cidrs" {
   type        = list(string)
+  sensitive   = true
   description = "CIDRs allowed past Cloudflare Access for tripbot stage-1"
 }

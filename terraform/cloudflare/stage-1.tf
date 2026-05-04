@@ -41,6 +41,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared" "stage_1" {
 # Tunnel ingress — public hostnames map to in-cluster Services.
 # tripbot is HTTP-served and the only thing exposed today;
 # vlc-server (RTSP), obs (VNC), postgres are not exposed.
+#
+# Heads-up: cloudflare provider v5.x cannot destroy this resource
+# (`terraform plan` shows "Resource Destruction Considerations"
+# warning). If you `terraform destroy`, the tunnel-config record
+# stays in the API and has to be deleted manually via the dashboard
+# or API. Updating it via apply works fine — only destroy is broken.
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id

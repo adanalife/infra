@@ -24,10 +24,20 @@ tasks:
   # Cloudflare resources — Pages project + the stage-1 tunnel/Access
   # used by `k8s/overlays/stage-1`. Provider auth is via
   # CLOUDFLARE_API_TOKEN; the S3 backend uses the default AWS
-  # credential chain. Requires TF_VAR_home_cidrs in env.
+  # credential chain.
+  #
+  # Detects the host's current public IP via ifconfig.me and writes
+  # it to a gitignored home_cidrs.auto.tfvars on every invocation.
+  # File-based vars stay stable across plan/apply (env vars don't,
+  # which broke v5 with "Can't change variable when applying a saved
+  # plan"). Bonus: the Cloudflare Access policy auto-tracks IP
+  # rotation between applies.
   tf-cloudflare:
     dir: terraform/cloudflare
     cmds:
+      - |
+        ip=$(curl -fsS ifconfig.me) || { echo "could not detect home IP"; exit 1; }
+        echo "home_cidrs = [\"$ip/32\"]" > home_cidrs.auto.tfvars
       - terraform {{.TF_ACTION}}
 
   # `aws-vault login` opens the AWS web console in browser

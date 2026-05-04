@@ -50,9 +50,9 @@ are in `terraform/cloudflare/`; the NS record is in
 
 ```bash
 # 1. Set the Cloudflare API token (Zone:Edit, DNS:Edit, Access:Edit,
-#    Cloudflare Tunnel:Edit) and your home CIDR.
+#    Cloudflare Tunnel:Edit). Home IP gets auto-detected by the
+#    Taskfile target via ifconfig.me on each invocation.
 export CLOUDFLARE_API_TOKEN=cf-pat-...
-export TF_VAR_home_cidrs='["'$(curl -s ifconfig.me)'/32"]'
 
 # 2. Apply Cloudflare side first — creates the zone, tunnel, ingress
 #    config, DNS record, and Access app + IP allow policy.

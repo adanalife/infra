@@ -18,6 +18,9 @@
 .terraform
 *.plan
 *.tfstate.backup
+# auto-loaded local-only var overrides (e.g. home IP, regenerated
+# from `curl ifconfig.me` by the tf-cloudflare Taskfile target).
+*.auto.tfvars
 
 # k8s secrets
 k8s/**/credentials
