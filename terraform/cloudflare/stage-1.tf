@@ -88,7 +88,10 @@ resource "cloudflare_zero_trust_access_application" "stage1_tripbot" {
   ]
 
   policies = [
-    cloudflare_zero_trust_access_policy.stage1_tripbot_ip_allow.id,
+    {
+      id         = cloudflare_zero_trust_access_policy.stage1_tripbot_ip_allow.id
+      precedence = 1
+    },
   ]
 }
 
