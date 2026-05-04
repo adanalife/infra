@@ -79,7 +79,7 @@ task k8s-tunnel-token
 task k8s-apply-stage-1
 
 # 7. Verify (after Cloudflare marks the zone Active in step 4).
-curl https://tripbot.stage.whalecore.com/health/live
+curl https://tripbot.whalecore.com/health/live
 #   from an allowlisted IP → 200 OK
 #   from a non-allowlisted IP → Cloudflare Access challenge page
 ```

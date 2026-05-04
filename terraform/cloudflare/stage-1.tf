@@ -2,7 +2,7 @@
 # (treated as "stage-1" until a real prod cluster exists).
 #
 # Public ingress flow:
-#   user → tripbot.stage.whalecore.com
+#   user → tripbot.whalecore.com
 #        → Cloudflare edge (TLS termination + Access policy)
 #        → tunnel → in-cluster cloudflared Deployment
 #        → http://tripbot.default.svc.cluster.local:80
@@ -56,7 +56,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   config = {
     ingress = [
       {
-        hostname = "tripbot.stage.${cloudflare_zone.whalecore.name}"
+        hostname = "tripbot.${cloudflare_zone.whalecore.name}"
         service  = "http://tripbot.default.svc.cluster.local:80"
       },
       # Catch-all (cloudflared requires this as the last rule).
@@ -67,12 +67,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   }
 }
 
-# Orange-cloud CNAME so tripbot.stage.whalecore.com routes into the
+# Orange-cloud CNAME so tripbot.whalecore.com routes into the
 # tunnel. Cloudflare proxies and terminates TLS at the edge with an
 # auto-issued cert.
 resource "cloudflare_dns_record" "stage_1_tripbot_tunnel" {
   zone_id = cloudflare_zone.whalecore.id
-  name    = "tripbot.stage"
+  name    = "tripbot"
   type    = "CNAME"
   ttl     = 1 # 1 = auto when proxied
   proxied = true
@@ -91,7 +91,7 @@ resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
   destinations = [
     {
       type = "public"
-      uri  = "tripbot.stage.${cloudflare_zone.whalecore.name}"
+      uri  = "tripbot.${cloudflare_zone.whalecore.name}"
     },
   ]
 
