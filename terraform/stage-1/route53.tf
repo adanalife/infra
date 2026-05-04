@@ -36,19 +36,3 @@ resource "aws_route53_record" "tripbot" {
   ttl     = "300"
   records = [aws_instance.tripbot.0.public_dns]
 }
-
-# Delegate apps.stage.{secondary} to Cloudflare. Records under
-# this subzone (tripbot.apps.stage.whereisdana.today, etc.) are
-# managed in terraform/cloudflare/; nameservers come back via
-# the cross-state data source in remote-states.tf.
-#
-# Order of operations on first apply: terraform/cloudflare/ must
-# be applied before this, otherwise the remote-state lookup is
-# empty.
-resource "aws_route53_record" "apps_subdomain_ns" {
-  zone_id = aws_route53_zone.secondary_subdomain_zone.zone_id
-  name    = "apps.${aws_route53_zone.secondary_subdomain_zone.name}"
-  type    = "NS"
-  ttl     = 300
-  records = data.terraform_remote_state.cloudflare.outputs.apps_stage_name_servers
-}

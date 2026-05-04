@@ -2,26 +2,28 @@
 # (treated as "stage-1" until a real prod cluster exists).
 #
 # Public ingress flow:
-#   user → tripbot.apps.stage.whereisdana.today
+#   user → tripbot.whalecore.com
 #        → Cloudflare edge (TLS termination + Access policy)
 #        → tunnel → in-cluster cloudflared Deployment
 #        → http://tripbot.default.svc.cluster.local:80
 #
 # Companion stage-1 manifests are at k8s/platform/cloudflared/.
-# Companion NS delegation in stage-1's Route53 zone is at
-# terraform/stage-1/route53.tf (cross-state via remote-states.tf
-# there).
-#
 # Operator runbook is in infra/README.md → "exposing services publicly".
+#
+# Why whalecore.com (and not a subzone of whereisdana.today): Cloudflare
+# Free only allows zone creation for root domains. Subdomain zones
+# (e.g. apps.stage.whereisdana.today) require Business plan ($200/mo).
+# Picking a fresh root domain we already own is the smallest delta.
 
-# The new subzone, NS-delegated from stage.whereisdana.today
-# (managed in stage-1's Route53 zone). Cloudflare manages
-# tripbot.apps.stage.whereisdana.today and any future siblings.
-resource "cloudflare_zone" "apps_stage" {
+# Whalecore is the dedicated domain for stage-1 / experimental
+# Cloudflare-managed services. Authoritative DNS lives here, not
+# Route53 — point whalecore.com's nameservers at the values from
+# `terraform output whalecore_name_servers` at your registrar.
+resource "cloudflare_zone" "whalecore" {
   account = {
     id = var.cloudflare_account_id
   }
-  name = "apps.stage.whereisdana.today"
+  name = "whalecore.com"
   type = "full"
 }
 
@@ -54,7 +56,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   config = {
     ingress = [
       {
-        hostname = "tripbot.${cloudflare_zone.apps_stage.name}"
+        hostname = "tripbot.${cloudflare_zone.whalecore.name}"
         service  = "http://tripbot.default.svc.cluster.local:80"
       },
       # Catch-all (cloudflared requires this as the last rule).
@@ -65,11 +67,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   }
 }
 
-# Orange-cloud CNAME so tripbot.apps.stage.whereisdana.today
-# routes into the tunnel. Cloudflare proxies and terminates TLS
-# at the edge with an auto-issued cert.
+# Orange-cloud CNAME so tripbot.whalecore.com routes into the tunnel.
+# Cloudflare proxies and terminates TLS at the edge with an auto-issued
+# cert.
 resource "cloudflare_dns_record" "stage_1_tripbot_tunnel" {
-  zone_id = cloudflare_zone.apps_stage.id
+  zone_id = cloudflare_zone.whalecore.id
   name    = "tripbot"
   type    = "CNAME"
   ttl     = 1 # 1 = auto when proxied
@@ -89,7 +91,7 @@ resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
   destinations = [
     {
       type = "public"
-      uri  = "tripbot.${cloudflare_zone.apps_stage.name}"
+      uri  = "tripbot.${cloudflare_zone.whalecore.name}"
     },
   ]
 

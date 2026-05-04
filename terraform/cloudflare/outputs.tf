@@ -5,10 +5,9 @@ output "cloudflared_tunnel_token" {
   sensitive = true
 }
 
-# Nameservers for the apps.stage.whereisdana.today subzone —
-# consumed cross-state by terraform/stage-1's Route53 NS
-# delegation record.
-output "apps_stage_name_servers" {
-  value       = cloudflare_zone.apps_stage.name_servers
-  description = "Cloudflare nameservers for apps.stage.whereisdana.today (consumed by stage-1 Route53)"
+# Nameservers Cloudflare assigned to whalecore.com. Point your
+# registrar's NS records at these to delegate the zone to Cloudflare.
+output "whalecore_name_servers" {
+  value       = cloudflare_zone.whalecore.name_servers
+  description = "Update whalecore.com NS at the registrar to these"
 }
