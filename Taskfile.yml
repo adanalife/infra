@@ -68,7 +68,7 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/local
 
-  k8s-apply-stage1:
+  k8s-apply-stage-1:
     desc: apply stage-1 overlay (cloudflared tunnel + apps)
     cmds:
       - kubectl apply -k k8s/overlays/stage-1

@@ -26,24 +26,24 @@ resource "cloudflare_zone" "apps_stage" {
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this
-# requires re-running `task k8s-tunnel-token` then `task k8s-apply-stage1`.
-resource "random_id" "stage1_tunnel_secret" {
+# requires re-running `task k8s-tunnel-token` then `task k8s-apply-stage-1`.
+resource "random_id" "stage_1_tunnel_secret" {
   byte_length = 32
 }
 
-resource "cloudflare_zero_trust_tunnel_cloudflared" "stage1" {
+resource "cloudflare_zero_trust_tunnel_cloudflared" "stage_1" {
   account_id    = var.cloudflare_account_id
-  name          = "adanalife-stage1"
-  tunnel_secret = random_id.stage1_tunnel_secret.b64_std
+  name          = "adanalife-stage-1"
+  tunnel_secret = random_id.stage_1_tunnel_secret.b64_std
   config_src    = "cloudflare"
 }
 
 # Tunnel ingress — public hostnames map to in-cluster Services.
 # tripbot is HTTP-served and the only thing exposed today;
 # vlc-server (RTSP), obs (VNC), postgres are not exposed.
-resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage1" {
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   account_id = var.cloudflare_account_id
-  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage1.id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id
 
   config = {
     ingress = [
@@ -62,18 +62,18 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage1" {
 # Orange-cloud CNAME so tripbot.apps.stage.whereisdana.today
 # routes into the tunnel. Cloudflare proxies and terminates TLS
 # at the edge with an auto-issued cert.
-resource "cloudflare_dns_record" "stage1_tripbot_tunnel" {
+resource "cloudflare_dns_record" "stage_1_tripbot_tunnel" {
   zone_id = cloudflare_zone.apps_stage.id
   name    = "tripbot"
   type    = "CNAME"
   ttl     = 1 # 1 = auto when proxied
   proxied = true
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.stage1.id}.cfargotunnel.com"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.stage_1.id}.cfargotunnel.com"
 }
 
 # Access app gates tripbot at the edge — traffic only reaches
 # the tunnel if the source IP is in var.home_cidrs.
-resource "cloudflare_zero_trust_access_application" "stage1_tripbot" {
+resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
   account_id           = var.cloudflare_account_id
   name                 = "tripbot (stage-1)"
   type                 = "self_hosted"
@@ -89,13 +89,13 @@ resource "cloudflare_zero_trust_access_application" "stage1_tripbot" {
 
   policies = [
     {
-      id         = cloudflare_zero_trust_access_policy.stage1_tripbot_ip_allow.id
+      id         = cloudflare_zero_trust_access_policy.stage_1_tripbot_ip_allow.id
       precedence = 1
     },
   ]
 }
 
-resource "cloudflare_zero_trust_access_policy" "stage1_tripbot_ip_allow" {
+resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
   account_id = var.cloudflare_account_id
   name       = "tripbot stage-1 — allow allowlisted IPs"
   decision   = "allow"
@@ -111,7 +111,7 @@ resource "cloudflare_zero_trust_access_policy" "stage1_tripbot_ip_allow" {
 
 # Tunnel token consumed by the in-cluster cloudflared Deployment.
 # Wired to the k8s Secret via `task k8s-tunnel-token`.
-data "cloudflare_zero_trust_tunnel_cloudflared_token" "stage1" {
+data "cloudflare_zero_trust_tunnel_cloudflared_token" "stage_1" {
   account_id = var.cloudflare_account_id
-  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage1.id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id
 }

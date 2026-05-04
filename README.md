@@ -68,7 +68,7 @@ task k8s-tunnel-token
 
 # 5. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
 #    plus the cloudflared Deployment.
-task k8s-apply-stage1
+task k8s-apply-stage-1
 
 # 6. Verify (allow ~5min for NS delegation to propagate after step 3).
 curl https://tripbot.apps.stage.whereisdana.today/health/live

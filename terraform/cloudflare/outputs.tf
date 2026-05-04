@@ -1,7 +1,7 @@
 # Tunnel token — sensitive. Wire into the k8s cloudflared
 # Deployment's secret with `task k8s-tunnel-token`.
 output "cloudflared_tunnel_token" {
-  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage1.token
+  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage_1.token
   sensitive = true
 }
 
