@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# secret.env is gitignored. Generate from terraform output:
+#   task k8s-tunnel-token
+secretGenerator:
+  - name: cloudflared-secret
+    envs:
+      - secret.env

@@ -5,10 +5,10 @@
 # starts with the dashboard enabled and exposes it on port 9000.
 #
 # Access:
-#   - After cluster recreate: http://localhost:9000/dashboard/
-#     (the trailing slash matters — traefik's dashboard handler is
-#     strict about it)
-#   - Without recreate: kubectl -n kube-system port-forward svc/traefik 9000:9000
+#   kubectl -n kube-system port-forward svc/traefik 9000:9000
+#   open http://localhost:9000/dashboard/
+# (the trailing slash matters — traefik's dashboard handler is strict
+# about it)
 #
 # Don't apply this on prod — `--api.insecure=true` is fine for a
 # local cluster but exposes the API without auth.

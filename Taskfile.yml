@@ -21,6 +21,25 @@ tasks:
       # We can't use session tokens when making IAM changes
       - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
 
+  # Cloudflare resources — Pages project + the stage-1 tunnel/Access
+  # used by `k8s/overlays/stage-1`. Provider auth is via
+  # CLOUDFLARE_API_TOKEN; the S3 backend uses the default AWS
+  # credential chain.
+  #
+  # Detects the host's current public IP via ifconfig.me and writes
+  # it to a gitignored home_cidrs.auto.tfvars on every invocation.
+  # File-based vars stay stable across plan/apply (env vars don't,
+  # which broke v5 with "Can't change variable when applying a saved
+  # plan"). Bonus: the Cloudflare Access policy auto-tracks IP
+  # rotation between applies.
+  tf-cloudflare:
+    dir: terraform/cloudflare
+    cmds:
+      - |
+        ip=$(curl -fsS ifconfig.me) || { echo "could not detect home IP"; exit 1; }
+        echo "home_cidrs = [\"$ip/32\"]" > home_cidrs.auto.tfvars
+      - terraform {{.TF_ACTION}}
+
   # `aws-vault login` opens the AWS web console in browser
   aws-login-stage:
     cmds:
@@ -43,21 +62,38 @@ tasks:
   k8s-down:
     desc: tear down the local k3d cluster
     cmds:
-      - k3d cluster delete adanalife-local
+      - k3d cluster delete adanalife-bees
 
   k8s-import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
       - docker compose -f infra/docker/docker-compose.yml build
-      - k3d image import adanalife/tripbot:latest --cluster=adanalife-local
-      - k3d image import adanalife/vlc:latest --cluster=adanalife-local
-      - k3d image import adanalife/obs:latest --cluster=adanalife-local
+      - k3d image import adanalife/tripbot:latest --cluster=adanalife-bees
+      - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
+      - k3d image import adanalife/obs:latest --cluster=adanalife-bees
 
   k8s-apply:
     desc: apply the local app manifests to the cluster
     cmds:
       - kubectl apply -k k8s/overlays/local
+
+  k8s-apply-stage-1:
+    desc: apply stage-1 overlay (cloudflared tunnel + apps)
+    cmds:
+      - kubectl apply -k k8s/overlays/stage-1
+
+  # Pulls the tunnel token out of cloudflare terraform state and writes
+  # it to the cloudflared secret.env. Run once after the first
+  # `task tf-cloudflare`, and re-run if the tunnel is recreated.
+  k8s-tunnel-token:
+    desc: write cloudflared tunnel token from terraform output to secret.env
+    dir: terraform/cloudflare
+    cmds:
+      # aws-vault wrap is required: terraform output reads remote state
+      # in core's S3 bucket. See [[vault/infra/TODO]] for the longer-term
+      # cleanup item on the AWS/non-AWS terraform mixing.
+      - echo "TUNNEL_TOKEN=$(aws-vault exec adanalife-core -- terraform output -raw cloudflared_tunnel_token)" > ../../k8s/platform/cloudflared/overlays/stage-1/secret.env
 
   k8s-logs:
     desc: tail logs across all app pods

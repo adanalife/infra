@@ -24,18 +24,73 @@ task k8s-apply
 
 # 3. Verify
 kubectl get pods                              # all four Running
-curl -H "Host: tripbot.localhost" http://localhost/health/live
-# VNC (optional): vnc://localhost:5902 (obs), vnc://localhost:5903 (vlc)
-# RTSP (optional): rtsp://localhost:8554/dashcam
+kubectl port-forward svc/tripbot 8080:80 &    # ad-hoc HTTP to tripbot
+curl http://localhost:8080/health/live
+# VNC (optional): kubectl port-forward svc/obs 5902:5902 → vnc://localhost:5902
+#                 kubectl port-forward svc/vlc-server 5903:5903 → vnc://localhost:5903
+# RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
 
 # 4. Tear down
 task k8s-down
 ```
 
-The bundled traefik handles the tripbot Ingress; the bundled servicelb
-(klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared in the
-local overlays. Both are k3s-only — on EKS the same Ingress works against
-prod traefik unchanged, and LoadBalancer services are fulfilled by AWS ELB.
+The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
+— anything you want to reach from the laptop goes through
+`kubectl port-forward`, and stage-1 mode (next section) handles
+public exposure through a Cloudflare Tunnel.
+
+The bundled traefik handles the tripbot Ingress in-cluster; the bundled
+servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services
+declared in the local overlays. Both are k3s-only — on EKS the same
+Ingress works against prod traefik unchanged, and LoadBalancer services
+are fulfilled by AWS ELB.
+
+
+## exposing services publicly (stage-1 mode)
+
+Wires the cluster to a Cloudflare Tunnel — TLS and IP allowlisting are
+handled at the Cloudflare edge, no port-forwarding, no in-cluster certs.
+DNS lives on Cloudflare under `whalecore.com`, our dedicated stage-1 /
+experimental domain; nothing about this touches the Route53 zones for
+`whereisdana.today` or `dana.lol`. Cloudflare resources live in
+`terraform/cloudflare/`.
+
+```bash
+# 1. Set the Cloudflare API token (Zone:Zone:Edit, Account:Cloudflare
+#    Tunnel:Edit, Account:Cloudflare Pages:Edit, Account:Access:Apps and
+#    Policies:Edit, Zone:DNS:Edit, Zone:Zone Settings:Edit). Home IP
+#    auto-detected by the Taskfile target via ifconfig.me each run.
+export CLOUDFLARE_API_TOKEN=cf-pat-...
+
+# 2. First-time only — enable Cloudflare Access (Zero Trust) at
+#    https://dash.cloudflare.com → Zero Trust. Free tier; pick a team
+#    name. Required before Access policies can be created.
+
+# 3. Apply Cloudflare side — creates the whalecore.com zone, tunnel,
+#    ingress config, DNS record, Access app + IP allow policy.
+task tf-cloudflare
+
+# 4. First-time only — point whalecore.com's nameservers at Cloudflare.
+#    Get the values from terraform output:
+aws-vault exec adanalife-core -- sh -c 'cd terraform/cloudflare \
+  && terraform output -json whalecore_name_servers | jq -r ".[]"'
+#    Update the NS records at whalecore.com's registrar to those values.
+#    Cloudflare will mark the zone "Active" once propagation completes
+#    (minutes to hours).
+
+# 5. Write the tunnel token from terraform output into the kustomize
+#    secret.env (re-run any time the tunnel is recreated).
+task k8s-tunnel-token
+
+# 6. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
+#    plus the cloudflared Deployment.
+task k8s-apply-stage-1
+
+# 7. Verify (after Cloudflare marks the zone Active in step 4).
+curl https://tripbot.whalecore.com/health/live
+#   from an allowlisted IP → 200 OK
+#   from a non-allowlisted IP → Cloudflare Access challenge page
+```
 
 
 

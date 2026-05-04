@@ -1,21 +1,27 @@
-# k3d cluster config for local app development.
+# k3d cluster config for app development.
 #
 # Bring up with:  task k8s-up
 # Tear down with: task k8s-down
 #
+# Cluster name encodes the host (`bees` is dmerrick-bees) so future
+# laptops get their own — `adanalife-<host>`.
+#
+# No host port bindings: HTTP/HTTPS for stage-1 mode goes through
+# the Cloudflare Tunnel (no inbound listener on this machine).
+# Anything else (VNC, RTSP, traefik dashboard, etc.) is reachable
+# ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
+#
 # Notes for future EKS port:
-#   - Bundled traefik (ingress) IS portable — same Ingress manifests will
-#     work on prod traefik unchanged.
-#   - Bundled servicelb / klipper-lb is k3d/k3s-only. On EKS, LoadBalancer
-#     services are fulfilled by AWS ELB instead. The Service manifests
-#     don't change; only the implementation underneath does.
-#   - The host port mappings below (5902/5903/8554) are k3d's way of
-#     forwarding traffic into the cluster's loadbalancer. EKS does not
-#     need these — ELB exposes the LoadBalancer services directly.
+#   - Bundled traefik (ingress) IS portable — same Ingress manifests
+#     will work on prod traefik unchanged.
+#   - Bundled servicelb / klipper-lb is k3d/k3s-only. On EKS,
+#     LoadBalancer services are fulfilled by AWS ELB instead. The
+#     Service manifests don't change; only the implementation underneath
+#     does.
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
-  name: adanalife-local
+  name: adanalife-bees
 
 servers: 1
 agents: 0
@@ -27,28 +33,3 @@ volumes:
   - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
     nodeFilters:
       - server:*
-
-ports:
-  # traefik ingress (HTTP + HTTPS) — for tripbot.localhost and friends
-  - port: 80:80
-    nodeFilters:
-      - loadbalancer
-  - port: 443:443
-    nodeFilters:
-      - loadbalancer
-  # traefik dashboard / web UI (enabled by overlays/local/traefik-dashboard.yaml)
-  - port: 9000:9000
-    nodeFilters:
-      - loadbalancer
-  # vlc-server RTSP — so a browser/VLC on the host can connect
-  - port: 8554:8554
-    nodeFilters:
-      - loadbalancer
-  # obs VNC
-  - port: 5902:5902
-    nodeFilters:
-      - loadbalancer
-  # vlc-server VNC
-  - port: 5903:5903
-    nodeFilters:
-      - loadbalancer
