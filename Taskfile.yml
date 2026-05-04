@@ -21,25 +21,28 @@ tasks:
       # We can't use session tokens when making IAM changes
       - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
 
-  # Edit the home_cidrs allowlist (Cloudflare Access policy on
-  # tripbot.whalecore.com). Pulls the current value from Secrets
-  # Manager into $EDITOR as a JSON array of CIDR strings, validates
-  # JSON on save, then writes back. terraform reads the new value
-  # via data source on the next `task tf-stage`.
-  update-home-ip:
-    desc: edit the stage-1/home-cidrs JSON list in Secrets Manager
+  # Append the host's current public IP (via ifconfig.me) to the
+  # stage-1/allowlist-cidrs list in Secrets Manager, deduping with
+  # jq. Use this when your home IP rotates and you're locked out of
+  # tripbot.whalecore.com. terraform reads the updated value via
+  # data source on the next `task tf-stage`. To remove stale
+  # entries or add a non-current CIDR, edit the secret directly:
+  #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+  #     --secret-id stage-1/allowlist-cidrs --secret-string '["X.X.X.X/32", ...]'
+  update-allowlist:
+    desc: append your current public IP to stage-1/allowlist-cidrs
     cmds:
       - |
-        tmp=$(mktemp)
-        trap 'rm -f "$tmp"' EXIT
-        aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
-          --secret-id stage-1/home-cidrs --query SecretString --output text \
-          | jq . > "$tmp"
-        ${EDITOR:-vi} "$tmp"
-        jq empty < "$tmp" || { echo "invalid JSON — aborting"; exit 1; }
+        ip=$(curl -fsS ifconfig.me) || { echo "could not detect public IP"; exit 1; }
+        cidr="$ip/32"
+        updated=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
+          --secret-id stage-1/allowlist-cidrs --query SecretString --output text \
+          | jq --arg c "$cidr" '. + [$c] | unique')
         aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-          --secret-id stage-1/home-cidrs --secret-string "file://$tmp" >/dev/null
-        echo "home-cidrs updated. Run 'task tf-stage' to apply."
+          --secret-id stage-1/allowlist-cidrs --secret-string "$updated" >/dev/null
+        echo "allowlist-cidrs is now:"
+        echo "$updated" | jq .
+        echo "Run 'task tf-stage' to apply."
 
   # `aws-vault login` opens the AWS web console in browser
   aws-login-stage:

@@ -29,9 +29,9 @@ resource "cloudflare_zone" "stage_1" {
 
 # Allowlisted CIDRs for the Access policy below. Sourced from
 # Secrets Manager so the home IP can rotate without a code change.
-# Edit via `task update-home-ip`.
+# Edit via `task update-allowlist`.
 locals {
-  home_cidrs = jsondecode(data.aws_secretsmanager_secret_version.stage_1_home_cidrs.secret_string)
+  allowlist_cidrs = jsondecode(data.aws_secretsmanager_secret_version.stage_1_allowlist_cidrs.secret_string)
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this
@@ -87,7 +87,7 @@ resource "cloudflare_dns_record" "stage_1_tripbot_tunnel" {
 }
 
 # Access app gates tripbot at the edge — traffic only reaches
-# the tunnel if the source IP is in local.home_cidrs.
+# the tunnel if the source IP is in local.allowlist_cidrs.
 resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
   account_id           = var.cloudflare_account_id
   name                 = "tripbot (stage-1)"
@@ -121,7 +121,7 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
   decision = "bypass"
 
   include = [
-    for cidr in local.home_cidrs : {
+    for cidr in local.allowlist_cidrs : {
       ip = {
         ip = cidr
       }

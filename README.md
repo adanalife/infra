@@ -71,7 +71,7 @@ task tf-stage
 #    Policies:Edit, DNS:Edit, Zone Settings:Edit.
 aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
   --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
-task update-home-ip   # opens stage-1/home-cidrs in $EDITOR; JSON array of CIDRs
+task update-allowlist   # opens stage-1/allowlist-cidrs in $EDITOR; JSON array of CIDRs
 
 # 4. Second apply — creates the whalecore.com zone, tunnel, ingress
 #    config, DNS record, Access app + IP allow policy, and the Pages
