@@ -53,35 +53,9 @@ variable "primary_acm_cert_alternative_names" {
   default = []
 }
 
-# Cloudflare ----------------------------------------------------------
-
-variable "cloudflare_account_id" {
-  type        = string
-  description = "Cloudflare account ID"
-}
-
-variable "project_name" {
-  type        = string
-  description = "Cloudflare Pages project name"
-}
-
-variable "github_repo_owner" {
-  type        = string
-  description = "GitHub repository owner for the Pages project"
-  default     = "adanalife"
-}
-
-variable "github_repo_name" {
-  type        = string
-  description = "GitHub repository name for the Pages project"
-  default     = "website"
-}
-
-variable "production_branch" {
-  type        = string
-  description = "Git branch used for production deployments of the Pages project"
-  default     = "master"
-}
+# Cloudflare-related variables live in cloudflare-pages.tf so that
+# prod-1 (which symlinks this file) doesn't see them as required
+# inputs without having any cloudflare resources to use them on.
 
 # a secret string between CloudFront and S3 to control access
 resource "random_password" "static_site_secret" {

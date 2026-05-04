@@ -48,28 +48,6 @@ output "external_dns_role_arn" {
   value = aws_iam_role.external_dns.arn
 }
 
-# Cloudflare ----------------------------------------------------------
-
-# Tunnel token — sensitive. Wire into the k8s cloudflared Deployment's
-# secret with `task k8s-tunnel-token`.
-output "cloudflared_tunnel_token" {
-  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage_1.token
-  sensitive = true
-}
-
-# Nameservers Cloudflare assigned to whalecore.com. Point your
-# registrar's NS records at these to delegate the zone to Cloudflare.
-output "stage_1_zone_name_servers" {
-  value       = cloudflare_zone.stage_1.name_servers
-  description = "Update whalecore.com NS at the registrar to these"
-}
-
-output "pages_url" {
-  description = "Cloudflare Pages URL"
-  value       = "${var.project_name}.pages.dev"
-}
-
-output "pages_project_name" {
-  description = "Cloudflare Pages project name (used by wrangler)"
-  value       = cloudflare_pages_project.stage_1.name
-}
+# Cloudflare outputs live in cloudflare-pages.tf and cloudflare-tunnel.tf
+# so that prod-1 (which symlinks this file) doesn't inherit references
+# to resources it doesn't have.

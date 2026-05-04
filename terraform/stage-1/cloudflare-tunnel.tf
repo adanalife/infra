@@ -135,3 +135,17 @@ data "cloudflare_zero_trust_tunnel_cloudflared_token" "stage_1" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id
 }
+
+# Tunnel token — sensitive. Wire into the k8s cloudflared Deployment's
+# secret with `task k8s-tunnel-token`.
+output "cloudflared_tunnel_token" {
+  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage_1.token
+  sensitive = true
+}
+
+# Nameservers Cloudflare assigned to whalecore.com. Point your
+# registrar's NS records at these to delegate the zone to Cloudflare.
+output "stage_1_zone_name_servers" {
+  value       = cloudflare_zone.stage_1.name_servers
+  description = "Update whalecore.com NS at the registrar to these"
+}
