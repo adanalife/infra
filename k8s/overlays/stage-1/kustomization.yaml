@@ -1,0 +1,20 @@
+# Umbrella overlay for the "stage-1 mode" — the local k3d cluster
+# wired to a public Cloudflare Tunnel. `kubectl apply -k k8s/overlays/stage-1`
+# brings up the same four-app stack as overlays/local PLUS the cloudflared
+# Deployment that dials Cloudflare's edge.
+#
+# We reuse the per-app local overlays for now; a real prod cluster would
+# get its own apps/<app>/overlays/prod with hardened images, real secrets,
+# and resource ceilings.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../apps/postgres/overlays/local
+  - ../../apps/tripbot/overlays/local
+  - ../../apps/vlc-server/overlays/local
+  - ../../apps/obs/overlays/local
+  - ../../platform/cloudflared/overlays/stage-1
+  # Note: not pulling in overlays/local/traefik-dashboard.yaml —
+  # that overlay enables --api.insecure=true on traefik, which
+  # is fine for laptop loopback but not for a tunneled cluster.
