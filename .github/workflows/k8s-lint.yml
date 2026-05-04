@@ -29,12 +29,17 @@ jobs:
       # templates so kustomize can build.
       - name: Stub secret.env files
         run: |
-          for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
+          for d in k8s/apps/{postgres,tripbot,obs}/overlays/local \
+                   k8s/platform/cloudflared/overlays/stage-1; do
             cp "$d/secret.env.example" "$d/secret.env"
           done
 
-      - name: Kustomize build
-        run: kubectl kustomize k8s/overlays/local > /tmp/built.yaml
+      - name: Kustomize build (local + stage-1)
+        run: |
+          kubectl kustomize k8s/overlays/local   > /tmp/local.yaml
+          kubectl kustomize k8s/overlays/stage-1 > /tmp/stage-1.yaml
 
-      - name: Server-side dry-run apply
-        run: kubectl apply --dry-run=server -k k8s/overlays/local
+      - name: Server-side dry-run apply (local + stage-1)
+        run: |
+          kubectl apply --dry-run=server -k k8s/overlays/local
+          kubectl apply --dry-run=server -k k8s/overlays/stage-1
