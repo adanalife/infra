@@ -106,7 +106,12 @@ resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
 resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
   account_id = var.cloudflare_account_id
   name       = "tripbot stage-1 — allow allowlisted IPs"
-  decision   = "allow"
+  # `bypass` (not `allow`): a matching IP skips auth entirely. With
+  # `allow`, the include rule only determines who's *eligible* to
+  # authenticate via Access — IPs in the allowlist would still get
+  # the email-OTP login page. Bypass is the right semantic for
+  # "this IP is trusted; let the request through".
+  decision = "bypass"
 
   include = [
     for cidr in var.home_cidrs : {
