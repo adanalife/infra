@@ -62,16 +62,16 @@ tasks:
   k8s-down:
     desc: tear down the local k3d cluster
     cmds:
-      - k3d cluster delete adanalife-local
+      - k3d cluster delete adanalife-bees
 
   k8s-import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
       - docker compose -f infra/docker/docker-compose.yml build
-      - k3d image import adanalife/tripbot:latest --cluster=adanalife-local
-      - k3d image import adanalife/vlc:latest --cluster=adanalife-local
-      - k3d image import adanalife/obs:latest --cluster=adanalife-local
+      - k3d image import adanalife/tripbot:latest --cluster=adanalife-bees
+      - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
+      - k3d image import adanalife/obs:latest --cluster=adanalife-bees
 
   k8s-apply:
     desc: apply the local app manifests to the cluster

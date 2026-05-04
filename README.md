@@ -24,18 +24,26 @@ task k8s-apply
 
 # 3. Verify
 kubectl get pods                              # all four Running
-curl -H "Host: tripbot.localhost" http://localhost/health/live
-# VNC (optional): vnc://localhost:5902 (obs), vnc://localhost:5903 (vlc)
-# RTSP (optional): rtsp://localhost:8554/dashcam
+kubectl port-forward svc/tripbot 8080:80 &    # ad-hoc HTTP to tripbot
+curl http://localhost:8080/health/live
+# VNC (optional): kubectl port-forward svc/obs 5902:5902 → vnc://localhost:5902
+#                 kubectl port-forward svc/vlc-server 5903:5903 → vnc://localhost:5903
+# RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
 
 # 4. Tear down
 task k8s-down
 ```
 
-The bundled traefik handles the tripbot Ingress; the bundled servicelb
-(klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared in the
-local overlays. Both are k3s-only — on EKS the same Ingress works against
-prod traefik unchanged, and LoadBalancer services are fulfilled by AWS ELB.
+The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
+— anything you want to reach from the laptop goes through
+`kubectl port-forward`, and stage-1 mode (next section) handles
+public exposure through a Cloudflare Tunnel.
+
+The bundled traefik handles the tripbot Ingress in-cluster; the bundled
+servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services
+declared in the local overlays. Both are k3s-only — on EKS the same
+Ingress works against prod traefik unchanged, and LoadBalancer services
+are fulfilled by AWS ELB.
 
 
 ## exposing services publicly (stage-1 mode)
