@@ -7,6 +7,10 @@ provider "aws" {
   }
 }
 
+# The cloudflare provider lives in cloudflare-pages.tf so that prod-1
+# (which symlinks this file) doesn't inherit it — prod-1 has no
+# Cloudflare resources today.
+
 # this lets us get the current account_id
 data "aws_caller_identity" "current" {}
 

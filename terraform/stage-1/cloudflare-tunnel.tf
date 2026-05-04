@@ -18,13 +18,20 @@
 # Whalecore is the dedicated domain for stage-1 / experimental
 # Cloudflare-managed services. Authoritative DNS lives here, not
 # Route53 — point whalecore.com's nameservers at the values from
-# `terraform output whalecore_name_servers` at your registrar.
-resource "cloudflare_zone" "whalecore" {
+# `terraform output stage_1_zone_name_servers` at your registrar.
+resource "cloudflare_zone" "stage_1" {
   account = {
     id = var.cloudflare_account_id
   }
   name = "whalecore.com"
   type = "full"
+}
+
+# Allowlisted CIDRs for the Access policy below. Sourced from
+# Secrets Manager so the home IP can rotate without a code change.
+# Edit via `task update-allowlist`.
+locals {
+  allowlist_cidrs = jsondecode(data.aws_secretsmanager_secret_version.stage_1_allowlist_cidrs.secret_string)
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this
@@ -56,7 +63,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
   config = {
     ingress = [
       {
-        hostname = "tripbot.${cloudflare_zone.whalecore.name}"
+        hostname = "tripbot.${cloudflare_zone.stage_1.name}"
         service  = "http://tripbot.default.svc.cluster.local:8080"
       },
       # Catch-all (cloudflared requires this as the last rule).
@@ -71,7 +78,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
 # tunnel. Cloudflare proxies and terminates TLS at the edge with an
 # auto-issued cert.
 resource "cloudflare_dns_record" "stage_1_tripbot_tunnel" {
-  zone_id = cloudflare_zone.whalecore.id
+  zone_id = cloudflare_zone.stage_1.id
   name    = "tripbot"
   type    = "CNAME"
   ttl     = 1 # 1 = auto when proxied
@@ -80,7 +87,7 @@ resource "cloudflare_dns_record" "stage_1_tripbot_tunnel" {
 }
 
 # Access app gates tripbot at the edge — traffic only reaches
-# the tunnel if the source IP is in var.home_cidrs.
+# the tunnel if the source IP is in local.allowlist_cidrs.
 resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
   account_id           = var.cloudflare_account_id
   name                 = "tripbot (stage-1)"
@@ -91,7 +98,7 @@ resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
   destinations = [
     {
       type = "public"
-      uri  = "tripbot.${cloudflare_zone.whalecore.name}"
+      uri  = "tripbot.${cloudflare_zone.stage_1.name}"
     },
   ]
 
@@ -114,7 +121,7 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
   decision = "bypass"
 
   include = [
-    for cidr in var.home_cidrs : {
+    for cidr in local.allowlist_cidrs : {
       ip = {
         ip = cidr
       }
@@ -127,4 +134,18 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "stage_1" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id
+}
+
+# Tunnel token — sensitive. Wire into the k8s cloudflared Deployment's
+# secret with `task k8s-tunnel-token`.
+output "cloudflared_tunnel_token" {
+  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage_1.token
+  sensitive = true
+}
+
+# Nameservers Cloudflare assigned to whalecore.com. Point your
+# registrar's NS records at these to delegate the zone to Cloudflare.
+output "stage_1_zone_name_servers" {
+  value       = cloudflare_zone.stage_1.name_servers
+  description = "Update whalecore.com NS at the registrar to these"
 }
