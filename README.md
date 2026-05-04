@@ -38,6 +38,45 @@ local overlays. Both are k3s-only — on EKS the same Ingress works against
 prod traefik unchanged, and LoadBalancer services are fulfilled by AWS ELB.
 
 
+## exposing services publicly (stage-1 mode)
+
+Wires the cluster to a Cloudflare Tunnel — TLS and IP allowlisting are
+handled at the Cloudflare edge, no port-forwarding, no in-cluster certs.
+DNS for `apps.stage.whereisdana.today` lives on Cloudflare; the parent
+zone stays on Route53 with one NS-delegation record. Cloudflare resources
+are in `terraform/cloudflare/`; the NS record is in
+`terraform/stage-1/route53.tf` and pulls Cloudflare nameservers via
+`terraform_remote_state`.
+
+```bash
+# 1. Set the Cloudflare API token (Zone:Edit, DNS:Edit, Access:Edit,
+#    Cloudflare Tunnel:Edit) and your home CIDR.
+export CLOUDFLARE_API_TOKEN=cf-pat-...
+export TF_VAR_home_cidrs='["'$(curl -s ifconfig.me)'/32"]'
+
+# 2. Apply Cloudflare side first — creates the zone, tunnel, ingress
+#    config, DNS record, and Access app + IP allow policy.
+task tf-cloudflare
+
+# 3. Apply stage-1 — adds the Route53 NS delegation that points
+#    apps.stage.whereisdana.today at the new Cloudflare zone.
+task tf-stage
+
+# 4. Write the tunnel token from terraform output into the kustomize
+#    secret.env (re-run any time the tunnel is recreated).
+task k8s-tunnel-token
+
+# 5. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
+#    plus the cloudflared Deployment.
+task k8s-apply-stage1
+
+# 6. Verify (allow ~5min for NS delegation to propagate after step 3).
+curl https://tripbot.apps.stage.whereisdana.today/health/live
+#   from an allowlisted IP → 200 OK
+#   from a non-allowlisted IP → Cloudflare Access challenge page
+```
+
+
 
 ### set up prometheus
 

@@ -21,6 +21,15 @@ tasks:
       # We can't use session tokens when making IAM changes
       - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
 
+  # Cloudflare resources — Pages project + the stage-1 tunnel/Access
+  # used by `k8s/overlays/stage-1`. Provider auth is via
+  # CLOUDFLARE_API_TOKEN; the S3 backend uses the default AWS
+  # credential chain. Requires TF_VAR_home_cidrs in env.
+  tf-cloudflare:
+    dir: terraform/cloudflare
+    cmds:
+      - terraform {{.TF_ACTION}}
+
   # `aws-vault login` opens the AWS web console in browser
   aws-login-stage:
     cmds:
@@ -58,6 +67,20 @@ tasks:
     desc: apply the local app manifests to the cluster
     cmds:
       - kubectl apply -k k8s/overlays/local
+
+  k8s-apply-stage1:
+    desc: apply stage-1 overlay (cloudflared tunnel + apps)
+    cmds:
+      - kubectl apply -k k8s/overlays/stage-1
+
+  # Pulls the tunnel token out of cloudflare terraform state and writes
+  # it to the cloudflared secret.env. Run once after the first
+  # `task tf-cloudflare`, and re-run if the tunnel is recreated.
+  k8s-tunnel-token:
+    desc: write cloudflared tunnel token from terraform output to secret.env
+    dir: terraform/cloudflare
+    cmds:
+      - echo "TUNNEL_TOKEN=$(terraform output -raw cloudflared_tunnel_token)" > ../../k8s/platform/cloudflared/overlays/stage-1/secret.env
 
   k8s-logs:
     desc: tail logs across all app pods
