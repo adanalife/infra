@@ -131,6 +131,12 @@ variable "managed_iam_policies_for_terraform" {
     "AmazonRoute53FullAccess",
     "AmazonS3FullAccess",
     "IAMFullAccess",
+    # ReadOnlyAccess intentionally excludes secretsmanager:GetSecretValue,
+    # so CI plans against terraform/stage-1/ would fail at the cloudflare
+    # provider's data source read. SecretsManagerReadWrite also covers
+    # the create/put/delete actions terraform needs for the secrets in
+    # secrets.tf.
+    "SecretsManagerReadWrite",
     "ReadOnlyAccess", #TODO: remove this after a while & add individual read-only policies
   ]
 }
