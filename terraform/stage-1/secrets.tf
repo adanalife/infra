@@ -51,3 +51,34 @@ resource "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
 data "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
   secret_id = aws_secretsmanager_secret.stage_1_allowlist_cidrs.id
 }
+
+# Allow CITerraformRole to read just these two secrets. ReadOnlyAccess
+# (already attached) excludes secretsmanager:GetSecretValue, which the
+# cloudflare provider's data source needs during `terraform plan` /
+# drift in CI. Scoped to the specific ARNs — CI can't read other
+# secrets in the account, and can't create/put/delete anything (so
+# `task tf-stage` on a SM-touching change has to run locally).
+data "aws_iam_policy_document" "ci_terraform_secrets_read" {
+  statement {
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:ListSecretVersionIds",
+    ]
+    resources = [
+      aws_secretsmanager_secret.cloudflare_api_token.arn,
+      aws_secretsmanager_secret.stage_1_allowlist_cidrs.arn,
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_secrets_read" {
+  name        = "AllowCITerraformReadStage1Secrets"
+  description = "Read-only access for CITerraformRole to the two SM secrets managed by terraform/stage-1/secrets.tf"
+  policy      = data.aws_iam_policy_document.ci_terraform_secrets_read.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_secrets_read.arn
+}
