@@ -5,7 +5,9 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Recreate so the RWO onscreens PVC isn't double-attached during rollout.
+    # Recreate avoids two OBS pods racing for the same Xvfb display
+    # and VNC port during rollout — the OBS process owns stateful
+    # local resources that don't survive an overlapping handoff.
     type: Recreate
   selector:
     matchLabels:
@@ -15,16 +17,6 @@ spec:
       labels:
         app: obs
     spec:
-      # Pin obs to the same node as vlc-server so they can both mount
-      # the RWO onscreens PVC. Defensive — k3d here is single-node
-      # anyway, but this keeps the manifest correct on any topology.
-      affinity:
-        podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app: vlc-server
-              topologyKey: kubernetes.io/hostname
       containers:
         - name: obs
           image: adanalife/obs:latest
@@ -37,11 +29,6 @@ spec:
                 name: obs-config
             - secretRef:
                 name: obs-secret
-          volumeMounts:
-            # Reads onscreen state files written by vlc-server. The
-            # PVC itself is owned by the vlc-server kustomization.
-            - name: onscreens
-              mountPath: /opt/data/run
           resources:
             requests:
               cpu: 200m
@@ -51,7 +38,3 @@ spec:
             # actual stream, so keeping the headroom modest.
             limits:
               memory: 3Gi
-      volumes:
-        - name: onscreens
-          persistentVolumeClaim:
-            claimName: onscreens
