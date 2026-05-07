@@ -8,9 +8,12 @@ locals {
 resource "aws_iam_user" "user" {
   count = length(local.user_data)
   name  = local.user_data[count.index]["user"]
-  tags = {
-    Name = local.user_data[count.index]["user"]
-  }
+  tags = merge(
+    {
+      Name = local.user_data[count.index]["user"]
+    },
+    lookup(local.user_data[count.index], "tags", {}),
+  )
   force_destroy = false
 }
 
