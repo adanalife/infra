@@ -20,18 +20,6 @@ variable "project_name" {
   description = "Cloudflare Pages project name"
 }
 
-variable "github_repo_owner" {
-  type        = string
-  description = "GitHub repository owner for the Pages project"
-  default     = "adanalife"
-}
-
-variable "github_repo_name" {
-  type        = string
-  description = "GitHub repository name for the Pages project"
-  default     = "website"
-}
-
 variable "production_branch" {
   type        = string
   description = "Git branch used for production deployments of the Pages project"
@@ -52,22 +40,12 @@ resource "cloudflare_pages_project" "prod_1" {
 
   production_branch = var.production_branch
 
-  # Build is handled by GitHub Actions (wrangler pages deploy),
-  # not by Cloudflare's built-in CI. No build_config needed.
-
-  source = {
-    type = "github"
-    config = {
-      owner                          = var.github_repo_owner
-      repo_name                      = var.github_repo_name
-      production_branch              = var.production_branch
-      preview_deployment_setting     = "custom"
-      preview_branch_includes        = ["*"]
-      preview_branch_excludes        = [var.production_branch]
-      pr_comments_enabled            = true
-      production_deployments_enabled = false
-    }
-  }
+  # Direct Upload project — no `source` block. We deploy via
+  # `wrangler pages deploy` from GitHub Actions (release.yml), so the
+  # Cloudflare → GitHub App integration is dead weight here, and an
+  # unhealthy install was throwing a 401 "Cloudflare Pages Git
+  # installation" error on terraform apply (CF error 8000011) that
+  # Direct Upload sidesteps.
 }
 
 output "pages_url" {
