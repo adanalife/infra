@@ -72,7 +72,25 @@ tasks:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
-      - docker compose -f infra/docker/docker-compose.yml build
+      # --project-directory + --env-file mirror bin/devenv so build contexts
+      # resolve relative to the tripbot repo root and ${VAR} substitutions in
+      # the compose file pick up env.docker. Without these, compose resolves
+      # `context: .` against the compose file's dir and the build fails with
+      # `lstat .../infra/docker/infra: no such file or directory`.
+      #
+      # On arm64 hosts (Apple Silicon), layer docker-compose.arm64.yml so
+      # the OBS service builds from Dockerfile.arm64 (compiles OBS + CEF
+      # from source). Without it, the amd64 Dockerfile runs natively on
+      # arm64, the OBS PPA has no arm64 packages, and apt silently falls
+      # back to Ubuntu universe's obs-studio +dfsg build (CEF stripped),
+      # so browser_source silently fails at scene load. First arm64 build
+      # takes ~30 min for the CEF compile; cached thereafter.
+      - |
+        args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
+        case "$(uname -m)" in
+          arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;;
+        esac
+        docker compose $args build
       - k3d image import adanalife/tripbot:latest --cluster=adanalife-bees
       - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
       - k3d image import adanalife/obs:latest --cluster=adanalife-bees
