@@ -76,3 +76,25 @@ output "pages_project_name" {
   description = "Cloudflare Pages project name (used by wrangler)"
   value       = cloudflare_pages_project.stage_1.name
 }
+
+# Custom domain: bind www.whalecore.com to the staging Pages project so
+# the staging site is reachable at a real hostname (handy for sharing
+# previews and for testing flows that depend on a non-pages.dev origin).
+# The matching DNS record is below.
+resource "cloudflare_pages_domain" "stage_1_whalecore_www" {
+  account_id   = var.cloudflare_account_id
+  project_name = cloudflare_pages_project.stage_1.name
+  name         = "www.${cloudflare_zone.stage_1.name}"
+}
+
+# Orange-cloud CNAME so www.whalecore.com resolves through Cloudflare's
+# edge and Universal SSL fronts the Pages origin. Pages requires the
+# proxy on for custom-domain TLS to work.
+resource "cloudflare_dns_record" "stage_1_whalecore_www_pages" {
+  zone_id = cloudflare_zone.stage_1.id
+  name    = "www"
+  type    = "CNAME"
+  ttl     = 1 # 1 = auto when proxied
+  proxied = true
+  content = "${cloudflare_pages_project.stage_1.name}.pages.dev"
+}
