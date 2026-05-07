@@ -75,3 +75,14 @@ resource "cloudflare_dns_record" "stage_1_whalecore_www_pages" {
   proxied = true
   content = "${cloudflare_pages_project.stage_1.name}.pages.dev"
 }
+
+# Second custom domain: staging.dana.lol. Authoritative DNS for
+# dana.lol lives in Route53 (not Cloudflare), so there's no
+# cloudflare_dns_record partner here — the matching CNAME is in
+# terraform/core/route53.tf:aws_route53_record.primary_staging.
+# Cloudflare validates the TLS cert via that Route53-managed CNAME.
+resource "cloudflare_pages_domain" "stage_1_staging_dana_lol" {
+  account_id   = var.cloudflare_account_id
+  project_name = cloudflare_pages_project.stage_1.name
+  name         = "staging.dana.lol"
+}
