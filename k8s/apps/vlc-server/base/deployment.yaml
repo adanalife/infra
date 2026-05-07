@@ -5,7 +5,10 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Recreate so the RWO onscreens PVC isn't double-attached during rollout.
+    # Recreate so an in-flight RTSP stream / VNC session isn't briefly
+    # served by two replicas at once during rollout. vlc-server is a
+    # single-replica workload by design (RTSP + libvlc state are local
+    # to the process).
     type: Recreate
   selector:
     matchLabels:
@@ -29,16 +32,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: vlc-server-config
-          volumeMounts:
-            - name: onscreens
-              mountPath: /opt/data/run
           resources:
             requests:
               cpu: 200m
               memory: 512Mi
             limits:
               memory: 2Gi
-      volumes:
-        - name: onscreens
-          persistentVolumeClaim:
-            claimName: onscreens
