@@ -31,6 +31,29 @@ data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
   secret_id = aws_secretsmanager_secret.cloudflare_api_token.id
 }
 
+# Twitch RTMP ingest key for the adanalife_ (production) channel. No
+# terraform-side consumer (no data source, not in the CI IAM policy);
+# the consumer is a future production OBS pod via ESO. The k8s/obs/
+# name prefix puts this inside the ESOSecretsReader IAM scope
+# (arn:aws:secretsmanager:*:*:secret:k8s/*) so it'll be readable
+# without a bump when the platform stack lands here.
+# Populate out-of-band:
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/obs/twitch-stream-key --secret-string "$STREAM_KEY"
+# Get the key from https://dashboard.twitch.tv/u/adanalife/settings/stream
+resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
+  name        = "k8s/obs/twitch-stream-key"
+  description = "Twitch RTMP stream key for adanalife (production). Consumed by OBS via ESO. Rotate from the Twitch dashboard, then put-secret-value here."
+}
+
+resource "aws_secretsmanager_secret_version" "k8s_obs_twitch_stream_key" {
+  secret_id     = aws_secretsmanager_secret.k8s_obs_twitch_stream_key.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Allow CITerraformRole to read this secret. ReadOnlyAccess (already
 # attached) excludes secretsmanager:GetSecretValue, which the
 # cloudflare provider's data source needs during `terraform plan` /
