@@ -78,7 +78,7 @@ jobs:
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
       - name: terraform apply
-        uses: dflook/terraform-apply@v1
+        uses: dflook/terraform-apply@v2
         with:
           path: ${{ env.terraform_dir }}
           # skip the terraform plan if running via workflow dispatch
