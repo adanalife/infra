@@ -72,7 +72,12 @@ tasks:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
-      - docker compose -f infra/docker/docker-compose.yml build
+      # --project-directory + --env-file mirror bin/devenv so build contexts
+      # resolve relative to the tripbot repo root and ${VAR} substitutions in
+      # the compose file pick up env.docker. Without these, compose resolves
+      # `context: .` against the compose file's dir and the build fails with
+      # `lstat .../infra/docker/infra: no such file or directory`.
+      - docker compose --project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml build
       - k3d image import adanalife/tripbot:latest --cluster=adanalife-bees
       - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
       - k3d image import adanalife/obs:latest --cluster=adanalife-bees
