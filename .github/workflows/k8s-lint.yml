@@ -38,6 +38,30 @@ jobs:
             cp "$d/secret.env.example" "$d/secret.env"
           done
 
+      # ESO is the only chart this lint installs. The linted overlays
+      # embed ExternalSecret resources, so its CRDs must be registered
+      # before `kubectl --dry-run=server` can validate them. The other
+      # platform charts (cert-manager, external-dns) install no CRDs
+      # that any overlay references today, so they'd be dead weight here
+      # — add a helm step alongside this one if that ever changes.
+      #
+      # Helm-install matches `task k8s-platform-up`. The CRD `Established`
+      # wait dodges the kubectl-cache lag that otherwise produces
+      # "no matches for kind" right after install.
+      - name: Install External Secrets Operator (CRDs + controllers)
+        run: |
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo update
+          helm upgrade --install external-secrets external-secrets/external-secrets \
+            -n external-secrets --create-namespace \
+            -f k8s/external-secrets/stage-1/values.yml \
+            --wait
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment --all -n external-secrets
+          kubectl wait --for=condition=Established --timeout=60s \
+            crd/clustersecretstores.external-secrets.io \
+            crd/externalsecrets.external-secrets.io
+
       - name: Kustomize build (local + stage-1)
         run: |
           kubectl kustomize k8s/overlays/local   > /tmp/local.yaml

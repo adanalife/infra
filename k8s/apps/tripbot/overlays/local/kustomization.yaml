@@ -3,6 +3,10 @@ kind: Kustomization
 
 resources:
   - ../../base
+  # ExternalSecret pulling Grafana Cloud OTLP creds from AWS SM. The
+  # materialized Secret is consumed by an envFrom patch below and by
+  # vlc-server's overlay.
+  - external-secret.yaml
 
 # secret.env is gitignored — copy from secret.env.example.
 secretGenerator:
@@ -12,16 +16,22 @@ secretGenerator:
 
 # Merge environment-specific values into the base ConfigMap. ENV is
 # what tripbot's main package checks at startup; without it the bot
-# refuses to boot.
+# refuses to boot. The OTEL_* defaults turn the SDK on for stage-1; the
+# OTLP endpoint + auth header arrive via the grafana-cloud-otlp Secret
+# (envFrom patch below).
 configMapGenerator:
   - name: tripbot-config
     behavior: merge
     literals:
       - ENV=development
+      - OTEL_SDK_DISABLED=false
+      - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
 
-# Local Ingress hostname — `tripbot.localhost` resolves to 127.0.0.1
-# on most systems via the .localhost TLD, hitting traefik on port 80.
 patches:
+  # Local Ingress hostname — `tripbot.localhost` resolves to 127.0.0.1
+  # on most systems via the .localhost TLD, hitting traefik on port 80.
   - target:
       kind: Ingress
       name: tripbot
@@ -29,3 +39,18 @@ patches:
       - op: replace
         path: /spec/rules/0/host
         value: tripbot.localhost
+  # Inject the Grafana Cloud OTLP env vars (endpoint + headers) from the
+  # ExternalSecret-managed Secret. optional:true keeps the pod running
+  # while ESO is still reconciling — pkg/telemetry treats a missing
+  # endpoint as "OTel disabled," so the worst case is no traces, not a
+  # crash loop.
+  - target:
+      kind: Deployment
+      name: tripbot
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: grafana-cloud-otlp
+            optional: true

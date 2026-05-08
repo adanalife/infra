@@ -78,12 +78,16 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
   depends_on = [aws_iam_role_policy_attachment.ci_terraform_twitch_stream_key_manage]
 }
 
-# Allow CITerraformRole to read the secrets that the cloudflare provider
-# needs at plan time. ReadOnlyAccess (already attached) excludes
-# secretsmanager:GetSecretValue, which the cloudflare provider's data
-# source uses during `terraform plan` / drift in CI. Scoped to the
-# specific ARNs — CI can't read the values of other secrets in the
-# account.
+# Allow CITerraformRole to read the SM secrets that terraform itself
+# touches at plan time. ReadOnlyAccess (already attached) excludes
+# secretsmanager:GetSecretValue. Two distinct call sites need it:
+#   - provider data sources (cloudflare provider reads its own token at
+#     plan via `data.aws_secretsmanager_secret_version.cloudflare_api_token`);
+#   - `aws_secretsmanager_secret_version` resource refresh, which calls
+#     GetSecretValue to compare current value against state — even with
+#     `ignore_changes = [secret_string]`, the refresh still reads.
+# Scoped to specific ARNs so CI can't read the values of other secrets
+# in the account.
 data "aws_iam_policy_document" "ci_terraform_secrets_read" {
   statement {
     actions = [
@@ -94,13 +98,14 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
     resources = [
       aws_secretsmanager_secret.cloudflare_api_token.arn,
       aws_secretsmanager_secret.stage_1_allowlist_cidrs.arn,
+      aws_secretsmanager_secret.grafana_cloud_otlp.arn,
     ]
   }
 }
 
 resource "aws_iam_policy" "ci_terraform_secrets_read" {
   name        = "AllowCITerraformReadStage1Secrets"
-  description = "Read-only access for CITerraformRole to the two SM secrets managed by terraform/stage-1/secrets.tf"
+  description = "Read-only access for CITerraformRole to the SM secrets terraform refreshes during plan in stage-1."
   policy      = data.aws_iam_policy_document.ci_terraform_secrets_read.json
 }
 
