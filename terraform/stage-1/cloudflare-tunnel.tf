@@ -108,15 +108,18 @@ resource "cloudflare_zero_trust_access_application" "stage_1_tripbot" {
 
   policies = [
     {
-      id         = cloudflare_zero_trust_access_policy.stage_1_tripbot_ip_allow.id
+      id         = cloudflare_zero_trust_access_policy.stage_1_ip_allow.id
       precedence = 1
     },
   ]
 }
 
-resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
+# Shared IP-bypass policy used by every stage-1 Access app.
+# Split into per-app policies if/when one app needs a different
+# allowlist (e.g. a broader allowlist for a public-facing service).
+resource "cloudflare_zero_trust_access_policy" "stage_1_ip_allow" {
   account_id = var.cloudflare_account_id
-  name       = "tripbot stage-1 — allow allowlisted IPs"
+  name       = "stage-1 — allow allowlisted IPs"
   # `bypass` (not `allow`): a matching IP skips auth entirely. With
   # `allow`, the include rule only determines who's *eligible* to
   # authenticate via Access — IPs in the allowlist would still get
@@ -144,9 +147,8 @@ resource "cloudflare_dns_record" "stage_1_vlc_tunnel" {
   content = "${cloudflare_zero_trust_tunnel_cloudflared.stage_1.id}.cfargotunnel.com"
 }
 
-# Access app gates vlc-server's HTTP API at the edge — same
-# IP-bypass shape as tripbot, separate app so policy decisions
-# can diverge per-app later (e.g. broader allowlist for vlc).
+# Access app gates vlc-server's HTTP API at the edge.
+# Reuses the shared stage_1_ip_allow policy.
 resource "cloudflare_zero_trust_access_application" "stage_1_vlc" {
   account_id           = var.cloudflare_account_id
   name                 = "vlc-server (stage-1)"
@@ -163,23 +165,9 @@ resource "cloudflare_zero_trust_access_application" "stage_1_vlc" {
 
   policies = [
     {
-      id         = cloudflare_zero_trust_access_policy.stage_1_vlc_ip_allow.id
+      id         = cloudflare_zero_trust_access_policy.stage_1_ip_allow.id
       precedence = 1
     },
-  ]
-}
-
-resource "cloudflare_zero_trust_access_policy" "stage_1_vlc_ip_allow" {
-  account_id = var.cloudflare_account_id
-  name       = "vlc-server stage-1 — allow allowlisted IPs"
-  decision   = "bypass"
-
-  include = [
-    for cidr in local.allowlist_cidrs : {
-      ip = {
-        ip = cidr
-      }
-    }
   ]
 }
 
