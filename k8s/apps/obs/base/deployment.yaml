@@ -43,11 +43,16 @@ spec:
           # Crash-dialog detection is the load-bearing one: OBS process
           # is up but pinned behind a modal until a human dismisses it
           # — only a pod restart unsticks it.
-          # initialDelay 60s covers Xvfb + OBS + scene-load startup.
+          # initialDelay 15s = 3× cushion over the observed ~5s window
+          # to "all three checks succeed" on stage-1 (full Xvfb + OBS +
+          # scene + RTMP-connect happens in ~7s on a warm-cache pull).
+          # First-pull on a fresh cluster adds layer-download time;
+          # 15s + (period 30s × failureThreshold 3) gives 105s before
+          # kubelet kills, plenty of room for the cold-start case.
           livenessProbe:
             exec:
               command: ["/opt/obs/healthcheck.sh"]
-            initialDelaySeconds: 60
+            initialDelaySeconds: 15
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 3
