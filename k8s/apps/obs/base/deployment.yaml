@@ -20,7 +20,7 @@ spec:
       containers:
         - name: obs
           image: adanalife/obs:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: vnc
               containerPort: 5900
