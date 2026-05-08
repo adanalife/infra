@@ -2,10 +2,10 @@
 # (treated as "stage-1" until a real prod cluster exists).
 #
 # Public ingress flow:
-#   user → tripbot.whalecore.com
+#   user → {tripbot,vlc}.whalecore.com
 #        → Cloudflare edge (TLS termination + Access policy)
 #        → tunnel → in-cluster cloudflared Deployment
-#        → http://tripbot.default.svc.cluster.local:80
+#        → http://<svc>.default.svc.cluster.local:8080
 #
 # Companion stage-1 manifests are at k8s/platform/cloudflared/.
 # Operator runbook is in infra/README.md → "exposing services publicly".
@@ -48,8 +48,8 @@ resource "cloudflare_zero_trust_tunnel_cloudflared" "stage_1" {
 }
 
 # Tunnel ingress — public hostnames map to in-cluster Services.
-# tripbot is HTTP-served and the only thing exposed today;
-# vlc-server (RTSP), obs (VNC), postgres are not exposed.
+# tripbot and vlc-server's HTTP API are exposed today;
+# vlc-server RTSP, obs (VNC), postgres are not exposed.
 #
 # Heads-up: cloudflare provider v5.x cannot destroy this resource
 # (`terraform plan` shows "Resource Destruction Considerations"
@@ -65,6 +65,10 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "stage_1" {
       {
         hostname = "tripbot.${cloudflare_zone.stage_1.name}"
         service  = "http://tripbot.default.svc.cluster.local:8080"
+      },
+      {
+        hostname = "vlc.${cloudflare_zone.stage_1.name}"
+        service  = "http://vlc-server.default.svc.cluster.local:8080"
       },
       # Catch-all (cloudflared requires this as the last rule).
       {
@@ -119,6 +123,56 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_tripbot_ip_allow" {
   # the email-OTP login page. Bypass is the right semantic for
   # "this IP is trusted; let the request through".
   decision = "bypass"
+
+  include = [
+    for cidr in local.allowlist_cidrs : {
+      ip = {
+        ip = cidr
+      }
+    }
+  ]
+}
+
+# Orange-cloud CNAME for vlc.whalecore.com → in-cluster vlc-server
+# HTTP API on port 8080.
+resource "cloudflare_dns_record" "stage_1_vlc_tunnel" {
+  zone_id = cloudflare_zone.stage_1.id
+  name    = "vlc"
+  type    = "CNAME"
+  ttl     = 1 # 1 = auto when proxied
+  proxied = true
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.stage_1.id}.cfargotunnel.com"
+}
+
+# Access app gates vlc-server's HTTP API at the edge — same
+# IP-bypass shape as tripbot, separate app so policy decisions
+# can diverge per-app later (e.g. broader allowlist for vlc).
+resource "cloudflare_zero_trust_access_application" "stage_1_vlc" {
+  account_id           = var.cloudflare_account_id
+  name                 = "vlc-server (stage-1)"
+  type                 = "self_hosted"
+  session_duration     = "24h"
+  app_launcher_visible = false
+
+  destinations = [
+    {
+      type = "public"
+      uri  = "vlc.${cloudflare_zone.stage_1.name}"
+    },
+  ]
+
+  policies = [
+    {
+      id         = cloudflare_zero_trust_access_policy.stage_1_vlc_ip_allow.id
+      precedence = 1
+    },
+  ]
+}
+
+resource "cloudflare_zero_trust_access_policy" "stage_1_vlc_ip_allow" {
+  account_id = var.cloudflare_account_id
+  name       = "vlc-server stage-1 — allow allowlisted IPs"
+  decision   = "bypass"
 
   include = [
     for cidr in local.allowlist_cidrs : {
