@@ -197,6 +197,51 @@ tasks:
       - kubectl apply -k k8s/external-secrets/stage-1
       - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
 
+  # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
+  # obs-secret is `optional: true`, so the existence + content of that
+  # Secret IS the stream state. `obs-stream-on` pulls the STREAM_KEY
+  # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and creates
+  # the Secret; `obs-stream-off` deletes the Secret. Either way we
+  # rollout-restart obs so the entrypoint re-reads STREAM_KEY at boot
+  # — Kubernetes doesn't propagate Secret changes to running pods'
+  # env vars.
+  obs-stream-on:
+    desc: enable Twitch streaming on OBS (pulls STREAM_KEY from SM, creates obs-secret, restarts OBS)
+    preconditions:
+      - sh: command -v aws-vault >/dev/null
+        msg: "aws-vault not found — install with `brew install aws-vault`"
+      - sh: command -v kubectl >/dev/null
+        msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster — run `task k8s-up` first"
+      - sh: kubectl get deploy obs >/dev/null 2>&1
+        msg: "obs Deployment not found — run `task k8s-apply-stage-1` first"
+    cmds:
+      - |
+        set -euo pipefail
+        sk=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
+          --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
+        kubectl create secret generic obs-secret \
+          --from-literal=STREAM_KEY="$sk" \
+          --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+      - kubectl rollout restart deploy/obs
+      - kubectl rollout status deploy/obs --timeout=120s
+      - echo "OBS streaming to Twitch (adanalife_staging via stage-1 SM)"
+
+  obs-stream-off:
+    desc: disable Twitch streaming on OBS (deletes obs-secret, restarts OBS to idle)
+    preconditions:
+      - sh: command -v kubectl >/dev/null
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster"
+      - sh: kubectl get deploy obs >/dev/null 2>&1
+        msg: "obs Deployment not found"
+    cmds:
+      - kubectl delete secret obs-secret --ignore-not-found
+      - kubectl rollout restart deploy/obs
+      - kubectl rollout status deploy/obs --timeout=120s
+      - echo "OBS idle (not streaming)"
+
   k8s-logs:
     desc: tail logs across all app pods
     cmds:
