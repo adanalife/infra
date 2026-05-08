@@ -38,11 +38,16 @@ jobs:
             cp "$d/secret.env.example" "$d/secret.env"
           done
 
-      # ESO CRDs are needed before kubectl can validate ExternalSecret
-      # resources baked into app overlays (e.g. tripbot's grafana-cloud
-      # OTLP secret). Helm-install matches `task k8s-platform-up`. The
-      # CRD `Established` wait dodges the kubectl-cache lag that
-      # otherwise produces "no matches for kind" right after install.
+      # ESO is the only chart this lint installs. The linted overlays
+      # embed ExternalSecret resources, so its CRDs must be registered
+      # before `kubectl --dry-run=server` can validate them. The other
+      # platform charts (cert-manager, external-dns) install no CRDs
+      # that any overlay references today, so they'd be dead weight here
+      # — add a helm step alongside this one if that ever changes.
+      #
+      # Helm-install matches `task k8s-platform-up`. The CRD `Established`
+      # wait dodges the kubectl-cache lag that otherwise produces
+      # "no matches for kind" right after install.
       - name: Install External Secrets Operator (CRDs + controllers)
         run: |
           helm repo add external-secrets https://charts.external-secrets.io
