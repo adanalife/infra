@@ -1,7 +1,7 @@
 # Cloudflare Pages project for dana.lol static site
 #
-# Staging-first: this creates "dana-lol-staging" on Cloudflare Pages.
-# The site will be available at dana-lol-staging.pages.dev.
+# Staging-first: this creates "dana-lol-stage-1" on Cloudflare Pages.
+# The site will be available at dana-lol-stage-1.pages.dev.
 # PR preview deployments are automatic for any non-production branch.
 #
 # TODO: once staging is verified, add a "dana-lol" production project

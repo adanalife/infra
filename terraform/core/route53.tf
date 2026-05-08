@@ -112,7 +112,7 @@ resource "aws_route53_record" "primary_staging" {
   # Low TTL during cutover so rollback is fast. Bump back to 300 once
   # CF Pages traffic has been stable for ~24h.
   ttl     = "60"
-  records = ["dana-lol-staging.pages.dev"]
+  records = ["dana-lol-stage-1.pages.dev"]
 }
 
 resource "aws_route53_record" "secondary_staging" {
