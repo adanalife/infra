@@ -26,11 +26,13 @@ jobs:
         run: k3d cluster create lint --no-lb
 
       # secret.env files are gitignored — stub them from the .example
-      # templates so kustomize can build.
+      # templates so kustomize can build. cloudflared and external-secrets
+      # no longer use this pattern (their Secrets are applied directly to
+      # the cluster from terraform output by Taskfile targets), so this
+      # only covers app overlays that still wire secrets via secretGenerator.
       - name: Stub secret.env files
         run: |
-          for d in k8s/apps/{postgres,tripbot,obs}/overlays/local \
-                   k8s/platform/cloudflared/overlays/stage-1; do
+          for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
             cp "$d/secret.env.example" "$d/secret.env"
           done
 

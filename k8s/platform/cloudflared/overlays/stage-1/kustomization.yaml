@@ -4,9 +4,8 @@ kind: Kustomization
 resources:
   - ../../base
 
-# secret.env is gitignored. Generate from terraform output:
-#   task k8s-tunnel-token
-secretGenerator:
-  - name: cloudflared-secret
-    envs:
-      - secret.env
+# The cloudflared-secret Secret that the deployment references is
+# applied directly by `task k8s-tunnel-token` via `kubectl create
+# secret generic ... | kubectl apply -f -`. The token stays in a shell
+# variable only — no plaintext secret.env on disk. See the task
+# definition in Taskfile.yml.
