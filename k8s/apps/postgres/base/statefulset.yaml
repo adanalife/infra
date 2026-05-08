@@ -26,6 +26,18 @@ spec:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
               subPath: pgdata
+          # Liveness uses pg_isready (exec) — answers protocol-level
+          # rather than just confirming the port is open like the
+          # tcpSocket readinessProbe does. Catches the "process up
+          # but not accepting queries" failure mode where a restart
+          # is the right answer.
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             tcpSocket:
               port: postgres
