@@ -25,3 +25,4 @@
 # k8s secrets
 k8s/**/credentials
 k8s/**/secret-access-key
+k8s/**/secret.env

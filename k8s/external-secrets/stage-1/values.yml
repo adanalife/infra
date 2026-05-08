@@ -1,0 +1,14 @@
+# Helm values for external-secrets/external-secrets chart. Bootstrap
+# CRDs (ClusterSecretStore, ExternalSecret, etc.) are installed by
+# default — no installCRDs flag required on this chart.
+#
+# Defaults are fine for a single-node k3d. Override resource limits
+# if/when this gets ported to a real cluster.
+replicaCount: 1
+
+# Webhook + cert-controller need their own deployments by default;
+# fine to keep on a learning cluster but worth disabling on tiny nodes.
+webhook:
+  create: true
+certController:
+  create: true

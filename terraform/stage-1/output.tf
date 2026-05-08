@@ -48,6 +48,6 @@ output "external_dns_role_arn" {
   value = aws_iam_role.external_dns.arn
 }
 
-# Cloudflare outputs live in cloudflare-pages.tf and cloudflare-tunnel.tf
-# so that prod-1 (which symlinks this file) doesn't inherit references
-# to resources it doesn't have.
+# ESO outputs live in eso.tf, Cloudflare outputs live in cloudflare-pages.tf
+# and cloudflare-tunnel.tf — non-symlinked files so prod-1 (which symlinks
+# this file) doesn't inherit references to resources it doesn't have.

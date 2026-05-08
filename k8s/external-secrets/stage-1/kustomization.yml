@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: external-secrets
+
+resources:
+  - cluster-secret-store.yml
+
+# The eso-aws-credentials Secret that cluster-secret-store.yml references
+# is applied directly by `task k8s-eso-bootstrap` via `kubectl create
+# secret generic ... | kubectl apply -f -`. The decrypted creds stay in
+# shell variables only — no plaintext secret.env on disk. See the task
+# definition in Taskfile.yml.
