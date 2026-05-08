@@ -37,6 +37,17 @@ spec:
             - secretRef:
                 name: obs-secret
                 optional: true
+          # Exec the in-image healthcheck.sh — OBS has no HTTP surface.
+          # Catches the safe-mode crash-dialog (modal blocks the canvas;
+          # only a pod restart unsticks it), the failure mode this probe
+          # exists for.
+          livenessProbe:
+            exec:
+              command: ["/opt/obs/healthcheck.sh"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
               cpu: 200m

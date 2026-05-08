@@ -32,6 +32,17 @@ spec:
           envFrom:
             - configMapRef:
                 name: vlc-server-config
+          # Bare-HTTP liveness — only fails when the HTTP server is hung
+          # or the process is gone. Doesn't try to detect libvlc-internal
+          # deadlock (false-positive risk during legitimate state
+          # transitions); that's tracked separately as a follow-up.
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /health/ready
