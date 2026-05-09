@@ -1,0 +1,30 @@
+# Public Ingress for vlc-server's HTTP API at vlc.stage.whereisdana.today.
+#
+# external-dns reconciles the hostname annotation into a Route53 A
+# record pointing at the host's public IP (set globally via
+# external-dns's --default-targets, fed from values.local.yml at
+# install time).
+#
+# HTTP-only for now — TLS depends on cert-manager, which isn't wired
+# into k8s:platform:up yet (blocked on the home-network port-forward
+# work). Add `cert-manager.io/cluster-issuer` annotation + tls block
+# once cert-manager is live.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vlc-server
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: vlc.stage.whereisdana.today
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: vlc.stage.whereisdana.today
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vlc-server
+                port:
+                  name: http

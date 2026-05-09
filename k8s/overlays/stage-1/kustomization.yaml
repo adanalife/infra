@@ -5,14 +5,16 @@
 #
 # We reuse the per-app local overlays for now; a real prod cluster would
 # get its own apps/<app>/overlays/prod with hardened images, real secrets,
-# and resource ceilings.
+# and resource ceilings. vlc-server is the first to graduate into a
+# proper apps/vlc-server/overlays/stage-1 so it can carry its public
+# Ingress.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
   - ../../apps/postgres/overlays/local
   - ../../apps/tripbot/overlays/local
-  - ../../apps/vlc-server/overlays/local
+  - ../../apps/vlc-server/overlays/stage-1
   - ../../apps/obs/overlays/local
   - ../../platform/cloudflared/overlays/stage-1
 # Traefik is installed via helm by `task k8s:platform:up` — see
