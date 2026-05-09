@@ -65,6 +65,14 @@ locals {
     "go-runtime",
     "http-routes",
     "logs-errors",
+    # Community dashboards from grafana.com, vendored as JSON so the
+    # version is pinned and diffable. Pre-processing applied at vendor
+    # time: __inputs/__requires stripped, ${DS_PROMETHEUS} swapped for
+    # the project's __DS_PROMETHEUS__ sentinel, .id removed, .uid set
+    # to a stable slug.
+    "k8s-cluster-monitoring", # grafana.com/dashboards/315
+    "node-exporter-full",     # grafana.com/dashboards/1860
+    "k8s-deployment-metrics", # grafana.com/dashboards/741
   ])
   dashboard_substitutions = {
     "__DS_PROMETHEUS__" = data.grafana_data_source.prometheus.uid
