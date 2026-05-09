@@ -25,3 +25,33 @@ resource "aws_secretsmanager_secret_version" "grafana_cloud_otlp" {
     ignore_changes = [secret_string]
   }
 }
+
+# Grafana Cloud admin API credentials consumed terraform-side by the
+# `grafana` provider (see grafana.tf). Same placeholder-plus-out-of-band
+# pattern. Seeded via:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/grafana-cloud-api \
+#     --secret-string '{"GRAFANA_CLOUD_URL":"https://<stack>.grafana.net","GRAFANA_CLOUD_API_TOKEN":"<token>","GRAFANA_CLOUD_STACK_SLUG":"<stack>"}'
+#
+# Token: mint a service account in the stack with Admin role, then
+# create a token under it. Stack slug = the subdomain of your URL.
+# Lives at stage-1/* (terraform-only consumer) rather than k8s/* so it
+# stays out of the ESOSecretsReader read scope.
+resource "aws_secretsmanager_secret" "grafana_cloud_api" {
+  name        = "stage-1/grafana-cloud-api"
+  description = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
+}
+
+resource "aws_secretsmanager_secret_version" "grafana_cloud_api" {
+  secret_id     = aws_secretsmanager_secret.grafana_cloud_api.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "grafana_cloud_api" {
+  secret_id  = aws_secretsmanager_secret.grafana_cloud_api.id
+  depends_on = [aws_secretsmanager_secret_version.grafana_cloud_api] # cold-start ordering
+}
