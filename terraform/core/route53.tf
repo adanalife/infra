@@ -91,9 +91,7 @@ resource "aws_route53_record" "primary_www" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "www.${var.domain}"
   type    = "CNAME"
-  # Low TTL during cutover so rollback is fast. Bump back to 300 once
-  # CF Pages traffic has been stable for ~24h.
-  ttl     = "60"
+  ttl     = "300"
   records = ["dana-lol-production.pages.dev"]
 }
 
@@ -109,9 +107,7 @@ resource "aws_route53_record" "primary_staging" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "staging.${var.domain}"
   type    = "CNAME"
-  # Low TTL during cutover so rollback is fast. Bump back to 300 once
-  # CF Pages traffic has been stable for ~24h.
-  ttl     = "60"
+  ttl     = "300"
   records = ["dana-lol-staging.pages.dev"]
 }
 
