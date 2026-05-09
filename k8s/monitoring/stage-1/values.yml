@@ -44,6 +44,14 @@ clusterMetrics:
   enabled: true
   collector: alloy-metrics
 
+# hostMetrics scrapes node-exporter (deployed below via telemetryServices).
+# Without this, node-exporter runs but its /metrics never reaches Mimir,
+# so node-level panels (Node Exporter Full + CPU/memory/disk on cluster
+# overview) stay empty. clusterMetrics only covers kubelet/cAdvisor/KSM.
+hostMetrics:
+  enabled: true
+  collector: alloy-metrics
+
 clusterEvents:
   enabled: true
   collector: alloy-singleton
@@ -61,10 +69,10 @@ annotationAutodiscovery:
   enabled: true
   collector: alloy-metrics
 
-# kube-state-metrics + node-exporter are off by default in v4.x; both
-# get scraped under clusterMetrics so they have to be deployed here.
-# cAdvisor scrape is built into clusterMetrics's kubelet target — no
-# extra deploy needed.
+# kube-state-metrics + node-exporter are off by default in v4.x;
+# deploying them here, then clusterMetrics scrapes KSM and hostMetrics
+# scrapes node-exporter. cAdvisor scrape is built into clusterMetrics's
+# kubelet target — no extra deploy needed.
 telemetryServices:
   kube-state-metrics:
     deploy: true
