@@ -49,12 +49,16 @@ clusterMetrics:
 # so node-level panels (Node Exporter Full + CPU/memory/disk on cluster
 # overview) stay empty. clusterMetrics only covers kubelet/cAdvisor/KSM.
 #
-# node-exporter.enabled is the per-source flag — hostMetrics also covers
-# Windows Exporter and Kepler (off here, only node-exporter applies).
+# `linuxHosts.enabled: true` is the per-source switch in the feature-
+# host-metrics subchart (parent chart aliases it under `hostMetrics:`).
+# Picks up the node-exporter pods deployed below via telemetryServices
+# automatically. The chart's README example calls this `node-exporter:`
+# but the rendered config only honors `linuxHosts:`. Verified by
+# `helm template` against k8s-monitoring 4.1.1.
 hostMetrics:
   enabled: true
   collector: alloy-metrics
-  node-exporter:
+  linuxHosts:
     enabled: true
 
 clusterEvents:
