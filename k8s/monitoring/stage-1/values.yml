@@ -52,6 +52,15 @@ podLogsViaLoki:
   enabled: true
   collector: alloy-logs
 
+# annotationAutodiscovery scrapes any pod tagged with prometheus.io/scrape
+# annotations. Used today by the helm-installed traefik (k8s/traefik/values.yml
+# sets podAnnotations) — avoids needing kube-prometheus-stack CRDs +
+# ServiceMonitor. App workloads that want their /metrics scraped can
+# add the same annotations.
+annotationAutodiscovery:
+  enabled: true
+  collector: alloy-metrics
+
 # kube-state-metrics + node-exporter are off by default in v4.x; both
 # get scraped under clusterMetrics so they have to be deployed here.
 # cAdvisor scrape is built into clusterMetrics's kubelet target — no
