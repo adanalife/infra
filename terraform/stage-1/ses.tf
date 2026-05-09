@@ -97,7 +97,7 @@ resource "aws_iam_user_policy" "contact_form_mailer_send" {
 # out of state and out of CI's GetSecretValue grants.
 resource "aws_secretsmanager_secret" "k8s_contact_form_smtp" {
   name        = "k8s/contact-form/smtp"
-  description = "SES SMTP credentials for the contact-form k8s deploy. Consumed by ESO. JSON: {username, password}. Populate via `task contact-form:bootstrap-smtp`."
+  description = "SES SMTP credentials for the contact-form k8s deploy. Consumed by ESO. JSON: {SMTP_USERNAME, SMTP_PASSWORD} so dataFrom.extract maps directly to envFrom keys. Populate via `task contact-form:bootstrap-smtp`."
 
   depends_on = [aws_iam_role_policy_attachment.ci_terraform_contact_form_smtp_manage]
 }

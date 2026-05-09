@@ -458,8 +458,14 @@ tasks:
         print(base64.b64encode(bytes([0x04]) + k).decode("ascii"), end="")
         ')
 
-        # 4. Write to SM
-        payload=$(jq -nc --arg u "$ak" --arg p "$smtp_password" '{username: $u, password: $p}')
+        # 4. Write to SM. Keys are SMTP_USERNAME / SMTP_PASSWORD so that
+        # the ExternalSecret's `dataFrom.extract` maps each JSON key
+        # directly to a k8s Secret key with the same name, and the
+        # contact-form pod's `envFrom: secretRef:` finds the env vars
+        # the app reads (SMTP_USERNAME, SMTP_PASSWORD) without any
+        # translation step.
+        payload=$(jq -nc --arg u "$ak" --arg p "$smtp_password" \
+          '{SMTP_USERNAME: $u, SMTP_PASSWORD: $p}')
         aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
           --secret-id k8s/contact-form/smtp \
           --secret-string "$payload" >/dev/null
