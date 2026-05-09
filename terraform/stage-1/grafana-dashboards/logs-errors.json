@@ -1,0 +1,122 @@
+{
+  "title": "Logs — errors & warnings",
+  "uid": "logs-errors",
+  "tags": ["tripbot", "vlc-server", "logs"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+        "query": "label_values({deployment_environment=~\".+\"}, service_name)",
+        "current": { "text": "All", "value": ".+" },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "search",
+        "type": "textbox",
+        "label": "Free-text search",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Errors (range)",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=\"ERROR\" [$__range]))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 100 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Warnings (range)",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=\"WARN\" [$__range]))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 50 },
+            { "color": "red", "value": 500 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total log lines (range)",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"}[$__range]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Log volume by severity",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (severity_text) (rate({service_name=~\"$service\"}[$__auto]))", "legendFormat": "{{severity_text}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "logs/s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Errors & warnings",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 14 },
+      "targets": [
+        { "refId": "A", "expr": "{service_name=~\"$service\"} | severity_text=~\"ERROR|WARN\" |~ \"$search\"" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "All logs (matching search)",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 12 },
+      "targets": [
+        { "refId": "A", "expr": "{service_name=~\"$service\"} |~ \"$search\"" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+    }
+  ]
+}
