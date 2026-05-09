@@ -382,3 +382,91 @@ tasks:
     desc: tail logs across all app pods
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
+
+  # contact-form: SMTP credential bootstrap for the staging deploy.
+  #
+  # Run once after `task tf:stage:apply` lands the SES + IAM resources
+  # in ses.tf. Re-runnable: idempotent on already-verified recipients,
+  # always overwrites the SM secret value (no harm).
+  #
+  # Steps:
+  #   1. SES sandbox requires verified recipients. If the recipient
+  #      isn't yet verified, send the AWS verification email and
+  #      exit (user clicks link, re-runs).
+  #   2. Pull the encrypted access-key secret from terraform output,
+  #      base64-decode, keybase-decrypt.
+  #   3. Derive the SES SMTP password from the secret access key
+  #      using AWS's documented HMAC-SHA256 chain (SigV4 → 0x04
+  #      version byte → base64).
+  #   4. Write {username, password} JSON to k8s/contact-form/smtp
+  #      via aws secretsmanager put-secret-value.
+  #
+  # Override the recipient by exporting RECIPIENT_EMAIL before the
+  # task. The default matches whatever EMAIL_RECIPIENTS is wired into
+  # the contact-form deployment manifest.
+  contact-form:bootstrap-smtp:
+    desc: verify recipient + populate k8s/contact-form/smtp in SM with derived SES SMTP creds
+    vars:
+      RECIPIENT: '{{.RECIPIENT_EMAIL | default "danadotlol@gmail.com"}}'
+    preconditions:
+      - sh: command -v aws-vault >/dev/null
+        msg: "aws-vault not found — install with `brew install aws-vault`"
+      - sh: command -v keybase >/dev/null
+        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+      - sh: command -v python3 >/dev/null
+        msg: "python3 not found — install with `mise use -g python@3.12` or system python"
+      - sh: command -v jq >/dev/null
+        msg: "jq not found — install with `brew install jq`"
+    cmds:
+      - |
+        set -euo pipefail
+        email='{{.RECIPIENT}}'
+
+        # 1. Ensure recipient is verified (SES sandbox)
+        verified=$(aws-vault exec adanalife-stage -- aws ses get-identity-verification-attributes \
+          --identities "$email" \
+          --query "VerificationAttributes.\"$email\".VerificationStatus" \
+          --output text 2>/dev/null || echo "None")
+        if [ "$verified" != "Success" ]; then
+          echo "Recipient $email is not yet verified by SES (status: $verified)."
+          echo "Sending AWS verification email..."
+          aws-vault exec adanalife-stage -- aws ses verify-email-identity --email-address "$email"
+          echo
+          echo "Click the verification link in $email's inbox, then re-run:"
+          echo "  task contact-form:bootstrap-smtp"
+          exit 1
+        fi
+        echo "Recipient $email is SES-verified."
+
+        # 2. Pull terraform outputs + decrypt the access key
+        ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw contact_form_mailer_access_key)
+        sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw contact_form_mailer_secret_encrypted \
+              | base64 -d | keybase pgp decrypt)
+
+        # 3. Derive the SES SMTP password (SigV4 chain → 0x04 prefix → base64)
+        smtp_password=$(SK="$sk" REGION="us-east-1" python3 -c '
+        import base64, hmac, hashlib, os
+        def _sign(key, msg):
+            return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+        secret = os.environ["SK"]
+        region = os.environ["REGION"]
+        k = _sign(("AWS4" + secret).encode("utf-8"), "11111111")
+        k = _sign(k, region)
+        k = _sign(k, "ses")
+        k = _sign(k, "aws4_request")
+        k = _sign(k, "SendRawEmail")
+        print(base64.b64encode(bytes([0x04]) + k).decode("ascii"), end="")
+        ')
+
+        # 4. Write to SM. Keys are SMTP_USERNAME / SMTP_PASSWORD so that
+        # the ExternalSecret's `dataFrom.extract` maps each JSON key
+        # directly to a k8s Secret key with the same name, and the
+        # contact-form pod's `envFrom: secretRef:` finds the env vars
+        # the app reads (SMTP_USERNAME, SMTP_PASSWORD) without any
+        # translation step.
+        payload=$(jq -nc --arg u "$ak" --arg p "$smtp_password" \
+          '{SMTP_USERNAME: $u, SMTP_PASSWORD: $p}')
+        aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+          --secret-id k8s/contact-form/smtp \
+          --secret-string "$payload" >/dev/null
+        echo "Wrote SES SMTP credentials to k8s/contact-form/smtp"

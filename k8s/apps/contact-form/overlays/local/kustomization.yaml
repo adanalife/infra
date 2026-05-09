@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  # ExternalSecret pulling SES SMTP creds from AWS SM. Materialized
+  # Secret is consumed by the Deployment's envFrom (see ../../base/deployment.yaml).
+  - external-secret.yaml
+
+patches:
+  # Real public hostname for the staging deploy. external-dns publishes
+  # a DNS record at this name targeting the host's public IP; cert-manager
+  # issues a Let's Encrypt cert via DNS-01 against the stage.whereisdana.today
+  # zone. Patch covers both the rule host and the TLS host so the cert SAN
+  # matches what visitors actually request.
+  - target:
+      kind: Ingress
+      name: contact-form
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: contact.stage.whereisdana.today
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: contact.stage.whereisdana.today

@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contact-form
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: contact-form
+  template:
+    metadata:
+      labels:
+        app: contact-form
+    spec:
+      containers:
+        - name: contact-form
+          image: adanalife/contact-form:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: contact-form-config
+            - secretRef:
+                name: contact-form-smtp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

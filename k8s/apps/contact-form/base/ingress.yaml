@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: contact-form
+  annotations:
+    # Real Let's Encrypt cert via DNS-01. Flip to letsencrypt-staging-route53
+    # via an overlay patch while iterating to avoid LE prod's
+    # 5-duplicate-certs/week limit.
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+spec:
+  ingressClassName: traefik
+  tls:
+    # host is patched per-overlay (real hostname for stage-1; .localhost for
+    # any future local-only overlay).
+    - hosts:
+        - contact-form.example.invalid
+      secretName: contact-form-tls
+  rules:
+    - host: contact-form.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: contact-form
+                port:
+                  name: http

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: contact-form
+spec:
+  type: ClusterIP
+  selector:
+    app: contact-form
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
