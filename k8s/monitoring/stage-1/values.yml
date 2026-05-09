@@ -1,0 +1,73 @@
+# Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
+# in-cluster collectors that fill the dashboards landed in
+# terraform/stage-1/grafana-dashboards/:
+#
+#   - Alloy collectors → scrape pods + ship logs to Loki + cluster events
+#   - kube-state-metrics + node-exporter → cluster/pod/node metrics to Mimir
+#   - kubelet + cAdvisor scrape (built into clusterMetrics)
+#
+# Credentials come from the grafana-cloud-metrics-write Secret in this
+# namespace, materialized by the ExternalSecret in external-secret.yaml.
+# All four keys are read at runtime via Alloy's `remote.kubernetes.secret`
+# expression, so rotating the SM value + force-syncing the ExternalSecret
+# is enough to pick up new tokens without redeploying the chart.
+
+cluster:
+  name: stage-1
+
+destinations:
+  metrics:
+    type: prometheus
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.metrics.data["PROMETHEUS_HOST"]) + "/api/prom/push"
+    auth:
+      type: basic
+      usernameKey: PROMETHEUS_USERNAME
+      passwordKey: TOKEN
+    secret:
+      create: false
+      name: grafana-cloud-metrics-write
+      namespace: monitoring
+
+  logs:
+    type: loki
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.logs.data["LOKI_HOST"]) + "/loki/api/v1/push"
+    auth:
+      type: basic
+      usernameKey: LOKI_USERNAME
+      passwordKey: TOKEN
+    secret:
+      create: false
+      name: grafana-cloud-metrics-write
+      namespace: monitoring
+
+clusterMetrics:
+  enabled: true
+  collector: alloy-metrics
+
+clusterEvents:
+  enabled: true
+  collector: alloy-singleton
+
+podLogsViaLoki:
+  enabled: true
+  collector: alloy-logs
+
+# kube-state-metrics + node-exporter are off by default in v4.x; both
+# get scraped under clusterMetrics so they have to be deployed here.
+# cAdvisor scrape is built into clusterMetrics's kubelet target — no
+# extra deploy needed.
+telemetryServices:
+  kube-state-metrics:
+    deploy: true
+  node-exporter:
+    deploy: true
+
+# Alloy collector deployments. Defaults are fine for a single-node k3d;
+# revisit on a real multi-node cluster.
+collectors:
+  alloy-metrics:
+    presets: [clustered, statefulset]
+  alloy-logs:
+    presets: [filesystem-log-reader, daemonset]
+  alloy-singleton:
+    presets: [singleton]

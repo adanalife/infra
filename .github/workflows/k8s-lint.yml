@@ -15,7 +15,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install k3d
         run: curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash

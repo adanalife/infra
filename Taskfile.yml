@@ -169,15 +169,23 @@ tasks:
           --dry-run=client -o yaml | kubectl apply -f -
       - echo "applied eso-aws-credentials Secret to external-secrets namespace"
 
-  # Install ESO into the local cluster. Idempotent — re-run after a
-  # cluster recreate or to upgrade the chart. Depends on
-  # `k8s-eso-bootstrap`, which auto-skips when the bootstrap Secret
-  # already exists (so the common path doesn't re-prompt for
-  # aws-vault + keybase). Future consumers (cert-manager, external-dns,
-  # app workloads) layer on top via their own kustomize overlays +
-  # ExternalSecret manifests.
+  # Install ESO + grafana-k8s-monitoring into the local cluster.
+  # Idempotent — re-run after a cluster recreate or to upgrade the
+  # chart. Depends on `k8s-eso-bootstrap`, which auto-skips when the
+  # bootstrap Secret already exists (so the common path doesn't
+  # re-prompt for aws-vault + keybase).
+  #
+  # k8s-monitoring requires the k8s/grafana-cloud-metrics-write SM
+  # value to have been seeded out-of-band first; see the bootstrap
+  # comment block at the top of terraform/stage-1/grafana-k8s-monitoring.tf.
+  # If it hasn't been seeded, the ExternalSecret materialization will
+  # fail and the helm install will follow.
+  #
+  # Future consumers (cert-manager, external-dns, app workloads)
+  # layer on top via their own kustomize overlays + ExternalSecret
+  # manifests.
   k8s-platform-up:
-    desc: install External Secrets Operator into the local cluster
+    desc: install ESO + grafana-k8s-monitoring into the local cluster
     deps: [k8s-eso-bootstrap]
     preconditions:
       - sh: command -v helm >/dev/null
@@ -188,6 +196,7 @@ tasks:
         msg: "no reachable cluster — run `task k8s-up` first"
     cmds:
       - helm repo add external-secrets https://charts.external-secrets.io
+      - helm repo add grafana https://grafana.github.io/helm-charts
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -202,6 +211,25 @@ tasks:
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/stage-1
       - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      # grafana-k8s-monitoring: namespace + ExternalSecret first so ESO
+      # materializes grafana-cloud-metrics-write before the helm chart
+      # tries to read it.
+      - kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl apply -k k8s/monitoring/stage-1
+      - |
+        echo "Waiting for grafana-cloud-metrics-write Secret to materialize..."
+        for i in $(seq 1 30); do
+          if kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null 2>&1; then
+            echo "ready"; break
+          fi
+          sleep 2
+        done
+        kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
+          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded? See terraform/stage-1/grafana-k8s-monitoring.tf."; exit 1; }
+      - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
+          -n monitoring
+          -f k8s/monitoring/stage-1/values.yml
+      - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-secret is `optional: true`, so the existence + content of that
