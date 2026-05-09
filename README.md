@@ -18,7 +18,7 @@ for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
 done
 
 # 2. Bring up the cluster, build & import images, apply manifests
-task cluster:up
+task k8s:cluster:up
 task k8s:import-images   # builds via tripbot/infra/docker/docker-compose.yml
 task k8s:apply
 
@@ -31,7 +31,7 @@ curl http://localhost:8080/health/live
 # RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
 
 # 4. Tear down
-task cluster:down
+task k8s:cluster:down
 ```
 
 The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)

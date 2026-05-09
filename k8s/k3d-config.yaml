@@ -1,7 +1,7 @@
 # k3d cluster config for app development.
 #
-# Bring up with:  task cluster:up
-# Tear down with: task cluster:down
+# Bring up with:  task k8s:cluster:up
+# Tear down with: task k8s:cluster:down
 #
 # Cluster name encodes the host (`bees` is dmerrick-bees) so future
 # laptops get their own — `adanalife-<host>`.

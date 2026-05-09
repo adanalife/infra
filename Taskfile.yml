@@ -113,12 +113,12 @@ tasks:
       - aws-vault login adanalife-core
 
   # Local k3d cluster for app development. See k8s/k3d-config.yaml.
-  cluster:up:
+  k8s:cluster:up:
     desc: create the local k3d cluster
     cmds:
       - k3d cluster create -c k8s/k3d-config.yaml
 
-  cluster:down:
+  k8s:cluster:down:
     desc: tear down the local k3d cluster
     cmds:
       - k3d cluster delete adanalife-bees
@@ -222,7 +222,7 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task cluster:up` first"
+        msg: "no reachable cluster — run `task k8s:cluster:up` first"
     cmds:
       # eso-aws-credentials: ESOSecretsReader access key for ESO.
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
@@ -284,7 +284,7 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task cluster:up` first"
+        msg: "no reachable cluster — run `task k8s:cluster:up` first"
     cmds:
       - helm repo add external-secrets https://charts.external-secrets.io
       - helm repo add grafana https://grafana.github.io/helm-charts
@@ -349,7 +349,7 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task cluster:up` first"
+        msg: "no reachable cluster — run `task k8s:cluster:up` first"
       - sh: kubectl get deploy obs >/dev/null 2>&1
         msg: "obs Deployment not found — run `task k8s:apply:stage-1` first"
     cmds:
