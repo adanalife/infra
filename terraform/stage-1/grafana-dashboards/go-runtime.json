@@ -88,20 +88,9 @@
       "type": "timeseries",
       "title": "GC heap goal",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "go_memory_gc_goal_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Memory limit (GOMEMLIMIT)",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
-      "targets": [
-        { "refId": "A", "expr": "go_memory_limit_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     }

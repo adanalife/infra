@@ -48,9 +48,14 @@ clusterMetrics:
 # Without this, node-exporter runs but its /metrics never reaches Mimir,
 # so node-level panels (Node Exporter Full + CPU/memory/disk on cluster
 # overview) stay empty. clusterMetrics only covers kubelet/cAdvisor/KSM.
+#
+# node-exporter.enabled is the per-source flag — hostMetrics also covers
+# Windows Exporter and Kepler (off here, only node-exporter applies).
 hostMetrics:
   enabled: true
   collector: alloy-metrics
+  node-exporter:
+    enabled: true
 
 clusterEvents:
   enabled: true
