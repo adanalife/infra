@@ -12,7 +12,7 @@
         "name": "service",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info, service_name)",
+        "query": "label_values(go_goroutine_count, service_name)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "multi": true,
@@ -23,105 +23,87 @@
   },
   "panels": [
     {
-      "id": 0,
-      "type": "text",
-      "title": "Empty until OTel runtime instrumentation lands",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
-      "options": {
-        "mode": "markdown",
-        "content": "`go_*` and `process_*` metrics aren't pushed via OTLP — they live in the default Prometheus registry and only surface via `/metrics` scrape, but no scraper runs in-cluster. Fix: add `go.opentelemetry.io/contrib/instrumentation/runtime` and call `runtime.Start()` from `pkg/telemetry/telemetry.go`. After that, swap `go_*` → `process_runtime_go_*` in the panels below."
-      }
-    },
-    {
       "id": 1,
       "type": "timeseries",
       "title": "Goroutines",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 3, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "go_goroutines{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
+        { "refId": "A", "expr": "go_goroutine_count{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "OS threads",
+      "title": "OS thread limit (GOMAXPROCS)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 3, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "go_threads{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
+        { "refId": "A", "expr": "go_processor_limit{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Heap (in-use vs sys)",
+      "title": "Memory used (stack vs heap)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 11, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "go_memstats_heap_inuse_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}} inuse" },
-        { "refId": "B", "expr": "go_memstats_heap_sys_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}} sys" }
+        { "refId": "A", "expr": "go_memory_used_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}} / {{go_memory_type}}" }
       ],
-      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
       "type": "timeseries",
       "title": "Heap allocation rate",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 11, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "rate(go_memstats_alloc_bytes_total{service_name=~\"$service\"}[$__rate_interval])", "legendFormat": "{{service_name}}" }
+        { "refId": "A", "expr": "rate(go_memory_allocated_bytes_total{service_name=~\"$service\"}[$__rate_interval])", "legendFormat": "{{service_name}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
     {
       "id": 5,
       "type": "timeseries",
-      "title": "GC pause (quantiles)",
+      "title": "Allocation count rate",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "go_gc_duration_seconds{service_name=~\"$service\", quantile=\"0.5\"}", "legendFormat": "{{service_name}} p50" },
-        { "refId": "B", "expr": "go_gc_duration_seconds{service_name=~\"$service\", quantile=\"0.75\"}", "legendFormat": "{{service_name}} p75" },
-        { "refId": "C", "expr": "go_gc_duration_seconds{service_name=~\"$service\", quantile=\"1\"}", "legendFormat": "{{service_name}} max" }
+        { "refId": "A", "expr": "rate(go_memory_allocations_total{service_name=~\"$service\"}[$__rate_interval])", "legendFormat": "{{service_name}}" }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Heap objects",
+      "title": "GC heap goal",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "go_memstats_heap_objects{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
+        { "refId": "A", "expr": "go_memory_gc_goal_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Stack memory",
+      "title": "Memory limit (GOMEMLIMIT)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 27, "w": 12, "h": 7 },
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "go_memstats_stack_inuse_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}} inuse" }
+        { "refId": "A", "expr": "go_memory_limit_bytes{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
       ],
-      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "GOMAXPROCS",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 27, "w": 12, "h": 7 },
-      "targets": [
-        { "refId": "A", "expr": "go_sched_gomaxprocs_threads{service_name=~\"$service\"}", "legendFormat": "{{service_name}}" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     }
   ]
 }
