@@ -28,9 +28,9 @@ jobs:
       # secret.env files are gitignored — stub them from the .example
       # templates so kustomize can build. cloudflared, external-secrets,
       # and obs no longer use this pattern (their Secrets are applied
-      # directly to the cluster by Taskfile targets — task k8s-tunnel-token,
-      # task k8s-eso-bootstrap, task obs-stream-on/off respectively), so
-      # this only covers app overlays that still wire secrets via
+      # directly to the cluster by Taskfile targets — task
+      # k8s-bootstrap-secrets and task obs-stream-on/off respectively),
+      # so this only covers app overlays that still wire secrets via
       # secretGenerator.
       - name: Stub secret.env files
         run: |
