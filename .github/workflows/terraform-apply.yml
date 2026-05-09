@@ -71,7 +71,7 @@ jobs:
           CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
           CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_STAGE_AWS_ACCESS_KEY_ID }}
           CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_STAGE_AWS_SECRET_ACCESS_KEY }}
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: us-east-1
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
