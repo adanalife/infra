@@ -95,6 +95,34 @@ tasks:
       - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
       - k3d image import adanalife/obs:latest --cluster=adanalife-bees
 
+  # Restart an app deployment so its pods re-pull the image. Pairs
+  # with `k8s-import-images` — after importing rebuilt images into
+  # k3d, restart the deployment to roll new pods that fetch the
+  # freshly-imported tag. imagePullPolicy: Always on these
+  # deployments (#411) means "rollout restart" is sufficient; no
+  # need to bump tags or delete the cached image first.
+  k8s-rollout-tripbot:
+    desc: restart the tripbot deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/tripbot
+      - kubectl rollout status deploy/tripbot --timeout=120s
+
+  k8s-rollout-vlc-server:
+    desc: restart the vlc-server deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/vlc-server
+      - kubectl rollout status deploy/vlc-server --timeout=120s
+
+  k8s-rollout-obs:
+    desc: restart the obs deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/obs
+      - kubectl rollout status deploy/obs --timeout=120s
+
+  k8s-rollout:
+    desc: restart all three app deployments (tripbot + vlc-server + obs)
+    deps: [k8s-rollout-tripbot, k8s-rollout-vlc-server, k8s-rollout-obs]
+
   k8s-apply:
     desc: apply the local app manifests to the cluster
     cmds:
