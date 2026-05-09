@@ -60,6 +60,14 @@ hostMetrics:
   collector: alloy-metrics
   linuxHosts:
     enabled: true
+    # The chart's default-allow-list keeps only a minimal subset of
+    # node-exporter metrics — enough for the basic Kubernetes views
+    # but missing node_uname_info, node_load*, node_disk_*,
+    # node_network_*errs_total, and most of what Node Exporter Full
+    # queries. The integration allowlist is the richer set that
+    # covers these.
+    metricsTuning:
+      useIntegrationAllowList: true
 
 clusterEvents:
   enabled: true
