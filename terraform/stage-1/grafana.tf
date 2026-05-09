@@ -15,7 +15,7 @@
 #   1. Build/edit a dashboard in the UI.
 #   2. Share → Export → "Export for sharing externally" off, copy JSON.
 #   3. Save into grafana-dashboards/<name>.json (or update in place).
-#   4. `task tf-stage` to apply.
+#   4. `task tf:stage:apply` to apply.
 
 locals {
   grafana_creds = jsondecode(data.aws_secretsmanager_secret_version.grafana_cloud_api.secret_string)

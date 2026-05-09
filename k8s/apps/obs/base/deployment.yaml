@@ -28,8 +28,8 @@ spec:
             - configMapRef:
                 name: obs-config
             # obs-secret existence + content IS the streaming toggle:
-            # `task obs-stream-on` creates it with STREAM_KEY pulled from
-            # AWS Secrets Manager; `task obs-stream-off` deletes it. The
+            # `task obs:stream:on` creates it with STREAM_KEY pulled from
+            # AWS Secrets Manager; `task obs:stream:off` deletes it. The
             # OBS entrypoint checks `-n "${STREAM_KEY:-}"` to decide
             # whether to add --startstreaming to obs args. optional=true
             # means the pod boots in idle mode (VNC-only) when the

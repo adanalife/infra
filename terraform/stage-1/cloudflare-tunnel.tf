@@ -29,13 +29,13 @@ resource "cloudflare_zone" "stage_1" {
 
 # Allowlisted CIDRs for the Access policy below. Sourced from
 # Secrets Manager so the home IP can rotate without a code change.
-# Edit via `task update-allowlist`.
+# Edit via `task stage:allowlist:add-current-ip`.
 locals {
   allowlist_cidrs = jsondecode(data.aws_secretsmanager_secret_version.stage_1_allowlist_cidrs.secret_string)
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this
-# requires re-running `task k8s-tunnel-token` then `task k8s-apply-stage-1`.
+# requires re-running `task k8s:bootstrap-secrets` then `task k8s:apply:stage-1`.
 resource "random_id" "stage_1_tunnel_secret" {
   byte_length = 32
 }
@@ -172,14 +172,14 @@ resource "cloudflare_zero_trust_access_application" "stage_1_vlc" {
 }
 
 # Tunnel token consumed by the in-cluster cloudflared Deployment.
-# Wired to the k8s Secret via `task k8s-tunnel-token`.
+# Wired to the k8s Secret via `task k8s:bootstrap-secrets`.
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "stage_1" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id
 }
 
 # Tunnel token — sensitive. Wire into the k8s cloudflared Deployment's
-# secret with `task k8s-tunnel-token`.
+# secret with `task k8s:bootstrap-secrets`.
 output "cloudflared_tunnel_token" {
   value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage_1.token
   sensitive = true

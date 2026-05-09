@@ -5,14 +5,14 @@
 # it on subsequent applies.
 #
 # First-apply flow (chicken-and-egg with the cloudflare provider):
-#   1. `task tf-prod` — SM resources apply; the cloudflare provider
+#   1. `task tf:prod:apply` — SM resources apply; the cloudflare provider
 #      initializes with the placeholder token and every cloudflare_*
 #      resource fails. Expected.
 #   2. Populate the real value (same token used by stage-1; Pages:Edit
 #      scope is account-wide, just stored in a second SM container):
 #        aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
 #          --secret-id prod-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
-#   3. `task tf-prod` again — cloudflare provider auths, resources apply.
+#   3. `task tf:prod:apply` again — cloudflare provider auths, resources apply.
 
 resource "aws_secretsmanager_secret" "cloudflare_api_token" {
   name        = "prod-1/cloudflare-api-token"
