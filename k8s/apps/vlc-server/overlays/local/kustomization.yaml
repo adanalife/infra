@@ -4,6 +4,10 @@ kind: Kustomization
 resources:
   - ../../base
   - host-access.yaml
+  # ExternalSecret pulling vlc-server's Sentry DSN from AWS SM
+  # (k8s/sentry-vlc-server). Materialized Secret is named `sentry` and
+  # envFrom'd by the Deployment patch below. Distinct DSN from tripbot.
+  - sentry-external-secret.yaml
 
 # Merge environment-specific config into the base ConfigMap. vlc-server
 # shares tripbot's config package, so it needs the same env-var surface
@@ -53,4 +57,17 @@ patches:
         value:
           secretRef:
             name: grafana-cloud-otlp
+            optional: true
+  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry` Secret.
+  # optional:true so the pod stays up while ESO reconciles; pkg/errors
+  # treats an unset DSN as "Sentry disabled."
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: sentry
             optional: true

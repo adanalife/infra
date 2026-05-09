@@ -7,6 +7,10 @@ resources:
   # materialized Secret is consumed by an envFrom patch below and by
   # vlc-server's overlay.
   - external-secret.yaml
+  # ExternalSecret pulling tripbot's Sentry DSN from AWS SM
+  # (k8s/sentry-tripbot). Materialized Secret is named `sentry` and
+  # envFrom'd by the Deployment patch below.
+  - sentry-external-secret.yaml
 
 # secret.env is gitignored — copy from secret.env.example.
 secretGenerator:
@@ -53,4 +57,18 @@ patches:
         value:
           secretRef:
             name: grafana-cloud-otlp
+            optional: true
+  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry` Secret.
+  # optional:true so the pod stays up while ESO reconciles; pkg/errors
+  # treats an unset DSN as "Sentry disabled," which is also the dev
+  # default per vault/tripbot/credentials.md.
+  - target:
+      kind: Deployment
+      name: tripbot
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: sentry
             optional: true
