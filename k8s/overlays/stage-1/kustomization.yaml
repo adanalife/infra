@@ -15,6 +15,6 @@ resources:
   - ../../apps/vlc-server/overlays/local
   - ../../apps/obs/overlays/local
   - ../../platform/cloudflared/overlays/stage-1
-  # Note: not pulling in overlays/local/traefik-dashboard.yaml —
-  # that overlay enables --api.insecure=true on traefik, which
-  # is fine for laptop loopback but not for a tunneled cluster.
+# Traefik is installed via helm by `task k8s-platform-up` — see
+# k8s/traefik/values.yml. Dashboard is reachable via port-forward
+# only; not exposed through the Cloudflare Tunnel.

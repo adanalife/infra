@@ -9,4 +9,7 @@ resources:
   - ../../apps/tripbot/overlays/local
   - ../../apps/vlc-server/overlays/local
   - ../../apps/obs/overlays/local
-  - traefik-dashboard.yaml
+# Traefik dashboard is enabled via --api.insecure=true in the helm
+# release values (k8s/traefik/values.yml). Reach it with:
+#   kubectl -n kube-system port-forward svc/traefik 9000:9000
+#   open http://localhost:9000/dashboard/
