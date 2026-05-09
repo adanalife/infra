@@ -86,9 +86,10 @@ aws-vault exec adanalife-stage -- sh -c 'cd terraform/stage-1 \
 #    Cloudflare will mark the zone "Active" once propagation completes
 #    (minutes to hours).
 
-# 6. Write the tunnel token from terraform output into the kustomize
-#    secret.env (re-run any time the tunnel is recreated).
-task k8s-tunnel-token
+# 6. Write the bootstrap Secrets (ESOSecretsReader access key for ESO,
+#    cloudflared TUNNEL_TOKEN) into the cluster from terraform outputs.
+#    Re-run any time the tunnel or ESO IAM access key is rotated.
+task k8s-bootstrap-secrets
 
 # 7. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
 #    plus the cloudflared Deployment.

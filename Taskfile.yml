@@ -105,47 +105,32 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/stage-1
 
-  # Pulls the tunnel token out of stage-1 terraform state and applies
-  # the cloudflared-secret Secret directly to the cluster. Token stays
-  # in a shell variable — never written to disk. Run once after the
-  # first `task tf-stage`, and re-run if the tunnel is recreated.
-  k8s-tunnel-token:
-    desc: apply cloudflared TUNNEL_TOKEN Secret directly to the cluster (no plaintext on disk)
-    preconditions:
-      - sh: command -v aws-vault >/dev/null
-        msg: "aws-vault not found — install with `brew install aws-vault`"
-      - sh: command -v kubectl >/dev/null
-        msg: "kubectl not found — install with `brew install kubectl`"
-      - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
-    cmds:
-      - |
-        set -euo pipefail
-        token=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw cloudflared_tunnel_token)
-        kubectl create secret generic cloudflared-secret \
-          --namespace=default \
-          --from-literal=TUNNEL_TOKEN="$token" \
-          --dry-run=client -o yaml | kubectl apply -f -
-      - echo "applied cloudflared-secret Secret to default namespace"
-
-  # Bootstrap the eso-aws-credentials Secret directly into the cluster.
-  # Decrypted creds stay in shell variables — never written to disk.
-  # Prereq: `task tf-stage` has provisioned ESOSecretsReader, and the
-  # external-secrets namespace exists (helm install --create-namespace
-  # in k8s-platform-up creates it; this task creates it idempotently
-  # too in case bootstrap runs first).
+  # Bootstrap the cluster Secrets that don't survive a recreate but
+  # have to exist before the platform stack can come up:
   #
-  # Re-run whenever the eso_reader access key is rotated. ESO picks up
-  # the new value on its next reconcile (refreshInterval 1h, or force
-  # with `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`).
-  k8s-eso-bootstrap:
-    desc: apply ESO bootstrap creds directly to the cluster (no plaintext on disk)
-    # Skip when the Secret already exists. Lets `k8s-platform-up` depend
-    # on this task without re-prompting for aws-vault + keybase on every
-    # platform refresh. To force a re-bootstrap (e.g., after rotating
-    # the eso_reader access key), `task --force k8s-eso-bootstrap`.
+  #   - eso-aws-credentials   (external-secrets namespace) — ESOSecretsReader
+  #     IAM access key for ESO to read SM. PGP-decrypted via keybase.
+  #   - cloudflared-secret    (default namespace) — TUNNEL_TOKEN for the
+  #     cloudflared Deployment in stage-1 mode.
+  #
+  # Both come from `task tf-stage` outputs; both stay in shell
+  # variables only (never written to disk). Re-runs idempotently:
+  # each Secret's bootstrap block skips when its target Secret already
+  # exists, so `task --force k8s-bootstrap-secrets` is the way to
+  # force-rotate after a TF output changes (e.g., access-key rotation
+  # or tunnel recreation).
+  #
+  # Used as a dep by `k8s-platform-up` so the platform stack always
+  # has its credentials, but the inner status checks make repeat runs
+  # cheap (no aws-vault / keybase reprompt when nothing's missing).
+  k8s-bootstrap-secrets:
+    desc: apply ESO + cloudflared bootstrap Secrets to the cluster (no plaintext on disk)
+    # Skip the whole task only when both Secrets are already present.
+    # Otherwise the cmds run, and each block independently no-ops if
+    # its own Secret exists.
     status:
       - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
+      - kubectl get secret cloudflared-secret >/dev/null 2>&1
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault` (see infra/README.md)"
@@ -156,23 +141,42 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — run `task k8s-up` first"
     cmds:
+      # eso-aws-credentials: ESOSecretsReader access key for ESO.
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - |
-        set -euo pipefail
-        ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
-        sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
-              | base64 -d | keybase pgp decrypt)
-        kubectl create secret generic eso-aws-credentials \
-          --namespace=external-secrets \
-          --from-literal=AWS_ACCESS_KEY_ID="$ak" \
-          --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
-          --dry-run=client -o yaml | kubectl apply -f -
+        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1; then
+          echo "eso-aws-credentials already present, skipping"
+        else
+          set -euo pipefail
+          ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
+                | base64 -d | keybase pgp decrypt)
+          kubectl create secret generic eso-aws-credentials \
+            --namespace=external-secrets \
+            --from-literal=AWS_ACCESS_KEY_ID="$ak" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "applied eso-aws-credentials Secret to external-secrets namespace"
+        fi
+      # cloudflared-secret: TUNNEL_TOKEN for the cloudflared Deployment.
+      - |
+        if kubectl get secret cloudflared-secret >/dev/null 2>&1; then
+          echo "cloudflared-secret already present, skipping"
+        else
+          set -euo pipefail
+          token=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw cloudflared_tunnel_token)
+          kubectl create secret generic cloudflared-secret \
+            --namespace=default \
+            --from-literal=TUNNEL_TOKEN="$token" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "applied cloudflared-secret Secret to default namespace"
+        fi
       - echo "applied eso-aws-credentials Secret to external-secrets namespace"
 
   # Install ESO + grafana-k8s-monitoring into the local cluster.
   # Idempotent — re-run after a cluster recreate or to upgrade the
-  # chart. Depends on `k8s-eso-bootstrap`, which auto-skips when the
-  # bootstrap Secret already exists (so the common path doesn't
+  # chart. Depends on `k8s-bootstrap-secrets`, which auto-skips when
+  # both bootstrap Secrets already exist (so the common path doesn't
   # re-prompt for aws-vault + keybase).
   #
   # k8s-monitoring requires the k8s/grafana-cloud-metrics-write SM
@@ -186,7 +190,7 @@ tasks:
   # manifests.
   k8s-platform-up:
     desc: install ESO + grafana-k8s-monitoring into the local cluster
-    deps: [k8s-eso-bootstrap]
+    deps: [k8s-bootstrap-secrets]
     preconditions:
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
