@@ -95,6 +95,34 @@ tasks:
       - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
       - k3d image import adanalife/obs:latest --cluster=adanalife-bees
 
+  # Restart an app deployment so its pods re-pull the image. Pairs
+  # with `k8s-import-images` — after importing rebuilt images into
+  # k3d, restart the deployment to roll new pods that fetch the
+  # freshly-imported tag. imagePullPolicy: Always on these
+  # deployments (#411) means "rollout restart" is sufficient; no
+  # need to bump tags or delete the cached image first.
+  k8s-rollout-tripbot:
+    desc: restart the tripbot deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/tripbot
+      - kubectl rollout status deploy/tripbot --timeout=120s
+
+  k8s-rollout-vlc-server:
+    desc: restart the vlc-server deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/vlc-server
+      - kubectl rollout status deploy/vlc-server --timeout=120s
+
+  k8s-rollout-obs:
+    desc: restart the obs deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/obs
+      - kubectl rollout status deploy/obs --timeout=120s
+
+  k8s-rollout:
+    desc: restart all three app deployments (tripbot + vlc-server + obs)
+    deps: [k8s-rollout-tripbot, k8s-rollout-vlc-server, k8s-rollout-obs]
+
   k8s-apply:
     desc: apply the local app manifests to the cluster
     cmds:
@@ -169,11 +197,11 @@ tasks:
           --dry-run=client -o yaml | kubectl apply -f -
       - echo "applied eso-aws-credentials Secret to external-secrets namespace"
 
-  # Install ESO + grafana-k8s-monitoring into the local cluster.
-  # Idempotent — re-run after a cluster recreate or to upgrade the
-  # chart. Depends on `k8s-eso-bootstrap`, which auto-skips when the
-  # bootstrap Secret already exists (so the common path doesn't
-  # re-prompt for aws-vault + keybase).
+  # Install ESO + traefik + grafana-k8s-monitoring into the local
+  # cluster. Idempotent — re-run after a cluster recreate or to
+  # upgrade any chart. Depends on `k8s-eso-bootstrap`, which auto-skips
+  # when the bootstrap Secret already exists (so the common path
+  # doesn't re-prompt for aws-vault + keybase).
   #
   # k8s-monitoring requires the k8s/grafana-cloud-metrics-write SM
   # value to have been seeded out-of-band first; see the bootstrap
@@ -181,11 +209,16 @@ tasks:
   # If it hasn't been seeded, the ExternalSecret materialization will
   # fail and the helm install will follow.
   #
+  # Traefik: the bundled k3s Traefik is disabled via --disable=traefik
+  # in k8s/k3d-config.yaml, so this task is the only thing that brings
+  # up an ingress controller. App Ingresses (`ingressClassName: traefik`)
+  # don't reach anything until this runs.
+  #
   # Future consumers (cert-manager, external-dns, app workloads)
   # layer on top via their own kustomize overlays + ExternalSecret
   # manifests.
   k8s-platform-up:
-    desc: install ESO + grafana-k8s-monitoring into the local cluster
+    desc: install ESO + traefik + grafana-k8s-monitoring into the local cluster
     deps: [k8s-eso-bootstrap]
     preconditions:
       - sh: command -v helm >/dev/null
@@ -197,6 +230,7 @@ tasks:
     cmds:
       - helm repo add external-secrets https://charts.external-secrets.io
       - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo add traefik https://traefik.github.io/charts
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -211,6 +245,16 @@ tasks:
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/stage-1
       - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      # Traefik replaces the disabled k3s-bundled chart. Lives in
+      # kube-system to match the bundled chart's namespace, so existing
+      # app Ingresses (ingressClassName: traefik) keep working without
+      # changes.
+      - helm upgrade --install traefik traefik/traefik
+          -n kube-system
+          -f k8s/traefik/values.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/traefik -n kube-system
+      - 'echo "Traefik up. App Ingresses (ingressClassName=traefik) will route through this."'
       # grafana-k8s-monitoring: namespace + ExternalSecret first so ESO
       # materializes grafana-cloud-metrics-write before the helm chart
       # tries to read it.

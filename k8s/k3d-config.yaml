@@ -12,8 +12,8 @@
 # ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
 #
 # Notes for future EKS port:
-#   - Bundled traefik (ingress) IS portable — same Ingress manifests
-#     will work on prod traefik unchanged.
+#   - Helm-installed traefik (ingress) IS portable — same Ingress
+#     manifests will work on prod traefik unchanged. See k8s/traefik/.
 #   - Bundled servicelb / klipper-lb is k3d/k3s-only. On EKS,
 #     LoadBalancer services are fulfilled by AWS ELB instead. The
 #     Service manifests don't change; only the implementation underneath
@@ -33,3 +33,15 @@ volumes:
   - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
     nodeFilters:
       - server:*
+
+# Disable k3s's bundled Traefik. We install traefik/traefik via helm
+# in `task k8s-platform-up` instead, so the full chart's CRDs (default
+# IngressClass, dashboard wiring, prometheus metrics) are available
+# without the HelmChartConfig customization dance the bundled chart
+# requires.
+options:
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
