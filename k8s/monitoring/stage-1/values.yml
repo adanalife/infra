@@ -43,6 +43,36 @@ destinations:
 clusterMetrics:
   enabled: true
   collector: alloy-metrics
+  # The chart's default cAdvisor + KSM allow lists are conservative —
+  # enough for the basic Grafana Cloud Kubernetes views but missing
+  # several metrics queried by the modern community dashboards we
+  # vendored (k8s-cluster-overview, k8s-pods). Extra series listed
+  # below; checked against the dashboard JSON queries.
+  cadvisor:
+    metricsTuning:
+      includeMetrics:
+        # CPU throttle time (seconds) — for "CPU Throttled seconds by
+        # container/namespace" panels. Default allow list has
+        # _periods_total but not _seconds_total.
+        - container_cpu_cfs_throttled_seconds_total
+        # OOM events — for "OOM Events by container/namespace" panels.
+        - container_oom_events_total
+        # Network errors — for "Network errors" panel.
+        - container_network_receive_errors_total
+        - container_network_transmit_errors_total
+  kube-state-metrics:
+    metricsTuning:
+      includeMetrics:
+        # Last terminated exit code — for the "Last Terminated Exit Code"
+        # panel. Default allow list has _reason and _timestamp but not
+        # _exitcode.
+        - kube_pod_container_status_last_terminated_exitcode
+        # Pod scheduled status — for "Unscheduled Pods" panel.
+        - kube_pod_status_scheduled
+        # Namespace creation timestamp — used as a 0-fallback in some
+        # "by namespace" panel queries to ensure namespaces with no
+        # pods still appear.
+        - kube_namespace_created
 
 # hostMetrics scrapes node-exporter (deployed below via telemetryServices).
 # Without this, node-exporter runs but its /metrics never reaches Mimir,
