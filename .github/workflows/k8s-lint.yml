@@ -29,7 +29,7 @@ jobs:
       # templates so kustomize can build. cloudflared, external-secrets,
       # and obs no longer use this pattern (their Secrets are applied
       # directly to the cluster by Taskfile targets — task
-      # k8s-bootstrap-secrets and task obs-stream-on/off respectively),
+      # k8s:bootstrap-secrets and task obs:stream:on/off respectively),
       # so this only covers app overlays that still wire secrets via
       # secretGenerator.
       - name: Stub secret.env files
@@ -45,7 +45,7 @@ jobs:
       # that any overlay references today, so they'd be dead weight here
       # — add a helm step alongside this one if that ever changes.
       #
-      # Helm-install matches `task k8s-platform-up`. The CRD `Established`
+      # Helm-install matches `task k8s:platform:up`. The CRD `Established`
       # wait dodges the kubectl-cache lag that otherwise produces
       # "no matches for kind" right after install.
       - name: Install External Secrets Operator (CRDs + controllers)

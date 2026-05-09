@@ -1,7 +1,7 @@
 # k3d cluster config for app development.
 #
-# Bring up with:  task k8s-up
-# Tear down with: task k8s-down
+# Bring up with:  task cluster:up
+# Tear down with: task cluster:down
 #
 # Cluster name encodes the host (`bees` is dmerrick-bees) so future
 # laptops get their own — `adanalife-<host>`.
@@ -35,7 +35,7 @@ volumes:
       - server:*
 
 # Disable k3s's bundled Traefik. We install traefik/traefik via helm
-# in `task k8s-platform-up` instead, so the full chart's CRDs (default
+# in `task k8s:platform:up` instead, so the full chart's CRDs (default
 # IngressClass, dashboard wiring, prometheus metrics) are available
 # without the HelmChartConfig customization dance the bundled chart
 # requires.

@@ -10,7 +10,7 @@
 # required for CITerraformRole, and a CI compromise can't read the
 # token out of state.
 #
-# Bootstrap (after first `task tf-stage`):
+# Bootstrap (after first `task tf:stage:apply`):
 #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
 #     --secret-id k8s/grafana-cloud-metrics-write \
 #     --secret-string '{

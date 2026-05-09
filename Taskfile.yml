@@ -1,35 +1,90 @@
 version: '3'
 
-vars:
-  # use like this: task tf-stage --tf_action=init
-  TF_ACTION: apply # Default action is 'apply'
-
 tasks:
-  tf-stage:
+  # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
+  # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
+  tf:stage:apply:
+    desc: terraform apply against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform {{.TF_ACTION}}
+      - aws-vault exec adanalife-stage -- terraform apply {{.CLI_ARGS}}
 
-  tf-prod:
+  tf:stage:plan:
+    desc: terraform plan against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform plan {{.CLI_ARGS}}
+
+  tf:stage:init:
+    desc: terraform init against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform init {{.CLI_ARGS}}
+
+  tf:stage:destroy:
+    desc: terraform destroy against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform destroy {{.CLI_ARGS}}
+
+  tf:prod:apply:
+    desc: terraform apply against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform {{.TF_ACTION}}
+      - aws-vault exec adanalife-prod -- terraform apply {{.CLI_ARGS}}
 
-  tf-core:
+  tf:prod:plan:
+    desc: terraform plan against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform plan {{.CLI_ARGS}}
+
+  tf:prod:init:
+    desc: terraform init against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform init {{.CLI_ARGS}}
+
+  tf:prod:destroy:
+    desc: terraform destroy against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform destroy {{.CLI_ARGS}}
+
+  # Core uses --no-session because session tokens can't make IAM changes.
+  tf:core:apply:
+    desc: terraform apply against core (no session token; IAM changes need full creds)
     dir: terraform/core
     cmds:
-      # We can't use session tokens when making IAM changes
-      - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
+      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+
+  tf:core:plan:
+    desc: terraform plan against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+
+  tf:core:init:
+    desc: terraform init against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+
+  tf:core:destroy:
+    desc: terraform destroy against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
 
   # Append the host's current public IP (via ifconfig.me) to the
   # stage-1/allowlist-cidrs list in Secrets Manager, deduping with
   # jq. Use this when your home IP rotates and you're locked out of
   # tripbot.whalecore.com. terraform reads the updated value via
-  # data source on the next `task tf-stage`. To remove stale
+  # data source on the next `task tf:stage:apply`. To remove stale
   # entries or add a non-current CIDR, edit the secret directly:
   #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
   #     --secret-id stage-1/allowlist-cidrs --secret-string '["X.X.X.X/32", ...]'
-  update-allowlist:
+  stage:allowlist:add-current-ip:
     desc: append your current public IP to stage-1/allowlist-cidrs
     cmds:
       - |
@@ -42,33 +97,33 @@ tasks:
           --secret-id stage-1/allowlist-cidrs --secret-string "$updated" >/dev/null
         echo "allowlist-cidrs is now:"
         echo "$updated" | jq .
-        echo "Run 'task tf-stage' to apply."
+        echo "Run 'task tf:stage:apply' to apply."
 
   # `aws-vault login` opens the AWS web console in browser
-  aws-login-stage:
+  aws:login:stage:
     cmds:
       - aws-vault login adanalife-stage
 
-  aws-login-prod:
+  aws:login:prod:
     cmds:
       - aws-vault login adanalife-prod
 
-  aws-login-core:
+  aws:login:core:
     cmds:
       - aws-vault login adanalife-core
 
   # Local k3d cluster for app development. See k8s/k3d-config.yaml.
-  k8s-up:
+  cluster:up:
     desc: create the local k3d cluster
     cmds:
       - k3d cluster create -c k8s/k3d-config.yaml
 
-  k8s-down:
+  cluster:down:
     desc: tear down the local k3d cluster
     cmds:
       - k3d cluster delete adanalife-bees
 
-  k8s-import-images:
+  k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
@@ -96,39 +151,39 @@ tasks:
       - k3d image import adanalife/obs:latest --cluster=adanalife-bees
 
   # Restart an app deployment so its pods re-pull the image. Pairs
-  # with `k8s-import-images` — after importing rebuilt images into
+  # with `k8s:import-images` — after importing rebuilt images into
   # k3d, restart the deployment to roll new pods that fetch the
   # freshly-imported tag. imagePullPolicy: Always on these
   # deployments (#411) means "rollout restart" is sufficient; no
   # need to bump tags or delete the cached image first.
-  k8s-rollout-tripbot:
+  k8s:rollout:tripbot:
     desc: restart the tripbot deployment so it pulls the latest imported image
     cmds:
       - kubectl rollout restart deploy/tripbot
       - kubectl rollout status deploy/tripbot --timeout=120s
 
-  k8s-rollout-vlc-server:
+  k8s:rollout:vlc-server:
     desc: restart the vlc-server deployment so it pulls the latest imported image
     cmds:
       - kubectl rollout restart deploy/vlc-server
       - kubectl rollout status deploy/vlc-server --timeout=120s
 
-  k8s-rollout-obs:
+  k8s:rollout:obs:
     desc: restart the obs deployment so it pulls the latest imported image
     cmds:
       - kubectl rollout restart deploy/obs
       - kubectl rollout status deploy/obs --timeout=120s
 
-  k8s-rollout:
+  k8s:rollout:
     desc: restart all three app deployments (tripbot + vlc-server + obs)
-    deps: [k8s-rollout-tripbot, k8s-rollout-vlc-server, k8s-rollout-obs]
+    deps: [k8s:rollout:tripbot, k8s:rollout:vlc-server, k8s:rollout:obs]
 
-  k8s-apply:
+  k8s:apply:
     desc: apply the local app manifests to the cluster
     cmds:
       - kubectl apply -k k8s/overlays/local
 
-  k8s-apply-stage-1:
+  k8s:apply:stage-1:
     desc: apply stage-1 overlay (cloudflared tunnel + apps)
     cmds:
       - kubectl apply -k k8s/overlays/stage-1
@@ -141,17 +196,17 @@ tasks:
   #   - cloudflared-secret    (default namespace) — TUNNEL_TOKEN for the
   #     cloudflared Deployment in stage-1 mode.
   #
-  # Both come from `task tf-stage` outputs; both stay in shell
+  # Both come from `task tf:stage:apply` outputs; both stay in shell
   # variables only (never written to disk). Re-runs idempotently:
   # each Secret's bootstrap block skips when its target Secret already
-  # exists, so `task --force k8s-bootstrap-secrets` is the way to
+  # exists, so `task --force k8s:bootstrap-secrets` is the way to
   # force-rotate after a TF output changes (e.g., access-key rotation
   # or tunnel recreation).
   #
-  # Used as a dep by `k8s-platform-up` so the platform stack always
+  # Used as a dep by `k8s:platform:up` so the platform stack always
   # has its credentials, but the inner status checks make repeat runs
   # cheap (no aws-vault / keybase reprompt when nothing's missing).
-  k8s-bootstrap-secrets:
+  k8s:bootstrap-secrets:
     desc: apply ESO + cloudflared bootstrap Secrets to the cluster (no plaintext on disk)
     # Skip the whole task only when both Secrets are already present.
     # Otherwise the cmds run, and each block independently no-ops if
@@ -167,7 +222,7 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
+        msg: "no reachable cluster — run `task cluster:up` first"
     cmds:
       # eso-aws-credentials: ESOSecretsReader access key for ESO.
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
@@ -202,7 +257,7 @@ tasks:
 
   # Install ESO + traefik + grafana-k8s-monitoring into the local
   # cluster. Idempotent — re-run after a cluster recreate or to
-  # upgrade any chart. Depends on `k8s-bootstrap-secrets`, which
+  # upgrade any chart. Depends on `k8s:bootstrap-secrets`, which
   # auto-skips when both bootstrap Secrets already exist (so the
   # common path doesn't re-prompt for aws-vault + keybase).
   #
@@ -220,16 +275,16 @@ tasks:
   # Future consumers (cert-manager, external-dns, app workloads)
   # layer on top via their own kustomize overlays + ExternalSecret
   # manifests.
-  k8s-platform-up:
+  k8s:platform:up:
     desc: install ESO + traefik + grafana-k8s-monitoring into the local cluster
-    deps: [k8s-bootstrap-secrets]
+    deps: [k8s:bootstrap-secrets]
     preconditions:
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
+        msg: "no reachable cluster — run `task cluster:up` first"
     cmds:
       - helm repo add external-secrets https://charts.external-secrets.io
       - helm repo add grafana https://grafana.github.io/helm-charts
@@ -280,13 +335,13 @@ tasks:
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-secret is `optional: true`, so the existence + content of that
-  # Secret IS the stream state. `obs-stream-on` pulls the STREAM_KEY
+  # Secret IS the stream state. `obs:stream:on` pulls the STREAM_KEY
   # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and creates
-  # the Secret; `obs-stream-off` deletes the Secret. Either way we
+  # the Secret; `obs:stream:off` deletes the Secret. Either way we
   # rollout-restart obs so the entrypoint re-reads STREAM_KEY at boot
   # — Kubernetes doesn't propagate Secret changes to running pods'
   # env vars.
-  obs-stream-on:
+  obs:stream:on:
     desc: enable Twitch streaming on OBS (pulls STREAM_KEY from SM, creates obs-secret, restarts OBS)
     preconditions:
       - sh: command -v aws-vault >/dev/null
@@ -294,9 +349,9 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
+        msg: "no reachable cluster — run `task cluster:up` first"
       - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — run `task k8s-apply-stage-1` first"
+        msg: "obs Deployment not found — run `task k8s:apply:stage-1` first"
     cmds:
       - |
         set -euo pipefail
@@ -309,7 +364,7 @@ tasks:
       - kubectl rollout status deploy/obs --timeout=120s
       - echo "OBS streaming to Twitch (adanalife_staging via stage-1 SM)"
 
-  obs-stream-off:
+  obs:stream:off:
     desc: disable Twitch streaming on OBS (deletes obs-secret, restarts OBS to idle)
     preconditions:
       - sh: command -v kubectl >/dev/null
@@ -323,7 +378,7 @@ tasks:
       - kubectl rollout status deploy/obs --timeout=120s
       - echo "OBS idle (not streaming)"
 
-  k8s-logs:
+  k8s:logs:
     desc: tail logs across all app pods
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
