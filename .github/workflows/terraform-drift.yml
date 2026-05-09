@@ -10,6 +10,9 @@ on:
 
 jobs:
   check_drift:
+    # Dependabot PRs run with an isolated, empty secret namespace; skip the
+    # AWS-touching drift check. The scheduled cron run is unaffected.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
