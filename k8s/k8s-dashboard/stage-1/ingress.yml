@@ -1,24 +1,29 @@
----
+# Ingress for the kubernetes-dashboard chart at
+# k8s-dashboard.stage.whereisdana.today. external-dns publishes a
+# Route53 record (target = host public IP via external-dns
+# --default-targets, set per-machine in values.local.yml).
+#
+# HTTP-only for now — TLS depends on cert-manager, which isn't wired
+# into k8s:platform:up yet (blocked on the home-network port-forward
+# work). Add `cert-manager.io/cluster-issuer` annotation + tls block
+# once cert-manager is live.
+apiVersion: networking.k8s.io/v1
 kind: Ingress
-apiVersion: extensions/v1beta1
 metadata:
-  name: k8s-dashboard-ingress
+  name: k8s-dashboard
   namespace: kube-system
   annotations:
-    external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
-    kubernetes.io/ingress.class: traefik
-    cert-manager.io/cluster-issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: k8s-dashboard.stage.whereisdana.today
 spec:
-  tls:
-    # this defines the secret that will be created
-    - secretName: k8s-dashboard-tls
-      hosts:
-        - k8s-dashboard.staging.whereisdana.today
+  ingressClassName: traefik
   rules:
-    - host: k8s-dashboard.staging.whereisdana.today
+    - host: k8s-dashboard.stage.whereisdana.today
       http:
         paths:
-        - path: /
-          backend:
-            serviceName: k8s-dashboard-kubernetes-dashboard
-            servicePort: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: k8s-dashboard-kubernetes-dashboard
+                port:
+                  name: http
