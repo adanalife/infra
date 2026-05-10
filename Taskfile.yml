@@ -382,3 +382,52 @@ tasks:
     desc: tail logs across all app pods
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
+
+  # Local kubectl port-forward wrappers for OBS / vlc-server VNC. The
+  # host-access LoadBalancer overlays (k8s/apps/{obs,vlc-server}/overlays/local)
+  # already expose VNC at host ports 5902 / 5903 via klipper-lb when the
+  # local overlay is applied — these tasks are the cluster-agnostic
+  # alternative when that overlay isn't in play (e.g. on stage-1, or
+  # when iterating without applying the local overlay). Backgrounded
+  # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
+  # find it. Re-running :up overwrites the PID file; if :down can't
+  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs"`.
+  obs:vnc:up:
+    desc: start a local kubectl port-forward to OBS VNC at localhost:5902
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward svc/obs 5902:5900 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
+
+  obs:vnc:down:
+    desc: stop the local kubectl port-forward to OBS VNC
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/obs-vnc.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/obs-vnc.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/obs-vnc.pid
+          echo "OBS VNC port-forward stopped"
+        else
+          echo "No OBS VNC port-forward PID file found — nothing to stop"
+        fi
+
+  vlc:vnc:up:
+    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward svc/vlc-server 5903:5900 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
+      - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
+
+  vlc:vnc:down:
+    desc: stop the local kubectl port-forward to vlc-server VNC
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/vlc-vnc.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/vlc-vnc.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/vlc-vnc.pid
+          echo "vlc-server VNC port-forward stopped"
+        else
+          echo "No vlc-server VNC port-forward PID file found — nothing to stop"
+        fi
