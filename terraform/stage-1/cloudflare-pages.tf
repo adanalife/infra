@@ -42,6 +42,19 @@ resource "cloudflare_pages_project" "stage_1" {
   # Cloudflare → GitHub App integration was unused dead weight, and
   # an unhealthy install threw 401 (CF error 8000011) on the matching
   # prod-1 apply. Match prod-1's shape for parity.
+
+  # The dana-lol-staging project was originally created with a GitHub
+  # source block (back when develop→master used CF Pages auto-deploys).
+  # Cloudflare's API silently refuses to unset `source` on existing
+  # projects: a direct PATCH with {"source": null} returns success but
+  # the source persists on the next plan, and the dashboard's
+  # "Disconnect" UI is hidden because the GitHub App install is in the
+  # unhealthy state behind the original 8000011 error. The dead source
+  # block stays attached but does nothing — every deploy goes through
+  # wrangler from CI, not git push.
+  lifecycle {
+    ignore_changes = [source]
+  }
 }
 
 output "pages_url" {
