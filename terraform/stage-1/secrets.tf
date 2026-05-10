@@ -100,6 +100,8 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.stage_1_allowlist_cidrs.arn,
       aws_secretsmanager_secret.grafana_cloud_otlp.arn,
       aws_secretsmanager_secret.grafana_cloud_api.arn,
+      aws_secretsmanager_secret.sentry_tripbot.arn,
+      aws_secretsmanager_secret.sentry_vlc_server.arn,
     ]
   }
 }
