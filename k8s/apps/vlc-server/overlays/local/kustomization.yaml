@@ -21,7 +21,7 @@ configMapGenerator:
   - name: vlc-server-config
     behavior: merge
     literals:
-      - ENV=development
+      - ENV=staging
       - DATABASE_HOST=postgres
       - DATABASE_USER=tripbot_docker
       - DATABASE_PASS=hunter2
