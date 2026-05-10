@@ -11,6 +11,12 @@
 # flip this URL to HTTPS. Start with letsencrypt-staging-route53 to
 # avoid LE prod's per-week duplicate-cert limit; flip to
 # letsencrypt-route53 once the first cert issues clean.
+#
+# BEFORE FLIPPING TO HTTPS: the kubernetes-dashboard chart's own auth
+# (token login) gates write actions, but anyone who can reach this URL
+# gets the read-side dashboard. That was always the case behind the
+# Cloudflare Access IP allowlist; revisit before publishing it on the
+# open internet.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
