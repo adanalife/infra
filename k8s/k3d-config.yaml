@@ -6,10 +6,17 @@
 # Cluster name encodes the host (`bees` is dmerrick-bees) so future
 # laptops get their own — `adanalife-<host>`.
 #
-# No host port bindings: HTTP/HTTPS for stage-1 mode goes through
-# the Cloudflare Tunnel (no inbound listener on this machine).
-# Anything else (VNC, RTSP, traefik dashboard, etc.) is reachable
-# ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
+# Host ports 9080/9443 are bound to the cluster's load-balancer so that
+# *.stage.whereisdana.today URLs (managed by external-dns in stage-1
+# mode) can hit traefik directly. Cloudflare Tunnel keeps running in
+# parallel for whalecore.com traffic — the two paths don't overlap.
+# High ports (9080/9443) instead of standard 80/443 because Colima
+# can't forward privileged ports (<1024) to the host without sudo;
+# test URLs include the port suffix until a router/CDN translates
+# 443 → host:9443. Other ports (VNC, RTSP, traefik dashboard, etc.)
+# are reachable ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
+# Re-run `task k8s:cluster:down && task k8s:cluster:up` to apply
+# port-mapping changes to an existing cluster.
 #
 # Notes for future EKS port:
 #   - Helm-installed traefik (ingress) IS portable — same Ingress
@@ -45,3 +52,13 @@ options:
       - arg: --disable=traefik
         nodeFilters:
           - server:*
+
+# Map host ports onto the bundled klipper-lb so external traffic can
+# reach traefik. See header comment for port-choice rationale.
+ports:
+  - port: 9080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 9443:443
+    nodeFilters:
+      - loadbalancer
