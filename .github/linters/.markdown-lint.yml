@@ -16,3 +16,8 @@ MD013: false
 # Disable MD033 (no-inline-html): the PR template uses <details> blocks
 # deliberately for collapsible sections.
 MD033: false
+
+# Disable MD012 (no-multiple-blanks): the top-level README and PR
+# template use 2-blank-line separators between major sections as a
+# legibility convention.
+MD012: false
