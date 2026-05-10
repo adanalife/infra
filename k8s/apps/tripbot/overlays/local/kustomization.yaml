@@ -27,7 +27,7 @@ configMapGenerator:
   - name: tripbot-config
     behavior: merge
     literals:
-      - ENV=development
+      - ENV=staging
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
