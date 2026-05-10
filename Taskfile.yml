@@ -279,8 +279,14 @@ tasks:
         # snapshot for external-dns --default-targets. Re-run the task
         # after an IP rotation, then \`task k8s:platform:up\` to roll
         # the chart with the new value.
+        #
+        # --force-default-targets is required because traefik writes
+        # the cluster-internal klipper-lb IP into Ingress.status, and
+        # external-dns prefers source-provided targets unless told to
+        # override them with the default.
         extraArgs:
           - --default-targets=$ip
+          - --force-default-targets
         YAML
           echo "wrote $values_file (default-targets=$ip)"
         fi
