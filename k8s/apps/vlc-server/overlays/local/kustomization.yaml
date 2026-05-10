@@ -58,9 +58,9 @@ patches:
           secretRef:
             name: grafana-cloud-otlp
             optional: true
-  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry` Secret.
-  # optional:true so the pod stays up while ESO reconciles; pkg/errors
-  # treats an unset DSN as "Sentry disabled."
+  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry-vlc-server`
+  # Secret. optional:true so the pod stays up while ESO reconciles;
+  # pkg/errors treats an unset DSN as "Sentry disabled."
   - target:
       kind: Deployment
       name: vlc-server
@@ -69,5 +69,5 @@ patches:
         path: /spec/template/spec/containers/0/envFrom/-
         value:
           secretRef:
-            name: sentry
+            name: sentry-vlc-server
             optional: true

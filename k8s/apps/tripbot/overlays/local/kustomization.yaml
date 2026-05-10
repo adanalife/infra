@@ -58,10 +58,10 @@ patches:
           secretRef:
             name: grafana-cloud-otlp
             optional: true
-  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry` Secret.
-  # optional:true so the pod stays up while ESO reconciles; pkg/errors
-  # treats an unset DSN as "Sentry disabled," which is also the dev
-  # default per vault/tripbot/credentials.md.
+  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry-tripbot`
+  # Secret. optional:true so the pod stays up while ESO reconciles;
+  # pkg/errors treats an unset DSN as "Sentry disabled," which is also
+  # the dev default per vault/tripbot/credentials.md.
   - target:
       kind: Deployment
       name: tripbot
@@ -70,5 +70,5 @@ patches:
         path: /spec/template/spec/containers/0/envFrom/-
         value:
           secretRef:
-            name: sentry
+            name: sentry-tripbot
             optional: true
