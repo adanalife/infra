@@ -32,6 +32,8 @@ jobs:
           # default LINTER_RULES_PATH). Most linters auto-discover their config
           # there; some need an explicit pointer.
           GITLEAKS_CONFIG_FILE: .gitleaks.toml
+          MARKDOWN_CONFIG_FILE: .markdown-lint.yml
+          YAML_CONFIG_FILE: .yaml-lint.yml
 
           # ─── languages not used in this repo ─────────────────────────
           # No Go, JS/TS, Python, Ruby, PHP, Rust, Lua, Perl, etc. in
@@ -43,17 +45,14 @@ jobs:
           VALIDATE_BIOME_LINT: false
           VALIDATE_BIOME_FORMAT: false
           VALIDATE_TYPESCRIPT_ES: false
-          VALIDATE_TYPESCRIPT_STANDARD: false
           VALIDATE_TYPESCRIPT_PRETTIER: false
           VALIDATE_JAVASCRIPT_ES: false
-          VALIDATE_JAVASCRIPT_STANDARD: false
           VALIDATE_JAVASCRIPT_PRETTIER: false
           VALIDATE_JSX: false
           VALIDATE_JSX_PRETTIER: false
           VALIDATE_TSX: false
           VALIDATE_TSX_PRETTIER: false
           VALIDATE_PYTHON_BLACK: false
-          VALIDATE_PYTHON_PYINK: false
           VALIDATE_PYTHON_PYLINT: false
           VALIDATE_PYTHON_FLAKE8: false
           VALIDATE_PYTHON_ISORT: false
@@ -85,7 +84,6 @@ jobs:
           VALIDATE_CSS_PRETTIER: false
           VALIDATE_LATEX: false
           VALIDATE_PROTOBUF: false
-          VALIDATE_TEKTON: false
           VALIDATE_OPENAPI: false
           VALIDATE_GRAPHQL_PRETTIER: false
           VALIDATE_GRAPHQL_SCHEMA: false
@@ -125,7 +123,6 @@ jobs:
           # the toolchain.
           VALIDATE_TERRAFORM_FMT: false
           VALIDATE_TERRAFORM_TFLINT: false
-          VALIDATE_TERRAFORM_TERRASCAN: false
 
           # ─── deferred: misc ──────────────────────────────────────────
           # GITHUB_ACTIONS_ZIZMOR is the strict-security actionlint
