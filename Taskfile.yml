@@ -311,12 +311,19 @@ tasks:
   # external-dns: publishes Route53 records for any Ingress annotated
   # with `external-dns.alpha.kubernetes.io/hostname`. Default target IP
   # comes from values.local.yml (per-machine, written by
-  # k8s:bootstrap-secrets from `curl ifconfig.me`).
+  # k8s:bootstrap-secrets from `curl -4 ifconfig.me`).
   #
-  # Future consumers (cert-manager, app workloads) layer on top via
-  # their own kustomize overlays + ExternalSecret manifests.
+  # cert-manager: issues LE certs via DNS-01 against Route53 for any
+  # Ingress annotated with `cert-manager.io/cluster-issuer`. Issuance
+  # works regardless of inbound network state — only serving TLS does.
+  # A smoke-test Certificate (cert-test.stage.whereisdana.today, LE
+  # staging) ships in the cert-manager kustomize so the pipeline is
+  # exercised even before any app Ingress requests a cert.
+  #
+  # Future consumers (app workloads) layer on top via their own
+  # kustomize overlays + ExternalSecret manifests.
   k8s:platform:up:
-    desc: install ESO + traefik + external-dns + grafana-k8s-monitoring into the local cluster
+    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the local cluster
     deps: [k8s:bootstrap-secrets]
     preconditions:
       - sh: command -v helm >/dev/null
@@ -332,6 +339,7 @@ tasks:
       - helm repo add grafana https://grafana.github.io/helm-charts
       - helm repo add traefik https://traefik.github.io/charts
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
+      - helm repo add jetstack https://charts.jetstack.io
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -370,6 +378,22 @@ tasks:
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns -n kube-system
       - 'echo "external-dns up. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
+      # cert-manager: chart first (creates Certificate / ClusterIssuer
+      # CRDs), then ExternalSecret + ClusterIssuers. Wait for the
+      # ExternalSecret so cert-manager can read its Route53 credentials
+      # the first time it processes a Certificate request.
+      - helm upgrade --install cert-manager jetstack/cert-manager
+          -n kube-system
+          -f k8s/cert-manager/stage-1/config.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment -n kube-system -l app.kubernetes.io/instance=cert-manager
+      - kubectl wait --for=condition=Established --timeout=60s
+          crd/clusterissuers.cert-manager.io
+          crd/certificates.cert-manager.io
+      - kubectl apply -k k8s/cert-manager/stage-1
+      - kubectl wait --for=condition=Ready --timeout=120s
+          externalsecret/cert-manager-aws-credentials -n kube-system
+      - 'echo "cert-manager up. Annotate an Ingress with cert-manager.io/cluster-issuer=letsencrypt-staging-route53 to request a cert."'
       # grafana-k8s-monitoring: namespace + ExternalSecret first so ESO
       # materializes grafana-cloud-metrics-write before the helm chart
       # tries to read it.
