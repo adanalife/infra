@@ -1,3 +1,8 @@
+#!/bin/bash
+# Manual platform-bootstrap recipe (run line-by-line, not as a single
+# script — the external-dns block has a "update config.yml with secret
+# name" step that requires human attention before the helm install).
+
 # cert-manager
 # generate secrets first
 kubectl apply -k k8s/cert-manager/stage-1
