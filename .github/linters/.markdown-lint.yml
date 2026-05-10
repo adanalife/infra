@@ -1,0 +1,18 @@
+---
+# markdownlint config for super-linter
+# Reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+# Disable MD041 (first-line-heading): the per-directory README files in
+# this repo are how-to-apply snippets that lead with frontmatter, code
+# blocks, or a sub-heading rather than a top-level title. The repo
+# already has a top-level README; per-dir READMEs don't need their own.
+MD041: false
+
+# Disable MD013 (line-length): long URLs, embedded SSH pubkeys, and
+# wide tables in runbooks would all otherwise trigger this on content
+# that's intentionally not wrapped.
+MD013: false
+
+# Disable MD033 (no-inline-html): the PR template uses <details> blocks
+# deliberately for collapsible sections.
+MD033: false
