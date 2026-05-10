@@ -6,3 +6,4 @@ namespace: kube-system
 resources:
   - cluster-issuer.yml
   - external-secret.yml
+  - smoke-test-certificate.yml
