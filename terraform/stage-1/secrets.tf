@@ -102,6 +102,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.grafana_cloud_api.arn,
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
+      aws_secretsmanager_secret.tripbot_twitch_creds.arn,
     ]
   }
 }
