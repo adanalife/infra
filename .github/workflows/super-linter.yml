@@ -28,6 +28,11 @@ jobs:
           # (the Actions step summary tab still gets the same content)
           ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
 
+          # Per-linter config files live under .github/linters/ (super-linter's
+          # default LINTER_RULES_PATH). Most linters auto-discover their config
+          # there; some need an explicit pointer.
+          GITLEAKS_CONFIG_FILE: .gitleaks.toml
+
           # ─── languages not used in this repo ─────────────────────────
           # No Go, JS/TS, Python, Ruby, PHP, Rust, Lua, Perl, etc. in
           # infra. Disable language validators that would otherwise
