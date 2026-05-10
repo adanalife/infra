@@ -1,0 +1,37 @@
+---
+# yamllint config for super-linter.
+#
+# Why these are relaxed:
+# - line-length: k8s manifests routinely have long literal blocks
+#   (image SHAs, base64 secret data, env-var values). Don't fight them.
+# - indentation: kustomize / helm style sometimes mixes 2 vs 4 space
+#   indent across docs; not worth a sweep.
+# - comments-indentation: yamllint default is strict; relax so inline
+#   `# comment` next to a key doesn't trip.
+# - truthy: super-linter passes 'on:' as the workflow trigger key,
+#   which yamllint treats as a non-true truthy value. Allow it.
+# - document-start: not all our YAML starts with `---`; don't enforce.
+
+extends: default
+
+rules:
+  line-length: disable
+  indentation:
+    spaces: consistent
+    indent-sequences: consistent
+    check-multi-line-strings: false
+  comments-indentation: disable
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+    check-keys: false
+  document-start: disable
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1

@@ -1,0 +1,132 @@
+---
+name: Super Linter
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Run Linters
+    runs-on: ubuntu-latest
+
+    steps:
+      # fetch-depth: 0 is required by super-linter v6+: it diffs against
+      # the default branch (master) to figure out which files changed,
+      # which means master has to be present in the local checkout.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: run-linters
+        uses: super-linter/super-linter@v8.6.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: master
+          # don't post a "Super-linter summary" comment on every PR run
+          # (the Actions step summary tab still gets the same content)
+          ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
+
+          # ─── languages not used in this repo ─────────────────────────
+          # No Go, JS/TS, Python, Ruby, PHP, Rust, Lua, Perl, etc. in
+          # infra. Disable language validators that would otherwise
+          # auto-run with no targets (or with stray targets like .json).
+          VALIDATE_GO: false
+          VALIDATE_GO_MODULES: false
+          VALIDATE_GO_RELEASER: false
+          VALIDATE_BIOME_LINT: false
+          VALIDATE_BIOME_FORMAT: false
+          VALIDATE_TYPESCRIPT_ES: false
+          VALIDATE_TYPESCRIPT_STANDARD: false
+          VALIDATE_TYPESCRIPT_PRETTIER: false
+          VALIDATE_JAVASCRIPT_ES: false
+          VALIDATE_JAVASCRIPT_STANDARD: false
+          VALIDATE_JAVASCRIPT_PRETTIER: false
+          VALIDATE_JSX: false
+          VALIDATE_JSX_PRETTIER: false
+          VALIDATE_TSX: false
+          VALIDATE_TSX_PRETTIER: false
+          VALIDATE_PYTHON_BLACK: false
+          VALIDATE_PYTHON_PYINK: false
+          VALIDATE_PYTHON_PYLINT: false
+          VALIDATE_PYTHON_FLAKE8: false
+          VALIDATE_PYTHON_ISORT: false
+          VALIDATE_PYTHON_MYPY: false
+          VALIDATE_PYTHON_RUFF: false
+          VALIDATE_RUBY: false
+          VALIDATE_RUST_2015: false
+          VALIDATE_RUST_2018: false
+          VALIDATE_RUST_2021: false
+          VALIDATE_RUST_CLIPPY: false
+          VALIDATE_PHP: false
+          VALIDATE_PHP_BUILTIN: false
+          VALIDATE_PHP_PHPCS: false
+          VALIDATE_PHP_PHPSTAN: false
+          VALIDATE_PHP_PSALM: false
+          VALIDATE_PERL: false
+          VALIDATE_LUA: false
+          VALIDATE_R: false
+          VALIDATE_SCALAFMT: false
+          VALIDATE_GROOVY: false
+          VALIDATE_KOTLIN: false
+          VALIDATE_DART: false
+          VALIDATE_CSHARP: false
+          VALIDATE_CLOJURE: false
+          VALIDATE_CLOUDFORMATION: false
+          VALIDATE_HTML: false
+          VALIDATE_HTML_PRETTIER: false
+          VALIDATE_CSS: false
+          VALIDATE_CSS_PRETTIER: false
+          VALIDATE_LATEX: false
+          VALIDATE_PROTOBUF: false
+          VALIDATE_TEKTON: false
+          VALIDATE_OPENAPI: false
+          VALIDATE_GRAPHQL_PRETTIER: false
+          VALIDATE_GRAPHQL_SCHEMA: false
+          VALIDATE_ENV: false
+          VALIDATE_ANSIBLE: false
+          VALIDATE_DOCKERFILE_HADOLINT: false  # no Dockerfiles in repo
+
+          # ─── deferred: opinionated formatters ────────────────────────
+          # Defer all *_PRETTIER and SHELL_SHFMT — opinionated, large
+          # surface, and not what we're trying to enforce here.
+          VALIDATE_JSON_PRETTIER: false
+          VALIDATE_MARKDOWN_PRETTIER: false
+          VALIDATE_YAML_PRETTIER: false
+          VALIDATE_SHELL_SHFMT: false
+
+          # ─── deferred: prose / spelling ─────────────────────────────
+          # Hundreds of findings on technical README prose; would need
+          # an ignore-words config to be useful.
+          VALIDATE_NATURAL_LANGUAGE: false
+          VALIDATE_SPELL_CODESPELL: false
+          VALIDATE_SPELL_PROSELINT: false
+          VALIDATE_SPELL_VALE: false
+          VALIDATE_SPELL_CSPELL: false
+
+          # ─── deferred: vuln/IaC scanners ────────────────────────────
+          # These need separate triage workflows (and tend to be loud
+          # on real terraform). Wire them in their own PRs once we
+          # have an exclusion-list strategy.
+          VALIDATE_TRIVY: false
+          VALIDATE_CHECKOV: false
+          VALIDATE_KUBERNETES_KUBECONFORM: false
+          VALIDATE_KUBERNETES_HELM: false
+
+          # ─── deferred: covered by pre-commit ─────────────────────────
+          # terraform_fmt runs in pre-commit (.pre-commit-config.yaml).
+          # Avoid duplicate / conflicting opinions until we consolidate
+          # the toolchain.
+          VALIDATE_TERRAFORM_FMT: false
+          VALIDATE_TERRAFORM_TFLINT: false
+          VALIDATE_TERRAFORM_TERRASCAN: false
+
+          # ─── deferred: misc ──────────────────────────────────────────
+          # GITHUB_ACTIONS_ZIZMOR is the strict-security actionlint
+          # variant; turn on later once the regular GITHUB_ACTIONS
+          # validator is clean.
+          VALIDATE_GITHUB_ACTIONS_ZIZMOR: false
+          VALIDATE_JSCPD: false
+          VALIDATE_SQLFLUFF: false
+          VALIDATE_EDITORCONFIG: false
