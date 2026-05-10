@@ -1,0 +1,45 @@
+# Stage-1 overlay for tripbot. Extends the local overlay (configmap
+# merge, secret patches, sentry + OTLP envFrom) and reroutes the
+# Ingress from `tripbot.localhost` (set by the local overlay's host
+# patch) to `tripbot.stage.whereisdana.today`, with an external-dns
+# annotation so the platform stack publishes a Route53 record.
+#
+# Today this URL is dormant: external-dns will create the A record
+# pointing at the host's public IPv4, but the home-network router
+# isn't forwarding inbound 443 (or 9443) to the cluster yet — see
+# vault/decisions/k8s-platform-stack.md. Twitch EventSub callbacks
+# continue to flow through `tripbot.whalecore.com` via the existing
+# Cloudflare Tunnel until the port-forward lands and we update the
+# webhook URLs registered with Twitch.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../local
+
+patches:
+  # Override the local overlay's host patch (`tripbot.localhost`) and
+  # attach the external-dns hostname annotation. The cert-manager
+  # annotation + the tls op below stay commented until the
+  # port-forward lands so this URL can actually serve TLS — start with
+  # letsencrypt-staging-route53 to avoid LE prod's per-week
+  # duplicate-cert limit, flip to letsencrypt-route53 once the first
+  # cert issues clean.
+  - target:
+      kind: Ingress
+      name: tripbot
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tripbot.stage.whereisdana.today
+      - op: add
+        path: /metadata/annotations
+        value:
+          external-dns.alpha.kubernetes.io/hostname: tripbot.stage.whereisdana.today
+          # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+      # - op: add
+      #   path: /spec/tls
+      #   value:
+      #     - hosts:
+      #         - tripbot.stage.whereisdana.today
+      #       secretName: tripbot-tls
