@@ -1,6 +1,7 @@
 # https://artifacthub.io/packages/helm/jetstack/cert-manager
 
-installCRDs: true
+crds:
+  enabled: true
 
 # Bypass the in-cluster CoreDNS resolver when checking DNS-01 challenge
 # propagation. CoreDNS caches negative responses for `_acme-challenge`
