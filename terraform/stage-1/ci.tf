@@ -136,14 +136,14 @@ variable "managed_iam_policies_for_terraform" {
 }
 
 data "aws_iam_policy" "managed_aws_iam_policies" {
-  count = length(var.managed_iam_policies_for_terraform)
-  name  = var.managed_iam_policies_for_terraform[count.index]
+  for_each = toset(var.managed_iam_policies_for_terraform)
+  name     = each.value
 }
 
 resource "aws_iam_role_policy_attachment" "ci_terraform_managed_policy" {
-  count      = length(var.managed_iam_policies_for_terraform)
+  for_each   = toset(var.managed_iam_policies_for_terraform)
   role       = aws_iam_role.ci_terraform.name
-  policy_arn = data.aws_iam_policy.managed_aws_iam_policies[count.index].arn
+  policy_arn = data.aws_iam_policy.managed_aws_iam_policies[each.key].arn
 }
 
 
