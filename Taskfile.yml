@@ -116,15 +116,40 @@ tasks:
   # following the tf:stage:* / tf:prod:* pattern; the cluster name embedded
   # in each k3d-config is host-based (adanalife-bees, adanalife-empty) so
   # the cluster identity survives any future env-reassignment.
+  #
+  # Lifecycle verbs:
+  #   up      → create the cluster (first time)
+  #   down    → delete the cluster (full wipe)
+  #   stop    → suspend the cluster (containers down, definition + state preserved)
+  #   start   → resume a stopped cluster (counterpart to stop)
+  #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
+  #             deployed" sequence; each step delegates to its canonical task
   k8s:stage:cluster:up:
     desc: create the local k3d cluster on bees (stage-1)
     cmds:
       - k3d cluster create -c k8s/k3d-config.bees.yaml
 
   k8s:stage:cluster:down:
-    desc: tear down the local k3d cluster on bees
+    desc: tear down the local k3d cluster on bees (delete; use k8s:stage:cluster:stop to suspend without wipe)
     cmds:
       - k3d cluster delete adanalife-bees
+
+  k8s:stage:cluster:stop:
+    desc: suspend the local k3d cluster on bees (containers down, cluster definition + state preserved)
+    cmds:
+      - k3d cluster stop adanalife-bees
+
+  k8s:stage:cluster:start:
+    desc: resume a stopped local k3d cluster on bees (counterpart to k8s:stage:cluster:stop)
+    cmds:
+      - k3d cluster start adanalife-bees
+
+  k8s:stage:cluster:rebuild:
+    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
+    cmds:
+      - task: k8s:stage:cluster:up
+      - task: k8s:stage:platform:up
+      - task: k8s:stage:apply
 
   k8s:prod:cluster:up:
     desc: create the local k3d cluster on empty (prod-1 Mac mini)
@@ -132,9 +157,25 @@ tasks:
       - k3d cluster create -c k8s/k3d-config.empty.yaml
 
   k8s:prod:cluster:down:
-    desc: tear down the local k3d cluster on empty
+    desc: tear down the local k3d cluster on empty (delete; use k8s:prod:cluster:stop to suspend without wipe)
     cmds:
       - k3d cluster delete adanalife-empty
+
+  k8s:prod:cluster:stop:
+    desc: suspend the local k3d cluster on empty (containers down, cluster definition + state preserved)
+    cmds:
+      - k3d cluster stop adanalife-empty
+
+  k8s:prod:cluster:start:
+    desc: resume a stopped local k3d cluster on empty (counterpart to k8s:prod:cluster:stop)
+    cmds:
+      - k3d cluster start adanalife-empty
+
+  k8s:prod:cluster:rebuild:
+    desc: Full empty-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep). No app overlay yet — k8s:prod:apply doesn't exist (prod-1 app overlays deferred).
+    cmds:
+      - task: k8s:prod:cluster:up
+      - task: k8s:prod:platform:up
 
   k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
