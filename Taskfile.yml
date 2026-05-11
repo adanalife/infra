@@ -512,3 +512,28 @@ tasks:
         else
           echo "No vlc-server VNC port-forward PID file found — nothing to stop"
         fi
+
+  # tripbot's cluster Postgres is a headless ClusterIP Service (clusterIP: None)
+  # in the default namespace; nothing from outside the cluster can reach it
+  # directly. These wrappers open a kubectl port-forward at localhost:5432 so
+  # host-side tools can connect — primarily the one-time Twitch OAuth bootstrap
+  # CLI in tripbot (cmd/auth-bootstrap), but also psql for ad-hoc DB poking.
+  tripbot:db:up:
+    desc: start a local kubectl port-forward to the cluster Postgres at localhost:5432
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward svc/postgres 5432:5432 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+      - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
+
+  tripbot:db:down:
+    desc: stop the local kubectl port-forward to cluster Postgres
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/tripbot-db.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/tripbot-db.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/tripbot-db.pid
+          echo "tripbot Postgres port-forward stopped"
+        else
+          echo "No tripbot Postgres port-forward PID file found — nothing to stop"
+        fi
