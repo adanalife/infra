@@ -119,9 +119,19 @@ tasks:
       - k3d cluster create -c k8s/k3d-config.yaml
 
   k8s:cluster:down:
-    desc: tear down the local k3d cluster
+    desc: tear down the local k3d cluster (delete; use k8s:cluster:stop to suspend without wipe)
     cmds:
       - k3d cluster delete adanalife-bees
+
+  k8s:cluster:stop:
+    desc: suspend the local k3d cluster (containers down, cluster definition + state preserved)
+    cmds:
+      - k3d cluster stop adanalife-bees
+
+  k8s:cluster:start:
+    desc: resume a stopped local k3d cluster (counterpart to k8s:cluster:stop)
+    cmds:
+      - k3d cluster start adanalife-bees
 
   k8s:cluster:rebuild:
     desc: Full local-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
