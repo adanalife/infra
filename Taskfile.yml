@@ -124,10 +124,9 @@ tasks:
       - k3d cluster delete adanalife-bees
 
   k8s:cluster:rebuild:
-    desc: Full local-cluster rebuild — cluster + ESO bootstrap secrets + platform helm charts + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
+    desc: Full local-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
     cmds:
       - task: k8s:cluster:up
-      - task: k8s:bootstrap-secrets
       - task: k8s:platform:up
       - task: k8s:apply:stage-1
 
