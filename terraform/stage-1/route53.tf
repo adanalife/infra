@@ -1,3 +1,10 @@
+# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/route53.tf
+#
+# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
+# until the modules refactor lands (vault/infra/TODO.md). Any structural
+# change here SHOULD be mirrored to the sibling file unless the divergence
+# is the whole point of the change.
+
 resource "aws_route53_zone" "primary_subdomain_zone" {
   name = local.primary_subdomain
 }

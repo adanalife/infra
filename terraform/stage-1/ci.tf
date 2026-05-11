@@ -1,3 +1,10 @@
+# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/ci.tf
+#
+# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
+# until the modules refactor lands (vault/infra/TODO.md). Any structural
+# change here SHOULD be mirrored to the sibling file unless the divergence
+# is the whole point of the change.
+
 resource "aws_iam_user" "ci" {
   name = "CIUser"
   path = "/bots/"
