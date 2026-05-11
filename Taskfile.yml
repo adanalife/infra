@@ -184,21 +184,9 @@ tasks:
       - kubectl apply -k k8s/overlays/local
 
   k8s:apply:stage-1:
-    desc: apply stage-1 overlay (cloudflared tunnel + apps) + run tripbot migrations
+    desc: apply stage-1 overlay (cloudflared tunnel + apps)
     cmds:
       - kubectl apply -k k8s/overlays/stage-1
-      - task: k8s:migrate
-
-  # tripbot migrate Job — uses `generateName` so `kubectl apply` won't
-  # take it (apply needs a stable name to reconcile). Each invocation
-  # creates a freshly-named Job; the manifest's `ttlSecondsAfterFinished`
-  # cleans completed rows up after an hour. `migrate up` is idempotent,
-  # so running on every apply is safe and converges the schema to head
-  # with no operator coordination.
-  k8s:migrate:
-    desc: run tripbot db/migrate against cluster postgres (creates a fresh Job)
-    cmds:
-      - kubectl create -f k8s/apps/tripbot/base/migrate-job.yaml
 
   # Bootstrap the cluster Secrets that don't survive a recreate but
   # have to exist before the platform stack can come up:
