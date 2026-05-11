@@ -123,6 +123,14 @@ tasks:
     cmds:
       - k3d cluster delete adanalife-bees
 
+  k8s:cluster:rebuild:
+    desc: Full local-cluster rebuild — cluster + ESO bootstrap secrets + platform helm charts + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
+    cmds:
+      - task: k8s:cluster:up
+      - task: k8s:bootstrap-secrets
+      - task: k8s:platform:up
+      - task: k8s:apply:stage-1
+
   k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
