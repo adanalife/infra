@@ -6,7 +6,7 @@
 # (future cert-manager, external-dns, app workloads) mount.
 #
 # ESOSecretsReader — IAM user + access key + scoped read policy. Output
-# is the (PGP-encrypted) access key. `task k8s:bootstrap-secrets` decrypts
+# is the (PGP-encrypted) access key. `task k8s:stage:bootstrap-secrets` decrypts
 # it via the adanalife keybase team key and pipes the cleartext directly
 # into a kubectl-applied Secret — no plaintext secret.env on disk.
 # Consumer SM containers (e.g. for external-dns, cert-manager) get added
@@ -59,7 +59,7 @@ resource "aws_iam_user_policy_attachment" "eso_reader" {
 
 # PGP-encrypted secret access key for ESOSecretsReader. Decrypt via
 # `terraform output -raw eso_reader_secret | base64 -d | keybase pgp
-# decrypt` and feed into `task k8s:bootstrap-secrets`. See
+# decrypt` and feed into `task k8s:stage:bootstrap-secrets`. See
 # vault/infra/keybase-setup.md.
 #
 # Lives here (not in output.tf) because output.tf is symlinked from

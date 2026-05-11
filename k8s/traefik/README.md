@@ -1,6 +1,6 @@
 # Traefik
 
-In-cluster ingress controller, installed via `traefik/traefik` helm chart by `task k8s:platform:up`. Replaces the k3s-bundled Traefik (disabled in `k8s/k3d-config.yaml` via `--disable=traefik`).
+In-cluster ingress controller, installed via `traefik/traefik` helm chart by `task k8s:stage:platform:up`. Replaces the k3s-bundled Traefik (disabled in `k8s/k3d-config.bees.yaml` via `--disable=traefik`).
 
 App Ingresses opt in via `ingressClassName: traefik` (e.g. `k8s/apps/tripbot/base/ingress.yaml`). The release also registers itself as the default IngressClass for any Ingress that doesn't specify one.
 
