@@ -6,10 +6,6 @@ resources:
   - service.yaml
   - ingress.yaml
 
-# migrate-job.yaml uses `generateName` so it can't be reconciled by
-# `kubectl apply` (apply requires a stable name). It lives in this
-# directory but is created out-of-band by `task k8s:migrate` instead.
-
 # tripbot-config holds non-secret env defaults that mirror
 # tripbot/infra/docker/env.docker, with service hosts swapped from
 # compose names (db, vlc) to k8s service names (postgres, vlc-server).
