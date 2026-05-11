@@ -1,7 +1,14 @@
+# Triggered by `task k8s:migrate` in infra/Taskfile.yml (which is wired
+# into `task k8s:apply:stage-1`). Intentionally NOT in the sibling
+# kustomization.yaml's resources list: `kubectl apply` refuses
+# generateName (no stable identity to reconcile against), so this Job
+# is created out-of-band via `kubectl create -f` each time, leaving the
+# overlay reconcile path clean. ttlSecondsAfterFinished cleans the old
+# Job rows up after an hour.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tripbot-migrate
+  generateName: tripbot-migrate-
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 6
