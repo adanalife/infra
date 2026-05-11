@@ -1,0 +1,27 @@
+# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/config.yml
+# https://artifacthub.io/packages/helm/jetstack/cert-manager
+
+crds:
+  enabled: true
+
+# Bypass the in-cluster CoreDNS resolver when checking DNS-01 challenge
+# propagation. CoreDNS caches negative responses for `_acme-challenge`
+# TXT records, which is the #1 reason DNS-01 hangs on local clusters.
+# These args make cert-manager query 1.1.1.1 / 8.8.8.8 directly.
+extraArgs:
+  - --dns01-recursive-nameservers-only
+  - --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53
+
+# ingress-shim is what makes the `cert-manager.io/cluster-issuer`
+# annotation on Ingress resources Just Work. We don't set a default
+# issuer — every Ingress declares which one (staging vs prod) it wants.
+ingressShim:
+  defaultIssuerKind: ClusterIssuer
+
+# Disable the post-install verification job. It's a Helm hook that runs
+# `cmctl check api` to validate cert-manager came up cleanly; on small
+# clusters it routinely TLS-handshake-times-out and aborts the install
+# even when cert-manager itself is healthy. We verify via `kubectl get
+# clusterissuer` after install instead.
+startupapicheck:
+  enabled: false
