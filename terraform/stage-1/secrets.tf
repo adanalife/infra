@@ -1,19 +1,43 @@
-# AWS Secrets Manager values consumed by other resources in this
-# workspace. Terraform creates the secret container + a placeholder
-# initial version, then `ignore_changes = [secret_string]` lets the
-# real value be set out-of-band (console, `aws secretsmanager
-# put-secret-value`, or `task stage:allowlist:add-current-ip`) without terraform
-# trying to clobber it on the next apply.
+# AWS Secrets Manager — stage-1 SM containers + CI lifecycle grants.
+#
+# As of 2026-05-11 consolidation: this file is the single bookkeeping point
+# for "what SM containers exist in this AWS account." Topic files
+# (grafana-cloud.tf, grafana-k8s-monitoring.tf, etc.) keep their consumer-
+# side resources (IAM users, providers, locals, dashboards) but no longer
+# declare SM containers themselves.
+#
+# Per-secret pattern (from vault/decisions/secrets-manager-for-tf-providers.md):
+#   - `aws_secretsmanager_secret`     — container, terraform-managed.
+#   - `aws_secretsmanager_secret_version` with `lifecycle.ignore_changes =
+#     [secret_string]` so the placeholder doesn't clobber out-of-band updates.
+#   - Optional `data.aws_secretsmanager_secret_version` if terraform itself
+#     needs the value at plan time (e.g. provider auth).
+#   - Container only (no version resource) if the secret should never be
+#     refreshed by CI — e.g. stream keys, where CI compromise should not give
+#     read access. Value seeded out-of-band, read at runtime by ESO.
+#
+# CI lifecycle grants live at the bottom of this file:
+#   - `ci_terraform_secrets_read`: bulk GetSecretValue for SM containers
+#     terraform refreshes during plan (any with a version resource or data
+#     source).
+#   - Per-secret lifecycle policies (CreateSecret / DeleteSecret / Update /
+#     Tag) for k8s/* SM containers that CI manages the container of. No
+#     GetSecretValue; the value is admin-owned (out-of-band put-secret-value)
+#     and ESO-readable.
 #
 # First-apply flow (chicken-and-egg with the cloudflare provider):
-#   1. `task tf:stage:apply` — SM resources apply cleanly; the cloudflare
-#      provider initializes with the placeholder token and every
-#      cloudflare_* resource fails. Expected.
-#   2. Populate the real values:
+#   1. `task tf:stage:apply` — SM resources apply; cloudflare_* resources
+#      fail on the placeholder token (expected).
+#   2. Populate the cloudflare-api-token + any other secrets needed for
+#      provider auth or at-plan reads. Examples:
 #        aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
 #          --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
 #        task stage:allowlist:add-current-ip   # writes ["X.X.X.X/32"] to stage-1/allowlist-cidrs
-#   3. `task tf:stage:apply` again — cloudflare provider auths, resources apply.
+#   3. `task tf:stage:apply` again — provider auths cleanly.
+
+# ============================================================================
+# Cloudflare
+# ============================================================================
 
 resource "aws_secretsmanager_secret" "cloudflare_api_token" {
   name        = "stage-1/cloudflare-api-token"
@@ -32,9 +56,9 @@ data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
   secret_id = aws_secretsmanager_secret.cloudflare_api_token.id
 }
 
-# JSON array of CIDR strings, e.g. ["69.222.113.215/32"]. Edited
-# interactively via `task stage:allowlist:add-current-ip`. Consumed by the
-# Cloudflare Access policy on tripbot — see cloudflare-tunnel.tf.
+# JSON array of CIDR strings, e.g. ["69.222.113.215/32"]. Edited interactively
+# via `task stage:allowlist:add-current-ip`. Consumed by the Cloudflare Access
+# policy on tripbot — see cloudflare-tunnel.tf.
 resource "aws_secretsmanager_secret" "stage_1_allowlist_cidrs" {
   name        = "stage-1/allowlist-cidrs"
   description = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
@@ -52,42 +76,207 @@ data "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
   secret_id = aws_secretsmanager_secret.stage_1_allowlist_cidrs.id
 }
 
-# Twitch RTMP ingest key for the adanalife_staging channel. No
-# terraform-side consumer (no data source); the consumer is the OBS
-# pod via ESO once the platform stack lands. The k8s/obs/ name prefix
-# puts this inside the ESOSecretsReader read scope (k8s/*); CI lifecycle
-# is granted narrowly per-secret via the policy below.
+# ============================================================================
+# Grafana Cloud
+# ============================================================================
+
+# OTLP credentials for in-cluster OpenTelemetry exporters (tripbot, vlc-server).
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/grafana-cloud-otlp \
+#     --secret-string '{"OTEL_EXPORTER_OTLP_ENDPOINT":"https://otlp-gateway-prod-us-central-0.grafana.net/otlp","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Basic <base64(instanceID:apiKey)>"}'
+# ESO picks up new values within an hour; force-sync with
+#   kubectl annotate externalsecret grafana-cloud-otlp force-sync=$(date +%s) --overwrite
+# The k8s/ name prefix matches AllowESOReadK8sSecrets in eso.tf, so ESO can read
+# without extra IAM grants.
+resource "aws_secretsmanager_secret" "grafana_cloud_otlp" {
+  name        = "k8s/grafana-cloud-otlp"
+  description = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
+}
+
+resource "aws_secretsmanager_secret_version" "grafana_cloud_otlp" {
+  secret_id     = aws_secretsmanager_secret.grafana_cloud_otlp.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# Grafana Cloud admin API credentials consumed terraform-side by the `grafana`
+# provider (see grafana.tf). Seeded via:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/grafana-cloud-api \
+#     --secret-string '{"GRAFANA_CLOUD_URL":"https://<stack>.grafana.net","GRAFANA_CLOUD_API_TOKEN":"<token>","GRAFANA_CLOUD_STACK_SLUG":"<stack>"}'
+# Token: mint a service account in the stack with Admin role, then create a
+# token under it. Stack slug = the subdomain of your URL. Lives at stage-1/*
+# (terraform-only consumer) so it stays out of the ESOSecretsReader scope.
+resource "aws_secretsmanager_secret" "grafana_cloud_api" {
+  name        = "stage-1/grafana-cloud-api"
+  description = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
+}
+
+resource "aws_secretsmanager_secret_version" "grafana_cloud_api" {
+  secret_id     = aws_secretsmanager_secret.grafana_cloud_api.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "grafana_cloud_api" {
+  secret_id  = aws_secretsmanager_secret.grafana_cloud_api.id
+  depends_on = [aws_secretsmanager_secret_version.grafana_cloud_api] # cold-start ordering
+}
+
+# Metrics + logs write credentials for the in-cluster grafana-k8s-monitoring
+# helm chart (Alloy + kube-state-metrics + node-exporter + cAdvisor). Separate
+# token from grafana_cloud_otlp so the cluster-monitoring blast radius is
+# isolated from the app-side OTel exporters.
+#
+# Container only (no version resource) — value populated out-of-band and
+# consumed by Alloy at runtime via ESO. Same precedent as k8s_obs_twitch_stream_key:
+# no GetSecretValue grant for CITerraformRole, and a CI compromise can't read
+# the token out of state.
+#
+# Bootstrap (after first `task tf:stage:apply`):
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/grafana-cloud-metrics-write \
+#     --secret-string '{
+#       "PROMETHEUS_HOST": "https://prometheus-prod-XX-XXX.grafana.net",
+#       "PROMETHEUS_USERNAME": "<numeric prom instance ID>",
+#       "LOKI_HOST": "https://logs-prod-XXX.grafana.net",
+#       "LOKI_USERNAME": "<numeric loki instance ID>",
+#       "TOKEN": "<Grafana Cloud Access Policy token with metrics:write + logs:write>"
+#     }'
+# Endpoints + numeric IDs come from Grafana Cloud `Connections → Add new
+# connection → Hosted Prometheus / Hosted Loki`. Token via Grafana Cloud admin
+# → Access Policies with scopes `metrics:write` + `logs:write`.
+resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
+  name        = "k8s/grafana-cloud-metrics-write"
+  description = "Grafana Cloud Mimir/Loki credentials for the in-cluster k8s-monitoring chart. Consumed by Alloy via ESO."
+
+  # CI-driven applies need the lifecycle policy attached to CITerraformRole
+  # before AWS will accept CreateSecret on this ARN. Local applies (admin role)
+  # don't care, but the explicit ordering is required for a CI bootstrap to
+  # succeed without a retry.
+  depends_on = [aws_iam_role_policy_attachment.ci_terraform_grafana_metrics_write_manage]
+}
+
+# ============================================================================
+# Sentry
+# ============================================================================
+
+# Sentry DSNs for the tripbot bot and vlc-server services. Two SM secrets, one
+# per Sentry project. Both materialize into k8s Secrets via ExternalSecret
+# resources owned by each app's overlay (k8s/apps/*), envFrom'd into the
+# respective Deployments as SENTRY_DSN.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/sentry-tripbot \
+#     --secret-string '{"SENTRY_DSN":"https://<key>@<org>.ingest.sentry.io/<project>"}'
+# and again for k8s/sentry-vlc-server with the matching DSN.
+resource "aws_secretsmanager_secret" "sentry_tripbot" {
+  name        = "k8s/sentry-tripbot"
+  description = "Sentry DSN for the tripbot Go service. Consumed by pkg/errors via SENTRY_DSN env var."
+}
+
+resource "aws_secretsmanager_secret_version" "sentry_tripbot" {
+  secret_id     = aws_secretsmanager_secret.sentry_tripbot.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret" "sentry_vlc_server" {
+  name        = "k8s/sentry-vlc-server"
+  description = "Sentry DSN for the vlc-server Go service. Consumed by pkg/errors via SENTRY_DSN env var."
+}
+
+resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
+  secret_id     = aws_secretsmanager_secret.sentry_vlc_server.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
+# Twitch
+# ============================================================================
+
+# Twitch app credentials (Helix API + OAuth Authorization Code flow) for the
+# tripbot Go service. One SM secret holding TWITCH_CLIENT_ID + TWITCH_CLIENT_SECRET.
+# The IRC token is no longer here — since tripbot v2.3.0 it lives in the
+# oauth_tokens DB table, populated by `task auth:bootstrap` and rotated hourly.
+#
+# Materializes into a k8s Secret via an ExternalSecret resource owned by
+# k8s/apps/tripbot/overlays/local/, envFrom'd into the Deployment.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/twitch-creds \
+#     --secret-string '{"TWITCH_CLIENT_ID":"...","TWITCH_CLIENT_SECRET":"..."}'
+resource "aws_secretsmanager_secret" "tripbot_twitch_creds" {
+  name        = "k8s/tripbot/twitch-creds"
+  description = "Twitch app credentials for tripbot. App: tripbot-development. Keys: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET. Consumed by pkg/twitch (Helix API + OAuth Authorization Code flow). IRC token lives in the oauth_tokens DB table, not in this secret."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
+  secret_id     = aws_secretsmanager_secret.tripbot_twitch_creds.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
+# OBS
+# ============================================================================
+
+# Twitch RTMP ingest key for the adanalife_staging channel. No terraform-side
+# consumer (no data source); ESO reads it at runtime once the platform stack
+# lands. The k8s/obs/ name prefix puts this inside the ESOSecretsReader read
+# scope (k8s/*); CI lifecycle is granted narrowly per-secret below.
 # Populate out-of-band (terraform-via-CI never sees the value):
 #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
 #     --secret-id k8s/obs/twitch-stream-key --secret-string "$STREAM_KEY"
 # Get the key from https://dashboard.twitch.tv/u/adanalife_staging/settings/stream
-# Container only — terraform deliberately doesn't manage the version
-# resource. Real values are populated out-of-band via `aws
-# secretsmanager put-secret-value` and read at runtime by ESO. Keeping
-# the version out of terraform state means CI never refreshes it (no
-# GetSecretValue grant required) and a CITerraformRole compromise can't
-# read the stream key.
+# Container only — terraform deliberately doesn't manage the version resource.
+# Keeping the version out of terraform state means CI never refreshes it (no
+# GetSecretValue grant required) and a CITerraformRole compromise can't read
+# the stream key.
 resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
   name        = "k8s/obs/twitch-stream-key"
   description = "Twitch RTMP stream key for adanalife_staging. Consumed by OBS via ESO. Rotate from the Twitch dashboard, then put-secret-value here."
 
-  # CI-driven applies need the lifecycle policy attached to
-  # CITerraformRole before AWS will accept CreateSecret on this ARN.
-  # Local applies (admin role) don't care, but the explicit ordering
-  # is required for a CI bootstrap to succeed without a retry.
+  # CI-driven applies need the lifecycle policy attached to CITerraformRole
+  # before AWS will accept CreateSecret on this ARN. Local applies (admin role)
+  # don't care, but the explicit ordering is required for a CI bootstrap to
+  # succeed without a retry.
   depends_on = [aws_iam_role_policy_attachment.ci_terraform_twitch_stream_key_manage]
 }
 
-# Allow CITerraformRole to read the SM secrets that terraform itself
-# touches at plan time. ReadOnlyAccess (already attached) excludes
+# ============================================================================
+# CI lifecycle grants
+# ============================================================================
+
+# Allow CITerraformRole to read the SM secrets that terraform itself touches
+# at plan time. ReadOnlyAccess (already attached) excludes
 # secretsmanager:GetSecretValue. Two distinct call sites need it:
-#   - provider data sources (cloudflare provider reads its own token at
-#     plan via `data.aws_secretsmanager_secret_version.cloudflare_api_token`);
+#   - provider data sources (cloudflare provider reads its own token at plan
+#     via `data.aws_secretsmanager_secret_version.cloudflare_api_token`);
 #   - `aws_secretsmanager_secret_version` resource refresh, which calls
 #     GetSecretValue to compare current value against state — even with
 #     `ignore_changes = [secret_string]`, the refresh still reads.
-# Scoped to specific ARNs so CI can't read the values of other secrets
-# in the account.
+# Scoped to specific ARNs so CI can't read the values of other secrets in
+# the account.
 data "aws_iam_policy_document" "ci_terraform_secrets_read" {
   statement {
     actions = [
@@ -118,17 +307,15 @@ resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
   policy_arn = aws_iam_policy.ci_terraform_secrets_read.arn
 }
 
-# Allow CITerraformRole to manage the lifecycle of the twitch-stream-key
-# SM container only. Narrow per-secret scope (least privilege): each
-# k8s/* SM secret that needs CI-applicable lifecycle gets its own policy.
-# The `-*` ARN suffix handles AWS's auto-appended 6-char random ID,
-# which the CreateSecret IAM check evaluates against the to-be-created
-# ARN.
+# --- Per-secret lifecycle grants ---
 #
-# No GetSecretValue, no PutSecretValue — the value is owned by the
-# admin who runs `aws secretsmanager put-secret-value` out of band, and
-# read by ESO via ESOSecretsReader. CITerraformRole only manages the
-# container (create/delete/update-description/tag).
+# Each k8s/* SM secret that needs CI-applicable lifecycle (CreateSecret /
+# DeleteSecret / UpdateSecret / Tag) but should NOT be CI-readable gets its
+# own narrow policy. The `-*` ARN suffix handles AWS's auto-appended 6-char
+# random ID, which the CreateSecret IAM check evaluates against the to-be-
+# created ARN.
+
+# k8s/obs/twitch-stream-key
 data "aws_iam_policy_document" "ci_terraform_twitch_stream_key_manage" {
   statement {
     actions = [
@@ -153,4 +340,31 @@ resource "aws_iam_policy" "ci_terraform_twitch_stream_key_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_twitch_stream_key_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_twitch_stream_key_manage.arn
+}
+
+# k8s/grafana-cloud-metrics-write
+data "aws_iam_policy_document" "ci_terraform_grafana_metrics_write_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UntagResource",
+      "secretsmanager:UpdateSecret",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/grafana-cloud-metrics-write-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_grafana_metrics_write_manage" {
+  name        = "AllowCITerraformManageStage1GrafanaMetricsWrite"
+  description = "Lifecycle access for CITerraformRole to the k8s/grafana-cloud-metrics-write SM secret in stage-1 (container only — value stays out-of-terraform)."
+  policy      = data.aws_iam_policy_document.ci_terraform_grafana_metrics_write_manage.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_grafana_metrics_write_manage" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_grafana_metrics_write_manage.arn
 }
