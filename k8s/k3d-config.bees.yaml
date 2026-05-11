@@ -1,10 +1,14 @@
-# k3d cluster config for app development.
+# k3d cluster config for stage-1 on the `bees` host (dmerrick-bees).
 #
-# Bring up with:  task k8s:cluster:up
-# Tear down with: task k8s:cluster:down
+# Bring up with:  task k8s:stage:cluster:up
+# Tear down with: task k8s:stage:cluster:down
 #
-# Cluster name encodes the host (`bees` is dmerrick-bees) so future
-# laptops get their own — `adanalife-<host>`.
+# Cluster name is host-based, not env-based: `adanalife-bees` on bees,
+# `adanalife-empty` on the Mac mini (see k3d-config.empty.yaml). Rationale:
+# when stage-1 eventually graduates from bees to the Mac mini, the cluster
+# on `empty` stays `adanalife-empty` and only the Taskfile mapping changes
+# (which env's tasks target which cluster). Host-based names decouple
+# cluster identity from env assignment.
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
 # *.stage.whereisdana.today URLs (managed by external-dns in stage-1

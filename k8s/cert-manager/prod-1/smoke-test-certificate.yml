@@ -1,0 +1,22 @@
+# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/smoke-test-certificate.yml
+#
+# Smoke-test Certificate — exercises the full DNS-01 issuance path
+# (cert-manager → ExternalSecret → Route53 → LE staging API) without
+# requiring any inbound network access. Useful for validating that the
+# platform can issue certs even before app Ingresses depend on them.
+#
+# Pinned to **letsencrypt-staging-route53** so failed iterations don't
+# burn LE-prod's per-week duplicate-cert limit; the resulting cert is
+# untrusted by browsers but valid in shape.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cert-manager-smoke-test
+  namespace: kube-system
+spec:
+  secretName: cert-manager-smoke-test-tls
+  issuerRef:
+    name: letsencrypt-staging-route53
+    kind: ClusterIssuer
+  dnsNames:
+    - cert-test.prod.whereisdana.today
