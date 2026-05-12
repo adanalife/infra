@@ -640,10 +640,11 @@ tasks:
   obs:vnc:up:
     desc: start a local kubectl port-forward to OBS VNC at localhost:5902
     cmds:
-      - mkdir -p /tmp/adanalife-tasks
-      - kubectl port-forward svc/obs 5902:5900 > /dev/null 2>&1 &
-      - echo $! > /tmp/adanalife-tasks/obs-vnc.pid
-      - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
+      - |
+        mkdir -p /tmp/adanalife-tasks
+        kubectl port-forward svc/obs 5902:5900 >/dev/null 2>&1 &
+        echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+        echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"
 
   obs:vnc:down:
     desc: stop the local kubectl port-forward to OBS VNC
@@ -660,10 +661,11 @@ tasks:
   vlc:vnc:up:
     desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
     cmds:
-      - mkdir -p /tmp/adanalife-tasks
-      - kubectl port-forward svc/vlc-server 5903:5900 > /dev/null 2>&1 &
-      - echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
-      - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
+      - |
+        mkdir -p /tmp/adanalife-tasks
+        kubectl port-forward svc/vlc-server 5903:5900 >/dev/null 2>&1 &
+        echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
+        echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"
 
   vlc:vnc:down:
     desc: stop the local kubectl port-forward to vlc-server VNC
@@ -685,10 +687,11 @@ tasks:
   tripbot:db:up:
     desc: start a local kubectl port-forward to the cluster Postgres at localhost:5432
     cmds:
-      - mkdir -p /tmp/adanalife-tasks
-      - kubectl port-forward svc/postgres 5432:5432 > /dev/null 2>&1 &
-      - echo $! > /tmp/adanalife-tasks/tripbot-db.pid
-      - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
+      - |
+        mkdir -p /tmp/adanalife-tasks
+        kubectl port-forward svc/postgres 5432:5432 >/dev/null 2>&1 &
+        echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+        echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"
 
   tripbot:db:down:
     desc: stop the local kubectl port-forward to cluster Postgres
