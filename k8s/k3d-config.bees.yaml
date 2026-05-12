@@ -19,7 +19,7 @@
 # test URLs include the port suffix until a router/CDN translates
 # 443 → host:9443. Other ports (VNC, RTSP, traefik dashboard, etc.)
 # are reachable ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
-# Re-run `task k8s:cluster:down && task k8s:cluster:up` to apply
+# Re-run `task k8s:stage:cluster:down && task k8s:stage:cluster:up` to apply
 # port-mapping changes to an existing cluster.
 #
 # Notes for future EKS port:
@@ -46,7 +46,7 @@ volumes:
       - server:*
 
 # Disable k3s's bundled Traefik. We install traefik/traefik via helm
-# in `task k8s:platform:up` instead, so the full chart's CRDs (default
+# in `task k8s:stage:platform:up` instead, so the full chart's CRDs (default
 # IngressClass, dashboard wiring, prometheus metrics) are available
 # without the HelmChartConfig customization dance the bundled chart
 # requires.
