@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-seed
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      # Migrate to head before seeding so the schema exists even if
+      # the Job is applied before the main Deployment's initContainer runs.
+      initContainers:
+        - name: migrate
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["migrate"]
+          args:
+            - "-path"
+            - "/migrations"
+            - "-database"
+            - "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable"
+            - "up"
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-secret
+      containers:
+        - name: seed
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/seed-db"]
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-secret

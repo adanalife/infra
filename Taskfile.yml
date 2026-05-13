@@ -701,3 +701,10 @@ tasks:
         else
           echo "No tripbot Postgres port-forward PID file found — nothing to stop"
         fi
+
+  tripbot:db:seed:
+    desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has rows
+    cmds:
+      - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
+      - kubectl wait --for=condition=complete job/tripbot-seed --timeout=180s
+      - kubectl logs job/tripbot-seed
