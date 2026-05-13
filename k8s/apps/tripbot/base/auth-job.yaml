@@ -20,6 +20,12 @@ spec:
           # port-forwards it to localhost so the browser redirect lands here.
           ports:
             - containerPort: 8080
+          env:
+            # Override the ConfigMap value so the Twitch redirect URI matches
+            # the registered http://localhost:8080/auth/callback — the
+            # port-forward makes localhost:8080 resolve to this pod.
+            - name: EXTERNAL_URL
+              value: "http://localhost:8080"
           envFrom:
             - configMapRef:
                 name: tripbot-config
