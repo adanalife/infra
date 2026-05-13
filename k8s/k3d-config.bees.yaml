@@ -44,6 +44,12 @@ volumes:
   - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
     nodeFilters:
       - server:*
+  # NAS-backed dashcam footage (home network only). Mounted :ro at the
+  # Docker bind level so the k3d node itself cannot write to the NAS.
+  # Used by the stage-1-nas overlay; the stage-1 overlay uses /host/dashcam above.
+  - volume: "/Volumes/Leeroy/Dana's Photos/Dashcam Scratchpad/Dashcam/_all:/host/nas-dashcam:ro"
+    nodeFilters:
+      - server:*
 
 # Disable k3s's bundled Traefik. We install traefik/traefik via helm
 # in `task k8s:stage:platform:up` instead, so the full chart's CRDs (default
