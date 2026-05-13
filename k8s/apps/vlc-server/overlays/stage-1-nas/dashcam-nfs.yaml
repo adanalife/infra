@@ -21,7 +21,7 @@ spec:
     - timeo=30
   nfs:
     server: 10.0.4.2
-    path: "/Leeroy/Dana's Photos/Dashcam/_all"
+    path: "/volume1/Leeroy/Dana's Photos/Dashcam/_all"
     readOnly: true
 ---
 # Static PVC that binds 1:1 to the PV above.
