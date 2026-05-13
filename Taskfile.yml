@@ -708,3 +708,13 @@ tasks:
       - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
       - kubectl wait --for=condition=complete --for=condition=failed job/tripbot-seed --timeout=180s
       - kubectl logs job/tripbot-seed
+
+  tripbot:auth:bootstrap:
+    desc: run the interactive Twitch OAuth bootstrap job; port-forwards 8080 so the browser callback reaches the pod
+    cmds:
+      - kubectl delete job tripbot-auth-bootstrap --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/base/auth-job.yaml
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap
+      - echo "Port-forwarding localhost:8080 → job pod. Open the URL above in your browser. Ctrl-C when done."
+      - kubectl port-forward job/tripbot-auth-bootstrap 8080:8080

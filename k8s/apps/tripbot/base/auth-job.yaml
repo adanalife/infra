@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-auth-bootstrap
+spec:
+  # Interactive one-shot: don't retry on failure (the OAuth state token
+  # is single-use; a retry would need a fresh browser flow anyway).
+  backoffLimit: 0
+  # Clean up automatically so the completed pod doesn't linger.
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: auth-bootstrap
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/auth-bootstrap"]
+          # Port 8080 is the OAuth callback listener; `task tripbot:auth:bootstrap`
+          # port-forwards it to localhost so the browser redirect lands here.
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-secret
