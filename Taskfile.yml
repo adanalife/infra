@@ -243,7 +243,7 @@ tasks:
       - kubectl apply -k k8s/overlays/stage-1
 
   k8s:stage:apply-nas:
-    desc: "apply stage-1-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires /Volumes/Leeroy mounted + cluster rebuild after k3d-config change)"
+    desc: "apply stage-1-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires ~/mnt/nas-dashcam NFS mount + cluster rebuild after k3d-config change)"
     cmds:
       - kubectl apply -k k8s/overlays/stage-1-nas
 

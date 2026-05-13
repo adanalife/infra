@@ -47,7 +47,7 @@ volumes:
   # NAS-backed dashcam footage (home network only). Mounted :ro at the
   # Docker bind level so the k3d node itself cannot write to the NAS.
   # Used by the stage-1-nas overlay; the stage-1 overlay uses /host/dashcam above.
-  - volume: "/Volumes/Leeroy/Dana's Photos/Dashcam Scratchpad/Dashcam/_all:/host/nas-dashcam:ro"
+  - volume: "/Users/dmerrick/mnt/nas-dashcam/Dana's Photos/Dashcam Scratchpad/Dashcam/_all:/host/nas-dashcam:ro"
     nodeFilters:
       - server:*
 
