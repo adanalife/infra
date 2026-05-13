@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Extends stage-1 (which extends local), replacing the local hostPath
+# dashcam volume with an NFS-backed PV/PVC sourced from the Synology NAS.
+# Use when the cluster host is on the home LAN (10.0.4.x).
+# Use stage-1 (not stage-1-nas) when away from home.
+resources:
+  - ../stage-1
+  - dashcam-nfs.yaml
+
+patches:
+  # JSON 6902 patch: replace the dashcam volume entry at index 0.
+  # A strategic merge patch can't remove hostPath while adding PVC in the
+  # same volume object — it merges the two specs instead. Explicit replace
+  # at index 0 is safe because the base + local overlay produces exactly
+  # one volume (dashcam), which is always at index 0.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: dashcam
+          persistentVolumeClaim:
+            claimName: dashcam-nas

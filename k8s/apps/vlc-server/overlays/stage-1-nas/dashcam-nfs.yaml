@@ -1,0 +1,41 @@
+---
+# Static NFS-backed PersistentVolume pointing at the Synology NAS.
+# PVs are cluster-scoped; capacity on NFS PVs is advisory only — it is
+# not enforced by the NFS server. ReadOnlyMany: multiple nodes could
+# technically read it, but vlc-server is single-replica by design.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: dashcam-nas
+spec:
+  capacity:
+    storage: 2Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4
+    - ro
+    - soft
+    - timeo=30
+  nfs:
+    server: 10.0.4.2
+    path: "/Leeroy/Dana's Photos/Dashcam/_all"
+    readOnly: true
+---
+# Static PVC that binds 1:1 to the PV above.
+# storageClassName: "" + volumeName: dashcam-nas together prevent any
+# dynamic provisioner from picking this up.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dashcam-nas
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 2Ti
+  volumeName: dashcam-nas
+  storageClassName: ""

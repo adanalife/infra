@@ -242,6 +242,11 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/stage-1
 
+  k8s:stage:apply-nas:
+    desc: apply stage-1-nas overlay — vlc-server reads dashcam footage from the Synology NAS over NFS (home network only)
+    cmds:
+      - kubectl apply -k k8s/overlays/stage-1-nas
+
   # No k8s:prod:apply yet — prod-1 app overlays are deferred per the
   # prod-1 deployment plan (platform-stack only in this pass).
 
