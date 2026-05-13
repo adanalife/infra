@@ -31,3 +31,6 @@ spec:
                 name: tripbot-config
             - secretRef:
                 name: tripbot-secret
+            - secretRef:
+                name: tripbot-twitch-creds
+                optional: true
