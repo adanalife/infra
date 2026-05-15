@@ -14,7 +14,7 @@
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`."
+        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate, `twitch_helix_errors_total{endpoint,status_code}` for silent-eviction-class incidents (see [tripbot#530](https://github.com/adanalife/tripbot/pull/530) for context)."
       }
     },
     {
@@ -134,6 +134,131 @@
       ],
       "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Operations",
+      "gridPos": { "x": 0, "y": 39, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Events / min (login + logout)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 40, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tripbot_events_total{service_name=\"tripbot\"}[5m])) * 60" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Scoreboard writes / min",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 40, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\"}[5m])) * 60" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Helix errors (5m)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 40, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(twitch_helix_errors_total{service_name=\"tripbot\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Command p95 (all)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 40, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Command latency (p50 / p95 / p99)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 45, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Command p95 by command (top 10)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 45, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, histogram_quantile(0.95, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval]))))", "legendFormat": "{{command}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Login / logout rate",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 53, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (event) (rate(tripbot_events_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{event}} / min" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Helix errors by endpoint and status",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 53, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (endpoint, status_code) (rate(twitch_helix_errors_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status_code}})" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Scoreboard writes by scoreboard",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 61, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (scoreboard) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{scoreboard}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
     }
   ]
 }
