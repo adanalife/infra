@@ -41,15 +41,6 @@ variable "external_dns_role" {
   default = "ExternalDNSRole"
 }
 
-variable "rds_tripbot_username" {
-  type = string
-}
-
-#TODO: replace with terraform password generator
-variable "rds_tripbot_password" {
-  type      = string
-  sensitive = true
-}
 
 variable "static_site_public_dir" {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"

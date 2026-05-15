@@ -6,10 +6,6 @@ secondary_domain = "whereisdana.today"
 # other account IDs
 core_account_id = "729863845087"
 
-# Supply via TF_VAR_rds_tripbot_password env var or a gitignored *.auto.tfvars
-# rds_tripbot_username = ""
-# rds_tripbot_password = ""
-
 # this is a convention set by middleman
 static_site_public_dir = "build"
 
