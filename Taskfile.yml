@@ -682,6 +682,26 @@ tasks:
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
 
+  obs:media:restart:
+    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs >/dev/null 2>&1
+        msg: "obs Deployment not found — is the cluster up?"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/tripbot/bin/obs-media-restart
+
   vlc:vnc:up:
     desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
     cmds:
@@ -731,7 +751,14 @@ tasks:
     desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has rows
     cmds:
       - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
-      - kubectl wait --for=condition=complete --for=condition=failed job/tripbot-seed --timeout=180s
+      - |
+        for i in $(seq 1 90); do
+          status=$(kubectl get job tripbot-seed -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null)
+          [ "$status" = "Complete" ] && break
+          [ "$status" = "Failed"   ] && { echo "seed job failed"; exit 1; }
+          sleep 2
+        done
+        [ "$status" = "Complete" ] || { echo "seed job timed out after 180s"; exit 1; }
       - kubectl logs job/tripbot-seed
 
   tripbot:auth:bootstrap:
