@@ -1,0 +1,30 @@
+# gitleaks config for super-linter
+#
+# Inherits the default ruleset and layers on path-based allowlists for
+# files that contain non-secret strings the default rules false-positive
+# on. Each entry below documents *why* the path is allowlisted — anything
+# new added here should keep that pattern so a future reviewer can audit.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "infra repo path allowlists for non-secret strings"
+paths = [
+  # Empty/stub values; gitleaks generic-api-key rule false-positives on
+  # the variable *name* `GOOGLE_MAPS_API_KEY=` (entropy ~3.78 even with
+  # no value). All values in this file are stubs by design.
+  '''k8s/apps/tripbot/overlays/local/secret\.env\.example''',
+
+  # Contains the rotated-and-dead access-key-id `AKIAWAS42L6WSH6MNBF6`
+  # (rotated 2026-05-04, see vault/decisions/k8s-platform-stack.md). The
+  # ID is preserved here as a deliberate reference; the secret half lives
+  # in SM and is reconciled via ESO. Migration to ESO-backed Secret +
+  # secretRef is tracked separately.
+  '''k8s/cert-manager/stage-1/cluster-issuer\.yml''',
+
+  # Maps access-key-id → mnemonic alias as an IAM user *tag*. The
+  # access-key-id is public (visible in the AWS console); the secret
+  # half is not present in this file.
+  '''terraform/core/user_data\.yml''',
+]

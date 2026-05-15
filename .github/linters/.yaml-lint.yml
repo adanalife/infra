@@ -1,0 +1,57 @@
+---
+# yamllint config for super-linter.
+#
+# Super-linter runs yamllint with --strict, which promotes warnings to
+# errors. Many of yamllint's defaults are stylistic and conflict with how
+# this repo is already written:
+#
+# - line-length: k8s manifests routinely have long literal blocks
+#   (image SHAs, base64 secret data, env-var values). Don't fight them.
+# - indentation: kustomize manifests, GHA workflows, and dynamic-dns
+#   pod specs each use slightly different sequence-indent styles
+#   (`  -` under a key vs `-` flush). Not worth a sweep; allow either.
+# - comments / comments-indentation: `#TODO:` / `#NOTE:` style without
+#   a leading space and inline comments next to keys are common.
+# - colons: cron expressions and aligned tables sometimes pad colons.
+# - truthy: super-linter passes 'on:' as the workflow trigger key, and
+#   k8s manifests mix 'true'/'false' with quoted forms.
+# - document-start: not all our YAML starts with `---`.
+
+extends: default
+
+rules:
+  line-length: disable
+
+  indentation:
+    spaces: consistent
+    # `whatever` accepts any sequence-indent style; the repo is mixed
+    # and unifying would touch a lot of manifests for no functional win.
+    indent-sequences: whatever
+    check-multi-line-strings: false
+
+  comments:
+    require-starting-space: false
+    min-spaces-from-content: 1
+  comments-indentation: disable
+
+  colons:
+    max-spaces-after: -1
+
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+    check-keys: false
+
+  document-start: disable
+
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
