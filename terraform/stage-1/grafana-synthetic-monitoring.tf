@@ -22,17 +22,25 @@
 # After seeding, run `task tf:stage:apply` to activate the checks.
 # Checks appear under Grafana Cloud → Testing & Synthetics → Checks.
 
-data "grafana_synthetic_monitoring_probes" "main" {}
+locals {
+  sm_enabled = lookup(local.grafana_creds, "GRAFANA_SM_ACCESS_TOKEN", "placeholder") != "placeholder"
+}
+
+# Skipped until GRAFANA_SM_ACCESS_TOKEN is seeded in the SM blob.
+data "grafana_synthetic_monitoring_probes" "main" {
+  count = local.sm_enabled ? 1 : 0
+}
 
 locals {
-  sm_probes = [
-    data.grafana_synthetic_monitoring_probes.main.probes["Atlanta"],
-    data.grafana_synthetic_monitoring_probes.main.probes["Frankfurt"],
-    data.grafana_synthetic_monitoring_probes.main.probes["Tokyo"],
-  ]
+  sm_probes = local.sm_enabled ? [
+    data.grafana_synthetic_monitoring_probes.main[0].probes["Atlanta"],
+    data.grafana_synthetic_monitoring_probes.main[0].probes["Frankfurt"],
+    data.grafana_synthetic_monitoring_probes.main[0].probes["Tokyo"],
+  ] : []
 }
 
 resource "grafana_synthetic_monitoring_check" "tripbot" {
+  count     = local.sm_enabled ? 1 : 0
   job       = "tripbot-http"
   target    = "https://tripbot.whalecore.com"
   enabled   = true
@@ -49,6 +57,7 @@ resource "grafana_synthetic_monitoring_check" "tripbot" {
 }
 
 resource "grafana_synthetic_monitoring_check" "vlc_server" {
+  count     = local.sm_enabled ? 1 : 0
   job       = "vlc-http"
   target    = "https://vlc.whalecore.com"
   enabled   = true
@@ -65,6 +74,7 @@ resource "grafana_synthetic_monitoring_check" "vlc_server" {
 }
 
 resource "grafana_synthetic_monitoring_check" "dana_lol" {
+  count     = local.sm_enabled ? 1 : 0
   job       = "dana-lol-http"
   target    = "https://dana.lol"
   enabled   = true
@@ -81,6 +91,7 @@ resource "grafana_synthetic_monitoring_check" "dana_lol" {
 }
 
 resource "grafana_synthetic_monitoring_check" "www_whalecore" {
+  count     = local.sm_enabled ? 1 : 0
   job       = "www-whalecore-http"
   target    = "https://www.whalecore.com"
   enabled   = true
