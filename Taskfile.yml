@@ -748,8 +748,13 @@ tasks:
         fi
 
   tripbot:db:seed:
-    desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has rows
+    desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has real rows
     cmds:
+      # Wait for postgres before applying so the seed Job's init container
+      # doesn't race headless-service DNS resolution against postgres-0
+      # becoming Ready — each DNS failure burns init-container backoff and
+      # can push completion past the poll window below.
+      - kubectl rollout status statefulset/postgres --timeout=120s
       - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
       - |
         for i in $(seq 1 90); do
