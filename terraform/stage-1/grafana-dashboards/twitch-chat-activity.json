@@ -14,15 +14,39 @@
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`)."
+        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`."
       }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Subscribers",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "max(twitch_subscribers_total{service_name=\"tripbot\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Followers",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "max(twitch_followers_total{service_name=\"tripbot\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
     },
     {
       "id": 1,
       "type": "stat",
       "title": "Messages / minute",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 5 },
+      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 5 },
       "targets": [
         { "refId": "A", "expr": "sum(rate(tripbot_chat_messages_total{service_name=\"tripbot\"}[5m])) * 60" }
       ],
@@ -34,7 +58,7 @@
       "type": "stat",
       "title": "Commands / minute",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 5 },
+      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 5 },
       "targets": [
         { "refId": "A", "expr": "sum(rate(tripbot_chat_commands_total{service_name=\"tripbot\"}[5m])) * 60" }
       ],
@@ -46,7 +70,7 @@
       "type": "stat",
       "title": "Messages (24h)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 5 },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "sum(increase(tripbot_chat_messages_total{service_name=\"tripbot\"}[24h]))" }
       ],
@@ -58,7 +82,7 @@
       "type": "stat",
       "title": "Commands (24h)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 5 },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "sum(increase(tripbot_chat_commands_total{service_name=\"tripbot\"}[24h]))" }
       ],
@@ -66,11 +90,23 @@
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
     },
     {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Subscribers & followers over time",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max(twitch_followers_total{service_name=\"tripbot\"})", "legendFormat": "followers" },
+        { "refId": "B", "expr": "max(twitch_subscribers_total{service_name=\"tripbot\"})", "legendFormat": "subscribers" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true } }, "overrides": [] }
+    },
+    {
       "id": 5,
       "type": "timeseries",
       "title": "Chat messages over time",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 9 },
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 9 },
       "targets": [
         { "refId": "A", "expr": "sum(rate(tripbot_chat_messages_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "msgs / min" }
       ],
@@ -81,7 +117,7 @@
       "type": "timeseries",
       "title": "Commands over time (top 10)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 9 },
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 9 },
       "targets": [
         { "refId": "A", "expr": "topk(10, sum by (command) (rate(tripbot_chat_commands_total{service_name=\"tripbot\"}[5m]))) * 60", "legendFormat": "{{command}}" }
       ],
@@ -92,7 +128,7 @@
       "type": "bargauge",
       "title": "Top commands (1h)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 29, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "expr": "topk(15, sum by (command) (increase(tripbot_chat_commands_total{service_name=\"tripbot\"}[1h])))", "legendFormat": "{{command}}" }
       ],
