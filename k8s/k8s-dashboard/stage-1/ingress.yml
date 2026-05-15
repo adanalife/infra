@@ -1,24 +1,44 @@
----
+# Ingress for the kubernetes-dashboard chart at
+# k8s-dashboard.stage.whereisdana.today. external-dns publishes a
+# Route53 record (target = host public IPv4 via external-dns
+# --default-targets, set per-machine in values.local.yml).
+#
+# HTTP-only today. cert-manager is installed and proven (the smoke-test
+# Certificate in k8s/cert-manager/stage-1/ issues against LE staging on
+# every cluster bring-up). The remaining blocker is the home-network
+# port-forward — once inbound 443 reaches traefik, uncomment the
+# cert-manager.io/cluster-issuer annotation AND the tls: block below to
+# flip this URL to HTTPS. Start with letsencrypt-staging-route53 to
+# avoid LE prod's per-week duplicate-cert limit; flip to
+# letsencrypt-route53 once the first cert issues clean.
+#
+# BEFORE FLIPPING TO HTTPS: the kubernetes-dashboard chart's own auth
+# (token login) gates write actions, but anyone who can reach this URL
+# gets the read-side dashboard. That was always the case behind the
+# Cloudflare Access IP allowlist; revisit before publishing it on the
+# open internet.
+apiVersion: networking.k8s.io/v1
 kind: Ingress
-apiVersion: extensions/v1beta1
 metadata:
-  name: k8s-dashboard-ingress
+  name: k8s-dashboard
   namespace: kube-system
   annotations:
-    external-dns.alpha.kubernetes.io/target: traefik.staging.whereisdana.today
-    kubernetes.io/ingress.class: traefik
-    cert-manager.io/cluster-issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: k8s-dashboard.stage.whereisdana.today
+    # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
 spec:
-  tls:
-    # this defines the secret that will be created
-    - secretName: k8s-dashboard-tls
-      hosts:
-        - k8s-dashboard.staging.whereisdana.today
+  ingressClassName: traefik
+  # tls:
+  #   - hosts:
+  #       - k8s-dashboard.stage.whereisdana.today
+  #     secretName: k8s-dashboard-tls
   rules:
-    - host: k8s-dashboard.staging.whereisdana.today
+    - host: k8s-dashboard.stage.whereisdana.today
       http:
         paths:
-        - path: /
-          backend:
-            serviceName: k8s-dashboard-kubernetes-dashboard
-            servicePort: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: k8s-dashboard-kubernetes-dashboard
+                port:
+                  name: http

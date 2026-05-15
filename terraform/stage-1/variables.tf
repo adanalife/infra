@@ -1,3 +1,10 @@
+# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/variables.tf
+#
+# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
+# until the modules refactor lands (vault/infra/TODO.md). Any structural
+# change here SHOULD be mirrored to the sibling file unless the divergence
+# is the whole point of the change.
+
 # prod, stage, dev
 variable "environment" {
   type = string
@@ -34,14 +41,6 @@ variable "external_dns_role" {
   default = "ExternalDNSRole"
 }
 
-variable "rds_tripbot_username" {
-  type = string
-}
-
-#TODO: replace with terraform password generator
-variable "rds_tripbot_password" {
-  type = string
-}
 
 variable "static_site_public_dir" {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"

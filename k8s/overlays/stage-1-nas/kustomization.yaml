@@ -1,0 +1,20 @@
+# Umbrella overlay for stage-1 when the cluster host is on the home LAN.
+# Identical to k8s/overlays/stage-1 except vlc-server uses the NAS-backed
+# dashcam overlay (stage-1-nas) instead of the local hostPath overlay.
+#
+# Apply with: task k8s:stage:apply-nas
+# Use stage-1 (task k8s:stage:apply) when away from the home network.
+#
+# Prerequisites:
+#   - /Volumes/Leeroy must be mounted on the host (Finder → Go → Connect to Server)
+#   - k3d cluster must be running with the current k3d-config.bees.yaml
+#     (rebuilt after the /host/nas-dashcam volume entry was added)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../apps/postgres/overlays/local
+  - ../../apps/tripbot/overlays/stage-1
+  - ../../apps/vlc-server/overlays/stage-1-nas
+  - ../../apps/obs/overlays/local
+  - ../../platform/cloudflared/overlays/stage-1

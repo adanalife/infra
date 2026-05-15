@@ -1,3 +1,10 @@
+# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/static.tf
+#
+# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
+# until the modules refactor lands (vault/infra/TODO.md). Any structural
+# change here SHOULD be mirrored to the sibling file unless the divergence
+# is the whole point of the change.
+
 # adapted from: https://github.com/conortm/terraform-aws-s3-static-website
 
 locals {

@@ -1,3 +1,10 @@
+# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/iam-policies.tf
+#
+# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
+# until the modules refactor lands (vault/infra/TODO.md). Any structural
+# change here SHOULD be mirrored to the sibling file unless the divergence
+# is the whole point of the change.
+
 #TODO: these would benefit greatly from being converted to data blocks
 
 # these are the permissions that Developer users get

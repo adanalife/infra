@@ -1,0 +1,74 @@
+# k3d cluster config for stage-1 on the `bees` host (dmerrick-bees).
+#
+# Bring up with:  task k8s:stage:cluster:up
+# Tear down with: task k8s:stage:cluster:down
+#
+# Cluster name is host-based, not env-based: `adanalife-bees` on bees,
+# `adanalife-empty` on the Mac mini (see k3d-config.empty.yaml). Rationale:
+# when stage-1 eventually graduates from bees to the Mac mini, the cluster
+# on `empty` stays `adanalife-empty` and only the Taskfile mapping changes
+# (which env's tasks target which cluster). Host-based names decouple
+# cluster identity from env assignment.
+#
+# Host ports 9080/9443 are bound to the cluster's load-balancer so that
+# *.stage.whereisdana.today URLs (managed by external-dns in stage-1
+# mode) can hit traefik directly. Cloudflare Tunnel keeps running in
+# parallel for whalecore.com traffic — the two paths don't overlap.
+# High ports (9080/9443) instead of standard 80/443 because Colima
+# can't forward privileged ports (<1024) to the host without sudo;
+# test URLs include the port suffix until a router/CDN translates
+# 443 → host:9443. Other ports (VNC, RTSP, traefik dashboard, etc.)
+# are reachable ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
+# Re-run `task k8s:stage:cluster:down && task k8s:stage:cluster:up` to apply
+# port-mapping changes to an existing cluster.
+#
+# Notes for future EKS port:
+#   - Helm-installed traefik (ingress) IS portable — same Ingress
+#     manifests will work on prod traefik unchanged. See k8s/traefik/.
+#   - Bundled servicelb / klipper-lb is k3d/k3s-only. On EKS,
+#     LoadBalancer services are fulfilled by AWS ELB instead. The
+#     Service manifests don't change; only the implementation underneath
+#     does.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: adanalife-bees
+
+servers: 1
+agents: 0
+
+# Mount host paths into the k3d node so pod hostPath volumes can reach
+# them. k3d nodes are themselves containers, so without this the host
+# filesystem isn't visible to pods.
+volumes:
+  - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
+    nodeFilters:
+      - server:*
+  # NAS-backed dashcam footage (home network only). Mounted :ro at the
+  # Docker bind level so the k3d node itself cannot write to the NAS.
+  # Used by the stage-1-nas overlay; the stage-1 overlay uses /host/dashcam above.
+  - volume: "/Users/dmerrick/mnt/nas-dashcam/Dana's Photos/Dashcam Scratchpad/Dashcam/_all:/host/nas-dashcam:ro"
+    nodeFilters:
+      - server:*
+
+# Disable k3s's bundled Traefik. We install traefik/traefik via helm
+# in `task k8s:stage:platform:up` instead, so the full chart's CRDs (default
+# IngressClass, dashboard wiring, prometheus metrics) are available
+# without the HelmChartConfig customization dance the bundled chart
+# requires.
+options:
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+
+# Map host ports onto the bundled klipper-lb so external traffic can
+# reach traefik. See header comment for port-choice rationale.
+ports:
+  - port: 9080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 9443:443
+    nodeFilters:
+      - loadbalancer

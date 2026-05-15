@@ -5,6 +5,8 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+  - seed-job.yaml
+  - auth-job.yaml
 
 # tripbot-config holds non-secret env defaults that mirror
 # tripbot/infra/docker/env.docker, with service hosts swapped from

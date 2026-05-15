@@ -1,3 +1,42 @@
+# Two ClusterIssuers: staging and prod. Iterate against staging
+# (`letsencrypt-staging-route53`) while debugging — issued certs are
+# untrusted but you don't burn LE prod's per-week duplicate-cert limits.
+# Flip Ingress annotations to `letsencrypt-route53` once the workflow
+# is clean.
+#
+# Both use the DNS-01 solver against Route53 because we don't always
+# have inbound HTTP for an HTTP-01 challenge (cluster lives on
+# residential/k3d). DNS-01 needs `route53:ChangeResourceRecordSets`
+# on the target zone — granted via AllowExternalDNSUpdates → role
+# ExternalDNSRole, which the user assumes from the static creds
+# delivered by ESO.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging-route53
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-route53-account
+    solvers:
+      - dns01:
+          route53:
+            region: us-east-1
+            # hostedZoneID intentionally omitted — cert-manager
+            # auto-discovers via ListHostedZones (granted by
+            # AllowExternalDNSUpdates), which avoids the stale-ID
+            # foot-gun if the zone is ever recreated.
+            accessKeyIDSecretRef:
+              name: cert-manager-aws-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: cert-manager-aws-credentials
+              key: secret-access-key
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
+---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -5,23 +44,21 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    # server: https://acme-staging-v02.api.letsencrypt.org/directory
     email: danadotlol@gmail.com
     privateKeySecretRef:
-      name: letsencrypt-route53
-
+      name: letsencrypt-route53-account
     solvers:
-    - dns01:
-        route53:
-          region: us-east-1
-          hostedZoneID: Z05605701ECX0UCEOKZBS
-          accessKeyID: AKIAWAS42L6WSH6MNBF6
-          secretAccessKeySecretRef:
-            name: aws-user-km8b84g222
-            key: secret-access-key
-          role: arn:aws:iam::413585268653:role/ExternalDNSRole
-
-    # we could use this one if port 80 was open
-    # - http01:
-    #     ingress:
-    #       class: traefik
+      - dns01:
+          route53:
+            region: us-east-1
+            # hostedZoneID intentionally omitted — cert-manager
+            # auto-discovers via ListHostedZones (granted by
+            # AllowExternalDNSUpdates), which avoids the stale-ID
+            # foot-gun if the zone is ever recreated.
+            accessKeyIDSecretRef:
+              name: cert-manager-aws-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: cert-manager-aws-credentials
+              key: secret-access-key
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole

@@ -12,6 +12,28 @@ spec:
       labels:
         app: tripbot
     spec:
+      # Run db migrations to head before tripbot starts. Same image as
+      # the main container — tripbot v2.3.1+ bakes the migrate CLI and
+      # db/migrate/*.sql into the image. `migrate up` is idempotent, so
+      # at-head runs are a no-op (~1-2s). On a fresh cluster, this is
+      # what populates the schema before LoadFromDB runs in the main
+      # container.
+      initContainers:
+        - name: migrate
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["migrate"]
+          args:
+            - "-path"
+            - "/migrations"
+            - "-database"
+            - "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable"
+            - "up"
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-secret
       containers:
         - name: tripbot
           image: adanalife/tripbot:latest

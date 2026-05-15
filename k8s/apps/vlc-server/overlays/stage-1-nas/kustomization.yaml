@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Extends stage-1 (which extends local), replacing the local hostPath
+# dashcam volume with one sourced from the Finder-mounted NAS.
+# The NAS path is bind-mounted :ro into the k3d node via k3d-config.bees.yaml,
+# providing read-only enforcement at two levels: Docker bind mount + volumeMount.
+# Use when the cluster host is on the home LAN with /Volumes/Leeroy mounted.
+# Use stage-1 (task k8s:stage:apply) when away from home.
+resources:
+  - ../stage-1
+
+patches:
+  # Replace the hostPath dashcam volume (local overlay, /host/dashcam) with the
+  # NAS-backed hostPath (/host/nas-dashcam). JSON 6902 replace is used because
+  # strategic merge patches merge object fields rather than replacing them,
+  # which would leave both paths present simultaneously.
+  # Index 0 is stable: base has no volumes; local overlay adds exactly one.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: dashcam
+          hostPath:
+            path: /host/nas-dashcam
+            type: Directory

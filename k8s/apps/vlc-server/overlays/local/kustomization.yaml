@@ -21,7 +21,7 @@ configMapGenerator:
   - name: vlc-server-config
     behavior: merge
     literals:
-      - ENV=development
+      - ENV=staging
       - DATABASE_HOST=postgres
       - DATABASE_USER=tripbot_docker
       - DATABASE_PASS=hunter2
@@ -35,7 +35,6 @@ configMapGenerator:
       - TWILIO_AUTH_TOKEN=stub
       - TWILIO_FROM_NUM=+15555550100
       - TWILIO_TO_NUM=+15555550101
-      - TRIPBOT_HTTP_AUTH=stub
       - DISABLE_TWITCH_WEBHOOKS=true
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio

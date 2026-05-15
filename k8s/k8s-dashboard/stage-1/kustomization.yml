@@ -1,7 +1,10 @@
-bases:
-  - ../base
-resources:
-  - ingress.yml
-# by default k8s-dashboard creates its own namespace,
-# this will put it in kube-system
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# k8s-dashboard creates its own namespace by default; pin it to
+# kube-system to keep platform infra co-located.
 namespace: kube-system
+
+resources:
+  - ../base
+  - ingress.yml

@@ -9,4 +9,4 @@ resources:
 # Apply order: kustomize creates the ExternalSecret, ESO reconciles
 # the Secret materialization within ~30s, then `helm upgrade --install`
 # picks up the existing Secret via secret.create=false in values.yml.
-# `task k8s:platform:up` sequences these correctly.
+# `task k8s:stage:platform:up` sequences these correctly.

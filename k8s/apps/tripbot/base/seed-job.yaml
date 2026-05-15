@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-seed
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        # postgres is a headless Service backing a StatefulSet — its DNS
+        # record only resolves once postgres-0 is Ready, and there's a few
+        # seconds of EndpointSlice → CoreDNS propagation lag even after.
+        # Poll until both DNS and TCP are live so the migrate step below
+        # doesn't burn backoffLimit retries on transient lookup failures.
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - 'until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done'
+        # Migrate to head before seeding so the schema exists even if
+        # the Job is applied before the main Deployment's initContainer runs.
+        - name: migrate
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["migrate"]
+          args:
+            - "-path"
+            - "/migrations"
+            - "-database"
+            - "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable"
+            - "up"
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-secret
+      containers:
+        - name: seed
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/seed-db"]
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-secret

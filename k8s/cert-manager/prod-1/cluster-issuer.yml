@@ -1,0 +1,58 @@
+# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/cluster-issuer.yml
+#
+# Two ClusterIssuers: staging and prod. Iterate against staging
+# (`letsencrypt-staging-route53`) while debugging — issued certs are
+# untrusted but you don't burn LE prod's per-week duplicate-cert limits.
+# Flip Ingress annotations to `letsencrypt-route53` once the workflow
+# is clean.
+#
+# Both use the DNS-01 solver against Route53 because we don't always
+# have inbound HTTP for an HTTP-01 challenge (cluster lives on
+# residential/k3d). DNS-01 needs `route53:ChangeResourceRecordSets`
+# on the target zone — granted via AllowExternalDNSUpdates → role
+# ExternalDNSRole in the prod-1 account, which the user assumes from
+# the static creds delivered by ESO.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging-route53
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-route53-account
+    solvers:
+      - dns01:
+          route53:
+            region: us-east-1
+            accessKeyIDSecretRef:
+              name: cert-manager-aws-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: cert-manager-aws-credentials
+              key: secret-access-key
+            role: arn:aws:iam::704461573429:role/ExternalDNSRole
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-route53
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-route53-account
+    solvers:
+      - dns01:
+          route53:
+            region: us-east-1
+            accessKeyIDSecretRef:
+              name: cert-manager-aws-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: cert-manager-aws-credentials
+              key: secret-access-key
+            role: arn:aws:iam::704461573429:role/ExternalDNSRole
