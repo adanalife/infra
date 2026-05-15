@@ -666,10 +666,10 @@ tasks:
         msg: "obs Deployment not found — is the cluster up?"
     cmds:
       - |
-        set -euo pipefail
+        set -eo pipefail
         kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
         PF=$!
-        cleanup() { kill "$PF" 2>/dev/null || true; wait "$PF" 2>/dev/null || true; }
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
