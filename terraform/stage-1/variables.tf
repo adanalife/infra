@@ -47,7 +47,8 @@ variable "rds_tripbot_username" {
 
 #TODO: replace with terraform password generator
 variable "rds_tripbot_password" {
-  type = string
+  type      = string
+  sensitive = true
 }
 
 variable "static_site_public_dir" {
