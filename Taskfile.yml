@@ -125,9 +125,21 @@ tasks:
   #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
   #             deployed" sequence; each step delegates to its canonical task
   k8s:stage:cluster:up:
-    desc: create the local k3d cluster on bees (stage-1)
+    desc: "create the local k3d cluster on bees (stage-1) — prefers k8s/k3d-config.bees.local.yaml if present, else falls back to k8s/k3d-config.bees.yaml"
     cmds:
-      - k3d cluster create -c k8s/k3d-config.bees.yaml
+      # Prefer the gitignored local override (which adds host-specific
+      # bind-mounts like the NAS dashcam share) when it exists; otherwise
+      # use the committed base config. The override must be a full
+      # superset because k3d doesn't merge config files — see
+      # k3d-config.bees.local.yaml.example for the shape.
+      - |
+        if [ -f k8s/k3d-config.bees.local.yaml ]; then
+          echo "using k8s/k3d-config.bees.local.yaml (local override)"
+          k3d cluster create -c k8s/k3d-config.bees.local.yaml
+        else
+          echo "using k8s/k3d-config.bees.yaml (no local override present)"
+          k3d cluster create -c k8s/k3d-config.bees.yaml
+        fi
 
   k8s:stage:cluster:down:
     desc: tear down the local k3d cluster on bees (delete; use k8s:stage:cluster:stop to suspend without wipe)
@@ -152,7 +164,7 @@ tasks:
       - task: k8s:stage:apply
 
   k8s:prod:cluster:up:
-    desc: create the local k3d cluster on empty (prod-1 Mac mini)
+    desc: create the local k3d cluster on empty (prod-1)
     cmds:
       - k3d cluster create -c k8s/k3d-config.empty.yaml
 
@@ -243,7 +255,7 @@ tasks:
       - kubectl apply -k k8s/overlays/stage-1
 
   k8s:stage:apply-nas:
-    desc: "apply stage-1-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires ~/mnt/nas-dashcam NFS mount + cluster rebuild after k3d-config change)"
+    desc: "apply stage-1-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires the NAS share to be mounted on the cluster host per k3d-config.bees.local.yaml and the cluster rebuilt with that override)"
     cmds:
       - kubectl apply -k k8s/overlays/stage-1-nas
 
