@@ -751,14 +751,17 @@ tasks:
     desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has real rows
     cmds:
       - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
+      # kubectl wait doesn't short-circuit on Failed when asked for
+      # Complete — wait the full window then disambiguate after the fact.
       - |
-        for i in $(seq 1 90); do
-          status=$(kubectl get job tripbot-seed -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null)
-          [ "$status" = "Complete" ] && break
-          [ "$status" = "Failed"   ] && { echo "seed job failed"; exit 1; }
-          sleep 2
-        done
-        [ "$status" = "Complete" ] || { echo "seed job timed out after 180s"; exit 1; }
+        if ! kubectl wait --for=condition=complete --timeout=180s job/tripbot-seed; then
+          if kubectl get job tripbot-seed -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' | grep -q True; then
+            echo "seed job failed"
+          else
+            echo "seed job timed out after 180s (still pending)"
+          fi
+          exit 1
+        fi
       - kubectl logs job/tripbot-seed
 
   tripbot:auth:bootstrap:
