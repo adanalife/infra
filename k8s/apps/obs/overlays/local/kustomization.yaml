@@ -11,3 +11,9 @@ resources:
 # OBS deployment's envFrom for the rationale). Pulling STREAM_KEY out
 # of kustomize means an apply of this overlay never accidentally
 # clobbers the running stream state.
+
+configMapGenerator:
+  - name: obs-config
+    behavior: merge
+    literals:
+      - OBS_QUALITY_PRESET=low
