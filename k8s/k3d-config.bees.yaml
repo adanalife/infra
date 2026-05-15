@@ -4,11 +4,17 @@
 # Tear down with: task k8s:stage:cluster:down
 #
 # Cluster name is host-based, not env-based: `adanalife-bees` on bees,
-# `adanalife-empty` on the Mac mini (see k3d-config.empty.yaml). Rationale:
-# when stage-1 eventually graduates from bees to the Mac mini, the cluster
+# `adanalife-empty` on the other host (see k3d-config.empty.yaml). Rationale:
+# when stage-1 eventually graduates between hosts, the cluster
 # on `empty` stays `adanalife-empty` and only the Taskfile mapping changes
 # (which env's tasks target which cluster). Host-based names decouple
 # cluster identity from env assignment.
+#
+# Local overrides: this file is the committed, machine-agnostic config.
+# For host-specific extras (e.g., extra host bind-mounts for NAS-backed
+# storage on the home network), create `k3d-config.bees.local.yaml`
+# (gitignored) as a full superset of this file. The `k8s:stage:cluster:up`
+# task prefers the local override if present. See `k3d-config.bees.local.yaml.example`.
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
 # *.stage.whereisdana.today URLs (managed by external-dns in stage-1
@@ -40,14 +46,14 @@ agents: 0
 # Mount host paths into the k3d node so pod hostPath volumes can reach
 # them. k3d nodes are themselves containers, so without this the host
 # filesystem isn't visible to pods.
+#
+# The stage-1-nas overlay expects an additional `/host/nas-dashcam`
+# volume entry pointing at a host-mounted dashcam source. That entry is
+# omitted here because the source path is host-specific; add it in
+# `k3d-config.bees.local.yaml` (gitignored) if you intend to apply the
+# stage-1-nas overlay.
 volumes:
   - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
-    nodeFilters:
-      - server:*
-  # NAS-backed dashcam footage (home network only). Mounted :ro at the
-  # Docker bind level so the k3d node itself cannot write to the NAS.
-  # Used by the stage-1-nas overlay; the stage-1 overlay uses /host/dashcam above.
-  - volume: "/Users/dmerrick/mnt/nas-dashcam/Dana's Photos/Dashcam Scratchpad/Dashcam/_all:/host/nas-dashcam:ro"
     nodeFilters:
       - server:*
 
