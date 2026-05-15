@@ -7,19 +7,19 @@ set -euo pipefail
 # Set DEPLOY_ENV based on the input directory
 case "$1" in
   terraform/core)
-    echo "DEPLOY_ENV=core" >> "$GITHUB_ENV"
-    echo "AWS_ACCESS_KEY_ID=${CI_CORE_AWS_ACCESS_KEY_ID}" >> "$GITHUB_ENV"
-    echo "AWS_SECRET_ACCESS_KEY=${CI_CORE_AWS_SECRET_ACCESS_KEY}" >> "$GITHUB_ENV"
+    DEPLOY_ENV=core
+    AWS_ACCESS_KEY_ID="${CI_CORE_AWS_ACCESS_KEY_ID}"
+    AWS_SECRET_ACCESS_KEY="${CI_CORE_AWS_SECRET_ACCESS_KEY}"
     ;;
   terraform/prod-1)
-    echo "DEPLOY_ENV=prod" >> "$GITHUB_ENV"
-    echo "AWS_ACCESS_KEY_ID=${CI_PROD_AWS_ACCESS_KEY_ID}" >> "$GITHUB_ENV"
-    echo "AWS_SECRET_ACCESS_KEY=${CI_PROD_AWS_SECRET_ACCESS_KEY}" >> "$GITHUB_ENV"
+    DEPLOY_ENV=prod
+    AWS_ACCESS_KEY_ID="${CI_PROD_AWS_ACCESS_KEY_ID}"
+    AWS_SECRET_ACCESS_KEY="${CI_PROD_AWS_SECRET_ACCESS_KEY}"
     ;;
   terraform/stage-1)
-    echo "DEPLOY_ENV=stage" >> "$GITHUB_ENV"
-    echo "AWS_ACCESS_KEY_ID=${CI_STAGE_AWS_ACCESS_KEY_ID}" >> "$GITHUB_ENV"
-    echo "AWS_SECRET_ACCESS_KEY=${CI_STAGE_AWS_SECRET_ACCESS_KEY}" >> "$GITHUB_ENV"
+    DEPLOY_ENV=stage
+    AWS_ACCESS_KEY_ID="${CI_STAGE_AWS_ACCESS_KEY_ID}"
+    AWS_SECRET_ACCESS_KEY="${CI_STAGE_AWS_SECRET_ACCESS_KEY}"
     ;;
   *)
     echo "Unknown environment: $1"
@@ -27,5 +27,7 @@ case "$1" in
     ;;
 esac
 
-# Save DEPLOY_ENV to GITHUB_STATE
+echo "DEPLOY_ENV=${DEPLOY_ENV}" >> "$GITHUB_ENV"
+echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" >> "$GITHUB_ENV"
+echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" >> "$GITHUB_ENV"
 echo "DEPLOY_ENV=${DEPLOY_ENV}" >> "$GITHUB_STATE"
