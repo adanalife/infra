@@ -1,5 +1,5 @@
 {
-  "title": "vlc-server — Service Health",
+  "title": "01 — Service Health: VLC Server",
   "uid": "vlc-server-service-health",
   "tags": ["tripbot", "vlc-server", "service-health"],
   "schemaVersion": 39,
