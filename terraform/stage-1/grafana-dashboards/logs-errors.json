@@ -36,7 +36,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=\"ERROR\" [$__range]))" }
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | detected_level=\"error\" [$__range]))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -58,7 +58,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=\"WARN\" [$__range]))" }
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | detected_level=\"warn\" [$__range]))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -92,7 +92,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 5, "w": 24, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (severity_text) (rate({service_name=~\"$service\"}[$__auto]))", "legendFormat": "{{severity_text}}" }
+        { "refId": "A", "expr": "sum by (detected_level) (rate({service_name=~\"$service\"}[$__auto]))", "legendFormat": "{{detected_level}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "logs/s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -103,7 +103,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 13, "w": 24, "h": 14 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=~\"$service\"} | severity_text=~\"ERROR|WARN\" |~ \"$search\"" }
+        { "refId": "A", "expr": "{service_name=~\"$service\"} | detected_level=~\"error|warn\" |~ \"$search\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
