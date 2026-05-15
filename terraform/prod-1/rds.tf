@@ -5,6 +5,11 @@
 # change here SHOULD be mirrored to the sibling file unless the divergence
 # is the whole point of the change.
 
+resource "random_password" "tripbot_db" {
+  length  = 32
+  special = false
+}
+
 resource "aws_db_instance" "tripbot" {
   # only create on stage for now
   # count = var.environment == "stage" ? 1 : 0
@@ -17,8 +22,8 @@ resource "aws_db_instance" "tripbot" {
 
   identifier = "tripbot-db"
   db_name    = "tripbot"
-  username   = var.rds_tripbot_username
-  password   = var.rds_tripbot_password
+  username   = "tripbot"
+  password   = random_password.tripbot_db.result
 
   allocated_storage = 20
   storage_type      = "gp2" # general purpose SSD
