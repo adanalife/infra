@@ -228,8 +228,9 @@ tasks:
       - kubectl rollout restart deploy/obs
       - kubectl rollout status deploy/obs --timeout=120s
 
-  k8s:rollout:
+  k8s:rollout:all:
     desc: restart all three app deployments (tripbot + vlc-server + obs)
+    aliases: [k8s:rollout]
     deps: [k8s:rollout:tripbot, k8s:rollout:vlc-server, k8s:rollout:obs]
 
   k8s:apply:
