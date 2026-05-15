@@ -672,7 +672,9 @@ tasks:
         cleanup() { kill "$PF" 2>/dev/null || true; wait "$PF" 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
-        OBS_WEBSOCKET_HOST=localhost uv run --with obsws-python \
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
 
   vlc:vnc:up:
