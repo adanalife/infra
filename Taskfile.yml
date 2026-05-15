@@ -1,35 +1,90 @@
 version: '3'
 
-vars:
-  # use like this: task tf-stage --tf_action=init
-  TF_ACTION: apply # Default action is 'apply'
-
 tasks:
-  tf-stage:
+  # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
+  # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
+  tf:stage:apply:
+    desc: terraform apply against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform {{.TF_ACTION}}
+      - aws-vault exec adanalife-stage -- terraform apply {{.CLI_ARGS}}
 
-  tf-prod:
+  tf:stage:plan:
+    desc: terraform plan against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform plan {{.CLI_ARGS}}
+
+  tf:stage:init:
+    desc: terraform init against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform init {{.CLI_ARGS}}
+
+  tf:stage:destroy:
+    desc: terraform destroy against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform destroy {{.CLI_ARGS}}
+
+  tf:prod:apply:
+    desc: terraform apply against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform {{.TF_ACTION}}
+      - aws-vault exec adanalife-prod -- terraform apply {{.CLI_ARGS}}
 
-  tf-core:
+  tf:prod:plan:
+    desc: terraform plan against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform plan {{.CLI_ARGS}}
+
+  tf:prod:init:
+    desc: terraform init against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform init {{.CLI_ARGS}}
+
+  tf:prod:destroy:
+    desc: terraform destroy against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform destroy {{.CLI_ARGS}}
+
+  # Core uses --no-session because session tokens can't make IAM changes.
+  tf:core:apply:
+    desc: terraform apply against core (no session token; IAM changes need full creds)
     dir: terraform/core
     cmds:
-      # We can't use session tokens when making IAM changes
-      - aws-vault exec adanalife-core --no-session -- terraform {{.TF_ACTION}}
+      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+
+  tf:core:plan:
+    desc: terraform plan against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+
+  tf:core:init:
+    desc: terraform init against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+
+  tf:core:destroy:
+    desc: terraform destroy against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
 
   # Append the host's current public IP (via ifconfig.me) to the
   # stage-1/allowlist-cidrs list in Secrets Manager, deduping with
   # jq. Use this when your home IP rotates and you're locked out of
   # tripbot.whalecore.com. terraform reads the updated value via
-  # data source on the next `task tf-stage`. To remove stale
+  # data source on the next `task tf:stage:apply`. To remove stale
   # entries or add a non-current CIDR, edit the secret directly:
   #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
   #     --secret-id stage-1/allowlist-cidrs --secret-string '["X.X.X.X/32", ...]'
-  update-allowlist:
+  stage:allowlist:add-current-ip:
     desc: append your current public IP to stage-1/allowlist-cidrs
     cmds:
       - |
@@ -42,33 +97,87 @@ tasks:
           --secret-id stage-1/allowlist-cidrs --secret-string "$updated" >/dev/null
         echo "allowlist-cidrs is now:"
         echo "$updated" | jq .
-        echo "Run 'task tf-stage' to apply."
+        echo "Run 'task tf:stage:apply' to apply."
 
   # `aws-vault login` opens the AWS web console in browser
-  aws-login-stage:
+  aws:login:stage:
     cmds:
       - aws-vault login adanalife-stage
 
-  aws-login-prod:
+  aws:login:prod:
     cmds:
       - aws-vault login adanalife-prod
 
-  aws-login-core:
+  aws:login:core:
     cmds:
       - aws-vault login adanalife-core
 
-  # Local k3d cluster for app development. See k8s/k3d-config.yaml.
-  k8s-up:
-    desc: create the local k3d cluster
+  # k3d cluster lifecycle. Tasks are env-prefixed (k8s:stage:* / k8s:prod:*)
+  # following the tf:stage:* / tf:prod:* pattern; the cluster name embedded
+  # in each k3d-config is host-based (adanalife-bees, adanalife-empty) so
+  # the cluster identity survives any future env-reassignment.
+  #
+  # Lifecycle verbs:
+  #   up      → create the cluster (first time)
+  #   down    → delete the cluster (full wipe)
+  #   stop    → suspend the cluster (containers down, definition + state preserved)
+  #   start   → resume a stopped cluster (counterpart to stop)
+  #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
+  #             deployed" sequence; each step delegates to its canonical task
+  k8s:stage:cluster:up:
+    desc: create the local k3d cluster on bees (stage-1)
     cmds:
-      - k3d cluster create -c k8s/k3d-config.yaml
+      - k3d cluster create -c k8s/k3d-config.bees.yaml
 
-  k8s-down:
-    desc: tear down the local k3d cluster
+  k8s:stage:cluster:down:
+    desc: tear down the local k3d cluster on bees (delete; use k8s:stage:cluster:stop to suspend without wipe)
     cmds:
       - k3d cluster delete adanalife-bees
 
-  k8s-import-images:
+  k8s:stage:cluster:stop:
+    desc: suspend the local k3d cluster on bees (containers down, cluster definition + state preserved)
+    cmds:
+      - k3d cluster stop adanalife-bees
+
+  k8s:stage:cluster:start:
+    desc: resume a stopped local k3d cluster on bees (counterpart to k8s:stage:cluster:stop)
+    cmds:
+      - k3d cluster start adanalife-bees
+
+  k8s:stage:cluster:rebuild:
+    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
+    cmds:
+      - task: k8s:stage:cluster:up
+      - task: k8s:stage:platform:up
+      - task: k8s:stage:apply
+
+  k8s:prod:cluster:up:
+    desc: create the local k3d cluster on empty (prod-1 Mac mini)
+    cmds:
+      - k3d cluster create -c k8s/k3d-config.empty.yaml
+
+  k8s:prod:cluster:down:
+    desc: tear down the local k3d cluster on empty (delete; use k8s:prod:cluster:stop to suspend without wipe)
+    cmds:
+      - k3d cluster delete adanalife-empty
+
+  k8s:prod:cluster:stop:
+    desc: suspend the local k3d cluster on empty (containers down, cluster definition + state preserved)
+    cmds:
+      - k3d cluster stop adanalife-empty
+
+  k8s:prod:cluster:start:
+    desc: resume a stopped local k3d cluster on empty (counterpart to k8s:prod:cluster:stop)
+    cmds:
+      - k3d cluster start adanalife-empty
+
+  k8s:prod:cluster:rebuild:
+    desc: Full empty-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep). No app overlay yet — k8s:prod:apply doesn't exist (prod-1 app overlays deferred).
+    cmds:
+      - task: k8s:prod:cluster:up
+      - task: k8s:prod:platform:up
+
+  k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
     dir: ../tripbot
     cmds:
@@ -95,51 +204,76 @@ tasks:
       - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
       - k3d image import adanalife/obs:latest --cluster=adanalife-bees
 
-  k8s-apply:
+  # Restart an app deployment so its pods re-pull the image. Pairs
+  # with `k8s:import-images` — after importing rebuilt images into
+  # k3d, restart the deployment to roll new pods that fetch the
+  # freshly-imported tag. imagePullPolicy: Always on these
+  # deployments (#411) means "rollout restart" is sufficient; no
+  # need to bump tags or delete the cached image first.
+  k8s:rollout:tripbot:
+    desc: restart the tripbot deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/tripbot
+      - kubectl rollout status deploy/tripbot --timeout=120s
+
+  k8s:rollout:vlc-server:
+    desc: restart the vlc-server deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/vlc-server
+      - kubectl rollout status deploy/vlc-server --timeout=120s
+
+  k8s:rollout:obs:
+    desc: restart the obs deployment so it pulls the latest imported image
+    cmds:
+      - kubectl rollout restart deploy/obs
+      - kubectl rollout status deploy/obs --timeout=120s
+
+  k8s:rollout:
+    desc: restart all three app deployments (tripbot + vlc-server + obs)
+    deps: [k8s:rollout:tripbot, k8s:rollout:vlc-server, k8s:rollout:obs]
+
+  k8s:apply:
     desc: apply the local app manifests to the cluster
     cmds:
       - kubectl apply -k k8s/overlays/local
 
-  k8s-apply-stage-1:
+  k8s:stage:apply:
     desc: apply stage-1 overlay (cloudflared tunnel + apps)
     cmds:
       - kubectl apply -k k8s/overlays/stage-1
 
-  # Pulls the tunnel token out of stage-1 terraform state and applies
-  # the cloudflared-secret Secret directly to the cluster. Token stays
-  # in a shell variable — never written to disk. Run once after the
-  # first `task tf-stage`, and re-run if the tunnel is recreated.
-  k8s-tunnel-token:
-    desc: apply cloudflared TUNNEL_TOKEN Secret directly to the cluster (no plaintext on disk)
-    preconditions:
-      - sh: command -v aws-vault >/dev/null
-        msg: "aws-vault not found — install with `brew install aws-vault`"
-      - sh: command -v kubectl >/dev/null
-        msg: "kubectl not found — install with `brew install kubectl`"
-      - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
+  k8s:stage:apply-nas:
+    desc: "apply stage-1-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires ~/mnt/nas-dashcam NFS mount + cluster rebuild after k3d-config change)"
     cmds:
-      - |
-        set -euo pipefail
-        token=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw cloudflared_tunnel_token)
-        kubectl create secret generic cloudflared-secret \
-          --namespace=default \
-          --from-literal=TUNNEL_TOKEN="$token" \
-          --dry-run=client -o yaml | kubectl apply -f -
-      - echo "applied cloudflared-secret Secret to default namespace"
+      - kubectl apply -k k8s/overlays/stage-1-nas
 
-  # Bootstrap the eso-aws-credentials Secret directly into the cluster.
-  # Decrypted creds stay in shell variables — never written to disk.
-  # Prereq: `task tf-stage` has provisioned ESOSecretsReader, and the
-  # external-secrets namespace exists (helm install --create-namespace
-  # in k8s-platform-up creates it; this task creates it idempotently
-  # too in case bootstrap runs first).
+  # No k8s:prod:apply yet — prod-1 app overlays are deferred per the
+  # prod-1 deployment plan (platform-stack only in this pass).
+
+  # Bootstrap the cluster Secrets that don't survive a recreate but
+  # have to exist before the platform stack can come up:
   #
-  # Re-run whenever the eso_reader access key is rotated. ESO picks up
-  # the new value on its next reconcile (refreshInterval 1h, or force
-  # with `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`).
-  k8s-eso-bootstrap:
-    desc: apply ESO bootstrap creds directly to the cluster (no plaintext on disk)
+  #   - eso-aws-credentials   (external-secrets namespace) — ESOSecretsReader
+  #     IAM access key for ESO to read SM. PGP-decrypted via keybase.
+  #   - cloudflared-secret    (default namespace) — TUNNEL_TOKEN for the
+  #     cloudflared Deployment. **stage-1 only** (no tunnel in prod-1).
+  #
+  # Both come from `task tf:<env>:apply` outputs; both stay in shell
+  # variables only (never written to disk). Re-runs idempotently:
+  # each Secret's bootstrap block skips when its target Secret already
+  # exists, so `task --force k8s:<env>:bootstrap-secrets` is the way to
+  # force-rotate after a TF output changes (e.g., access-key rotation
+  # or tunnel recreation).
+  #
+  # Used as a dep by `k8s:<env>:platform:up` so the platform stack always
+  # has its credentials, but the inner status checks make repeat runs
+  # cheap (no aws-vault / keybase reprompt when nothing's missing).
+  k8s:stage:bootstrap-secrets:
+    desc: apply stage-1 ESO + cloudflared bootstrap Secrets + write external-dns values.local.yml (no plaintext on disk)
+    status:
+      - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
+      - kubectl get secret cloudflared-secret >/dev/null 2>&1
+      - test -f k8s/external-dns/stage-1/values.local.yml
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault` (see infra/README.md)"
@@ -147,65 +281,317 @@ tasks:
         msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: command -v curl >/dev/null
+        msg: "curl not found — required to fetch host public IP for external-dns default-targets"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
+        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
+    cmds:
+      # eso-aws-credentials: ESOSecretsReader access key for ESO.
+      - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+      - |
+        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1; then
+          echo "eso-aws-credentials already present, skipping"
+        else
+          set -euo pipefail
+          ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
+                | base64 -d | keybase pgp decrypt)
+          kubectl create secret generic eso-aws-credentials \
+            --namespace=external-secrets \
+            --from-literal=AWS_ACCESS_KEY_ID="$ak" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "applied eso-aws-credentials Secret to external-secrets namespace"
+        fi
+      # cloudflared-secret: TUNNEL_TOKEN for the cloudflared Deployment.
+      - |
+        if kubectl get secret cloudflared-secret >/dev/null 2>&1; then
+          echo "cloudflared-secret already present, skipping"
+        else
+          set -euo pipefail
+          token=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw cloudflared_tunnel_token)
+          kubectl create secret generic cloudflared-secret \
+            --namespace=default \
+            --from-literal=TUNNEL_TOKEN="$token" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "applied cloudflared-secret Secret to default namespace"
+        fi
+      # external-dns values.local.yml: per-machine helm override holding
+      # the host's current public IP, fed to external-dns as
+      # --default-targets so any Ingress without an explicit
+      # external-dns.alpha.kubernetes.io/target annotation resolves to
+      # this machine. File-based (not a Secret) because helm values are
+      # consumed at chart install, not at pod runtime — re-run this
+      # task and `task k8s:stage:platform:up` after a home-IP rotation.
+      - |
+        values_file=k8s/external-dns/stage-1/values.local.yml
+        if [ -f "$values_file" ]; then
+          echo "$values_file already present, skipping"
+        else
+          set -euo pipefail
+          # -4 forces IPv4: Route53 A records can only point at v4
+          # addresses, and ifconfig.me prefers v6 when the host has it.
+          ip=$(curl -4 -fsS ifconfig.me)
+          cat > "$values_file" <<YAML
+        # Generated by \`task k8s:stage:bootstrap-secrets\` — host public IP
+        # snapshot for external-dns --default-targets. Re-run the task
+        # after an IP rotation, then \`task k8s:stage:platform:up\` to roll
+        # the chart with the new value.
+        #
+        # --force-default-targets is required because traefik writes
+        # the cluster-internal klipper-lb IP into Ingress.status, and
+        # external-dns prefers source-provided targets unless told to
+        # override them with the default.
+        extraArgs:
+          - --default-targets=$ip
+          - --force-default-targets
+        YAML
+          echo "wrote $values_file (default-targets=$ip)"
+        fi
+
+  # prod-1 sibling — same shape minus the cloudflared block (no tunnel
+  # in prod-1 in this pass). Reads from terraform/prod-1 via the
+  # adanalife-prod aws-vault profile, writes the external-dns values
+  # file into k8s/external-dns/prod-1/.
+  k8s:prod:bootstrap-secrets:
+    desc: apply prod-1 ESO bootstrap Secret + write external-dns values.local.yml (no plaintext on disk)
+    status:
+      - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
+      - test -f k8s/external-dns/prod-1/values.local.yml
+    preconditions:
+      - sh: command -v aws-vault >/dev/null
+        msg: "aws-vault not found — install with `brew install aws-vault`"
+      - sh: command -v keybase >/dev/null
+        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+      - sh: command -v kubectl >/dev/null
+        msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: command -v curl >/dev/null
+        msg: "curl not found — required to fetch host public IP for external-dns default-targets"
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster — run `task k8s:prod:cluster:up` first"
     cmds:
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - |
-        set -euo pipefail
-        ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
-        sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
-              | base64 -d | keybase pgp decrypt)
-        kubectl create secret generic eso-aws-credentials \
-          --namespace=external-secrets \
-          --from-literal=AWS_ACCESS_KEY_ID="$ak" \
-          --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
-          --dry-run=client -o yaml | kubectl apply -f -
-      - echo "applied eso-aws-credentials Secret to external-secrets namespace"
+        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1; then
+          echo "eso-aws-credentials already present, skipping"
+        else
+          set -euo pipefail
+          ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
+                | base64 -d | keybase pgp decrypt)
+          kubectl create secret generic eso-aws-credentials \
+            --namespace=external-secrets \
+            --from-literal=AWS_ACCESS_KEY_ID="$ak" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "applied eso-aws-credentials Secret to external-secrets namespace"
+        fi
+      - |
+        values_file=k8s/external-dns/prod-1/values.local.yml
+        if [ -f "$values_file" ]; then
+          echo "$values_file already present, skipping"
+        else
+          set -euo pipefail
+          ip=$(curl -4 -fsS ifconfig.me)
+          cat > "$values_file" <<YAML
+        # Generated by \`task k8s:prod:bootstrap-secrets\` — host public IP
+        # snapshot for external-dns --default-targets. Re-run the task
+        # after an IP rotation, then \`task k8s:prod:platform:up\` to roll
+        # the chart with the new value.
+        extraArgs:
+          - --default-targets=$ip
+          - --force-default-targets
+        YAML
+          echo "wrote $values_file (default-targets=$ip)"
+        fi
 
-  # Install ESO into the local cluster. Idempotent — re-run after a
-  # cluster recreate or to upgrade the chart. Prereqs: `task k8s-up`
-  # (cluster exists), then `task k8s-eso-bootstrap` (creates the
-  # eso-aws-credentials Secret that ClusterSecretStore depends on).
-  # Future consumers (cert-manager, external-dns, app workloads) layer
-  # on top via their own kustomize overlays + ExternalSecret manifests.
-  k8s-platform-up:
-    desc: install External Secrets Operator into the local cluster
+  # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
+  # into the local cluster. Idempotent — re-run after a cluster recreate or
+  # to upgrade any chart. Depends on `k8s:<env>:bootstrap-secrets`, which
+  # auto-skips when its bootstrap targets already exist (so the common
+  # path doesn't re-prompt for aws-vault + keybase).
+  #
+  # k8s-monitoring requires the k8s/grafana-cloud-metrics-write SM value
+  # to have been seeded out-of-band first; if it hasn't, the ExternalSecret
+  # materialization will fail and the helm install won't run. See
+  # vault/infra/grafana-cloud-bootstrap.md.
+  #
+  # Traefik: the bundled k3s Traefik is disabled via --disable=traefik in
+  # the k3d configs, so this task is the only thing that brings up an
+  # ingress controller. App Ingresses (`ingressClassName: traefik`) don't
+  # reach anything until this runs.
+  #
+  # external-dns: publishes Route53 records for any Ingress annotated with
+  # `external-dns.alpha.kubernetes.io/hostname`. Default target IP comes
+  # from values.local.yml (per-machine, written by
+  # k8s:<env>:bootstrap-secrets from `curl -4 ifconfig.me`).
+  #
+  # cert-manager: issues LE certs via DNS-01 against Route53 for any
+  # Ingress annotated with `cert-manager.io/cluster-issuer`. Issuance
+  # works regardless of inbound network state — only serving TLS does.
+  # A smoke-test Certificate (cert-test.<env>.whereisdana.today, LE
+  # staging) ships in the cert-manager kustomize so the pipeline is
+  # exercised even before any app Ingress requests a cert.
+  k8s:stage:platform:up:
+    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the bees cluster
+    deps: [k8s:stage:bootstrap-secrets]
     preconditions:
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
-      - sh: kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
-        msg: "eso-aws-credentials Secret missing — run `task k8s-eso-bootstrap` first"
+        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
+      - sh: test -f k8s/external-dns/stage-1/values.local.yml
+        msg: "k8s/external-dns/stage-1/values.local.yml missing — run `task k8s:stage:bootstrap-secrets` first"
     cmds:
       - helm repo add external-secrets https://charts.external-secrets.io
+      - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo add traefik https://traefik.github.io/charts
+      - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
+      - helm repo add jetstack https://charts.jetstack.io
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
           -f k8s/external-secrets/stage-1/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
-      # Wait for CRD discovery to settle — kubectl's local cache lags
-      # the helm install by a few seconds, and `kubectl apply -k` errors
-      # with "no matches for kind" if you don't wait for the API.
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/stage-1
       - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      - helm upgrade --install traefik traefik/traefik
+          -n kube-system
+          -f k8s/traefik/values.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/traefik -n kube-system
+      - 'echo "Traefik up. App Ingresses (ingressClassName=traefik) will route through this."'
+      - kubectl apply -k k8s/external-dns/stage-1
+      - kubectl wait --for=condition=Ready --timeout=120s
+          externalsecret/external-dns-aws-credentials -n kube-system
+      - helm upgrade --install external-dns external-dns/external-dns
+          -n kube-system
+          -f k8s/external-dns/stage-1/config.yml
+          -f k8s/external-dns/stage-1/values.local.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/external-dns -n kube-system
+      - 'echo "external-dns up. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
+      - helm upgrade --install cert-manager jetstack/cert-manager
+          -n kube-system
+          -f k8s/cert-manager/stage-1/config.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment -n kube-system -l app.kubernetes.io/instance=cert-manager
+      - kubectl wait --for=condition=Established --timeout=60s
+          crd/clusterissuers.cert-manager.io
+          crd/certificates.cert-manager.io
+      - kubectl apply -k k8s/cert-manager/stage-1
+      - kubectl wait --for=condition=Ready --timeout=120s
+          externalsecret/cert-manager-aws-credentials -n kube-system
+      - 'echo "cert-manager up. Annotate an Ingress with cert-manager.io/cluster-issuer=letsencrypt-staging-route53 to request a cert."'
+      - kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl apply -k k8s/monitoring/stage-1
+      - |
+        echo "Waiting for grafana-cloud-metrics-write Secret to materialize..."
+        for i in $(seq 1 30); do
+          if kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null 2>&1; then
+            echo "ready"; break
+          fi
+          sleep 2
+        done
+        kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
+          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
+      - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
+          -n monitoring
+          -f k8s/monitoring/stage-1/values.yml
+      - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+
+  # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
+  # KEEP-IN-SYNC with k8s:stage:platform:up; structural changes should
+  # mirror to both unless deliberately env-specific.
+  k8s:prod:platform:up:
+    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the empty cluster
+    deps: [k8s:prod:bootstrap-secrets]
+    preconditions:
+      - sh: command -v helm >/dev/null
+        msg: "helm not found — install with `brew install helm`"
+      - sh: command -v kubectl >/dev/null
+        msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster — run `task k8s:prod:cluster:up` first"
+      - sh: test -f k8s/external-dns/prod-1/values.local.yml
+        msg: "k8s/external-dns/prod-1/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
+    cmds:
+      - helm repo add external-secrets https://charts.external-secrets.io
+      - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo add traefik https://traefik.github.io/charts
+      - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
+      - helm repo add jetstack https://charts.jetstack.io
+      - helm repo update
+      - helm upgrade --install external-secrets external-secrets/external-secrets
+          -n external-secrets --create-namespace
+          -f k8s/external-secrets/stage-1/values.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment --all -n external-secrets
+      - kubectl wait --for=condition=Established --timeout=60s
+          crd/clustersecretstores.external-secrets.io
+          crd/externalsecrets.external-secrets.io
+      - kubectl apply -k k8s/external-secrets/prod-1
+      - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      - helm upgrade --install traefik traefik/traefik
+          -n kube-system
+          -f k8s/traefik/values.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/traefik -n kube-system
+      - 'echo "Traefik up. App Ingresses (ingressClassName=traefik) will route through this."'
+      - kubectl apply -k k8s/external-dns/prod-1
+      - kubectl wait --for=condition=Ready --timeout=120s
+          externalsecret/external-dns-aws-credentials -n kube-system
+      - helm upgrade --install external-dns external-dns/external-dns
+          -n kube-system
+          -f k8s/external-dns/prod-1/config.yml
+          -f k8s/external-dns/prod-1/values.local.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/external-dns -n kube-system
+      - 'echo "external-dns up. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
+      - helm upgrade --install cert-manager jetstack/cert-manager
+          -n kube-system
+          -f k8s/cert-manager/prod-1/config.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment -n kube-system -l app.kubernetes.io/instance=cert-manager
+      - kubectl wait --for=condition=Established --timeout=60s
+          crd/clusterissuers.cert-manager.io
+          crd/certificates.cert-manager.io
+      - kubectl apply -k k8s/cert-manager/prod-1
+      - kubectl wait --for=condition=Ready --timeout=120s
+          externalsecret/cert-manager-aws-credentials -n kube-system
+      - 'echo "cert-manager up. Annotate an Ingress with cert-manager.io/cluster-issuer=letsencrypt-staging-route53 to request a cert."'
+      - kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl apply -k k8s/monitoring/prod-1
+      - |
+        echo "Waiting for grafana-cloud-metrics-write Secret to materialize..."
+        for i in $(seq 1 30); do
+          if kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null 2>&1; then
+            echo "ready"; break
+          fi
+          sleep 2
+        done
+        kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
+          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded in prod-1? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
+      - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
+          -n monitoring
+          -f k8s/monitoring/prod-1/values.yml
+      - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-secret is `optional: true`, so the existence + content of that
-  # Secret IS the stream state. `obs-stream-on` pulls the STREAM_KEY
+  # Secret IS the stream state. `obs:stream:on` pulls the STREAM_KEY
   # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and creates
-  # the Secret; `obs-stream-off` deletes the Secret. Either way we
+  # the Secret; `obs:stream:off` deletes the Secret. Either way we
   # rollout-restart obs so the entrypoint re-reads STREAM_KEY at boot
   # — Kubernetes doesn't propagate Secret changes to running pods'
   # env vars.
-  obs-stream-on:
+  obs:stream:on:
     desc: enable Twitch streaming on OBS (pulls STREAM_KEY from SM, creates obs-secret, restarts OBS)
     preconditions:
       - sh: command -v aws-vault >/dev/null
@@ -213,9 +599,9 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s-up` first"
+        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
       - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — run `task k8s-apply-stage-1` first"
+        msg: "obs Deployment not found — run `task k8s:stage:apply` first"
     cmds:
       - |
         set -euo pipefail
@@ -228,7 +614,7 @@ tasks:
       - kubectl rollout status deploy/obs --timeout=120s
       - echo "OBS streaming to Twitch (adanalife_staging via stage-1 SM)"
 
-  obs-stream-off:
+  obs:stream:off:
     desc: disable Twitch streaming on OBS (deletes obs-secret, restarts OBS to idle)
     preconditions:
       - sh: command -v kubectl >/dev/null
@@ -242,7 +628,120 @@ tasks:
       - kubectl rollout status deploy/obs --timeout=120s
       - echo "OBS idle (not streaming)"
 
-  k8s-logs:
+  k8s:logs:
     desc: tail logs across all app pods
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
+
+  # Local kubectl port-forward wrappers for OBS / vlc-server VNC. The
+  # host-access LoadBalancer overlays (k8s/apps/{obs,vlc-server}/overlays/local)
+  # already expose VNC at host ports 5902 / 5903 via klipper-lb when the
+  # local overlay is applied — these tasks are the cluster-agnostic
+  # alternative when that overlay isn't in play (e.g. on stage-1, or
+  # when iterating without applying the local overlay). Backgrounded
+  # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
+  # find it. Re-running :up overwrites the PID file; if :down can't
+  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs"`.
+  obs:vnc:up:
+    desc: start a local kubectl port-forward to OBS VNC at localhost:5902
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward svc/obs 5902:5900 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
+
+  obs:vnc:down:
+    desc: stop the local kubectl port-forward to OBS VNC
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/obs-vnc.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/obs-vnc.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/obs-vnc.pid
+          echo "OBS VNC port-forward stopped"
+        else
+          echo "No OBS VNC port-forward PID file found — nothing to stop"
+        fi
+
+  obs:browser:refresh:
+    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently)
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs >/dev/null 2>&1
+        msg: "obs Deployment not found — is the cluster up?"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
+
+  vlc:vnc:up:
+    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward svc/vlc-server 5903:5900 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
+      - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
+
+  vlc:vnc:down:
+    desc: stop the local kubectl port-forward to vlc-server VNC
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/vlc-vnc.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/vlc-vnc.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/vlc-vnc.pid
+          echo "vlc-server VNC port-forward stopped"
+        else
+          echo "No vlc-server VNC port-forward PID file found — nothing to stop"
+        fi
+
+  # tripbot's cluster Postgres is a headless ClusterIP Service (clusterIP: None)
+  # in the default namespace; nothing from outside the cluster can reach it
+  # directly. These wrappers open a kubectl port-forward at localhost:5432 so
+  # host-side tools can connect — primarily the one-time Twitch OAuth bootstrap
+  # CLI in tripbot (cmd/auth-bootstrap), but also psql for ad-hoc DB poking.
+  tripbot:db:up:
+    desc: start a local kubectl port-forward to the cluster Postgres at localhost:5432
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward svc/postgres 5432:5432 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+      - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
+
+  tripbot:db:down:
+    desc: stop the local kubectl port-forward to cluster Postgres
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/tripbot-db.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/tripbot-db.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/tripbot-db.pid
+          echo "tripbot Postgres port-forward stopped"
+        else
+          echo "No tripbot Postgres port-forward PID file found — nothing to stop"
+        fi
+
+  tripbot:db:seed:
+    desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has rows
+    cmds:
+      - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
+      - kubectl wait --for=condition=complete --for=condition=failed job/tripbot-seed --timeout=180s
+      - kubectl logs job/tripbot-seed
+
+  tripbot:auth:bootstrap:
+    desc: run the interactive Twitch OAuth bootstrap job; port-forwards 8080 so the browser callback reaches the pod
+    cmds:
+      - kubectl delete job tripbot-auth-bootstrap --ignore-not-found
+      - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap
+      - echo "Port-forwarding localhost:8080 → job pod. Open the URL above in your browser."
+      - kubectl port-forward job/tripbot-auth-bootstrap 8080:8080 2>/dev/null || true
+      - echo "Bootstrap complete — token written to cluster Postgres."

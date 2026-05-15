@@ -16,6 +16,10 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.0"
     }
+    grafana = {
+      source  = "grafana/grafana"
+      version = "~> 4.35"
+    }
   }
 
   backend "s3" {

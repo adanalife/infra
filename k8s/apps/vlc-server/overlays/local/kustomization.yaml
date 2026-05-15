@@ -4,16 +4,24 @@ kind: Kustomization
 resources:
   - ../../base
   - host-access.yaml
+  # ExternalSecret pulling vlc-server's Sentry DSN from AWS SM
+  # (k8s/sentry-vlc-server). Materialized Secret is named `sentry` and
+  # envFrom'd by the Deployment patch below. Distinct DSN from tripbot.
+  - sentry-external-secret.yaml
 
 # Merge environment-specific config into the base ConfigMap. vlc-server
 # shares tripbot's config package, so it needs the same env-var surface
 # even though most of these values are stubs in local. For stage/prod
 # the secret values would move into a real Secret — TODO.
+#
+# OTEL_* defaults match tripbot's overlay; the OTLP endpoint + headers
+# arrive via the grafana-cloud-otlp Secret (envFrom patch below) which
+# tripbot's overlay materializes via ExternalSecret.
 configMapGenerator:
   - name: vlc-server-config
     behavior: merge
     literals:
-      - ENV=development
+      - ENV=staging
       - DATABASE_HOST=postgres
       - DATABASE_USER=tripbot_docker
       - DATABASE_PASS=hunter2
@@ -27,9 +35,38 @@ configMapGenerator:
       - TWILIO_AUTH_TOKEN=stub
       - TWILIO_FROM_NUM=+15555550100
       - TWILIO_TO_NUM=+15555550101
-      - TRIPBOT_HTTP_AUTH=stub
       - DISABLE_TWITCH_WEBHOOKS=true
+      - OTEL_SDK_DISABLED=false
+      - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
 
 # Mount the dashcam video dir from the host (k3d-only).
 patches:
   - path: dashcam-hostpath.yaml
+  # Inject the Grafana Cloud OTLP env vars from the Secret materialized
+  # by tripbot's ExternalSecret. optional:true keeps vlc-server running
+  # while ESO is still reconciling.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: grafana-cloud-otlp
+            optional: true
+  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry-vlc-server`
+  # Secret. optional:true so the pod stays up while ESO reconciles;
+  # pkg/errors treats an unset DSN as "Sentry disabled."
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: sentry-vlc-server
+            optional: true

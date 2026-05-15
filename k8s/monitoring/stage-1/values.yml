@@ -1,0 +1,137 @@
+# Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
+# in-cluster collectors that fill the dashboards landed in
+# terraform/stage-1/grafana-dashboards/:
+#
+#   - Alloy collectors → scrape pods + ship logs to Loki + cluster events
+#   - kube-state-metrics + node-exporter → cluster/pod/node metrics to Mimir
+#   - kubelet + cAdvisor scrape (built into clusterMetrics)
+#
+# Credentials come from the grafana-cloud-metrics-write Secret in this
+# namespace, materialized by the ExternalSecret in external-secret.yaml.
+# All four keys are read at runtime via Alloy's `remote.kubernetes.secret`
+# expression, so rotating the SM value + force-syncing the ExternalSecret
+# is enough to pick up new tokens without redeploying the chart.
+
+cluster:
+  name: stage-1
+
+destinations:
+  metrics:
+    type: prometheus
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.metrics.data["PROMETHEUS_HOST"]) + "/api/prom/push"
+    auth:
+      type: basic
+      usernameKey: PROMETHEUS_USERNAME
+      passwordKey: TOKEN
+    secret:
+      create: false
+      name: grafana-cloud-metrics-write
+      namespace: monitoring
+
+  logs:
+    type: loki
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.logs.data["LOKI_HOST"]) + "/loki/api/v1/push"
+    auth:
+      type: basic
+      usernameKey: LOKI_USERNAME
+      passwordKey: TOKEN
+    secret:
+      create: false
+      name: grafana-cloud-metrics-write
+      namespace: monitoring
+
+clusterMetrics:
+  enabled: true
+  collector: alloy-metrics
+  # The chart's default cAdvisor + KSM allow lists are conservative —
+  # enough for the basic Grafana Cloud Kubernetes views but missing
+  # several metrics queried by the modern community dashboards we
+  # vendored (k8s-cluster-overview, k8s-pods). Extra series listed
+  # below; checked against the dashboard JSON queries.
+  cadvisor:
+    metricsTuning:
+      includeMetrics:
+        # CPU throttle time (seconds) — for "CPU Throttled seconds by
+        # container/namespace" panels. Default allow list has
+        # _periods_total but not _seconds_total.
+        - container_cpu_cfs_throttled_seconds_total
+        # OOM events — for "OOM Events by container/namespace" panels.
+        - container_oom_events_total
+        # Network errors — for "Network errors" panel.
+        - container_network_receive_errors_total
+        - container_network_transmit_errors_total
+  kube-state-metrics:
+    metricsTuning:
+      includeMetrics:
+        # Last terminated exit code — for the "Last Terminated Exit Code"
+        # panel. Default allow list has _reason and _timestamp but not
+        # _exitcode.
+        - kube_pod_container_status_last_terminated_exitcode
+        # Pod scheduled status — for "Unscheduled Pods" panel.
+        - kube_pod_status_scheduled
+        # Namespace creation timestamp — used as a 0-fallback in some
+        # "by namespace" panel queries to ensure namespaces with no
+        # pods still appear.
+        - kube_namespace_created
+
+# hostMetrics scrapes node-exporter (deployed below via telemetryServices).
+# Without this, node-exporter runs but its /metrics never reaches Mimir,
+# so node-level panels (Node Exporter Full + CPU/memory/disk on cluster
+# overview) stay empty. clusterMetrics only covers kubelet/cAdvisor/KSM.
+#
+# `linuxHosts.enabled: true` is the per-source switch in the feature-
+# host-metrics subchart (parent chart aliases it under `hostMetrics:`).
+# Picks up the node-exporter pods deployed below via telemetryServices
+# automatically. The chart's README example calls this `node-exporter:`
+# but the rendered config only honors `linuxHosts:`. Verified by
+# `helm template` against k8s-monitoring 4.1.1.
+hostMetrics:
+  enabled: true
+  collector: alloy-metrics
+  linuxHosts:
+    enabled: true
+    # The chart's default-allow-list keeps only a minimal subset of
+    # node-exporter metrics — enough for the basic Kubernetes views
+    # but missing node_uname_info, node_load*, node_disk_*,
+    # node_network_*errs_total, and most of what Node Exporter Full
+    # queries. The integration allowlist is the richer set that
+    # covers these.
+    metricsTuning:
+      useIntegrationAllowList: true
+
+clusterEvents:
+  enabled: true
+  collector: alloy-singleton
+
+podLogsViaLoki:
+  enabled: true
+  collector: alloy-logs
+
+# annotationAutodiscovery scrapes any pod tagged with prometheus.io/scrape
+# annotations. Used today by the helm-installed traefik (k8s/traefik/values.yml
+# sets podAnnotations) — avoids needing kube-prometheus-stack CRDs +
+# ServiceMonitor. App workloads that want their /metrics scraped can
+# add the same annotations.
+annotationAutodiscovery:
+  enabled: true
+  collector: alloy-metrics
+
+# kube-state-metrics + node-exporter are off by default in v4.x;
+# deploying them here, then clusterMetrics scrapes KSM and hostMetrics
+# scrapes node-exporter. cAdvisor scrape is built into clusterMetrics's
+# kubelet target — no extra deploy needed.
+telemetryServices:
+  kube-state-metrics:
+    deploy: true
+  node-exporter:
+    deploy: true
+
+# Alloy collector deployments. Defaults are fine for a single-node k3d;
+# revisit on a real multi-node cluster.
+collectors:
+  alloy-metrics:
+    presets: [clustered, statefulset]
+  alloy-logs:
+    presets: [filesystem-log-reader, daemonset]
+  alloy-singleton:
+    presets: [singleton]

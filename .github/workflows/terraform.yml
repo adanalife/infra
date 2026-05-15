@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   plan:
+    # Dependabot PRs run with an isolated, empty secret namespace; skip the
+    # AWS-touching plan job for them. validate + fmt still run.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -25,7 +28,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
         env:
           CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
@@ -34,7 +37,7 @@ jobs:
           CI_PROD_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
           CI_STAGE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_STAGE_AWS_ACCESS_KEY_ID }}
           CI_STAGE_AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_STAGE_AWS_SECRET_ACCESS_KEY }}
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: us-east-1
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
@@ -52,7 +55,7 @@ jobs:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: terraform validate
         uses: dflook/terraform-validate@v2
         with:
@@ -65,7 +68,7 @@ jobs:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: terraform fmt
         uses: dflook/terraform-fmt-check@v2
         with:

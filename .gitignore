@@ -26,3 +26,10 @@
 k8s/**/credentials
 k8s/**/secret-access-key
 k8s/**/secret.env
+
+# Per-machine helm overrides written by `task k8s:bootstrap-secrets` —
+# notably external-dns/stage-1/values.local.yml, which sets
+# `extraArgs: [--default-targets=<host public IP>]` from `curl ifconfig.me`.
+# Keeps machine-specific values out of git so a stage-1 apply works on
+# any host without manifest churn.
+k8s/**/values.local.yml

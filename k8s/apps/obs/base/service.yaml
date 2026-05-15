@@ -10,3 +10,6 @@ spec:
     - name: vnc
       port: 5900
       targetPort: vnc
+    - name: websocket
+      port: 4455
+      targetPort: websocket

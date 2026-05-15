@@ -20,16 +20,18 @@ spec:
       containers:
         - name: obs
           image: adanalife/obs:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: vnc
               containerPort: 5900
+            - name: websocket
+              containerPort: 4455
           envFrom:
             - configMapRef:
                 name: obs-config
             # obs-secret existence + content IS the streaming toggle:
-            # `task obs-stream-on` creates it with STREAM_KEY pulled from
-            # AWS Secrets Manager; `task obs-stream-off` deletes it. The
+            # `task obs:stream:on` creates it with STREAM_KEY pulled from
+            # AWS Secrets Manager; `task obs:stream:off` deletes it. The
             # OBS entrypoint checks `-n "${STREAM_KEY:-}"` to decide
             # whether to add --startstreaming to obs args. optional=true
             # means the pod boots in idle mode (VNC-only) when the
@@ -37,6 +39,17 @@ spec:
             - secretRef:
                 name: obs-secret
                 optional: true
+          # Exec the in-image healthcheck.sh — OBS has no HTTP surface.
+          # Catches the safe-mode crash-dialog (modal blocks the canvas;
+          # only a pod restart unsticks it), the failure mode this probe
+          # exists for.
+          livenessProbe:
+            exec:
+              command: ["/opt/obs/healthcheck.sh"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
               cpu: 200m

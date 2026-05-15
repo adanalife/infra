@@ -6,7 +6,7 @@
 Local app stack (postgres + tripbot + vlc-server + obs) on k3d. Manifests
 live in `k8s/apps/<component>/{base,overlays/local}/`; the umbrella overlay
 at `k8s/overlays/local/` wires them together. The k3d cluster config is at
-`k8s/k3d-config.yaml`.
+`k8s/k3d-config.bees.yaml`.
 
 ```bash
 brew install k3d kubectl
@@ -18,9 +18,9 @@ for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
 done
 
 # 2. Bring up the cluster, build & import images, apply manifests
-task k8s-up
-task k8s-import-images   # builds via tripbot/infra/docker/docker-compose.yml
-task k8s-apply
+task k8s:stage:cluster:up
+task k8s:import-images   # builds via tripbot/infra/docker/docker-compose.yml
+task k8s:apply
 
 # 3. Verify
 kubectl get pods                              # all four Running
@@ -31,10 +31,10 @@ curl http://localhost:8080/health/live
 # RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
 
 # 4. Tear down
-task k8s-down
+task k8s:stage:cluster:down
 ```
 
-The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
+The k3d cluster has no host-port bindings (see `k8s/k3d-config.bees.yaml`)
 — anything you want to reach from the laptop goes through
 `kubectl port-forward`, and stage-1 mode (next section) handles
 public exposure through a Cloudflare Tunnel.
@@ -64,19 +64,19 @@ API token and the home-IP allowlist are stored in AWS Secrets Manager.
 # 2. First apply — creates the SM secret containers (with placeholders)
 #    and the AWS resources. Cloudflare resources fail because the
 #    placeholder token can't authenticate. Expected.
-task tf-stage
+task tf:stage:apply
 
 # 3. Populate the secrets out-of-band. The Cloudflare API token needs
 #    these scopes: Zone:Edit, Tunnel:Edit, Pages:Edit, Access:Apps and
 #    Policies:Edit, DNS:Edit, Zone Settings:Edit.
 aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
   --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
-task update-allowlist   # opens stage-1/allowlist-cidrs in $EDITOR; JSON array of CIDRs
+task stage:allowlist:add-current-ip   # appends your current public IP to stage-1/allowlist-cidrs
 
 # 4. Second apply — creates the whalecore.com zone, tunnel, ingress
 #    config, DNS record, Access app + IP allow policy, and the Pages
 #    project.
-task tf-stage
+task tf:stage:apply
 
 # 5. First-time only — point whalecore.com's nameservers at Cloudflare.
 #    Get the values from terraform output:
@@ -86,13 +86,14 @@ aws-vault exec adanalife-stage -- sh -c 'cd terraform/stage-1 \
 #    Cloudflare will mark the zone "Active" once propagation completes
 #    (minutes to hours).
 
-# 6. Write the tunnel token from terraform output into the kustomize
-#    secret.env (re-run any time the tunnel is recreated).
-task k8s-tunnel-token
+# 6. Write the bootstrap Secrets (ESOSecretsReader access key for ESO,
+#    cloudflared TUNNEL_TOKEN) into the cluster from terraform outputs.
+#    Re-run any time the tunnel or ESO IAM access key is rotated.
+task k8s:stage:bootstrap-secrets
 
-# 7. Apply the stage-1 overlay — same four apps as `task k8s-apply`,
+# 7. Apply the stage-1 overlay — same four apps as `task k8s:apply`,
 #    plus the cloudflared Deployment.
-task k8s-apply-stage-1
+task k8s:stage:apply
 
 # 8. Verify (after Cloudflare marks the zone Active in step 5).
 curl https://tripbot.whalecore.com/health/live

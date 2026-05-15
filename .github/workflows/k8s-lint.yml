@@ -15,7 +15,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install k3d
         run: curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
@@ -28,15 +28,39 @@ jobs:
       # secret.env files are gitignored — stub them from the .example
       # templates so kustomize can build. cloudflared, external-secrets,
       # and obs no longer use this pattern (their Secrets are applied
-      # directly to the cluster by Taskfile targets — task k8s-tunnel-token,
-      # task k8s-eso-bootstrap, task obs-stream-on/off respectively), so
-      # this only covers app overlays that still wire secrets via
+      # directly to the cluster by Taskfile targets — task
+      # k8s:bootstrap-secrets and task obs:stream:on/off respectively),
+      # so this only covers app overlays that still wire secrets via
       # secretGenerator.
       - name: Stub secret.env files
         run: |
           for d in k8s/apps/{postgres,tripbot}/overlays/local; do
             cp "$d/secret.env.example" "$d/secret.env"
           done
+
+      # ESO is the only chart this lint installs. The linted overlays
+      # embed ExternalSecret resources, so its CRDs must be registered
+      # before `kubectl --dry-run=server` can validate them. The other
+      # platform charts (cert-manager, external-dns) install no CRDs
+      # that any overlay references today, so they'd be dead weight here
+      # — add a helm step alongside this one if that ever changes.
+      #
+      # Helm-install matches `task k8s:platform:up`. The CRD `Established`
+      # wait dodges the kubectl-cache lag that otherwise produces
+      # "no matches for kind" right after install.
+      - name: Install External Secrets Operator (CRDs + controllers)
+        run: |
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo update
+          helm upgrade --install external-secrets external-secrets/external-secrets \
+            -n external-secrets --create-namespace \
+            -f k8s/external-secrets/stage-1/values.yml \
+            --wait
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment --all -n external-secrets
+          kubectl wait --for=condition=Established --timeout=60s \
+            crd/clustersecretstores.external-secrets.io \
+            crd/externalsecrets.external-secrets.io
 
       - name: Kustomize build (local + stage-1)
         run: |

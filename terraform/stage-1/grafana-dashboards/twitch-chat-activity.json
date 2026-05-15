@@ -1,0 +1,103 @@
+{
+  "title": "02 — Twitch Chat Activity",
+  "uid": "twitch-chat-activity",
+  "tags": ["tripbot", "product", "twitch"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 0,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "mode": "markdown",
+        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`)."
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Messages / minute",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tripbot_chat_messages_total{service_name=\"tripbot\"}[5m])) * 60" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Commands / minute",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tripbot_chat_commands_total{service_name=\"tripbot\"}[5m])) * 60" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Messages (24h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(tripbot_chat_messages_total{service_name=\"tripbot\"}[24h]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Commands (24h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(tripbot_chat_commands_total{service_name=\"tripbot\"}[24h]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Chat messages over time",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tripbot_chat_messages_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "msgs / min" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Commands over time (top 10)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, sum by (command) (rate(tripbot_chat_commands_total{service_name=\"tripbot\"}[5m]))) * 60", "legendFormat": "{{command}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Top commands (1h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "expr": "topk(15, sum by (command) (increase(tripbot_chat_commands_total{service_name=\"tripbot\"}[1h])))", "legendFormat": "{{command}}" }
+      ],
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}

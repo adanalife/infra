@@ -1,0 +1,80 @@
+# Helm values for traefik/traefik (chart v40.x). Replaces the
+# k3s-bundled Traefik so we get the full set of CRDs (including
+# ingress-class isDefaultClass, dashboard wiring, prometheus metrics
+# baked in) that the bundled HelmChartConfig dance can't easily reach.
+#
+# Workloads route through this via `ingressClassName: traefik` (set
+# on each app's Ingress, e.g. k8s/apps/tripbot/base/ingress.yaml).
+# The bundled Traefik lived in `kube-system` and was the default
+# IngressClass; this release matches both for drop-in compatibility.
+
+deployment:
+  # Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's
+  # annotationAutodiscovery feature scrape the metrics endpoint —
+  # avoids needing a kube-prometheus ServiceMonitor + CRD.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9100"
+    prometheus.io/path: "/metrics"
+
+# Match the bundled Traefik's role: be the default IngressClass.
+# App Ingresses already opt-in via ingressClassName: traefik, so this
+# is belt-and-suspenders.
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+
+# Expose the API + dashboard. --api.insecure=true means no auth on
+# the dashboard, accessed via `kubectl port-forward svc/traefik
+# 9000:9000` for laptop-loopback only. If/when Traefik gets exposed
+# at a real public hostname, swap this for an IngressRoute with
+# auth middleware.
+additionalArguments:
+  - "--api.insecure=true"
+  - "--api.dashboard=true"
+
+providers:
+  kubernetesIngress:
+    enabled: true
+    publishedService:
+      # Lets external-dns + cert-manager pick up the published
+      # service IP/hostname for DNS records and HTTP-01 challenges
+      # respectively. Harmless when neither runs.
+      enabled: true
+  kubernetesCRD:
+    enabled: true
+
+# Web → websecure redirect. The bundled Traefik doesn't do this,
+# but we want it: any HTTP caller gets bumped to HTTPS. Cloudflare
+# Tunnel terminates TLS at the edge, so internally only HTTP arrives
+# — but if anything inside the cluster talks to traefik directly on
+# :80, the redirect still helps it.
+ports:
+  web:
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  metrics:
+    port: 9100
+    exposedPort: 9100
+    protocol: TCP
+
+# Enable the prometheus metrics endpoint on its own entrypoint.
+metrics:
+  prometheus:
+    entryPoint: metrics
+    # Tag metrics with router/service names so per-route latency
+    # breakdowns are queryable (matches what we did with
+    # otelhttp.WithRouteTag in tripbot#428).
+    addRoutersLabels: true
+    addServicesLabels: true
+
+# Dashboard reachable via port-forward only (entryPoint `traefik`
+# is exposed on port 9000). IngressRoute disabled because we don't
+# want it accidentally routed via Cloudflare Tunnel.
+ingressRoute:
+  dashboard:
+    enabled: false
