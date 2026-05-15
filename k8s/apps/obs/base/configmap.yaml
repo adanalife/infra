@@ -10,3 +10,4 @@ data:
   # it, URLs render as relative ("/onscreens/...") and CEF can't
   # resolve them, so onscreens never appear on the OBS canvas.
   ONSCREENS_URL_BASE: http://vlc-server:8080
+  OBS_WEBSOCKET_PASSWD: adanalife

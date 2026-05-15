@@ -24,6 +24,8 @@ spec:
           ports:
             - name: vnc
               containerPort: 5900
+            - name: websocket
+              containerPort: 4455
           envFrom:
             - configMapRef:
                 name: obs-config
