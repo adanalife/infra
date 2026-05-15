@@ -657,6 +657,24 @@ tasks:
           echo "No OBS VNC port-forward PID file found — nothing to stop"
         fi
 
+  obs:browser:refresh:
+    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently)
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs >/dev/null 2>&1
+        msg: "obs Deployment not found — is the cluster up?"
+    cmds:
+      - |
+        set -euo pipefail
+        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait "$PF" 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost uv run --with obsws-python \
+          {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
+
   vlc:vnc:up:
     desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
     cmds:
