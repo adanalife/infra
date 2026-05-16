@@ -20,4 +20,7 @@ resources:
   - ../../apps/tripbot/overlays/stage-1
   - ../../apps/vlc-server/overlays/stage-1-nas
   - ../../apps/obs/overlays/local
-  - ../../platform/cloudflared/overlays/stage-1
+# The cloudflared Deployment (tunnel client for *.whalecore.com) is
+# opt-in — bring it up with `task k8s:stage:tunnel:up`. It lives in
+# its own `cloudflared` namespace and is no longer part of this
+# umbrella.
