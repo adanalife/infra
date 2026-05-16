@@ -35,7 +35,8 @@ locals {
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this
-# requires re-running `task k8s:stage:bootstrap-secrets` then `task k8s:stage:apply`.
+# requires re-running `task --force k8s:stage:tunnel:up` to re-seed
+# the in-cluster cloudflared-secret with the fresh token.
 resource "random_id" "stage_1_tunnel_secret" {
   byte_length = 32
 }
@@ -172,14 +173,14 @@ resource "cloudflare_zero_trust_access_application" "stage_1_vlc" {
 }
 
 # Tunnel token consumed by the in-cluster cloudflared Deployment.
-# Wired to the k8s Secret via `task k8s:stage:bootstrap-secrets`.
+# Wired to the k8s Secret via `task k8s:stage:tunnel:up`.
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "stage_1" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.stage_1.id
 }
 
 # Tunnel token — sensitive. Wire into the k8s cloudflared Deployment's
-# secret with `task k8s:stage:bootstrap-secrets`.
+# secret with `task k8s:stage:tunnel:up`.
 output "cloudflared_tunnel_token" {
   value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.stage_1.token
   sensitive = true
