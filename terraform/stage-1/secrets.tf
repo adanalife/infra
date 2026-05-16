@@ -237,6 +237,39 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 }
 
 # ============================================================================
+# Google Maps
+# ============================================================================
+
+# Google Maps API key for the tripbot Go service. Used by the `!location`
+# chat command (`pkg/chatbot/commands.go` → `helpers.CityFromCoords`) and
+# during video ingest (`pkg/video/db.go` → `helpers.StateFromCoords`); the
+# tripbot config marks it `required:"true"`, so the bot won't boot without
+# it. Per-env keys (stage and prod are separate API keys in the same GCP
+# project, restricted to the Geocoding + Maps JavaScript APIs) for bounded
+# blast radius. See vault/tripbot/credentials.md for minting / rotation.
+#
+# Materializes into a k8s Secret via an ExternalSecret resource owned by
+# k8s/apps/tripbot/overlays/local/, envFrom'd into the Deployment.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/google-maps-api-key \
+#     --secret-string '{"GOOGLE_MAPS_API_KEY":"AIza..."}'
+resource "aws_secretsmanager_secret" "tripbot_google_maps_api_key" {
+  name        = "k8s/tripbot/google-maps-api-key"
+  description = "Google Maps API key for tripbot. Key holds GOOGLE_MAPS_API_KEY. Consumed by pkg/chatbot (!location command) and pkg/video (state lookup on ingest). Restricted to Geocoding + Maps JavaScript APIs. Stage and prod are distinct keys."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_google_maps_api_key" {
+  secret_id     = aws_secretsmanager_secret.tripbot_google_maps_api_key.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
 # OBS
 # ============================================================================
 
@@ -292,6 +325,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
+      aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
     ]
   }
 }

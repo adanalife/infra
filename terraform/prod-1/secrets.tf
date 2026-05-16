@@ -171,6 +171,33 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 }
 
 # ============================================================================
+# Google Maps
+# ============================================================================
+
+# Google Maps API key for prod-1 tripbot. Separate key from stage-1's (same
+# GCP project, distinct API keys) so a leak in one env doesn't compromise the
+# other. Restricted to the Geocoding + Maps JavaScript APIs.
+# See vault/tripbot/credentials.md for minting / rotation.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/google-maps-api-key \
+#     --secret-string '{"GOOGLE_MAPS_API_KEY":"AIza..."}'
+resource "aws_secretsmanager_secret" "tripbot_google_maps_api_key" {
+  name        = "k8s/tripbot/google-maps-api-key"
+  description = "Google Maps API key for tripbot (prod-1). Key holds GOOGLE_MAPS_API_KEY. Consumed by pkg/chatbot (!location) and pkg/video. Restricted to Geocoding + Maps JavaScript APIs."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_google_maps_api_key" {
+  secret_id     = aws_secretsmanager_secret.tripbot_google_maps_api_key.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
 # OBS
 # ============================================================================
 
@@ -206,6 +233,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
+      aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
     ]
   }
 }
