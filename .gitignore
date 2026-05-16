@@ -33,3 +33,8 @@ k8s/**/secret.env
 # Keeps machine-specific values out of git so a stage-1 apply works on
 # any host without manifest churn.
 k8s/**/values.local.yml
+
+# Per-machine k3d config overrides — full-superset configs holding
+# host-specific bind-mounts (e.g., NAS share paths) that shouldn't land
+# in git. Picked up by `task k8s:<env>:cluster:up` when present.
+k8s/k3d-config.*.local.yaml

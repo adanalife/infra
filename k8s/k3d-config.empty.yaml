@@ -1,4 +1,4 @@
-# k3d cluster config for prod-1 on the `empty` host (dmerrick-empty Mac mini).
+# k3d cluster config for prod-1 on the `empty` host (dmerrick-empty).
 #
 # Bring up with:  task k8s:prod:cluster:up
 # Tear down with: task k8s:prod:cluster:down
@@ -9,13 +9,13 @@
 #   - metadata.name: adanalife-empty (vs adanalife-bees)
 #   - no dashcam volume mount: prod-1 apps stay dormant in this pass, so
 #     the /host/dashcam mount has no consumer. Re-introduce when apps land
-#     here (and verify the path resolves on the Mac mini's user home —
+#     here (and verify the path resolves on the host's user home —
 #     hardcoded /Users/dmerrick/ paths may not be portable across machines).
 #
-# Public 80/443 path on this host goes through a Synology Web Portal reverse
-# proxy on the Mac mini's network (Synology NAS running DSM). Routing from
-# the proxy to the cluster's 9080/9443 is the missing link for TLS-serving;
-# tracked in vault/infra/TODO.md under the public-80/443 follow-up.
+# Public 80/443 path on this host goes through an external reverse-proxy
+# appliance on the host's local network. Routing from the proxy to the
+# cluster's 9080/9443 is the missing link for TLS-serving; tracked in
+# the infra TODO under the public-80/443 follow-up.
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
@@ -39,8 +39,8 @@ options:
 # Map host ports onto the bundled klipper-lb so external traffic can
 # reach traefik. High ports (9080/9443) instead of standard 80/443
 # because Colima can't forward privileged ports (<1024) to the host
-# without sudo; same constraint as bees. The Synology Web Portal
-# reverse-proxy translation lands externally.
+# without sudo; same constraint as bees. The external reverse-proxy
+# port translation lands externally.
 ports:
   - port: 9080:80
     nodeFilters:
