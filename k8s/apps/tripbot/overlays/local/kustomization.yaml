@@ -17,6 +17,12 @@ resources:
   # Deployment patch below — overrides the placeholder Twitch values
   # from secret.env once ESO has reconciled.
   - twitch-external-secret.yaml
+  # ExternalSecret pulling tripbot's Google Maps API key from AWS SM
+  # (k8s/tripbot/google-maps-api-key). Materialized Secret is named
+  # `tripbot-google-maps-api-key` and envFrom'd by the Deployment patch
+  # below — overrides the `stub` placeholder in secret.env once ESO
+  # has reconciled.
+  - google-maps-external-secret.yaml
 
 # secret.env is gitignored — copy from secret.env.example.
 secretGenerator:
@@ -93,4 +99,21 @@ patches:
         value:
           secretRef:
             name: tripbot-twitch-creds
+            optional: true
+  # Inject GOOGLE_MAPS_API_KEY from the ExternalSecret-managed
+  # `tripbot-google-maps-api-key` Secret. optional:true so the pod
+  # stays up while ESO reconciles — the bot boots with the `stub`
+  # value from secret.env (required:"true" in config) and switches
+  # to the real key on the next pod restart after ESO syncs. Stub
+  # works for `!location` to no-op gracefully; real Geocoding calls
+  # need the real key.
+  - target:
+      kind: Deployment
+      name: tripbot
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: tripbot-google-maps-api-key
             optional: true
