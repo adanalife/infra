@@ -85,7 +85,11 @@ locals {
 resource "grafana_dashboard" "tripbot" {
   for_each = local.dashboard_files
   folder   = grafana_folder.tripbot.uid
-  config_json = replace(
+  # Wrapped in sensitive() so plan/apply renders "(sensitive value)" instead
+  # of the full JSON diff — the dashboards are dashboards-as-code from the
+  # files in ./grafana-dashboards/, and the noisy multi-thousand-line diffs
+  # drown out everything else in the plan.
+  config_json = sensitive(replace(
     replace(
       replace(
         file("${path.module}/grafana-dashboards/${each.key}.json"),
@@ -94,5 +98,5 @@ resource "grafana_dashboard" "tripbot" {
       "__DS_LOKI__", local.dashboard_substitutions["__DS_LOKI__"]
     ),
     "__DS_TEMPO__", local.dashboard_substitutions["__DS_TEMPO__"]
-  )
+  ))
 }
