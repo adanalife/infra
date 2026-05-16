@@ -14,7 +14,7 @@
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate, `twitch_helix_errors_total{endpoint,status_code}` for silent-eviction-class incidents (see [tripbot#530](https://github.com/adanalife/tripbot/pull/530) for context)."
+        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate, `twitch_helix_errors_total{endpoint,status_code}` for silent-eviction-class incidents (see [tripbot#530](https://github.com/adanalife/tripbot/pull/530) for context). **Chat feed row** (added 2026-05-15): each PRIVMSG arrives as a Loki log record under `{service_name=\"tripbot\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
       }
     },
     {
@@ -259,6 +259,24 @@
         { "refId": "A", "expr": "sum by (scoreboard) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{scoreboard}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 21,
+      "type": "logs",
+      "title": "Chat feed (live)",
+      "description": "Twitch chat messages as they arrive. Emitted by pkg/chatbot/log/log.go as OTel log records under scope_name=\"twitch-chat\"; twitch.user and twitch.channel land as attributes (expand a row to see them).",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 69, "w": 24, "h": 16 },
+      "targets": [
+        { "refId": "A", "expr": "{service_name=\"tripbot\", scope_name=\"twitch-chat\"}" }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "enableLogDetails": true
+      }
     }
   ]
 }
