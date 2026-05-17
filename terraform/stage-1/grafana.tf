@@ -66,6 +66,7 @@ locals {
     "go-runtime",
     "http-routes",
     "logs-errors",
+    "app-latency",
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}

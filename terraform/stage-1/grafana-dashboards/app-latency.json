@@ -1,0 +1,351 @@
+{
+  "title": "08 — Application Latency: Commands & DB",
+  "uid": "app-latency",
+  "tags": ["tripbot", "latency", "chatbot", "database"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(target_info{service_name=\"tripbot\"}, deployment_environment)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Chatbot command latency",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Command rate",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Command p50 (overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Command p95 (overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.5 },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Command p99 (overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 2.5 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Command latency (p50 / p95 / p99 overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Command latency p95 by command",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{command}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Top commands — rate / p50 / p95 / p99",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 9 },
+      "transformations": [
+        { "id": "merge" },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A": "rate /s",
+              "Value #B": "p50",
+              "Value #C": "p95",
+              "Value #D": "p99"
+            },
+            "indexByName": {},
+            "excludeByName": { "Time": true, "service_name": true, "__name__": true, "job": true, "instance": true }
+          }
+        }
+      ],
+      "targets": [
+        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (command) (rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
+        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.50, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "D", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "rate /s" }, "properties": [ { "id": "unit", "value": "ops" } ] },
+          { "matcher": { "id": "byName", "options": "p50" }, "properties": [ { "id": "unit", "value": "s" } ] },
+          { "matcher": { "id": "byName", "options": "p95" }, "properties": [ { "id": "unit", "value": "s" } ] },
+          { "matcher": { "id": "byName", "options": "p99" }, "properties": [ { "id": "unit", "value": "s" } ] }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "type": "heatmap",
+      "title": "Command latency heatmap",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 9 },
+      "targets": [
+        { "refId": "A", "format": "heatmap", "expr": "sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{le}}" }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "s" },
+        "color": { "scheme": "Spectral", "mode": "scheme" }
+      }
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "DB client operation latency (otelsql)",
+      "gridPos": { "x": 0, "y": 31, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 0,
+      "type": "text",
+      "title": "Source",
+      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 3 },
+      "options": {
+        "mode": "markdown",
+        "content": "Metrics from **`db.client.operation.duration`** (XSAM/otelsql) — one observation per DB call routed through `pkg/database`. Label `db_operation_name` is the otelsql `Method` (e.g. `sql.conn.query`, `sql.conn.exec`, `sql.stmt.query`, `sql.tx.commit`). Errors surface via the `error_type` label when present."
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "DB call rate",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 35, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "DB p50 (overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 35, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "DB p95 (overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 35, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.1 },
+            { "color": "red", "value": 0.5 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "DB p99 (overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 35, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.25 },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "DB latency (p50 / p95 / p99 overall)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 39, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "DB latency p95 by operation",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 39, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{db_operation_name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "DB operations — rate / p50 / p95 / p99",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 47, "w": 24, "h": 9 },
+      "transformations": [
+        { "id": "merge" },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A": "rate /s",
+              "Value #B": "p50",
+              "Value #C": "p95",
+              "Value #D": "p99"
+            },
+            "indexByName": {},
+            "excludeByName": { "Time": true, "service_name": true, "__name__": true, "job": true, "instance": true }
+          }
+        }
+      ],
+      "targets": [
+        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (db_operation_name) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
+        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.50, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "D", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "rate /s" }, "properties": [ { "id": "unit", "value": "ops" } ] },
+          { "matcher": { "id": "byName", "options": "p50" }, "properties": [ { "id": "unit", "value": "s" } ] },
+          { "matcher": { "id": "byName", "options": "p95" }, "properties": [ { "id": "unit", "value": "s" } ] },
+          { "matcher": { "id": "byName", "options": "p99" }, "properties": [ { "id": "unit", "value": "s" } ] }
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "DB error rate by error_type",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 56, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (error_type) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", error_type!=\"\"}[$__rate_interval]))", "legendFormat": "{{error_type}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 19,
+      "type": "heatmap",
+      "title": "DB latency heatmap",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 56, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "format": "heatmap", "expr": "sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{le}}" }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "s" },
+        "color": { "scheme": "Spectral", "mode": "scheme" }
+      }
+    }
+  ]
+}
