@@ -179,7 +179,8 @@ resource "aws_iam_policy" "basic_web_console_viewing" {
                 "route53:ListVPCAssociationAuthorizations"
             ],
             "Resource": [
-                "arn:aws:route53:::hostedzone/*",
+                "arn:aws:route53:::hostedzone/${aws_route53_zone.primary_subdomain_zone.zone_id}",
+                "arn:aws:route53:::hostedzone/${aws_route53_zone.secondary_subdomain_zone.zone_id}",
                 "arn:aws:route53:::healthcheck/*"
             ]
         },
