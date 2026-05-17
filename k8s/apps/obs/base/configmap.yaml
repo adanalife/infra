@@ -4,10 +4,10 @@ metadata:
   name: obs-config
 data:
   DASHCAM_RTSP_URL: rtsp://vlc-server:8554/dashcam
-  # Base URL for the browser_source onscreens that vlc-server serves.
+  # Base URL for the browser_source onscreens that onscreens-server serves.
   # entrypoint.sh envsubst's this into Tripbot.json.tmpl so each
   # browser_source's `url` field becomes fully qualified. Without
   # it, URLs render as relative ("/onscreens/...") and CEF can't
   # resolve them, so onscreens never appear on the OBS canvas.
-  ONSCREENS_URL_BASE: http://vlc-server:8080
+  ONSCREENS_URL_BASE: http://vlc-server:8081
   OBS_WEBSOCKET_PASSWD: adanalife
