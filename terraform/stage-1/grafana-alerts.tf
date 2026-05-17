@@ -87,7 +87,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "tripbot"
+      service  = "vlc-server"
     }
 
     data {
@@ -99,7 +99,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(rate(obs_stream_output_skipped_frames{service_name=\"tripbot\"}[5m]))"
+        expr          = "max(rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -140,7 +140,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "tripbot"
+      service  = "vlc-server"
     }
 
     data {
@@ -152,7 +152,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_stream_output_congestion{service_name=\"tripbot\"})"
+        expr          = "max(obs_stream_output_congestion{service_name=\"vlc-server\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -193,7 +193,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "critical"
-      service  = "tripbot"
+      service  = "vlc-server"
     }
 
     data {
@@ -205,7 +205,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_stream_output_reconnecting{service_name=\"tripbot\"})"
+        expr          = "max(obs_stream_output_reconnecting{service_name=\"vlc-server\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
