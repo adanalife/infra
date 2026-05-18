@@ -35,7 +35,6 @@ configMapGenerator:
       - TWILIO_AUTH_TOKEN=stub
       - TWILIO_FROM_NUM=+15555550100
       - TWILIO_TO_NUM=+15555550101
-      - DISABLE_TWITCH_WEBHOOKS=true
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
