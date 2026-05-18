@@ -126,8 +126,14 @@ tasks:
     cmds:
       - |
         set -euo pipefail
-        echo "Enabling Geocoding + Maps JavaScript APIs on {{.PROJECT}}..." >&2
+        echo "Enabling API Keys + Geocoding + Maps JavaScript APIs on {{.PROJECT}}..." >&2
+        # apikeys.googleapis.com is the meta-API for managing API keys
+        # (what the `api-keys create` subcommand below talks to). It's a
+        # separate enablement from the Maps APIs the minted key actually uses.
+        # Without it, the first run on a fresh project fails with
+        # PERMISSION_DENIED / SERVICE_DISABLED.
         gcloud services enable \
+          apikeys.googleapis.com \
           geocoding-backend.googleapis.com \
           maps-backend.googleapis.com \
           --project={{.PROJECT}} >&2
