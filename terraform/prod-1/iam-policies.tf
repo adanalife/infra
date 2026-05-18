@@ -179,7 +179,8 @@ resource "aws_iam_policy" "basic_web_console_viewing" {
                 "route53:ListVPCAssociationAuthorizations"
             ],
             "Resource": [
-                "arn:aws:route53:::hostedzone/*",
+                "arn:aws:route53:::hostedzone/${aws_route53_zone.primary_subdomain_zone.zone_id}",
+                "arn:aws:route53:::hostedzone/${aws_route53_zone.secondary_subdomain_zone.zone_id}",
                 "arn:aws:route53:::healthcheck/*"
             ]
         },
@@ -218,6 +219,10 @@ EOF
 resource "aws_iam_policy" "allow_external_dns_updates" {
   name = "AllowExternalDNSUpdates"
 
+  # ChangeResourceRecordSets is scoped to the specific zones managed in this
+  # workspace. The discovery actions (GetChange / ListHostedZones / etc.)
+  # don't support resource-level permissions and must stay "*".
+  # See: https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md#iam-policy
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -229,7 +234,8 @@ resource "aws_iam_policy" "allow_external_dns_updates" {
         "route53:TestDNSAnswer"
       ],
       "Resource": [
-        "arn:aws:route53:::hostedzone/*"
+        "arn:aws:route53:::hostedzone/${aws_route53_zone.primary_subdomain_zone.zone_id}",
+        "arn:aws:route53:::hostedzone/${aws_route53_zone.secondary_subdomain_zone.zone_id}"
       ]
     },
     {
