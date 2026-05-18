@@ -59,6 +59,7 @@ locals {
   dashboard_files = toset([
     "tripbot-service-health",
     "vlc-server-service-health",
+    "onscreens-server-service-health",
     "stream-health",
     "tripbot-vlc-traffic",
     "postgres-pool",
