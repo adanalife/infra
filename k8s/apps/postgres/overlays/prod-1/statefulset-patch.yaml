@@ -1,0 +1,31 @@
+# Prod-1 patches on top of postgres base StatefulSet.
+#
+# Two deltas from base:
+# 1. PVC uses the Retain-policy StorageClass (local-path-retain) so the
+#    underlying data survives PVC deletion. See storageclass.yaml.
+# 2. Storage bumped from 5Gi → 50Gi to give years of events-table growth
+#    a comfortable runway. local-path-provisioner doesn't support
+#    volume expansion (allowVolumeExpansion: false on the SC), so we
+#    size up-front.
+#
+# Restoring the existing tripbot DB onto a fresh PVC requires:
+#   1. kubectl apply -k k8s/apps/postgres/overlays/prod-1 (creates pod)
+#   2. wait for pod ready: kubectl wait pod/postgres-0 --for=Ready
+#   3. kubectl cp <local-dump>.sql postgres-0:/tmp/dump.sql
+#   4. kubectl exec -it postgres-0 -- \
+#        psql -U "$POSTGRES_USER" "$POSTGRES_DB" -f /tmp/dump.sql
+#   5. Apply the miles-backfill migration SQL from the prior session
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path-retain
+        resources:
+          requests:
+            storage: 50Gi

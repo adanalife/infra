@@ -1,0 +1,32 @@
+# Prod-1 postgres overlay for adanalife-minipc.
+#
+# Layered on top of the base StatefulSet + Service. Adds:
+# - A Retain-policy StorageClass (the safety lever for irreplaceable data)
+# - StatefulSet patch that uses the retain SC and sizes up to 50Gi
+# - secretGenerator for the postgres credentials (gitignored secret.env)
+#
+# Apply with:
+#   kubectl apply -k k8s/apps/postgres/overlays/prod-1
+#
+# Data restoration workflow (after the StatefulSet is up):
+#   1. kubectl cp <dump>.sql postgres-0:/tmp/dump.sql
+#   2. kubectl exec -it postgres-0 -- psql -U tripbot tripbot -f /tmp/dump.sql
+#   3. Apply the miles-backfill migration SQL from the prior session
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - storageclass.yaml
+
+patches:
+  - path: statefulset-patch.yaml
+    target:
+      kind: StatefulSet
+      name: postgres
+
+# secret.env is gitignored — copy from secret.env.example and fill in.
+secretGenerator:
+  - name: postgres-secret
+    envs:
+      - secret.env

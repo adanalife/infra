@@ -1,0 +1,25 @@
+# Retain-policy StorageClass for postgres on adanalife-minipc.
+#
+# Why this exists: tripbot's Postgres holds years of irreplaceable data
+# (chat history since 2019, miles, events). The default `local-path`
+# StorageClass uses Delete reclaim policy — `kubectl delete pvc` or a
+# kustomize-driven re-deploy that recreates the PVC would wipe the
+# underlying disk path. With Retain, the PV (and the data) survives PVC
+# deletion. Restoration requires re-creating the PVC pointing at the
+# orphaned PV, but the data is intact.
+#
+# Use this StorageClass for any workload whose data we'd be sad to lose.
+# Workloads that hold derivable or replayable state (image caches,
+# test fixtures, scratch) should stay on `local-path` (Delete) so that
+# `kubectl delete pvc` cleans up.
+#
+# Underlying paths land at /var/lib/local-path-provisioner/<pvc-name>/
+# (see the patched ConfigMap in the local-path-storage namespace).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path-retain
+provisioner: rancher.io/local-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: false
