@@ -1,0 +1,36 @@
+# Machine config patch for adanalife-minipc (single control-plane node).
+#
+# Applied on top of the generated controlplane.yaml via:
+#   talosctl machineconfig patch controlplane.yaml \
+#     --patch @controlplane.patch.yaml \
+#     --output controlplane.patched.yaml
+#
+# Non-secret. Safe to commit. The base controlplane.yaml (gitignored) carries
+# the PKI material this patch doesn't.
+#
+# NIC uses DHCP. Stable IP is enforced by a DHCP reservation at the router
+# (MAC 58:47:ca:7d:7b:b0 → 192.168.1.200 on the Texas network). When the box
+# moves to Maine, set up an equivalent reservation on the Maine router with
+# the same target IP and no Talos-side reconfig is needed. The K8s API
+# endpoint (https://192.168.1.200:6443) is baked into the generated
+# controlplane.yaml; if the reservation IP ever changes, regenerate the
+# config with the new endpoint.
+#
+# Hostname is set via the HostnameConfig sub-resource (Talos 1.13+ pattern).
+# Setting machine.network.hostname in v1alpha1 conflicts with HostnameConfig.
+
+machine:
+  install:
+    disk: /dev/nvme0n1
+    image: factory.talos.dev/installer/0ea99a3671ec45ac4eac8d5e33fd3b374d9848f4d1f9758f90c3e666ca8ad2b9:v1.13.2
+  network:
+    interfaces:
+      - interface: enp88s0
+        dhcp: true
+
+cluster:
+  allowSchedulingOnControlPlanes: true
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+hostname: adanalife-minipc
