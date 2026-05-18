@@ -206,16 +206,6 @@
         { "refId": "A", "expr": "max(obs_average_frame_render_time_ms{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame" }
       ],
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
-    },
-    {
-      "id": 40,
-      "type": "text",
-      "title": "Live stream (${twitch_channel})",
-      "gridPos": { "x": 0, "y": 27, "w": 16, "h": 9 },
-      "options": {
-        "mode": "html",
-        "content": "<iframe src=\"https://player.twitch.tv/?channel=${twitch_channel}&parent=adanalife.grafana.net&muted=true\" width=\"100%\" height=\"100%\" frameborder=\"0\" allowfullscreen=\"true\"></iframe>"
-      }
     }
   ]
 }
