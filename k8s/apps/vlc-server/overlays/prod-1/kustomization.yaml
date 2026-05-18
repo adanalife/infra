@@ -1,0 +1,107 @@
+# vlc-server prod-1 overlay for adanalife-minipc.
+#
+# Extends base directly (not the local overlay) to avoid pulling in
+# k3d-specific bits like host-access and the dashcam hostPath. The
+# dashcam corpus mounts from the Synology via NFS (dashcam-nfs.yaml)
+# instead.
+#
+# Apply with:
+#   kubectl apply -k k8s/apps/vlc-server/overlays/prod-1
+#
+# Pre-reqs:
+# - cluster has reach to NFS server 192.168.1.222 and 192.168.1.200
+#   is in the export allowlist for /volume1/Leeroy/...
+# - k8s/sentry-vlc-server SM container populated (already done for
+#   stage-1; shared between envs)
+# - external-dns + cert-manager + traefik running (via
+#   `task k8s:prod:platform:up`)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - dashcam-nfs.yaml
+  - sentry-external-secret.yaml
+  - ingress.yaml
+
+# Prod-1 env vars layered on top of base's vlc-server-config ConfigMap.
+# Most are stubs because vlc-server uses tripbot's shared config
+# package — it reads the env-var surface but only acts on a subset
+# (Sentry DSN, OTel exporter, VLC paths). Real values that matter:
+# CHANNEL_NAME (used by some onscreens text), OTEL_*, ENV.
+configMapGenerator:
+  - name: vlc-server-config
+    behavior: merge
+    literals:
+      # ENV is the tripbot/vlc binary's environment label — only certain
+      # values are accepted by the config-package validator (staging /
+      # production / development). "prod-1" is the infra/k8s naming for
+      # the env; "production" is what the binary expects. The
+      # OTEL_RESOURCE_ATTRIBUTES below preserves "prod-1" as the
+      # telemetry-side identifier.
+      - ENV=production
+      - DATABASE_HOST=postgres
+      - DATABASE_USER=tripbot
+      - DATABASE_PASS=stub-vlc-doesnt-connect-to-db
+      - DATABASE_DB=tripbot
+      - CHANNEL_NAME=adanalife
+      - BOT_USERNAME=adanalife_bot
+      - TWITCH_CLIENT_ID=stub
+      - TWITCH_CLIENT_SECRET=stub
+      - TWITCH_AUTH_TOKEN=oauth:stub
+      - TWILIO_ACCT_SID=stub
+      - TWILIO_AUTH_TOKEN=stub
+      - TWILIO_FROM_NUM=+15555550100
+      - TWILIO_TO_NUM=+15555550101
+      - OTEL_SDK_DISABLED=false
+      - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
+
+patches:
+  # Mount the NFS PVC at the dashcam corpus path.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/volumes
+        value:
+          - name: dashcam
+            persistentVolumeClaim:
+              claimName: vlc-dashcam
+              readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - name: dashcam
+            mountPath: /opt/data/Dashcam/_all
+            readOnly: true
+  # Inject Sentry DSN via envFrom. optional:true keeps the pod up while
+  # ESO is still reconciling.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: sentry-vlc-server
+            optional: true
+  # Inject Grafana Cloud OTLP env vars. Same Secret tripbot's
+  # ExternalSecret materializes; not redundant because the materialized
+  # Secret is namespace-scoped and vlc-server is in the same ns as
+  # tripbot, so it shares the Secret naturally. optional:true means
+  # vlc-server still comes up if tripbot's ExternalSecret hasn't
+  # reconciled yet.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: grafana-cloud-otlp
+            optional: true

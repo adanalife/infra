@@ -1,0 +1,40 @@
+# NFS-backed dashcam corpus for vlc-server on adanalife-minipc.
+#
+# Static PV pointing at the Synology share at 192.168.1.222:/volume1/Leeroy/...
+# (the corpus path has spaces and an apostrophe, hence the quoting).
+# ReadOnlyMany + readOnly: true gives defense-in-depth: NFS export
+# allowlist restricts to .200, the export options on the Synology
+# side will additionally squash to a read-only user (TODO), and
+# K8s enforces readOnly on both the volume source and the volumeMount.
+#
+# storage: 1Ti is a placeholder — NFS doesn't enforce capacity, and
+# `storageClassName: ""` plus the explicit volumeName binds the PVC
+# to this specific PV without dynamic provisioning kicking in.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vlc-dashcam-nfs
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 192.168.1.222
+    path: "/volume1/Leeroy/Dana's Photos/Dashcam Scratchpad/Dashcam/_all"
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vlc-dashcam
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  volumeName: vlc-dashcam-nfs
+  resources:
+    requests:
+      storage: 1Ti
