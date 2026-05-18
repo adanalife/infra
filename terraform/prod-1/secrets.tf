@@ -235,6 +235,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
+      aws_secretsmanager_secret.postgres_backup_s3.arn,
     ]
   }
 }
@@ -374,4 +375,34 @@ resource "aws_iam_policy" "ci_terraform_postgres_credentials_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_credentials_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_postgres_credentials_manage.arn
+}
+
+# k8s/postgres/backup-s3-credentials — PutSecretValue included because
+# terraform writes the value (IAM access key id + secret + bucket + region).
+# Resource definition lives in postgres-backup.tf.
+data "aws_iam_policy_document" "ci_terraform_postgres_backup_s3_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UntagResource",
+      "secretsmanager:UpdateSecret",
+      "secretsmanager:PutSecretValue",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/postgres/backup-s3-credentials-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_postgres_backup_s3_manage" {
+  name        = "AllowCITerraformManageProd1PostgresBackupS3"
+  description = "Lifecycle access for CITerraformRole to the k8s/postgres/backup-s3-credentials SM secret in prod-1, including PutSecretValue (terraform owns the value)."
+  policy      = data.aws_iam_policy_document.ci_terraform_postgres_backup_s3_manage.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_backup_s3_manage" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_postgres_backup_s3_manage.arn
 }
