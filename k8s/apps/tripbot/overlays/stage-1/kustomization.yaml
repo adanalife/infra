@@ -12,11 +12,9 @@
 # Cloudflare Tunnel until the port-forward lands and we update the
 # webhook URLs registered with Twitch.
 #
-# BEFORE FLIPPING TO HTTPS: tripbot has a couple of unauthenticated
-# endpoints worth knowing about (the legacy /webhooks/twitch/... POSTs
-# don't HMAC-validate, currently disabled via DISABLE_TWITCH_WEBHOOKS;
-# /metrics is open). Full audit + remediation TODOs in
-# vault/tripbot/http-endpoints.md and vault/tripbot/tripbot/TODO.md.
+# BEFORE FLIPPING TO HTTPS: /metrics is unauthenticated. Full audit +
+# remediation TODOs in vault/tripbot/http-endpoints.md and
+# vault/tripbot/tripbot/TODO.md.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
