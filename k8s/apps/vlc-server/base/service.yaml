@@ -1,5 +1,7 @@
 # Cluster-internal service. obs reaches RTSP at rtsp://vlc-server:8554,
-# tripbot reaches the HTTP API at http://vlc-server:8080.
+# tripbot reaches the vlc HTTP API at http://vlc-server:8080, and both
+# tripbot + OBS reach the onscreens-server HTTP API at
+# http://vlc-server:8081 (second binary in the same pod, supervisord-managed).
 #
 # Host-side access for VNC/RTSP is handled by a separate LoadBalancer
 # service in overlays/local/ (k3d-only convenience).
@@ -15,6 +17,9 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+    - name: onscreens
+      port: 8081
+      targetPort: onscreens
     - name: rtsp
       port: 8554
       targetPort: rtsp
