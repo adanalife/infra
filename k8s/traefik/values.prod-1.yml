@@ -1,0 +1,70 @@
+# Prod-1 traefik override — layered on top of values.yml via
+# `helm upgrade --install ... -f values.yml -f values.prod-1.yml`.
+# Stage-1 (bees / k3d) uses just values.yml.
+#
+# Why hostNetwork:
+# Talos doesn't ship a LoadBalancer controller (k3s did, via klipper-lb).
+# MetalLB was tried first; the controller assigned IPs cleanly but the
+# speaker's L2 announcement never engaged for reasons that warrant a
+# longer debug session (see TODO). hostNetwork is the pragmatic
+# single-node answer: traefik binds 80/443 directly on the node's IP
+# (192.168.1.200), the router's port-forward to the node just works,
+# and we revisit MetalLB when a second node lands.
+#
+# Trade-offs:
+# - 1 replica only (80/443 are host-bound)
+# - second node requires revisiting LB strategy (MetalLB or DaemonSet)
+# - traefik's Service still exists for in-cluster routing (cert-manager,
+#   etc.) but its EXTERNAL-IP stays <pending> since no controller fills it
+
+hostNetwork: true
+
+deployment:
+  replicas: 1
+  # Recreate (vs default RollingUpdate) so the old pod terminates
+  # before the new one starts — with hostPorts on 80/443, two pods
+  # can't coexist on the same node.
+  kind: Deployment
+
+updateStrategy:
+  type: Recreate
+  rollingUpdate: null
+
+# Run as root to bind privileged ports. The chart's default non-root
+# user (65532) + allowPrivilegeEscalation=false combo prevents
+# binding <1024 even with CAP_NET_BIND_SERVICE. The cleaner sysctl
+# workaround (net.ipv4.ip_unprivileged_port_start=0) is blocked
+# because hostNetwork pods can't set sysctls. kube-system is
+# PSS-exempt per Talos config, so root is allowed here.
+podSecurityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+
+securityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_BIND_SERVICE
+
+# Service stays as LoadBalancer for chart consistency; EXTERNAL-IP will
+# be <pending> on Talos. Real traffic flows through hostNetwork, not
+# the Service.
+service:
+  type: LoadBalancer
+
+# With hostNetwork, traefik binds directly to host ports. Override the
+# chart's default 8000/8443 (non-privileged) to bind real 80/443. The
+# traefik image has CAP_NET_BIND_SERVICE baked in via setcap, so the
+# unprivileged user inside the container can still bind <1024.
+ports:
+  web:
+    port: 80
+    hostPort: 80
+  websecure:
+    port: 443
+    hostPort: 443
