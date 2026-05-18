@@ -18,6 +18,20 @@
         "multi": false,
         "refresh": 2,
         "sort": 1
+      },
+      {
+        "name": "twitch_channel",
+        "label": "Twitch channel",
+        "type": "custom",
+        "description": "Which Twitch channel the Live-stream panel embeds. Pair with deployment_environment: stage-1 → adanalife_staging, prod-1 → adanalife_.",
+        "query": "stage-1 : adanalife_staging, prod-1 : adanalife_",
+        "current": { "text": "stage-1", "value": "adanalife_staging", "selected": true },
+        "options": [
+          { "text": "stage-1", "value": "adanalife_staging", "selected": true },
+          { "text": "prod-1", "value": "adanalife_", "selected": false }
+        ],
+        "includeAll": false,
+        "multi": false
       }
     ]
   },
@@ -192,6 +206,16 @@
         { "refId": "A", "expr": "max(obs_average_frame_render_time_ms{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame" }
       ],
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 40,
+      "type": "text",
+      "title": "Live stream (${twitch_channel})",
+      "gridPos": { "x": 0, "y": 27, "w": 16, "h": 9 },
+      "options": {
+        "mode": "html",
+        "content": "<iframe src=\"https://player.twitch.tv/?channel=${twitch_channel}&parent=adanalife.grafana.net&muted=true\" width=\"100%\" height=\"100%\" frameborder=\"0\" allowfullscreen=\"true\"></iframe>"
+      }
     }
   ]
 }
