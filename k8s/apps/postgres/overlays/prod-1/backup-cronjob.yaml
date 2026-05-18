@@ -1,0 +1,70 @@
+# Postgres backup CronJob — suspended by default.
+#
+# Today: manually triggered with
+#   kubectl create job postgres-backup-manual-$(date +%Y%m%d-%H%M%S) \
+#     --from=cronjob/postgres-backup
+# Logs: kubectl logs -f job/<job-name>
+#
+# Later: flip `suspend: false` to enable the daily schedule.
+#
+# Mechanics:
+#   - `postgres:16-alpine` matches the server image (PG16 pg_dump).
+#     `apk add aws-cli` at start adds ~10–20s — fine for a backup job.
+#   - pg_dump --format=custom (-Fc) writes a single compressed dump
+#     (zlib internal). Restore with pg_restore --clean --if-exists.
+#   - Streams straight to S3 via `aws s3 cp -` (no on-disk buffering).
+#     Object key: tripbot/<UTC-timestamp>.dump under the bucket from
+#     the postgres-backup-s3 Secret.
+#   - Two envFroms: postgres-secret (USER/PASSWORD/DB from the
+#     server's ESO) and postgres-backup-s3 (S3 creds + bucket).
+#   - concurrencyPolicy: Forbid so an overrunning backup doesn't
+#     stack on the next schedule (won't matter while suspended, but
+#     this is the right setting for when we un-suspend).
+#   - backoffLimit: 1 keeps failed-job retry cheap.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+spec:
+  schedule: "0 4 * * *"
+  suspend: true
+  timeZone: Etc/UTC
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  apk add --no-cache aws-cli
+                  TS=$(date -u +%Y%m%d-%H%M%SZ)
+                  KEY="tripbot/${TS}.dump"
+                  echo "Dumping ${POSTGRES_DB} to s3://${S3_BUCKET}/${KEY}"
+                  PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
+                    --format=custom \
+                    --host=postgres \
+                    --username="$POSTGRES_USER" \
+                    "$POSTGRES_DB" \
+                    | aws s3 cp --no-progress - "s3://${S3_BUCKET}/${KEY}"
+                  echo "OK: s3://${S3_BUCKET}/${KEY}"
+              envFrom:
+                - secretRef:
+                    name: postgres-secret
+                - secretRef:
+                    name: postgres-backup-s3
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi

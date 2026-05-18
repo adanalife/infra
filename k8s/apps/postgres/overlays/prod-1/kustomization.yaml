@@ -8,6 +8,8 @@ resources:
   - ../../base
   - storageclass.yaml
   - external-secret.yaml
+  - backup-external-secret.yaml
+  - backup-cronjob.yaml
 
 patches:
   - path: statefulset-patch.yaml
