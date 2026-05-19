@@ -830,21 +830,25 @@ tasks:
           echo "No vlc-server VNC port-forward PID file found — nothing to stop"
         fi
 
-  # tripbot's cluster Postgres is a headless ClusterIP Service (clusterIP: None)
-  # in the default namespace; nothing from outside the cluster can reach it
-  # directly. These wrappers open a kubectl port-forward at localhost:5432 so
-  # host-side tools can connect — primarily the one-time Twitch OAuth bootstrap
-  # CLI in tripbot (cmd/auth-bootstrap), but also psql for ad-hoc DB poking.
-  tripbot:db:up:
-    desc: start a local kubectl port-forward to the cluster Postgres at localhost:5432
+  # tripbot operational tasks. Naming follows <tool>:<env>:<verb>[:<subverb>]
+  # so it's clear which cluster each one targets. Aliases preserve the
+  # older unscoped names while the schema migration is in flight.
+  #
+  # The :db:* tasks open kubectl port-forwards to the cluster Postgres
+  # (a headless ClusterIP, otherwise unreachable from outside the cluster) —
+  # primarily for the auth-bootstrap CLI and psql poking.
+  tripbot:stage:db:up:
+    desc: start a local kubectl port-forward to the stage cluster Postgres at localhost:5432
+    aliases: [tripbot:db:up]
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       - kubectl port-forward svc/postgres 5432:5432 > /dev/null 2>&1 &
       - echo $! > /tmp/adanalife-tasks/tripbot-db.pid
       - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
 
-  tripbot:db:down:
-    desc: stop the local kubectl port-forward to cluster Postgres
+  tripbot:stage:db:down:
+    desc: stop the local kubectl port-forward to the stage cluster Postgres
+    aliases: [tripbot:db:down]
     cmds:
       - |
         if [ -f /tmp/adanalife-tasks/tripbot-db.pid ]; then
@@ -855,8 +859,9 @@ tasks:
           echo "No tripbot Postgres port-forward PID file found — nothing to stop"
         fi
 
-  tripbot:db:seed:
-    desc: run the one-shot DB seed Job in the cluster; idempotent — skips if videos table already has real rows
+  tripbot:stage:db:seed:
+    desc: run the one-shot DB seed Job in the stage cluster; idempotent — skips if videos table already has real rows
+    aliases: [tripbot:db:seed]
     cmds:
       - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
       # kubectl wait doesn't short-circuit on Failed when asked for
@@ -872,8 +877,9 @@ tasks:
         fi
       - kubectl logs job/tripbot-seed
 
-  tripbot:auth:bootstrap:
-    desc: run the interactive Twitch OAuth bootstrap job; port-forwards 8080 so the browser callback reaches the pod
+  tripbot:stage:auth:bootstrap:
+    desc: run the interactive Twitch OAuth bootstrap job against stage-1; port-forwards 8080 so the browser callback reaches the pod
+    aliases: [tripbot:auth:bootstrap]
     cmds:
       - kubectl delete job tripbot-auth-bootstrap --ignore-not-found
       - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
@@ -883,3 +889,22 @@ tasks:
       - echo "Port-forwarding localhost:8080 → job pod. Open the URL above in your browser."
       - kubectl port-forward job/tripbot-auth-bootstrap 8080:8080 2>/dev/null || true
       - echo "Bootstrap complete — token written to cluster Postgres."
+
+  tripbot:prod:auth:bootstrap:
+    desc: run the interactive Twitch OAuth bootstrap job against prod-1; port-forwards 8080 so the browser callback reaches the pod
+    cmds:
+      # The auth-bootstrap Job is deliberately NOT part of the prod-1
+      # umbrella overlay (would otherwise re-run every k8s:prod:apply and
+      # burn its 5min timeout). Standalone manifest at
+      # k8s/apps/tripbot/overlays/prod-1/auth-bootstrap.yaml carries
+      # prod-shaped envFroms (tripbot-twitch-creds, tripbot-database-creds,
+      # tripbot-google-maps-api-key) and direct env: literals for the
+      # config-required values.
+      - kubectl delete job tripbot-auth-bootstrap --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/overlays/prod-1/auth-bootstrap.yaml
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap
+      - echo "Port-forwarding localhost:8080 → job pod. Open the URL above in your browser."
+      - kubectl port-forward job/tripbot-auth-bootstrap 8080:8080 2>/dev/null || true
+      - 'echo "Bootstrap complete — token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot\` to bring the bot online."'
