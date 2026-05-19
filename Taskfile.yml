@@ -112,6 +112,46 @@ tasks:
     cmds:
       - aws-vault login adanalife-core
 
+  # GCP — single bootstrap helper today, used by the tripbot prod-1 Maps
+  # credential mint (see vault/tripbot/credentials.md → Google Maps section).
+  # If/when more GCP resources show up here, lift this to a hashicorp/google
+  # provider in terraform/prod-1/; the migration TODO lives in vault/infra/TODO.md.
+  # Pre-req: `gcloud auth login` once + billing attached to the target project.
+  gcp:prod:mint-maps-key:
+    desc: mint a fresh Maps API key on tripbot-prod (Geocoding + Maps JavaScript only) and print the keyString to stdout
+    silent: true
+    vars:
+      PROJECT: tripbot-prod
+      NAME: '{{.NAME | default "tripbot-prod-1"}}'
+    cmds:
+      - |
+        set -euo pipefail
+        echo "Enabling API Keys + Geocoding + Maps JavaScript APIs on {{.PROJECT}}..." >&2
+        # apikeys.googleapis.com is the meta-API for managing API keys
+        # (what the `api-keys create` subcommand below talks to). It's a
+        # separate enablement from the Maps APIs the minted key actually uses.
+        # Without it, the first run on a fresh project fails with
+        # PERMISSION_DENIED / SERVICE_DISABLED.
+        gcloud services enable \
+          apikeys.googleapis.com \
+          geocoding-backend.googleapis.com \
+          maps-backend.googleapis.com \
+          --project={{.PROJECT}} >&2
+        echo "Minting API key '{{.NAME}}' on {{.PROJECT}}..." >&2
+        KEY_RESOURCE=$(gcloud alpha services api-keys create \
+          --display-name='{{.NAME}}' \
+          --api-target=service=geocoding-backend.googleapis.com \
+          --api-target=service=maps-backend.googleapis.com \
+          --project={{.PROJECT}} \
+          --format='value(response.name)' \
+          --quiet)
+        echo "Created key resource: $KEY_RESOURCE" >&2
+        # The keyString is the ONLY line on stdout — capture with:
+        #   export PROD_GOOGLE_MAPS_API_KEY=$(task gcp:prod:mint-maps-key)
+        gcloud alpha services api-keys get-key-string "$KEY_RESOURCE" \
+          --format='value(keyString)' \
+          --quiet
+
   # k3d cluster lifecycle. Tasks are env-prefixed (k8s:stage:* / k8s:prod:*)
   # following the tf:stage:* / tf:prod:* pattern; the cluster name embedded
   # in each k3d-config is host-based (adanalife-bees, adanalife-empty) so
