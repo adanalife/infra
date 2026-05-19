@@ -76,6 +76,7 @@ locals {
     "k8s-cluster-overview", # grafana.com/dashboards/15757 — modern cluster view
     "k8s-pods",             # grafana.com/dashboards/15760 — modern pods view
     "node-exporter-full",   # grafana.com/dashboards/1860
+    "intel-gpu",            # vendored from intel/xpumanager v1.3.6 deployment/kubernetes/monitoring/
   ])
   dashboard_substitutions = {
     "__DS_PROMETHEUS__" = data.grafana_data_source.prometheus.uid
