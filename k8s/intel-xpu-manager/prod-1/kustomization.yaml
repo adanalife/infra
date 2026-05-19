@@ -15,8 +15,12 @@
 #     up the metrics endpoint without needing a ServiceMonitor.
 #   - Drop the upstream's imagePullSecrets reference: intel/xpumanager
 #     is public on Docker Hub; pulling doesn't need creds.
-#   - Pin both container images to v1.3.6 instead of the upstream's
-#     unpinned `intel/xpumanager` (which resolves to :latest).
+#   - Pin both container images by digest. Intel publishes Docker Hub
+#     tags on a separate cadence from GitHub releases (the v1.3.6
+#     GitHub manifest references `intel/xpumanager` unpinned, but no
+#     v1.3.6 image was ever pushed to Docker Hub; current published
+#     tags top out at v1.2.27 + `latest`). Pinning by digest gives
+#     reproducibility without coupling to a fictional tag.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -40,7 +44,7 @@ patches:
         path: /spec/template/spec/imagePullSecrets
       - op: replace
         path: /spec/template/spec/containers/0/image
-        value: intel/xpumanager:v1.3.6
+        value: intel/xpumanager@sha256:7c2123abfdf87ba97fce3865e0db86a8728a8fefdebe96961ab066b2aabcbc86
       - op: replace
         path: /spec/template/spec/containers/1/image
-        value: intel/xpumanager:v1.3.6
+        value: intel/xpumanager@sha256:7c2123abfdf87ba97fce3865e0db86a8728a8fefdebe96961ab066b2aabcbc86
