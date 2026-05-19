@@ -224,10 +224,11 @@ tasks:
       - k3d cluster start adanalife-empty
 
   k8s:prod:cluster:rebuild:
-    desc: Full empty-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep). No app overlay yet — k8s:prod:apply doesn't exist (prod-1 app overlays deferred).
+    desc: Full empty-cluster rebuild — cluster + platform helm charts + app overlays (shared-secrets, postgres, vlc-server; tripbot/obs when their overlays land).
     cmds:
       - task: k8s:prod:cluster:up
       - task: k8s:prod:platform:up
+      - task: k8s:prod:apply
 
   k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
@@ -300,6 +301,11 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/stage-1-nas
 
+  k8s:prod:apply:
+    desc: apply prod-1 overlay (shared-secrets + postgres + vlc-server; tripbot/obs added when their prod-1 overlays land)
+    cmds:
+      - kubectl apply -k k8s/overlays/prod-1
+
   # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
   # nor `k8s:stage:apply`. Brings up the `cloudflared` namespace, seeds
   # the tunnel-token Secret from terraform output, and applies the
@@ -356,9 +362,6 @@ tasks:
       # Deployment and the out-of-band Secret with it. --ignore-not-found
       # keeps the task idempotent across repeat runs.
       - kubectl delete -k k8s/platform/cloudflared/overlays/stage-1 --ignore-not-found
-
-  # No k8s:prod:apply yet — prod-1 app overlays are deferred per the
-  # prod-1 deployment plan (platform-stack only in this pass).
 
   # Bootstrap the cluster Secrets that don't survive a recreate but
   # have to exist before the platform stack can come up:

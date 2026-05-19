@@ -4,10 +4,10 @@ kind: Kustomization
 resources:
   - ../../base
   - host-access.yaml
-  # ExternalSecret pulling vlc-server's Sentry DSN from AWS SM
-  # (k8s/sentry-vlc-server). Materialized Secret is named `sentry` and
-  # envFrom'd by the Deployment patch below. Distinct DSN from tripbot.
-  - sentry-external-secret.yaml
+  # Cross-cutting observability ExternalSecrets (Sentry + OTLP) live in
+  # k8s/shared-secrets/base/ per
+  # vault/decisions/shared-secrets-not-owned-by-workload.md — applied
+  # by the env's umbrella overlay alongside this app overlay.
 
 # Merge environment-specific config into the base ConfigMap. vlc-server
 # shares tripbot's config package, so it needs the same env-var surface
@@ -43,9 +43,9 @@ configMapGenerator:
 # Mount the dashcam video dir from the host (k3d-only).
 patches:
   - path: dashcam-hostpath.yaml
-  # Inject the Grafana Cloud OTLP env vars from the Secret materialized
-  # by tripbot's ExternalSecret. optional:true keeps vlc-server running
-  # while ESO is still reconciling.
+  # Inject the Grafana Cloud OTLP env vars from the shared-secrets
+  # ExternalSecret. optional: false — pod fails to start if the
+  # shared-secrets overlay isn't applied.
   - target:
       kind: Deployment
       name: vlc-server
@@ -55,10 +55,8 @@ patches:
         value:
           secretRef:
             name: grafana-cloud-otlp
-            optional: true
-  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry-vlc-server`
-  # Secret. optional:true so the pod stays up while ESO reconciles;
-  # pkg/errors treats an unset DSN as "Sentry disabled."
+            optional: false
+  # Inject SENTRY_DSN from the shared-secrets ExternalSecret.
   - target:
       kind: Deployment
       name: vlc-server
@@ -68,4 +66,4 @@ patches:
         value:
           secretRef:
             name: sentry-vlc-server
-            optional: true
+            optional: false

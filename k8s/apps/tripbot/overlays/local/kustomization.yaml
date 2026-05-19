@@ -3,14 +3,12 @@ kind: Kustomization
 
 resources:
   - ../../base
-  # ExternalSecret pulling Grafana Cloud OTLP creds from AWS SM. The
-  # materialized Secret is consumed by an envFrom patch below and by
-  # vlc-server's overlay.
-  - external-secret.yaml
-  # ExternalSecret pulling tripbot's Sentry DSN from AWS SM
-  # (k8s/sentry-tripbot). Materialized Secret is named `sentry` and
-  # envFrom'd by the Deployment patch below.
-  - sentry-external-secret.yaml
+  # Workload-specific ExternalSecrets stay in this overlay (consumer
+  # is tripbot-only). Cross-cutting observability secrets — OTLP + the
+  # Sentry DSNs — live in k8s/shared-secrets/base/ per
+  # vault/decisions/shared-secrets-not-owned-by-workload.md, applied
+  # by the env's umbrella overlay alongside this app overlay.
+  #
   # ExternalSecret pulling tripbot's Twitch credentials (chat IRC +
   # Helix API) from AWS SM (k8s/tripbot/twitch-creds). Materialized
   # Secret is named `tripbot-twitch-creds` and envFrom'd by the
@@ -56,10 +54,9 @@ patches:
         path: /spec/rules/0/host
         value: tripbot.localhost
   # Inject the Grafana Cloud OTLP env vars (endpoint + headers) from the
-  # ExternalSecret-managed Secret. optional:true keeps the pod running
-  # while ESO is still reconciling — pkg/telemetry treats a missing
-  # endpoint as "OTel disabled," so the worst case is no traces, not a
-  # crash loop.
+  # ExternalSecret-managed Secret. The ExternalSecret lives in
+  # k8s/shared-secrets/base/; pod startup fails loud if it isn't
+  # applied alongside this overlay (per the env's umbrella overlay).
   - target:
       kind: Deployment
       name: tripbot
@@ -69,11 +66,9 @@ patches:
         value:
           secretRef:
             name: grafana-cloud-otlp
-            optional: true
+            optional: false
   # Inject SENTRY_DSN from the ExternalSecret-managed `sentry-tripbot`
-  # Secret. optional:true so the pod stays up while ESO reconciles;
-  # pkg/errors treats an unset DSN as "Sentry disabled," which is also
-  # the dev default per vault/tripbot/credentials.md.
+  # Secret. Same shared-secrets origin as OTLP above.
   - target:
       kind: Deployment
       name: tripbot
@@ -83,7 +78,7 @@ patches:
         value:
           secretRef:
             name: sentry-tripbot
-            optional: true
+            optional: false
   # Inject Twitch credentials (TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
   # TWITCH_AUTH_TOKEN) from the ExternalSecret-managed
   # `tripbot-twitch-creds` Secret. optional:true so the pod stays up
