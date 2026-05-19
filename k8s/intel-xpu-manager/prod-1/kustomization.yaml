@@ -1,0 +1,46 @@
+# Intel XPU Manager DaemonSet for adanalife-minipc (prod-1).
+#
+# Reads telemetry off the iGPU (engine utilization, power, temperature,
+# frequency, memory) and exposes Prometheus metrics on port 29999 with
+# the `xpum_` prefix. Claims the `gpu.intel.com/i915_monitoring`
+# resource registered by the sibling intel-gpu-plugin DaemonSet.
+#
+# Lives in kube-system because xpumd needs SYS_ADMIN + hostNetwork +
+# hostPath (/var/lib/kubelet/pod-resources, /dev/dri) — all blocked by
+# PSS baseline. kube-system is exempt per Talos's PodSecurity config.
+#
+# Patches:
+#   - prometheus.io/scrape annotation so Grafana Alloy (annotation
+#     auto-discovery enabled in k8s/monitoring/prod-1/values.yml) picks
+#     up the metrics endpoint without needing a ServiceMonitor.
+#   - Drop the upstream's imagePullSecrets reference: intel/xpumanager
+#     is public on Docker Hub; pulling doesn't need creds.
+#   - Pin both container images to v1.3.6 instead of the upstream's
+#     unpinned `intel/xpumanager` (which resolves to :latest).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kube-system
+
+resources:
+  - github.com/intel/xpumanager/deployment/kubernetes/daemonset/base?ref=v1.3.6
+
+patches:
+  - target:
+      kind: DaemonSet
+      name: intel-xpumanager
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "29999"
+          prometheus.io/path: /metrics
+      - op: remove
+        path: /spec/template/spec/imagePullSecrets
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: intel/xpumanager:v1.3.6
+      - op: replace
+        path: /spec/template/spec/containers/1/image
+        value: intel/xpumanager:v1.3.6

@@ -690,6 +690,18 @@ tasks:
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+      # Intel GPU device plugin + XPU Manager. Plugin registers
+      # gpu.intel.com/i915 (+ i915_monitoring) so OBS/vlc-server pods
+      # can claim the iGPU as an extended resource without hostPath.
+      # XPU Manager scrapes iGPU telemetry off the i915_monitoring
+      # device and exposes it on :29999 with the xpum_ prefix; Grafana
+      # Alloy's annotation auto-discovery picks it up via the
+      # prometheus.io/scrape annotation on the pod.
+      - kubectl apply -k k8s/intel-gpu-plugin/prod-1
+      - kubectl rollout status -n kube-system daemonset/intel-gpu-plugin --timeout=120s
+      - kubectl apply -k k8s/intel-xpu-manager/prod-1
+      - kubectl rollout status -n kube-system daemonset/intel-xpumanager --timeout=180s
+      - 'echo "Intel GPU plugin + XPU Manager up. gpu.intel.com/i915 schedulable; xpum_* metrics scraping at <pod-ip>:29999."'
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-secret is `optional: true`, so the existence + content of that
