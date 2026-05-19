@@ -1,30 +1,18 @@
-# vlc-server Ingress for adanalife-minipc.
-#
-# LAN-only by virtue of external-dns publishing the A record at
-# 192.168.1.200 (the node IP, via the LAN-targets values.local.yml)
-# rather than a public IP. Resolvable from anywhere, reachable only
-# from the LAN — which is the security property we want for an
-# unauthenticated write-side HTTP API.
-#
-# Real Let's Encrypt cert from day one (issued via DNS-01 against
-# Route53, which doesn't need inbound HTTP to work). DNS-01 keeps
-# working regardless of port-forward state.
-#
-# vlc-server has NO in-process auth — anyone who can reach this URL
-# can disrupt the stream. Acceptable for LAN-only; revisit before
-# flipping external-dns to publish the public IP.
+# LE cert from day one via DNS-01 against Route53 — issuance is
+# independent of port-forward state. vlc-server has NO in-process
+# auth, so reachability is gated entirely by what external-dns
+# publishes as the record's target.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: vlc-server
   annotations:
     external-dns.alpha.kubernetes.io/hostname: vlc.prod.whereisdana.today
-    # Explicit target annotation because external-dns 0.21 + traefik
-    # publishedService combo doesn't surface a target from this
-    # Ingress's empty status.loadBalancer; --force-default-targets
-    # only overrides existing targets, doesn't synthesize new ones.
-    # Manually point at the node IP (matches what default-targets
-    # would set anyway).
+    # TODO(vault/infra/TODO.md#external-dns-target-synthesis): drop
+    # this hardcoded target. external-dns 0.21 doesn't synthesize
+    # default-targets when Ingress.status.loadBalancer is empty (which
+    # is what helm-installed traefik leaves it as); fix is upstream
+    # config, not per-Ingress annotation.
     external-dns.alpha.kubernetes.io/target: 192.168.1.200
     cert-manager.io/cluster-issuer: letsencrypt-staging-route53
 spec:

@@ -1,24 +1,6 @@
-# Prod-1 postgres overlay for adanalife-minipc.
-#
-# Layered on top of the base StatefulSet + Service. Adds:
-# - A Retain-policy StorageClass (the safety lever for irreplaceable data)
-# - StatefulSet patch that uses the retain SC and sizes up to 50Gi
-# - ExternalSecret pulling credentials from AWS Secrets Manager (no
-#   plaintext on disk; see external-secret.yaml comment for the SM
-#   container shape and seeding instructions)
-#
-# Apply with:
-#   kubectl apply -k k8s/apps/postgres/overlays/prod-1
-#
-# Pre-requirement: the SM container `k8s/postgres/credentials` must be
-# seeded before this applies cleanly — ESO will keep retrying until
-# the data is available. Postgres pod will CrashLoopBackOff until the
-# Secret materializes.
-#
-# Data restoration workflow (after the StatefulSet is up and Ready):
-#   1. kubectl cp <dump>.sql postgres-0:/tmp/dump.sql
-#   2. kubectl exec -it postgres-0 -- psql -U tripbot tripbot -f /tmp/dump.sql
-#   3. Apply the miles-backfill migration SQL from the prior session
+# Prod-1 postgres overlay: 50Gi PVC on a Retain-policy StorageClass
+# (the safety lever for irreplaceable data) + credentials sourced
+# from AWS Secrets Manager via ESO.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
