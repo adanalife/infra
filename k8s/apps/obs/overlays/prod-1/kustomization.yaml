@@ -1,0 +1,30 @@
+# OBS prod-1 overlay. Extends base directly — local-overlay's
+# host-access LoadBalancer is k3d-only; prod-1 reaches VNC via
+# `task obs:vnc:up` port-forward instead.
+#
+# No Ingress: OBS exposes only VNC (TCP 5900) and websocket (4455),
+# neither of which is useful through traefik HTTPS without a
+# websockify shim. The container is reachable only from inside the
+# cluster (websocket via the in-cluster `obs:4455` Service is what
+# vlc-server/onscreens-server poll for stream stats).
+#
+# Streaming toggle: `obs-secret` is created imperatively by
+# `task obs:stream:on` (pulls STREAM_KEY from adanalife-stage SM).
+# The task is currently env-agnostic and always reads from the stage
+# AWS account — intentional safety property while we're not ready to
+# go live on the prod Twitch account. See vault/infra/TODO.md for
+# the planned obs:stage:stream:on / obs:prod:stream:on split.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Explicit even though `high` is the entrypoint default — the
+# manifest tells the full story rather than relying on the image's
+# default expanding to the right preset.
+configMapGenerator:
+  - name: obs-config
+    behavior: merge
+    literals:
+      - OBS_QUALITY_PRESET=high

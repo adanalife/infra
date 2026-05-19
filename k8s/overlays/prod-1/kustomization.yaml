@@ -3,9 +3,7 @@
 # k8s/overlays/prod-1` brings up the full app stack against AWS SM
 # values from the adanalife-prod account.
 #
-# Covers postgres (with backup CronJob), vlc-server, and tripbot.
-# OBS's prod-1 overlay is pending; it'll get added as a resource here
-# when it lands (sequencing in vault/infra/adanalife-minipc-bootstrap.md).
+# Covers postgres (with backup CronJob), vlc-server, tripbot, and OBS.
 #
 # Cloudflare Tunnel is dropped per the bringup session — prod-1 has
 # no public Ingress (tripbot is outbound-only, vlc-server is reachable
@@ -21,4 +19,4 @@ resources:
   - ../../apps/postgres/overlays/prod-1
   - ../../apps/vlc-server/overlays/prod-1
   - ../../apps/tripbot/overlays/prod-1
-  # - ../../apps/obs/overlays/prod-1       # add when prod-1 overlay lands
+  - ../../apps/obs/overlays/prod-1
