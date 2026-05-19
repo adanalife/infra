@@ -41,15 +41,13 @@ data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
 # Grafana Cloud
 # ============================================================================
 
-# OTLP credentials for in-cluster OpenTelemetry exporters (future prod tripbot,
-# vlc-server). Same shared Grafana Cloud stack as stage-1, so the OTLP endpoint
-# is the same but the Access Policy token here should be a separate prod-only
-# token so a leak is blast-radius-bounded.
-#
-# Bootstrap:
-#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/grafana-cloud-otlp \
-#     --secret-string '{"OTEL_EXPORTER_OTLP_ENDPOINT":"https://otlp-gateway-prod-us-central-0.grafana.net/otlp","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Basic <base64(instanceID:apiKey)>"}'
+# OTLP credentials for in-cluster OpenTelemetry exporters (prod tripbot,
+# vlc-server). Same shared Grafana Cloud stack as stage-1; the value held
+# here matches stage's container byte-for-byte. Per the
+# vault/decisions/observability-projects-by-component.md ADR, env separation
+# happens via deployment.environment on each event/metric/log, not via
+# duplicate access-policy tokens. Bootstrap = copy stage's value into prod's
+# container (see the Sentry block below for the for-loop pattern).
 resource "aws_secretsmanager_secret" "grafana_cloud_otlp" {
   name        = "k8s/grafana-cloud-otlp"
   description = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters (prod-1 tripbot/vlc-server when they land)."
@@ -108,16 +106,20 @@ resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
 # Sentry
 # ============================================================================
 
-# Sentry DSNs for prod-1 tripbot + vlc-server. Decision (2026-05-11): separate
-# Sentry projects per env, so prod errors don't drown in the staging stream.
-# Bootstrap:
-#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/sentry-tripbot \
-#     --secret-string '{"SENTRY_DSN":"https://<key>@<org>.ingest.sentry.io/<prod-tripbot-project-id>"}'
-# and same shape for k8s/sentry-vlc-server with the prod vlc-server project DSN.
+# Sentry DSNs for prod-1 tripbot + vlc-server. Per the
+# vault/decisions/observability-projects-by-component.md ADR, Sentry partitions
+# by component (tripbot, vlc-server) with SENTRY_ENVIRONMENT distinguishing
+# stage from prod on the event itself — no separate prod projects.
+# Bootstrap = copy stage's values into prod's containers:
+#   for profile in adanalife-stage adanalife-prod; do
+#     aws-vault exec "$profile" -- aws secretsmanager get-secret-value \
+#       --secret-id k8s/sentry-tripbot ...
+#   done
+# Verify cross-env parity with the SHA-256 hash check in
+# vault/tripbot/monitoring.md's Sentry section.
 resource "aws_secretsmanager_secret" "sentry_tripbot" {
   name        = "k8s/sentry-tripbot"
-  description = "Sentry DSN for the tripbot Go service (prod-1 project). Consumed by pkg/errors via SENTRY_DSN env var."
+  description = "Sentry DSN for the tripbot Go service. Consumed by pkg/errors via SENTRY_DSN env var."
 }
 
 resource "aws_secretsmanager_secret_version" "sentry_tripbot" {
@@ -131,7 +133,7 @@ resource "aws_secretsmanager_secret_version" "sentry_tripbot" {
 
 resource "aws_secretsmanager_secret" "sentry_vlc_server" {
   name        = "k8s/sentry-vlc-server"
-  description = "Sentry DSN for the vlc-server Go service (prod-1 project). Consumed by pkg/errors via SENTRY_DSN env var."
+  description = "Sentry DSN for the vlc-server Go service. Consumed by pkg/errors via SENTRY_DSN env var."
 }
 
 resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
@@ -235,6 +237,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
+      aws_secretsmanager_secret.postgres_backup_s3.arn,
     ]
   }
 }
@@ -374,4 +377,34 @@ resource "aws_iam_policy" "ci_terraform_postgres_credentials_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_credentials_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_postgres_credentials_manage.arn
+}
+
+# k8s/postgres/backup-s3-credentials — PutSecretValue included because
+# terraform writes the value (IAM access key id + secret + bucket + region).
+# Resource definition lives in postgres-backup.tf.
+data "aws_iam_policy_document" "ci_terraform_postgres_backup_s3_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UntagResource",
+      "secretsmanager:UpdateSecret",
+      "secretsmanager:PutSecretValue",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/postgres/backup-s3-credentials-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_postgres_backup_s3_manage" {
+  name        = "AllowCITerraformManageProd1PostgresBackupS3"
+  description = "Lifecycle access for CITerraformRole to the k8s/postgres/backup-s3-credentials SM secret in prod-1, including PutSecretValue (terraform owns the value)."
+  policy      = data.aws_iam_policy_document.ci_terraform_postgres_backup_s3_manage.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_backup_s3_manage" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_postgres_backup_s3_manage.arn
 }
