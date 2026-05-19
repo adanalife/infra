@@ -25,7 +25,10 @@ ingressShim:
 startupapicheck:
   enabled: false
 
-# TODO: enable once prometheus stack is back online.
-# prometheus:
-#   servicemonitor:
-#     enabled: true
+# Enable Prometheus metrics on the controller and webhook. With
+# `enabled: true` the chart adds `prometheus.io/*` pod annotations
+# automatically, which grafana-k8s-monitoring's annotationAutodiscovery
+# picks up. servicemonitor stays off — that requires the Prometheus
+# Operator CRD we don't run; pod annotations are the alternate path.
+prometheus:
+  enabled: true
