@@ -2,9 +2,15 @@
 # in-cluster collectors that fill the dashboards landed in
 # terraform/stage-1/grafana-dashboards/:
 #
-#   - Alloy collectors → scrape pods + ship logs to Loki + cluster events
-#   - kube-state-metrics + node-exporter → cluster/pod/node metrics to Mimir
+#   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
+#   - kube-state-metrics → cluster/pod state metrics to Mimir
 #   - kubelet + cAdvisor scrape (built into clusterMetrics)
+#
+# Host-level metrics (node-exporter) are installed separately into the
+# `monitoring-host` namespace — Talos enforces PodSecurity baseline
+# cluster-wide and node-exporter needs hostPath + hostNetwork, so it
+# gets its own ns labeled `privileged`. This chart's workloads all stay
+# under baseline.
 #
 # Credentials come from the grafana-cloud-metrics-write Secret in this
 # namespace, materialized by the ExternalSecret in external-secret.yaml.
@@ -74,17 +80,18 @@ clusterMetrics:
         # pods still appear.
         - kube_namespace_created
 
-# hostMetrics scrapes node-exporter (deployed below via telemetryServices).
+# hostMetrics scrapes node-exporter — which is installed separately
+# in the `monitoring-host` namespace (see Taskfile k8s:stage:platform:up
+# and k8s/monitoring/host-namespace.yml). hostMetrics's annotation-based
+# discovery picks up the prometheus.io/scrape-annotated node-exporter
+# pods across namespaces.
+#
 # Without this, node-exporter runs but its /metrics never reaches Mimir,
 # so node-level panels (Node Exporter Full + CPU/memory/disk on cluster
 # overview) stay empty. clusterMetrics only covers kubelet/cAdvisor/KSM.
 #
 # `linuxHosts.enabled: true` is the per-source switch in the feature-
 # host-metrics subchart (parent chart aliases it under `hostMetrics:`).
-# Picks up the node-exporter pods deployed below via telemetryServices
-# automatically. The chart's README example calls this `node-exporter:`
-# but the rendered config only honors `linuxHosts:`. Verified by
-# `helm template` against k8s-monitoring 4.1.1.
 hostMetrics:
   enabled: true
   collector: alloy-metrics
@@ -103,28 +110,38 @@ clusterEvents:
   enabled: true
   collector: alloy-singleton
 
-podLogsViaLoki:
+# Pod logs via the Kubernetes API instead of tailing /var/log on the
+# host. Trade-off: a tiny bit slower than reading log files directly,
+# but doesn't require hostPath (and therefore namespace-privileged PSA).
+# Keeps every collector under PodSecurity baseline.
+podLogsViaKubernetesApi:
   enabled: true
   collector: alloy-logs
 
 # annotationAutodiscovery scrapes any pod tagged with prometheus.io/scrape
-# annotations. Used today by the helm-installed traefik (k8s/traefik/values.yml
-# sets podAnnotations) — avoids needing kube-prometheus-stack CRDs +
-# ServiceMonitor. App workloads that want their /metrics scraped can
-# add the same annotations.
+# annotations. Used by helm-installed traefik / external-dns / cert-manager /
+# external-secrets (each chart's values.yml sets podAnnotations), plus the
+# externally-deployed node-exporter in the monitoring-host namespace.
+# Avoids needing kube-prometheus-stack CRDs + ServiceMonitor.
 annotationAutodiscovery:
   enabled: true
   collector: alloy-metrics
 
-# kube-state-metrics + node-exporter are off by default in v4.x;
-# deploying them here, then clusterMetrics scrapes KSM and hostMetrics
-# scrapes node-exporter. cAdvisor scrape is built into clusterMetrics's
+# kube-state-metrics is off by default in v4.x; deploying it here, then
+# clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's
 # kubelet target — no extra deploy needed.
+#
+# node-exporter is the only workload in monitoring that genuinely needs
+# hostPath + hostNetwork (which violates Talos's cluster-default
+# baseline PSA). It's installed separately via
+# prometheus-community/prometheus-node-exporter into the
+# monitoring-host namespace (labeled `privileged`), so the rest of
+# `monitoring` stays under baseline.
 telemetryServices:
   kube-state-metrics:
     deploy: true
   node-exporter:
-    deploy: true
+    deploy: false
 
 # Alloy collector deployments. Defaults are fine for a single-node k3d;
 # revisit on a real multi-node cluster.
@@ -132,6 +149,27 @@ collectors:
   alloy-metrics:
     presets: [clustered, statefulset]
   alloy-logs:
-    presets: [filesystem-log-reader, daemonset]
+    # filesystem-log-reader preset is what mounted /var/log + the
+    # docker-containers hostPaths — dropped since kube-API mode reads
+    # logs through the API server instead.
+    presets: [daemonset]
   alloy-singleton:
     presets: [singleton]
+
+# Override the chart's default container securityContext for all alloy
+# collectors. The upstream chart adds back ~14 of Docker's default
+# capabilities after dropping ALL (CHOWN, FOWNER, NET_RAW, etc.); none
+# of them are needed for HTTP scraping + push-to-Grafana-Cloud, and
+# NET_RAW in particular is what made the collectors fail PodSecurity
+# baseline. We drop ALL and add nothing back.
+collectorCommon:
+  alloy:
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 4242
+      seccompProfile:
+        type: RuntimeDefault
