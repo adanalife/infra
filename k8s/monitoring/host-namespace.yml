@@ -1,0 +1,17 @@
+# Dedicated namespace for workloads that genuinely need hostPath +
+# hostNetwork — today, just node-exporter. Talos enforces PodSecurity
+# `baseline:latest` cluster-wide; this namespace is explicitly labeled
+# `privileged` so the one workload that needs it can run, without
+# relaxing PSA for everything in `monitoring`.
+#
+# Mirrors what Talos does automatically for `local-path-storage` (the
+# storage provisioner needs hostPath for the same reason). Shared
+# across stage-1 + prod-1 — both kustomizations reference this file.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring-host
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
