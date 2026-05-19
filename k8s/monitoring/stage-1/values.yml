@@ -212,3 +212,16 @@ collectorCommon:
         runAsUser: 4242
         seccompProfile:
           type: RuntimeDefault
+      # readOnlyRootFilesystem makes / read-only, but alloy needs a
+      # writable working dir at `storagePath` (default /tmp/alloy) for
+      # its remotecfg service + WAL. Mount an emptyDir specifically
+      # there so the readonly root stays in place.
+      mounts:
+        extra:
+          - name: tmp-alloy
+            mountPath: /tmp/alloy
+    controller:
+      volumes:
+        extra:
+          - name: tmp-alloy
+            emptyDir: {}
