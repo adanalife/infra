@@ -28,9 +28,9 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
-      # Override the local overlay's stage tag — see that overlay for why
-      # this exists.
-      - SENTRY_ENVIRONMENT=production
+      # Override the local overlay's stage-1 tag — see that overlay for
+      # why this exists.
+      - SENTRY_ENVIRONMENT=prod-1
 
 patches:
   # Mount the dashcam NFS PVC at the corpus path.

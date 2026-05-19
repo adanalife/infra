@@ -31,8 +31,10 @@ configMapGenerator:
       # Partitions Sentry events by env. Per
       # vault/decisions/observability-projects-by-component.md, stage and prod
       # share one Sentry project per service; this tag is what splits them
-      # in the UI. Prod-1 overrides to "production".
-      - SENTRY_ENVIRONMENT=stage
+      # in the UI. Matches OTEL_RESOURCE_ATTRIBUTES deployment.environment
+      # above so a Sentry event tag and the matching Tempo/Loki record use
+      # the same string. Prod-1 overrides to "prod-1".
+      - SENTRY_ENVIRONMENT=stage-1
 
 patches:
   # Local Ingress hostname — `tripbot.localhost` resolves to 127.0.0.1
