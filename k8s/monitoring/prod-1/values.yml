@@ -153,10 +153,16 @@ collectorCommon:
         type: RuntimeDefault
     # Container-level SecurityContext for the `alloy` container. This
     # is the load-bearing override — PSA reads capabilities from here.
+    #
+    # `add: []` is non-obvious but required: helm/yaml deep-merges the
+    # `capabilities` map with the chart default rather than replacing
+    # it, so omitting `add` keeps the chart's full Docker-default list
+    # (including NET_RAW). Explicit empty list wipes the merge.
     alloy:
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:
+          add: []
           drop: [ALL]
         readOnlyRootFilesystem: true
         runAsNonRoot: true
