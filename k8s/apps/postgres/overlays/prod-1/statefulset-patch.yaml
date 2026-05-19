@@ -1,0 +1,17 @@
+# Bump PVC to 50Gi on the Retain-policy StorageClass (see
+# storageclass.yaml). local-path-provisioner doesn't support volume
+# expansion, so size up-front.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path-retain
+        resources:
+          requests:
+            storage: 50Gi

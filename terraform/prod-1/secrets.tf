@@ -234,6 +234,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
+      aws_secretsmanager_secret.tripbot_db_credentials.arn,
     ]
   }
 }
@@ -303,4 +304,74 @@ resource "aws_iam_policy" "ci_terraform_grafana_metrics_write_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_grafana_metrics_write_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_grafana_metrics_write_manage.arn
+}
+
+# ============================================================================
+# Postgres credentials (k8s/postgres/credentials)
+# ============================================================================
+#
+# Credentials for tripbot's Postgres on adanalife-minipc. Unlike other
+# SM containers here, terraform OWNS the value: random_pet generates a
+# passphrase-style password, jsonencode wraps it with the user/db
+# fields, and `aws_secretsmanager_secret_version` writes the result.
+# ESO in-cluster materializes this into the `postgres-secret` Secret
+# via the ExternalSecret at k8s/apps/postgres/overlays/prod-1/.
+#
+# No `lifecycle { ignore_changes = [secret_string] }` here — that
+# would defeat the point of letting terraform manage the value.
+# random_pet is deterministic given the same seed/keepers, so the
+# password is stable across applies unless `keepers` changes.
+#
+# Password rotation: set/bump `keepers.rotation_id` on random_pet, then
+# `terraform apply`. After SM updates, ESO syncs (≤1h or force) and
+# then `kubectl exec postgres-0 -- psql -c "ALTER USER tripbot WITH
+# PASSWORD '<new-from-SM>';"` to bring pg_authid in line.
+
+resource "random_pet" "tripbot_db_password" {
+  length    = 4
+  separator = "-"
+}
+
+resource "aws_secretsmanager_secret" "tripbot_db_credentials" {
+  name        = "k8s/postgres/credentials"
+  description = "Postgres credentials for tripbot on adanalife-minipc."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_db_credentials" {
+  secret_id = aws_secretsmanager_secret.tripbot_db_credentials.id
+  secret_string = jsonencode({
+    user     = "tripbot"
+    password = random_pet.tripbot_db_password.id
+    db       = "tripbot"
+  })
+}
+
+# CI lifecycle grant — same shape as the other ci_terraform_*_manage
+# blocks, but with PutSecretValue added because terraform writes the
+# value (not an out-of-band aws-cli put).
+data "aws_iam_policy_document" "ci_terraform_postgres_credentials_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UntagResource",
+      "secretsmanager:UpdateSecret",
+      "secretsmanager:PutSecretValue",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/postgres/credentials-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_postgres_credentials_manage" {
+  name        = "AllowCITerraformManageProd1PostgresCredentials"
+  description = "Lifecycle access for CITerraformRole to the k8s/postgres/credentials SM secret in prod-1, including PutSecretValue (terraform owns the value)."
+  policy      = data.aws_iam_policy_document.ci_terraform_postgres_credentials_manage.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_credentials_manage" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_postgres_credentials_manage.arn
 }

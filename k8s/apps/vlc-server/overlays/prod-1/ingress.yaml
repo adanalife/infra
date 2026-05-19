@@ -1,0 +1,34 @@
+# LE cert from day one via DNS-01 against Route53 — issuance is
+# independent of port-forward state. vlc-server has NO in-process
+# auth, so reachability is gated entirely by what external-dns
+# publishes as the record's target.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vlc-server
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: vlc.prod.whereisdana.today
+    # TODO(vault/infra/TODO.md#external-dns-target-synthesis): drop
+    # this hardcoded target. external-dns 0.21 doesn't synthesize
+    # default-targets when Ingress.status.loadBalancer is empty (which
+    # is what helm-installed traefik leaves it as); fix is upstream
+    # config, not per-Ingress annotation.
+    external-dns.alpha.kubernetes.io/target: 192.168.1.200
+    cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - vlc.prod.whereisdana.today
+      secretName: vlc-tls
+  rules:
+    - host: vlc.prod.whereisdana.today
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vlc-server
+                port:
+                  name: http

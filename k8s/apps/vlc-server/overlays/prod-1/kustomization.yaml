@@ -1,0 +1,70 @@
+# vlc-server prod-1 overlay. Extends base directly (not the local
+# overlay) to skip k3d-specific bits like host-access and the dashcam
+# hostPath; dashcam mounts from NFS instead.
+#
+# Pre-req: copy dashcam-nfs.local.yaml.example to dashcam-nfs.local.yaml
+# and fill in the NFS server address + share path for this cluster.
+# The .local file is gitignored.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - dashcam-nfs.local.yaml
+  - sentry-external-secret.yaml
+  - ingress.yaml
+
+# Prod-1 env vars merged onto base's vlc-server-config ConfigMap.
+# The binary's config-package validator only accepts ENV ∈
+# {staging, production, development} — "prod-1" is the infra/k8s naming
+# for the env, "production" is what the binary expects.
+# OTEL_RESOURCE_ATTRIBUTES preserves "prod-1" as the telemetry identifier.
+configMapGenerator:
+  - name: vlc-server-config
+    behavior: merge
+    literals:
+      - ENV=production
+      - OTEL_SDK_DISABLED=false
+      - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
+
+patches:
+  # Mount the dashcam NFS PVC at the corpus path.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/volumes
+        value:
+          - name: dashcam
+            persistentVolumeClaim:
+              claimName: vlc-dashcam
+              readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - name: dashcam
+            mountPath: /opt/data/Dashcam/_all
+            readOnly: true
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: sentry-vlc-server
+            optional: true
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: grafana-cloud-otlp
+            optional: true

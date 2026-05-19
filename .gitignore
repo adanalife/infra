@@ -14,12 +14,10 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Terraform stuff
+# Terraform
 .terraform
 *.plan
 *.tfstate.backup
-# auto-loaded local-only var overrides (e.g. home IP, regenerated
-# from `curl ifconfig.me` by the tf-cloudflare Taskfile target).
 *.auto.tfvars
 
 # k8s secrets
@@ -27,14 +25,9 @@ k8s/**/credentials
 k8s/**/secret-access-key
 k8s/**/secret.env
 
-# Per-machine helm overrides written by `task k8s:bootstrap-secrets` —
-# notably external-dns/stage-1/values.local.yml, which sets
-# `extraArgs: [--default-targets=<host public IP>]` from `curl ifconfig.me`.
-# Keeps machine-specific values out of git so a stage-1 apply works on
-# any host without manifest churn.
+# Per-machine local overrides — values.local.yml (helm), *.local.yaml
+# (kustomize manifests with host-specific addresses/paths), and the
+# k3d-config local-overrides — all generated or hand-edited per host.
 k8s/**/values.local.yml
-
-# Per-machine k3d config overrides — full-superset configs holding
-# host-specific bind-mounts (e.g., NAS share paths) that shouldn't land
-# in git. Picked up by `task k8s:<env>:cluster:up` when present.
+k8s/**/*.local.yaml
 k8s/k3d-config.*.local.yaml
