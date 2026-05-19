@@ -868,6 +868,11 @@ tasks:
           echo "No vlc-server VNC port-forward PID file found — nothing to stop"
         fi
 
+  talos:minipc:dashboard:
+    desc: open the talosctl TUI dashboard against the minipc node
+    cmds:
+      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes 192.168.1.200
+
   # tripbot operational tasks. Naming follows <tool>:<env>:<verb>[:<subverb>]
   # so it's clear which cluster each one targets. Aliases preserve the
   # older unscoped names while the schema migration is in flight.
