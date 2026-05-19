@@ -116,10 +116,15 @@ collectors:
   alloy-metrics:
     presets: [clustered, statefulset]
   alloy-logs:
-    # filesystem-log-reader preset is what mounted /var/log + the
-    # docker-containers hostPaths — dropped since kube-API mode reads
-    # logs through the API server instead.
-    presets: [daemonset]
+    # `clustered` is required by podLogsViaKubernetesApi — collectors
+    # coordinate which pod's logs each replica reads via Alloy's
+    # clustering, so a multi-replica DaemonSet doesn't duplicate-fetch
+    # every pod's log stream through the kube API. The k8s-monitoring
+    # chart's helm validation enforces this.
+    #
+    # `filesystem-log-reader` preset (the /var/log + docker-containers
+    # hostPath mount set) was dropped when we switched off podLogsViaLoki.
+    presets: [clustered, daemonset]
   alloy-singleton:
     presets: [singleton]
 
