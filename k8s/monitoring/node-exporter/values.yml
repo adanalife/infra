@@ -14,11 +14,22 @@
 # scrape this pod across namespaces — same path traefik /
 # external-dns / cert-manager / external-secrets metrics flow.
 
+# Bind to :9101 instead of the chart default :9100 — traefik in
+# prod-1 runs with hostNetwork: true and already binds host port
+# 9100 for its own metrics endpoint (k8s/traefik/values.yml).
+# Node-exporter also runs hostNetwork (chart default), so the two
+# would collide on the host port without this override. Stage-1's
+# traefik isn't hostNetwork, but keeping the port consistent
+# across envs is simpler than env-specific values files.
+service:
+  port: 9101
+  targetPort: 9101
+
 # Set on the DaemonSet's pod template (not just the Service) so
 # annotationAutodiscovery picks it up. Without these on the pod,
 # the Service annotations the chart sets by default don't help —
 # alloy-metrics scrapes pods, not services.
 podAnnotations:
   prometheus.io/scrape: "true"
-  prometheus.io/port: "9100"
+  prometheus.io/port: "9101"
   prometheus.io/path: "/metrics"
