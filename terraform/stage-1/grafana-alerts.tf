@@ -16,6 +16,126 @@ locals {
   alert_eval_interval_seconds = 60
 }
 
+// Go-runtime alert rules — catches the two leak shapes most likely to
+// bite the bot in production: an unbounded climb in goroutine count
+// (a stuck-goroutine leak) and sustained heap growth (a memory leak
+// holding references that never get collected). Lives in its own rule
+// group so it can be toggled independently of stream-health.
+//
+// Metric names come from the OTel-runtime exporter pushed via OTLP and
+// match what the go-runtime dashboard queries against.
+resource "grafana_rule_group" "go_runtime" {
+  name             = "go-runtime"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Go: goroutine count high"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Goroutine count above 10000 for 10m"
+      description = "Sustained goroutine count > 10000 on a tripbot service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the go-runtime dashboard for the affected service and pull a goroutine profile from Pyroscope to find the leak site."
+    }
+    labels = {
+      severity = "warning"
+      service  = "{{ $labels.service_name }}"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|vlc-server|onscreens-server\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [10000] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name           = "Go: heap growing without bound"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Heap grew by more than 100 MB over the last hour"
+      description = "Sustained heap growth without bound suggests a memory leak — references being held that never get collected. Open the go-runtime dashboard for the affected service and pull a heap profile (alloc_space + inuse_space) from Pyroscope to find what's accumulating."
+    }
+    labels = {
+      severity = "warning"
+      service  = "{{ $labels.service_name }}"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|vlc-server|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|vlc-server|onscreens-server\"} offset 1h)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [100000000] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 resource "grafana_rule_group" "stream_health" {
   name             = "stream-health"
   folder_uid       = grafana_folder.tripbot.uid
