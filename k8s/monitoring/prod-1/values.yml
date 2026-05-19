@@ -71,6 +71,16 @@ hostMetrics:
   collector: alloy-metrics
   linuxHosts:
     enabled: true
+    # Point hostMetrics at the externally-deployed node-exporter
+    # (prometheus-community chart in the `monitoring-host` namespace
+    # — see k8s/monitoring/node-exporter/). Without these, the chart
+    # refuses to render: "The Linux host configuration requires a
+    # connection to Node Exporter". The default would scrape the
+    # chart's bundled node-exporter (which we disabled to keep this
+    # namespace under baseline PSA).
+    namespace: monitoring-host
+    labelMatchers:
+      app.kubernetes.io/name: prometheus-node-exporter
     metricsTuning:
       useIntegrationAllowList: true
 
