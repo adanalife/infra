@@ -255,6 +255,304 @@
         { "refId": "D", "expr": "max(obs_active_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "active fps" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "HTTP panics (last 1h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(tripbot_http_panics_total{service=\"tripbot\"}[1h]))"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Cron panics (last 1h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(tripbot_cron_panics_total[1h]))"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Oldest cron last-run age",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(time() - tripbot_cron_last_run_timestamp_seconds)"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 3600,
+                "color": "yellow"
+              },
+              {
+                "value": 10800,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Cron jobs that panicked (1h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(increase(tripbot_cron_panics_total[1h]) > 0) OR vector(0)"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Cron runs / min by job",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job) (rate(tripbot_cron_runs_total[5m])) * 60",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cpm",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Cron duration p95 by job",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 46,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (job, le) (rate(tripbot_cron_duration_seconds_bucket[10m])))",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      }
     }
   ]
 }
