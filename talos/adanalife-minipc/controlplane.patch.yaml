@@ -22,7 +22,7 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    image: factory.talos.dev/installer/0ea99a3671ec45ac4eac8d5e33fd3b374d9848f4d1f9758f90c3e666ca8ad2b9:v1.13.2
+    image: factory.talos.dev/installer/2dcd442954d67662d41c61bdb92165aaf7189aff9997bd011b6968c12ce8d9c0:v1.13.2
   network:
     interfaces:
       - interface: enp88s0
