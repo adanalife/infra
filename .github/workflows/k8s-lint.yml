@@ -5,11 +5,6 @@ on:
     paths:
       - 'k8s/**'
       - '.github/workflows/k8s-lint.yml'
-  push:
-    branches: [master]
-    paths:
-      - 'k8s/**'
-      - '.github/workflows/k8s-lint.yml'
 
 jobs:
   lint:
