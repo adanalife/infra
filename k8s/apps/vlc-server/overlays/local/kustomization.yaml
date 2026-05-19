@@ -39,6 +39,11 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
+      # Partitions Sentry events by env. Per
+      # vault/decisions/observability-projects-by-component.md, stage and prod
+      # share one Sentry project per service; this tag is what splits them
+      # in the UI. Prod-1 overrides to "production".
+      - SENTRY_ENVIRONMENT=stage
 
 # Mount the dashcam video dir from the host (k3d-only).
 patches:
