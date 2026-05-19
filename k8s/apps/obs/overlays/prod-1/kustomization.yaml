@@ -32,7 +32,11 @@ configMapGenerator:
     behavior: merge
     literals:
       - OBS_QUALITY_PRESET=high
-      - OBS_STREAM_ENCODER=ffmpeg_vaapi
+      # OBS exposes the VAAPI H.264 encoder as `ffmpeg_vaapi_tex`, not
+      # `ffmpeg_vaapi` — verified empirically by reading the Available
+      # Encoders list from a running pod. The bare name silently falls
+      # back to x264 (OBS doesn't error on unknown encoder strings).
+      - OBS_STREAM_ENCODER=ffmpeg_vaapi_tex
 
 # Request the iGPU via the Intel device plugin
 # (k8s/intel-gpu-plugin/prod-1/). The plugin advertises 4 virtual
