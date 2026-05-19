@@ -1,0 +1,24 @@
+# Helm values for prometheus-community/prometheus-node-exporter.
+# Shared across stage-1 + prod-1 — same chart, same values, only the
+# install namespace differs (always monitoring-host).
+#
+# Why isolated: node-exporter is the one workload in the monitoring
+# stack that genuinely needs hostPath + hostNetwork. Talos enforces
+# PodSecurity `baseline:latest` cluster-wide, which forbids both.
+# The grafana/k8s-monitoring chart's default bundled node-exporter
+# lives in the main `monitoring` namespace, which is why this is
+# installed separately into `monitoring-host` (labeled `privileged`).
+#
+# Discovery: pod annotations let grafana-k8s-monitoring's
+# annotationAutodiscovery feature (running in the `monitoring` ns)
+# scrape this pod across namespaces — same path traefik /
+# external-dns / cert-manager / external-secrets metrics flow.
+
+# Set on the DaemonSet's pod template (not just the Service) so
+# annotationAutodiscovery picks it up. Without these on the pod,
+# the Service annotations the chart sets by default don't help —
+# alloy-metrics scrapes pods, not services.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9100"
+  prometheus.io/path: "/metrics"

@@ -4,9 +4,15 @@
 # in-cluster collectors that fill the dashboards landed in
 # terraform/stage-1/grafana-dashboards/:
 #
-#   - Alloy collectors → scrape pods + ship logs to Loki + cluster events
-#   - kube-state-metrics + node-exporter → cluster/pod/node metrics to Mimir
+#   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
+#   - kube-state-metrics → cluster/pod state metrics to Mimir
 #   - kubelet + cAdvisor scrape (built into clusterMetrics)
+#
+# Host-level metrics (node-exporter) are installed separately into the
+# `monitoring-host` namespace — Talos enforces PodSecurity baseline
+# cluster-wide and node-exporter needs hostPath + hostNetwork, so it
+# gets its own ns labeled `privileged`. This chart's workloads all stay
+# under baseline.
 #
 # Credentials come from the grafana-cloud-metrics-write Secret in this
 # namespace, materialized by the ExternalSecret in external-secret.yaml.
@@ -72,7 +78,11 @@ clusterEvents:
   enabled: true
   collector: alloy-singleton
 
-podLogsViaLoki:
+# Pod logs via the Kubernetes API instead of tailing /var/log on the
+# host. Trade-off: a tiny bit slower than reading log files directly,
+# but doesn't require hostPath (and therefore namespace-privileged PSA).
+# Keeps every collector under PodSecurity baseline.
+podLogsViaKubernetesApi:
   enabled: true
   collector: alloy-logs
 
@@ -83,13 +93,40 @@ annotationAutodiscovery:
 telemetryServices:
   kube-state-metrics:
     deploy: true
+  # node-exporter deploys separately into the `monitoring-host`
+  # namespace via the prometheus-community/prometheus-node-exporter
+  # chart — see Taskfile k8s:prod:platform:up. It's the only workload
+  # we run that genuinely needs hostPath + hostNetwork; isolating it
+  # in its own privileged-labeled namespace keeps the rest of
+  # `monitoring` under baseline.
   node-exporter:
-    deploy: true
+    deploy: false
 
 collectors:
   alloy-metrics:
     presets: [clustered, statefulset]
   alloy-logs:
-    presets: [filesystem-log-reader, daemonset]
+    # filesystem-log-reader preset is what mounted /var/log + the
+    # docker-containers hostPaths — dropped since kube-API mode reads
+    # logs through the API server instead.
+    presets: [daemonset]
   alloy-singleton:
     presets: [singleton]
+
+# Override the chart's default container securityContext for all alloy
+# collectors. The upstream chart adds back ~14 of Docker's default
+# capabilities after dropping ALL (CHOWN, FOWNER, NET_RAW, etc.); none
+# of them are needed for HTTP scraping + push-to-Grafana-Cloud, and
+# NET_RAW in particular is what made the collectors fail PodSecurity
+# baseline. We drop ALL and add nothing back.
+collectorCommon:
+  alloy:
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 4242
+      seccompProfile:
+        type: RuntimeDefault

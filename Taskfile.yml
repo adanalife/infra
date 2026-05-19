@@ -557,6 +557,7 @@ tasks:
       - helm repo add traefik https://traefik.github.io/charts
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
       - helm repo add jetstack https://charts.jetstack.io
+      - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -597,7 +598,19 @@ tasks:
           externalsecret/cert-manager-aws-credentials -n kube-system
       - 'echo "cert-manager up. Annotate an Ingress with cert-manager.io/cluster-issuer=letsencrypt-staging-route53 to request a cert."'
       - kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+      # PSA-privileged namespace for the isolated node-exporter install
+      # below — see k8s/monitoring/host-namespace.yml for why this is
+      # split out from the main k8s-monitoring chart. Applied via
+      # kubectl (not kustomize) because env-specific kustomizations
+      # can't reference a shared file outside their directory.
+      - kubectl apply -f k8s/monitoring/host-namespace.yml
       - kubectl apply -k k8s/monitoring/stage-1
+      - helm upgrade --install node-exporter prometheus-community/prometheus-node-exporter
+          -n monitoring-host
+          -f k8s/monitoring/node-exporter/values.yml
+      - kubectl rollout status daemonset/node-exporter-prometheus-node-exporter
+          -n monitoring-host --timeout=120s
+      - 'echo "node-exporter up in monitoring-host (privileged); alloy-metrics discovers it via prometheus.io/scrape annotations."'
       - |
         echo "Waiting for grafana-cloud-metrics-write Secret to materialize..."
         for i in $(seq 1 30); do
@@ -634,6 +647,7 @@ tasks:
       - helm repo add traefik https://traefik.github.io/charts
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
       - helm repo add jetstack https://charts.jetstack.io
+      - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -675,7 +689,19 @@ tasks:
           externalsecret/cert-manager-aws-credentials -n kube-system
       - 'echo "cert-manager up. Annotate an Ingress with cert-manager.io/cluster-issuer=letsencrypt-staging-route53 to request a cert."'
       - kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+      # PSA-privileged namespace for the isolated node-exporter install
+      # below — see k8s/monitoring/host-namespace.yml for why this is
+      # split out from the main k8s-monitoring chart. Applied via
+      # kubectl (not kustomize) because env-specific kustomizations
+      # can't reference a shared file outside their directory.
+      - kubectl apply -f k8s/monitoring/host-namespace.yml
       - kubectl apply -k k8s/monitoring/prod-1
+      - helm upgrade --install node-exporter prometheus-community/prometheus-node-exporter
+          -n monitoring-host
+          -f k8s/monitoring/node-exporter/values.yml
+      - kubectl rollout status daemonset/node-exporter-prometheus-node-exporter
+          -n monitoring-host --timeout=120s
+      - 'echo "node-exporter up in monitoring-host (privileged); alloy-metrics discovers it via prometheus.io/scrape annotations."'
       - |
         echo "Waiting for grafana-cloud-metrics-write Secret to materialize..."
         for i in $(seq 1 30); do
