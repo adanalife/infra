@@ -1,5 +1,5 @@
 {
-  "title": "03 — Postgres Pool",
+  "title": "08 — Postgres Pool",
   "uid": "postgres-pool",
   "tags": ["tripbot", "postgres", "database"],
   "schemaVersion": 39,
