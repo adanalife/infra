@@ -27,7 +27,10 @@ cluster:
 destinations:
   metrics:
     type: prometheus
-    urlFrom: convert.nonsensitive(remote.kubernetes.secret.metrics.data["PROMETHEUS_HOST"]) + "/api/prom/push"
+    # PROMETHEUS_HOST in SM already includes the /api/prom path
+    # (Grafana Cloud's "Prometheus" connection URL form). Only the
+    # /push suffix needs adding.
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.metrics.data["PROMETHEUS_HOST"]) + "/push"
     auth:
       type: basic
       usernameKey: PROMETHEUS_USERNAME
