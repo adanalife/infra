@@ -139,6 +139,16 @@ podLogsViaKubernetesApi:
 annotationAutodiscovery:
   enabled: true
   collector: alloy-metrics
+  # Override the chart's default annotation keys (k8s.grafana.com/*)
+  # to the standard prometheus.io/* convention used by upstream charts
+  # (traefik, external-dns, cert-manager, external-secrets,
+  # prometheus-community/prometheus-node-exporter, and almost any
+  # future scrape target we'd add).
+  annotations:
+    scrape: "prometheus.io/scrape"
+    metricsPath: "prometheus.io/path"
+    metricsPortNumber: "prometheus.io/port"
+    metricsScheme: "prometheus.io/scheme"
 
 # kube-state-metrics is off by default in v4.x; deploying it here, then
 # clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's
