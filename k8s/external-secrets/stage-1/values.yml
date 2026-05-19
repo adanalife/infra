@@ -2,13 +2,37 @@
 # CRDs (ClusterSecretStore, ExternalSecret, etc.) are installed by
 # default — no installCRDs flag required on this chart.
 #
+# Shared across stage-1 + prod-1 — the prod-1 Taskfile target uses
+# this same file. Per-env config (like the ClusterSecretStore) lives
+# under {stage-1,prod-1}/.
+#
 # Defaults are fine for a single-node k3d. Override resource limits
 # if/when this gets ported to a real cluster.
 replicaCount: 1
 
+# Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's
+# annotationAutodiscovery feature scrape the chart's metrics endpoint
+# (:8080 /metrics on each component). The chart's serviceMonitor path
+# isn't usable for us — it needs the Prometheus Operator CRD we don't
+# run. Same pattern as k8s/traefik/values.yml.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
 # Webhook + cert-controller need their own deployments by default;
 # fine to keep on a learning cluster but worth disabling on tiny nodes.
+# Repeat the scrape annotations on each so all three components get
+# picked up by alloy-metrics.
 webhook:
   create: true
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
 certController:
   create: true
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
