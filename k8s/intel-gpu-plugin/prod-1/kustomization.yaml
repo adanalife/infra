@@ -1,0 +1,43 @@
+# Intel GPU device plugin for adanalife-minipc (prod-1).
+#
+# Registers `gpu.intel.com/i915` as a schedulable resource so OBS and
+# vlc-server can request the iGPU via standard pod resource limits
+# instead of bind-mounting /dev/dri via hostPath (which would require
+# PSS-labeling the default namespace privileged). Pre-req: the
+# i915-ucode Talos extension creates /dev/dri/renderD128 on the node.
+#
+# Lives in kube-system because:
+#   1. The plugin's own pod needs hostPath access to /dev/dri,
+#      /sys/class/drm, /var/lib/kubelet/device-plugins, /var/run/cdi.
+#      kube-system is PSS-exempt by the Talos machine config.
+#   2. Convention — kube-proxy, coredns, and other system DaemonSets
+#      already live there.
+#
+# Patches:
+#   `-enable-monitoring` advertises a sibling `gpu.intel.com/i915_monitoring`
+#   resource that XPU Manager (see intel-xpu-manager/prod-1/) claims to
+#   read GPU telemetry off all devices on the node.
+#
+#   `-shared-dev-num=4` tells the plugin to advertise 4 virtual instances
+#   of the single physical iGPU so multiple pods (OBS + vlc-server,
+#   plus future siblings) can each claim one and share the device.
+#   The Iris Xe handles concurrent VAAPI clients fine — desktop Linux
+#   runs Firefox + VLC + OBS sharing the same iGPU every day.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kube-system
+
+resources:
+  - github.com/intel/intel-device-plugins-for-kubernetes/deployments/gpu_plugin?ref=v0.35.0
+
+patches:
+  - target:
+      kind: DaemonSet
+      name: intel-gpu-plugin
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args
+        value:
+          - -enable-monitoring
+          - -shared-dev-num=4
