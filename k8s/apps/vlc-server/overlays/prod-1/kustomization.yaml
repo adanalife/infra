@@ -68,3 +68,28 @@ patches:
           secretRef:
             name: grafana-cloud-otlp
             optional: false
+  # Request the iGPU via the Intel device plugin
+  # (k8s/intel-gpu-plugin/prod-1/) so libvlc can hardware-decode the
+  # dashcam corpus via VAAPI. Sibling OBS overlay does the same; the
+  # plugin's -shared-dev-num=4 lets both pods claim concurrently.
+  # Pairs with the tripbot PR's VLC_AVCODEC_HW default change
+  # (vdpau_avcodec -> any), which makes libvlc pick VAAPI when the
+  # device is reachable.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: vlc-server
+      spec:
+        template:
+          spec:
+            containers:
+              - name: vlc-server
+                resources:
+                  requests:
+                    gpu.intel.com/i915: "1"
+                  limits:
+                    gpu.intel.com/i915: "1"
