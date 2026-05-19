@@ -7,6 +7,13 @@ resources:
   - ingress.yaml
   - seed-job.yaml
   - auth-job.yaml
+  # ExternalSecrets for workload-specific tripbot creds. The
+  # aws-secretsmanager ClusterSecretStore is env-routed by the
+  # cluster's own AWS creds, so the same manifest reads from
+  # adanalife-stage SM in stage clusters and adanalife-prod SM in
+  # prod clusters.
+  - twitch-external-secret.yaml
+  - google-maps-external-secret.yaml
 
 # tripbot-config holds non-secret env defaults that mirror
 # tripbot/infra/docker/env.docker, with service hosts swapped from

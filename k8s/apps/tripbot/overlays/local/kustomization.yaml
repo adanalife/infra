@@ -3,24 +3,10 @@ kind: Kustomization
 
 resources:
   - ../../base
-  # Workload-specific ExternalSecrets stay in this overlay (consumer
-  # is tripbot-only). Cross-cutting observability secrets — OTLP + the
-  # Sentry DSNs — live in k8s/shared-secrets/base/ per
-  # vault/decisions/shared-secrets-not-owned-by-workload.md, applied
-  # by the env's umbrella overlay alongside this app overlay.
-  #
-  # ExternalSecret pulling tripbot's Twitch credentials (chat IRC +
-  # Helix API) from AWS SM (k8s/tripbot/twitch-creds). Materialized
-  # Secret is named `tripbot-twitch-creds` and envFrom'd by the
-  # Deployment patch below — overrides the placeholder Twitch values
-  # from secret.env once ESO has reconciled.
-  - twitch-external-secret.yaml
-  # ExternalSecret pulling tripbot's Google Maps API key from AWS SM
-  # (k8s/tripbot/google-maps-api-key). Materialized Secret is named
-  # `tripbot-google-maps-api-key` and envFrom'd by the Deployment patch
-  # below — overrides the `stub` placeholder in secret.env once ESO
-  # has reconciled.
-  - google-maps-external-secret.yaml
+  # All workload-specific ExternalSecrets (Twitch creds, Maps API key)
+  # now live in ../../base — see base/kustomization.yaml for the rationale.
+  # Cross-cutting observability secrets live in k8s/shared-secrets/base
+  # per vault/decisions/shared-secrets-not-owned-by-workload.md.
 
 # secret.env is gitignored — copy from secret.env.example.
 secretGenerator:
