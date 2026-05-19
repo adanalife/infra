@@ -128,20 +128,38 @@ collectors:
   alloy-singleton:
     presets: [singleton]
 
-# Override the chart's default container securityContext for all alloy
-# collectors. The upstream chart adds back ~14 of Docker's default
-# capabilities after dropping ALL (CHOWN, FOWNER, NET_RAW, etc.); none
-# of them are needed for HTTP scraping + push-to-Grafana-Cloud, and
-# NET_RAW in particular is what made the collectors fail PodSecurity
-# baseline. We drop ALL and add nothing back.
+# Override the chart's default securityContext for all alloy collectors.
+# The k8s-monitoring chart's `collectorCommon.alloy` block passes through
+# to the underlying grafana/alloy subchart, which uses two distinct keys:
+#
+#   - `securityContext` at top level → POD-level PodSecurityContext
+#   - `alloy.securityContext`         → CONTAINER-level SecurityContext
+#
+# PSA evaluates the container's capabilities. The chart's container
+# default re-adds 14 of Docker's default caps (CHOWN, FOWNER, NET_RAW,
+# etc.) after dropping ALL — NET_RAW is what made the collectors fail
+# baseline. Alloy needs none of these for HTTP scrape + push to Grafana
+# Cloud, so we override the container-level block too (doubled-`alloy`
+# path) to drop ALL and add nothing back.
 collectorCommon:
   alloy:
+    # Pod-level PodSecurityContext. runAsNonRoot + runAsUser are the
+    # baseline-respecting defaults the chart already wires; restating
+    # so the override is explicit in one place.
     securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: [ALL]
-      readOnlyRootFilesystem: true
       runAsNonRoot: true
       runAsUser: 4242
       seccompProfile:
         type: RuntimeDefault
+    # Container-level SecurityContext for the `alloy` container. This
+    # is the load-bearing override — PSA reads capabilities from here.
+    alloy:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 4242
+        seccompProfile:
+          type: RuntimeDefault
