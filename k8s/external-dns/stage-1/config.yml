@@ -53,7 +53,11 @@ policy: sync
 interval: 1m
 logLevel: info
 
-# Service + metrics intentionally minimal — re-enable when prometheus
-# stack is back online.
-metrics:
-  enabled: false
+# Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's
+# annotationAutodiscovery feature scrape external-dns's metrics endpoint
+# (same port as the service; chart defaults to 7979). Mirrors the
+# pattern used in k8s/traefik/values.yml.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "7979"
+  prometheus.io/path: "/metrics"
