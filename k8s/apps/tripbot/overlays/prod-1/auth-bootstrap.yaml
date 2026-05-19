@@ -45,6 +45,8 @@ spec:
               value: tripbot-prod
             - name: VLC_SERVER_HOST
               value: vlc-server:8080
+            - name: ONSCREENS_SERVER_HOST
+              value: vlc-server:8081
             - name: DATABASE_HOST
               value: postgres
           envFrom:
