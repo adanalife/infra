@@ -2,16 +2,16 @@
 # overlay) to skip k3d-specific bits like host-access and the dashcam
 # hostPath; dashcam mounts from NFS instead.
 #
-# Pre-req: copy dashcam-nfs.local.yaml.example to dashcam-nfs.local.yaml
-# and fill in the NFS server address + share path for this cluster.
-# The .local file is gitignored.
+# Pre-reqs (all satisfied by `task k8s:prod:apply`):
+# - dashcam-nfs.local.yaml populated from .example (gitignored)
+# - k8s/shared-secrets/base applied (owns the Sentry + OTLP
+#   ExternalSecrets envFrom'd below, both required)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
   - ../../base
   - dashcam-nfs.local.yaml
-  - sentry-external-secret.yaml
   - ingress.yaml
 
 # Prod-1 env vars merged onto base's vlc-server-config ConfigMap.
@@ -57,7 +57,7 @@ patches:
         value:
           secretRef:
             name: sentry-vlc-server
-            optional: true
+            optional: false
   - target:
       kind: Deployment
       name: vlc-server
@@ -67,4 +67,4 @@ patches:
         value:
           secretRef:
             name: grafana-cloud-otlp
-            optional: true
+            optional: false

@@ -1,0 +1,25 @@
+# Umbrella overlay for the "prod-1 mode" — the adanalife-minipc
+# Talos cluster running production workloads. `kubectl apply -k
+# k8s/overlays/prod-1` brings up the full app stack against AWS SM
+# values from the adanalife-prod account.
+#
+# As of 2026-05-18, this covers postgres (with backup CronJob) +
+# vlc-server. tripbot's prod-1 overlay + OBS's prod-1 overlay are
+# pending; they'll get added as resources here when they land
+# (sequencing tracked in vault/infra/adanalife-minipc-bootstrap.md).
+#
+# Cloudflare Tunnel is dropped per the bringup session — prod-1 has
+# no public Ingress (tripbot is outbound-only, vlc-server is reachable
+# via traefik+external-dns at vlc.prod.whereisdana.today).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Cross-cutting observability ExternalSecrets (OTLP + Sentry DSNs)
+  # owned at the cluster level, not by any workload.
+  # See vault/decisions/shared-secrets-not-owned-by-workload.md.
+  - ../../shared-secrets/base
+  - ../../apps/postgres/overlays/prod-1
+  - ../../apps/vlc-server/overlays/prod-1
+  # - ../../apps/tripbot/overlays/prod-1   # add when prod-1 overlay lands
+  # - ../../apps/obs/overlays/prod-1       # add when prod-1 overlay lands

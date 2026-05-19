@@ -11,6 +11,10 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
+  # Cross-cutting observability ExternalSecrets (OTLP + Sentry DSNs)
+  # owned at the cluster level, not by any workload.
+  # See vault/decisions/shared-secrets-not-owned-by-workload.md.
+  - ../../shared-secrets/base
   - ../../apps/postgres/overlays/local
   - ../../apps/tripbot/overlays/stage-1
   - ../../apps/vlc-server/overlays/stage-1
