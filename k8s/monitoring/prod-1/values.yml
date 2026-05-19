@@ -119,48 +119,31 @@ collectors:
   alloy-metrics:
     presets: [clustered, statefulset]
   alloy-logs:
-    # `clustered` is required by podLogsViaKubernetesApi — collectors
-    # coordinate which pod's logs each replica reads via Alloy's
-    # clustering, so a multi-replica DaemonSet doesn't duplicate-fetch
-    # every pod's log stream through the kube API. The k8s-monitoring
-    # chart's helm validation enforces this.
-    #
-    # `filesystem-log-reader` preset (the /var/log + docker-containers
-    # hostPath mount set) was dropped when we switched off podLogsViaLoki.
+    # `clustered` lets replicas partition pods between themselves so
+    # podLogsViaKubernetesApi doesn't N-multiply kube-API log fetches.
+    # `daemonset` keeps one collector per node for locality.
     presets: [clustered, daemonset]
   alloy-singleton:
     presets: [singleton]
 
-# Override the chart's default securityContext for all alloy collectors.
-# The k8s-monitoring chart's `collectorCommon.alloy` block passes through
-# to the underlying grafana/alloy subchart, which uses two distinct keys:
+# `collectorCommon.alloy` passes through to the underlying grafana/alloy
+# subchart, which uses two distinct securityContext keys (the doubled
+# `alloy.alloy` path is the container-level block — load-bearing for
+# PSA, which reads capabilities from there).
 #
-#   - `securityContext` at top level → POD-level PodSecurityContext
-#   - `alloy.securityContext`         → CONTAINER-level SecurityContext
-#
-# PSA evaluates the container's capabilities. The chart's container
-# default re-adds 14 of Docker's default caps (CHOWN, FOWNER, NET_RAW,
-# etc.) after dropping ALL — NET_RAW is what made the collectors fail
-# baseline. Alloy needs none of these for HTTP scrape + push to Grafana
-# Cloud, so we override the container-level block too (doubled-`alloy`
-# path) to drop ALL and add nothing back.
+# The chart's container default re-adds the full Docker capability set
+# after dropping ALL, including NET_RAW — which is what fails Talos's
+# baseline PSA enforcement. Alloy needs none of those caps for HTTP
+# scrape + push, so we wipe the add list entirely. `add: []` is
+# required explicitly because helm deep-merges the capabilities map
+# (omitting `add` would inherit the chart default).
 collectorCommon:
   alloy:
-    # Pod-level PodSecurityContext. runAsNonRoot + runAsUser are the
-    # baseline-respecting defaults the chart already wires; restating
-    # so the override is explicit in one place.
     securityContext:
       runAsNonRoot: true
       runAsUser: 4242
       seccompProfile:
         type: RuntimeDefault
-    # Container-level SecurityContext for the `alloy` container. This
-    # is the load-bearing override — PSA reads capabilities from here.
-    #
-    # `add: []` is non-obvious but required: helm/yaml deep-merges the
-    # `capabilities` map with the chart default rather than replacing
-    # it, so omitting `add` keeps the chart's full Docker-default list
-    # (including NET_RAW). Explicit empty list wipes the merge.
     alloy:
       securityContext:
         allowPrivilegeEscalation: false
@@ -172,10 +155,8 @@ collectorCommon:
         runAsUser: 4242
         seccompProfile:
           type: RuntimeDefault
-      # readOnlyRootFilesystem makes / read-only, but alloy needs a
-      # writable working dir at `storagePath` (default /tmp/alloy) for
-      # its remotecfg service + WAL. Mount an emptyDir specifically
-      # there so the readonly root stays in place.
+      # Writable working dir for alloy's storagePath (default
+      # /tmp/alloy) — needed because readOnlyRootFilesystem locks /.
       mounts:
         extra:
           - name: tmp-alloy

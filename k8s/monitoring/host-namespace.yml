@@ -5,8 +5,10 @@
 # relaxing PSA for everything in `monitoring`.
 #
 # Mirrors what Talos does automatically for `local-path-storage` (the
-# storage provisioner needs hostPath for the same reason). Shared
-# across stage-1 + prod-1 — both kustomizations reference this file.
+# storage provisioner needs hostPath for the same reason). Applied by
+# `task k8s:{stage,prod}:platform:up` via kubectl directly, since
+# env-scoped kustomizations can't reference a shared file outside
+# their directory.
 apiVersion: v1
 kind: Namespace
 metadata:
