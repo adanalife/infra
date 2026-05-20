@@ -21,6 +21,14 @@ resources:
 # Overlays merge environment-specific values (ENV, GOOGLE_*, etc.).
 configMapGenerator:
   - name: tripbot-config
+    # Stable name (no hash suffix) so the standalone, raw-`kubectl apply`d
+    # auth-bootstrap / seed Jobs can `envFrom` it by a fixed name instead of
+    # duplicating its values as inline env: literals. Trade-off: a config
+    # value change no longer auto-rolls the Deployment via a new hash — edit
+    # then `kubectl rollout restart deploy/tripbot`. (vlc-server-config /
+    # obs-config keep their hashes; only tripbot-config needs the fixed name.)
+    options:
+      disableNameSuffixHash: true
     literals:
       - READ_ONLY=false
       - VERBOSE=false
