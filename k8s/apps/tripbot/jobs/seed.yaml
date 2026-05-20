@@ -1,0 +1,55 @@
+# ESO-wired DB seed Job — shared by credentialed environments that want a
+# fresh seed (stage-1 today; prod restores from a dump instead, so it
+# doesn't use this). Applied via `task tripbot:<env>:db:seed` with
+# `-n <namespace>`; not part of any umbrella overlay.
+#
+# Same shape as base/seed-job.yaml but envFrom the ESO `tripbot-database-creds`
+# Secret instead of the secret.env-style `tripbot-secret`, and the stable
+# `tripbot-config`. seed-db loads a fixed fixture into the videos table
+# (idempotent — the task skips if real rows already exist).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-seed
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        # postgres is a headless Service — its DNS only resolves once
+        # postgres-0 is Ready, with a few seconds of propagation lag. Poll
+        # until live so the migrate step doesn't burn backoffLimit retries.
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - 'until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done'
+        # Migrate to head before seeding so the schema exists.
+        - name: migrate
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["migrate"]
+          args:
+            - "-path"
+            - "/migrations"
+            - "-database"
+            - "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable"
+            - "up"
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+      containers:
+        - name: seed
+          image: adanalife/tripbot:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/seed-db"]
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
