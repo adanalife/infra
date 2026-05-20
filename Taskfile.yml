@@ -1047,13 +1047,27 @@ tasks:
   # NOTE: untested against a live cluster — eyeball the first run during the
   # wipe loop. Does NOT roll tripbot (echoes the command instead).
   tripbot:prod:db:restore:
-    desc: "restore prod-1 Postgres from an S3 dump (DUMP_KEY=tripbot/<ts>.dump, default newest) + clear stale migrate dirty flag"
+    desc: "restore prod-1 Postgres from an S3 dump (DUMP_KEY=tripbot/<ts>.dump, default newest); scales tripbot down for the restore + clears stale migrate dirty flag"
     vars:
       BUCKET: adanalife-prod-1-postgres-backups
     preconditions:
       - sh: kubectl get pod postgres-0 >/dev/null 2>&1
         msg: "postgres-0 not found — bring the cluster + postgres up first"
     cmds:
+      # Scale tripbot to 0 first: otherwise its migrate init container races the
+      # restore and leaves schema_migrations dirty (hit on the 2026-05-20 first
+      # wipe). Original replica count is stashed and restored at the end.
+      - |
+        set -euo pipefail
+        if kubectl get deploy tripbot >/dev/null 2>&1; then
+          mkdir -p /tmp/adanalife-tasks
+          kubectl get deploy tripbot -o jsonpath='{.spec.replicas}' > /tmp/adanalife-tasks/tripbot-replicas
+          echo "scaling tripbot $(cat /tmp/adanalife-tasks/tripbot-replicas)->0 for the restore"
+          kubectl scale deploy/tripbot --replicas=0
+          kubectl rollout status deploy/tripbot --timeout=90s >/dev/null 2>&1 || true
+        else
+          echo "tripbot deploy not present — skipping scale-down"
+        fi
       - |
         set -euo pipefail
         key="{{.DUMP_KEY}}"
@@ -1078,7 +1092,16 @@ tasks:
           psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
           echo "cleared."
         fi
-      - 'echo "Next: kubectl rollout restart deploy/tripbot — its migrate init re-applies any pending migrations."'
+      # Scale tripbot back to its original count; its migrate init now runs once,
+      # cleanly, against the fully-restored DB.
+      - |
+        set -euo pipefail
+        if kubectl get deploy tripbot >/dev/null 2>&1; then
+          orig=$(cat /tmp/adanalife-tasks/tripbot-replicas 2>/dev/null || echo 1)
+          [ "$orig" = "0" ] && orig=1
+          echo "scaling tripbot back to $orig — migrate init re-applies any pending migrations"
+          kubectl scale deploy/tripbot --replicas="$orig"
+        fi
 
   tripbot:stage:db:seed:
     desc: run the one-shot DB seed Job in the stage cluster; idempotent — skips if videos table already has real rows
