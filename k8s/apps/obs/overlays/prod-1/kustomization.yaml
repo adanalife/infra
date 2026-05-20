@@ -1,12 +1,10 @@
-# OBS prod-1 overlay. Extends base directly — local-overlay's
-# host-access LoadBalancer is k3d-only; prod-1 reaches VNC via
-# `task obs:vnc:up` port-forward instead.
+# OBS prod-1 overlay. Extends base + adds an Ingress for browser VNC.
 #
-# No Ingress: OBS exposes only VNC (TCP 5900) and websocket (4455),
-# neither of which is useful through traefik HTTPS without a
-# websockify shim. The container is reachable only from inside the
-# cluster (websocket via the in-cluster `obs:4455` Service is what
-# vlc-server/onscreens-server poll for stream stats).
+# OBS's VNC is now reachable in a browser: the image runs websockify +
+# noVNC on :6080, and ingress.yaml fronts the obs Service's novnc port
+# through traefik at obs.prod.whereisdana.today (LAN-only — see ingress.yaml).
+# Raw VNC (5900) and the websocket (4455) stay cluster-internal; the
+# websocket is what vlc-server/onscreens-server poll for stream stats.
 #
 # Streaming toggle: `obs-secret` is created imperatively by
 # `task obs:stream:on` (pulls STREAM_KEY from adanalife-stage SM).
@@ -19,6 +17,7 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - ingress.yaml
 
 # OBS_QUALITY_PRESET=high is explicit even though `high` is the
 # entrypoint default — the manifest tells the full story.
