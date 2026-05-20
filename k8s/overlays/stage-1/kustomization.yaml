@@ -16,9 +16,9 @@
 #     so they stay diff-identical to prod-1; this is the single point that
 #     env-routes them to stage.
 #
-# Scope so far: shared observability secrets + postgres + tripbot
-# (outbound-only). vlc-server + OBS (GPU, low quality, streaming off) land
-# in a follow-up commit.
+# Full app set: shared observability secrets + postgres + tripbot
+# (outbound-only) + vlc-server + OBS (both on the shared iGPU at low
+# quality, streaming off by default, cluster-internal — no Ingress).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -29,6 +29,8 @@ resources:
   - ../../shared-secrets/base
   - ../../apps/postgres/overlays/stage-1
   - ../../apps/tripbot/overlays/stage-1
+  - ../../apps/vlc-server/overlays/stage-1
+  - ../../apps/obs/overlays/stage-1
 
 patches:
   # Env-route the SHARED, store-agnostic ExternalSecrets to the stage

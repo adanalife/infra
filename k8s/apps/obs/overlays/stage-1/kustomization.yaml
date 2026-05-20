@@ -1,0 +1,48 @@
+# OBS stage-1 overlay. Mirrors prod-1's iGPU + VAAPI encode setup but at
+# LOW quality, and with NO Ingress — stage OBS is cluster-internal,
+# reached via `kubectl port-forward` to the noVNC port rather than a public
+# obs.stage.* URL.
+#
+# Streaming is OFF by default: like prod, the `obs-stream-key` Secret is
+# created imperatively (task obs:stage:stream:on, which pulls the
+# adanalife_staging key from the stage SM account). Without it OBS sits
+# idle in VNC mode — no manifest carries a stream key.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# LOW quality for stage (prod runs `high`). OBS_STREAM_ENCODER opts into
+# VAAPI hardware encode via the iGPU — OBS exposes the VAAPI H.264 encoder
+# as `ffmpeg_vaapi_tex` (the bare `ffmpeg_vaapi` silently falls back to
+# x264). Only matters when streaming is toggled on.
+configMapGenerator:
+  - name: obs-config
+    behavior: merge
+    literals:
+      - OBS_QUALITY_PRESET=low
+      - OBS_STREAM_ENCODER=ffmpeg_vaapi_tex
+
+# Request the iGPU via the Intel device plugin (single cluster-wide
+# install at k8s/intel-gpu-plugin/prod-1/; -shared-dev-num=4 covers
+# prod vlc+obs + stage vlc+obs = 4 concurrent claims).
+patches:
+  - target:
+      kind: Deployment
+      name: obs
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: obs
+      spec:
+        template:
+          spec:
+            containers:
+              - name: obs
+                resources:
+                  requests:
+                    gpu.intel.com/i915: "1"
+                  limits:
+                    gpu.intel.com/i915: "1"
