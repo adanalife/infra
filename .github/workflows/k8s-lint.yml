@@ -49,7 +49,7 @@ jobs:
           helm repo update
           helm upgrade --install external-secrets external-secrets/external-secrets \
             -n external-secrets --create-namespace \
-            -f k8s/external-secrets/stage-1/values.yml \
+            -f k8s/external-secrets/development/values.yml \
             --wait
           kubectl wait --for=condition=Available --timeout=120s \
             deployment --all -n external-secrets
@@ -57,12 +57,12 @@ jobs:
             crd/clustersecretstores.external-secrets.io \
             crd/externalsecrets.external-secrets.io
 
-      - name: Kustomize build (local + stage-1)
+      - name: Kustomize build (local + development)
         run: |
-          kubectl kustomize k8s/overlays/local   > /tmp/local.yaml
-          kubectl kustomize k8s/overlays/stage-1 > /tmp/stage-1.yaml
+          kubectl kustomize k8s/overlays/local       > /tmp/local.yaml
+          kubectl kustomize k8s/overlays/development  > /tmp/development.yaml
 
-      - name: Server-side dry-run apply (local + stage-1)
+      - name: Server-side dry-run apply (local + development)
         run: |
           kubectl apply --dry-run=server -k k8s/overlays/local
-          kubectl apply --dry-run=server -k k8s/overlays/stage-1
+          kubectl apply --dry-run=server -k k8s/overlays/development
