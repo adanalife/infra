@@ -1,0 +1,44 @@
+# Umbrella overlay for "stage-1 mode" — a staging environment co-tenanting
+# the adanalife-minipc Talos cluster beside prod-1, in its own `stage-1`
+# namespace. `kubectl apply -k k8s/overlays/stage-1` (via task
+# k8s:stage:apply) brings up the stage app stack against AWS SM values
+# from the adanalife-stage account.
+#
+# Co-tenancy model (see vault/decisions/k8s-platform-stack.md):
+#   - Reuses prod's platform stack (traefik / ESO / external-dns /
+#     cert-manager / monitoring) — no second install.
+#   - Namespace isolation: everything lands in `stage-1` (the `namespace`
+#     field below); prod stays in `default`.
+#   - Secret isolation: the patch below repoints every ExternalSecret to
+#     the namespace-locked `aws-secretsmanager-stage` ClusterSecretStore
+#     (k8s/external-secrets/stage-1), which reads the adanalife-stage
+#     account. The app/base ExternalSecret files name `aws-secretsmanager`
+#     so they stay diff-identical to prod-1; this is the single point that
+#     env-routes them to stage.
+#
+# Scope so far: shared observability secrets + postgres + tripbot
+# (outbound-only). vlc-server + OBS (GPU, low quality, streaming off) land
+# in a follow-up commit.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: stage-1
+
+resources:
+  # Cross-cutting observability ExternalSecrets (OTLP + Sentry DSNs).
+  - ../../shared-secrets/base
+  - ../../apps/postgres/overlays/stage-1
+  - ../../apps/tripbot/overlays/stage-1
+
+patches:
+  # Env-route every ExternalSecret in the stage stack to the stage account
+  # via the namespace-locked aws-secretsmanager-stage store. Covers the
+  # base twitch/maps secrets, the shared OTLP/Sentry secrets, and the
+  # postgres + tripbot DB secrets — all in one place, so the underlying
+  # files stay identical to prod-1.
+  - target:
+      kind: ExternalSecret
+    patch: |-
+      - op: replace
+        path: /spec/secretStoreRef/name
+        value: aws-secretsmanager-stage
