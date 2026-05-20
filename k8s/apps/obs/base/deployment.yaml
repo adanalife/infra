@@ -26,6 +26,10 @@ spec:
               containerPort: 5900
             - name: websocket
               containerPort: 4455
+            # noVNC (websockify) — browser VNC client, fronted by the
+            # Ingress in the prod-1 overlay.
+            - name: novnc
+              containerPort: 6080
           envFrom:
             - configMapRef:
                 name: obs-config
