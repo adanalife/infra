@@ -16,10 +16,23 @@
 
 resource "aws_kms_key" "sops_talos_pki" {
   description = "SOPS key for the adanalife-minipc Talos PKI bundle (controlplane/worker/talosconfig)."
-  # Max window: deleting this key makes every committed *.sops.yaml
-  # permanently undecryptable, so give the longest possible recovery runway.
+
+  # Two layers of protection — losing this key makes every committed
+  # *.sops.yaml permanently undecryptable:
+  #   - deletion_window_in_days: AWS-side 30-day (max) recovery window before
+  #     a *scheduled* deletion actually destroys the key material.
+  #   - prevent_destroy: blocks terraform from scheduling deletion at all, so
+  #     a `terraform destroy` / accidental removal of prod-1 errors out here.
   deletion_window_in_days = 30
-  enable_key_rotation     = true
+
+  # Rotation intentionally off: this key only wraps SOPS data keys for a tiny,
+  # rarely-read bundle (decrypt fires a handful of times a year), so annual
+  # rotation just adds AWS cost for no meaningful benefit.
+  enable_key_rotation = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_kms_alias" "sops_talos_pki" {
