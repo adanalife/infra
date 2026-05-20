@@ -1,4 +1,4 @@
-# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/cluster-issuer.yml
+# KEEP-IN-SYNC: k8s/cert-manager/{development,prod-1}/cluster-issuer.yml
 #
 # Two ClusterIssuers: staging and prod. Iterate against staging
 # (`letsencrypt-staging-route53`) while debugging — issued certs are

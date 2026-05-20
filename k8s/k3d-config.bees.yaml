@@ -1,11 +1,11 @@
-# k3d cluster config for stage-1 on the `bees` host (dmerrick-bees).
+# k3d cluster config for development on the `bees` host (dmerrick-bees).
 #
-# Bring up with:  task k8s:stage:cluster:up
-# Tear down with: task k8s:stage:cluster:down
+# Bring up with:  task k8s:dev:cluster:up
+# Tear down with: task k8s:dev:cluster:down
 #
 # Cluster name is host-based, not env-based: `adanalife-bees` on bees,
 # `adanalife-empty` on the other host (see k3d-config.empty.yaml). Rationale:
-# when stage-1 eventually graduates between hosts, the cluster
+# when development eventually graduates between hosts, the cluster
 # on `empty` stays `adanalife-empty` and only the Taskfile mapping changes
 # (which env's tasks target which cluster). Host-based names decouple
 # cluster identity from env assignment.
@@ -13,11 +13,11 @@
 # Local overrides: this file is the committed, machine-agnostic config.
 # For host-specific extras (e.g., extra host bind-mounts for NAS-backed
 # storage on the home network), create `k3d-config.bees.local.yaml`
-# (gitignored) as a full superset of this file. The `k8s:stage:cluster:up`
+# (gitignored) as a full superset of this file. The `k8s:dev:cluster:up`
 # task prefers the local override if present. See `k3d-config.bees.local.yaml.example`.
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
-# *.stage.whereisdana.today URLs (managed by external-dns in stage-1
+# *.dev.whereisdana.today URLs (managed by external-dns in development
 # mode) can hit traefik directly. Cloudflare Tunnel keeps running in
 # parallel for whalecore.com traffic — the two paths don't overlap.
 # High ports (9080/9443) instead of standard 80/443 because Colima
@@ -25,7 +25,7 @@
 # test URLs include the port suffix until a router/CDN translates
 # 443 → host:9443. Other ports (VNC, RTSP, traefik dashboard, etc.)
 # are reachable ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
-# Re-run `task k8s:stage:cluster:down && task k8s:stage:cluster:up` to apply
+# Re-run `task k8s:dev:cluster:down && task k8s:dev:cluster:up` to apply
 # port-mapping changes to an existing cluster.
 #
 # Notes for future EKS port:
@@ -47,18 +47,18 @@ agents: 0
 # them. k3d nodes are themselves containers, so without this the host
 # filesystem isn't visible to pods.
 #
-# The stage-1-nas overlay expects an additional `/host/nas-dashcam`
+# The development-nas overlay expects an additional `/host/nas-dashcam`
 # volume entry pointing at a host-mounted dashcam source. That entry is
 # omitted here because the source path is host-specific; add it in
 # `k3d-config.bees.local.yaml` (gitignored) if you intend to apply the
-# stage-1-nas overlay.
+# development-nas overlay.
 volumes:
   - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
     nodeFilters:
       - server:*
 
 # Disable k3s's bundled Traefik. We install traefik/traefik via helm
-# in `task k8s:stage:platform:up` instead, so the full chart's CRDs (default
+# in `task k8s:dev:platform:up` instead, so the full chart's CRDs (default
 # IngressClass, dashboard wiring, prometheus metrics) are available
 # without the HelmChartConfig customization dance the bundled chart
 # requires.

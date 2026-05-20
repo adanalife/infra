@@ -1,11 +1,11 @@
-# KEEP-IN-SYNC: k8s/external-dns/{stage-1,prod-1}/config.yml
+# KEEP-IN-SYNC: k8s/external-dns/{development,prod-1}/config.yml
 #
 # Helm values for the upstream external-dns chart at
 # https://kubernetes-sigs.github.io/external-dns/. Applied by
 # `task k8s:prod:platform:up`, sequenced after the ExternalSecret materialises
 # the `external-dns-aws-credentials` Secret in kube-system.
 #
-# Same shape as stage-1's; the deltas are `domainFilters` (prod subdomain)
+# Same shape as development's; the deltas are `domainFilters` (prod subdomain)
 # and `txtOwnerId` (so multiple controllers don't fight over a zone).
 
 # Limit reconcile to the prod-1 zone delegated from core. external-dns

@@ -1,11 +1,11 @@
-# Public Ingress for vlc-server's HTTP API at vlc.stage.whereisdana.today.
+# Public Ingress for vlc-server's HTTP API at vlc.dev.whereisdana.today.
 #
 # external-dns reconciles the hostname annotation into a Route53 A
 # record pointing at the host's public IPv4 (set globally via
 # external-dns's --default-targets, fed from values.local.yml).
 #
 # HTTP-only today. cert-manager is installed and proven (the smoke-test
-# Certificate in k8s/cert-manager/stage-1/ issues against LE staging on
+# Certificate in k8s/cert-manager/development/ issues against LE staging on
 # every cluster bring-up). The remaining blocker is the home-network
 # port-forward — once inbound 443 reaches traefik, uncomment the
 # cert-manager.io/cluster-issuer annotation AND the tls: block below to
@@ -23,16 +23,16 @@ kind: Ingress
 metadata:
   name: vlc-server
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: vlc.stage.whereisdana.today
+    external-dns.alpha.kubernetes.io/hostname: vlc.dev.whereisdana.today
     # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
 spec:
   ingressClassName: traefik
   # tls:
   #   - hosts:
-  #       - vlc.stage.whereisdana.today
+  #       - vlc.dev.whereisdana.today
   #     secretName: vlc-tls
   rules:
-    - host: vlc.stage.whereisdana.today
+    - host: vlc.dev.whereisdana.today
       http:
         paths:
           - path: /

@@ -1,4 +1,4 @@
-# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/config.yml
+# KEEP-IN-SYNC: k8s/cert-manager/{development,prod-1}/config.yml
 # https://artifacthub.io/packages/helm/jetstack/cert-manager
 
 crds:

@@ -18,7 +18,7 @@ for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
 done
 
 # 2. Bring up the cluster, build & import images, apply manifests
-task k8s:stage:cluster:up
+task k8s:dev:cluster:up
 task k8s:import-images   # builds via tripbot/infra/docker/docker-compose.yml
 task k8s:apply
 
@@ -31,12 +31,12 @@ curl http://localhost:8080/health/live
 # RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
 
 # 4. Tear down
-task k8s:stage:cluster:down
+task k8s:dev:cluster:down
 ```
 
 The k3d cluster has no host-port bindings (see `k8s/k3d-config.bees.yaml`)
 — anything you want to reach from the laptop goes through
-`kubectl port-forward`, and stage-1 mode (next section) handles
+`kubectl port-forward`, and development mode (next section) handles
 public exposure through a Cloudflare Tunnel.
 
 The bundled traefik handles the tripbot Ingress in-cluster; the bundled
@@ -46,7 +46,7 @@ Ingress works against prod traefik unchanged, and LoadBalancer services
 are fulfilled by AWS ELB.
 
 
-## exposing services publicly (stage-1 mode)
+## exposing services publicly (development mode)
 
 Wires the cluster to a Cloudflare Tunnel — TLS and IP allowlisting are
 handled at the Cloudflare edge, no port-forwarding, no in-cluster certs.
@@ -89,11 +89,11 @@ aws-vault exec adanalife-stage -- sh -c 'cd terraform/stage-1 \
 # 6. Write the bootstrap Secrets (ESOSecretsReader access key for ESO,
 #    cloudflared TUNNEL_TOKEN) into the cluster from terraform outputs.
 #    Re-run any time the tunnel or ESO IAM access key is rotated.
-task k8s:stage:bootstrap-secrets
+task k8s:dev:bootstrap-secrets
 
-# 7. Apply the stage-1 overlay — same four apps as `task k8s:apply`,
+# 7. Apply the development overlay — same four apps as `task k8s:apply`,
 #    plus the cloudflared Deployment.
-task k8s:stage:apply
+task k8s:dev:apply
 
 # 8. Verify (after Cloudflare marks the zone Active in step 5).
 curl https://tripbot.whalecore.com/health/live

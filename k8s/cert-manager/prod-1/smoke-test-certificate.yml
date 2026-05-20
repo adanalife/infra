@@ -1,4 +1,4 @@
-# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/smoke-test-certificate.yml
+# KEEP-IN-SYNC: k8s/cert-manager/{development,prod-1}/smoke-test-certificate.yml
 #
 # Smoke-test Certificate — exercises the full DNS-01 issuance path
 # (cert-manager → ExternalSecret → Route53 → LE staging API) without

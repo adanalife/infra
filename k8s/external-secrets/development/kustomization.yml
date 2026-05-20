@@ -7,7 +7,7 @@ resources:
   - cluster-secret-store.yml
 
 # The eso-aws-credentials Secret that cluster-secret-store.yml references
-# is applied directly by `task k8s:stage:bootstrap-secrets` via `kubectl create
+# is applied directly by `task k8s:dev:bootstrap-secrets` via `kubectl create
 # secret generic ... | kubectl apply -f -`. The decrypted creds stay in
 # shell variables only — no plaintext secret.env on disk. See the task
 # definition in Taskfile.yml.
