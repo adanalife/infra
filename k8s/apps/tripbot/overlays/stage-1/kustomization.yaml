@@ -1,31 +1,29 @@
-# tripbot stage-1 overlay. Mirrors prod-1: extends base directly (not the
-# local overlay) so the gitignored secret.env doesn't shape stage — all
-# real values flow from AWS Secrets Manager (adanalife-stage account) via
-# ESO. The stage-1 umbrella overlay repoints every ExternalSecret to the
-# namespace-locked aws-secretsmanager-stage store.
+# tripbot stage-1 overlay. Same shape as prod-1: extends the shared ESO
+# base (../_eso), so this file is just stage's config VALUES plus its
+# database-external-secret (which names the stage store directly). The
+# only differences from prod are the values below.
 #
 # Identity: bot tripbot4000 in channel adanalife_staging (the same Twitch
 # identity the development/k3d env borrows — so dev and stage must not be
 # live at once; see vault/infra/TODO.md).
 #
-# Like prod, tripbot is outbound-only — no Ingress, no public HTTP surface.
-# EventSub uses the WebSocket transport (outbound), so no public callback
-# URL is needed. The seed + auth-bootstrap Jobs from base/ are dropped;
-# seeding and the one-shot interactive OAuth run via their own task paths.
+# Outbound-only like prod (Ingress dropped in ../_eso); EventSub uses the
+# WebSocket transport, so no public callback URL is needed. The seed +
+# auth-bootstrap Jobs run via tasks, not on apply.
 #
 # Pre-reqs:
-# - k8s/shared-secrets/base applied via the umbrella (Sentry + OTLP)
+# - shared-secrets applied via the stage-1 umbrella (Sentry + OTLP)
 # - the stage account's tripbot_twitch_creds + tripbot_google_maps_api_key
 #   SM containers populated (already exist; see terraform/stage-1)
 # - postgres stage-1 overlay applied + k8s/postgres/credentials populated
-#   (terraform-owned; the database-external-secret below reads it)
+#   (terraform-owned; database-external-secret reads it)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../base
-  # stage-1 DATABASE_* materialization from k8s/postgres/credentials
-  # (the Twitch + Maps ExternalSecrets come in via ../../base).
+  - ../_eso
+  # stage DATABASE_* materialization from k8s/postgres/credentials, via
+  # the stage store (named directly — not routed through the umbrella patch).
   - database-external-secret.yaml
 
 configMapGenerator:
@@ -42,89 +40,3 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=stage-1
-
-patches:
-  # Outbound-only like prod — drop the Ingress.
-  - target:
-      kind: Ingress
-      name: tripbot
-    patch: |-
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: tripbot
-
-  # Drop the seed-job — stage is seeded out-of-band via its own task.
-  - target:
-      kind: Job
-      name: tripbot-seed
-    patch: |-
-      $patch: delete
-      apiVersion: batch/v1
-      kind: Job
-      metadata:
-        name: tripbot-seed
-
-  # Drop the auth-bootstrap Job — interactive one-shot; would run on
-  # every apply otherwise. Runs via a dedicated task instead.
-  - target:
-      kind: Job
-      name: tripbot-auth-bootstrap
-    patch: |-
-      $patch: delete
-      apiVersion: batch/v1
-      kind: Job
-      metadata:
-        name: tripbot-auth-bootstrap
-
-  # Swap the base's tripbot-secret envFrom (sourced from gitignored
-  # secret.env, which stage doesn't use) for the stage ExternalSecret
-  # set. All required — pod fails to start if any are missing, surfacing
-  # misconfiguration loudly. Both the migrate init container and the main
-  # container get the DB creds; the main container also gets the runtime
-  # credentials.
-  - target:
-      kind: Deployment
-      name: tripbot
-    patch: |-
-      - op: remove
-        path: /spec/template/spec/initContainers/0/envFrom/1
-      - op: remove
-        path: /spec/template/spec/containers/0/envFrom/1
-      - op: add
-        path: /spec/template/spec/initContainers/0/envFrom/-
-        value:
-          secretRef:
-            name: tripbot-database-creds
-            optional: false
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: grafana-cloud-otlp
-            optional: false
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: sentry-tripbot
-            optional: false
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: tripbot-twitch-creds
-            optional: false
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: tripbot-google-maps-api-key
-            optional: false
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: tripbot-database-creds
-            optional: false
