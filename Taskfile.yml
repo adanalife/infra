@@ -1024,8 +1024,64 @@ tasks:
           echo "No tripbot Postgres port-forward PID file found — nothing to stop"
         fi
 
+  # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
+  # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
+  # most recent S3 dump written by the postgres-backup CronJob (pg_dump -Fc).
+  # See vault/infra/adanalife-minipc-bootstrap.md "Wipe-and-rebuild loop".
+  tripbot:prod:db:backups:
+    desc: list available prod-1 Postgres dumps in S3 (newest last)
+    vars:
+      BUCKET: adanalife-prod-1-postgres-backups
+    cmds:
+      - aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/tripbot/" | sort
+
+  # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
+  # env creds (no credential handling here). Then clears a stale
+  # schema_migrations dirty flag if the dump carried one — the historical
+  # 20260518 dump was taken at version=10 dirty=true, which makes tripbot's
+  # migrate init container refuse to start. Clearing it lets migrate re-apply
+  # the pending migrations on tripbot's next roll. The dump is a consistent
+  # snapshot, so clearing dirty is safe (it reflects the dumped state).
+  #
+  # DUMP_KEY=tripbot/<ts>.dump picks a specific dump; defaults to the newest.
+  # NOTE: untested against a live cluster — eyeball the first run during the
+  # wipe loop. Does NOT roll tripbot (echoes the command instead).
+  tripbot:prod:db:restore:
+    desc: "restore prod-1 Postgres from an S3 dump (DUMP_KEY=tripbot/<ts>.dump, default newest) + clear stale migrate dirty flag"
+    vars:
+      BUCKET: adanalife-prod-1-postgres-backups
+    preconditions:
+      - sh: kubectl get pod postgres-0 >/dev/null 2>&1
+        msg: "postgres-0 not found — bring the cluster + postgres up first"
+    cmds:
+      - |
+        set -euo pipefail
+        key="{{.DUMP_KEY}}"
+        if [ -z "$key" ]; then
+          newest=$(aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/tripbot/" | sort | tail -1 | awk '{print $4}')
+          [ -n "$newest" ] || { echo "no dumps found in s3://{{.BUCKET}}/tripbot/"; exit 1; }
+          key="tripbot/$newest"
+        fi
+        echo "Restoring prod-1 Postgres from s3://{{.BUCKET}}/$key"
+        aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/$key" - \
+          | kubectl exec -i postgres-0 -- sh -c \
+            'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+        echo "Restore complete."
+      - |
+        set -euo pipefail
+        psql() { kubectl exec -i postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
+        ver=$(psql "SELECT version FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
+        dirty=$(psql "SELECT dirty FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
+        echo "schema_migrations: version=$ver dirty=$dirty"
+        if [ "$dirty" = "t" ]; then
+          echo "clearing stale dirty flag so tripbot's migrate init can re-apply pending migrations"
+          psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
+          echo "cleared."
+        fi
+      - 'echo "Next: kubectl rollout restart deploy/tripbot — its migrate init re-applies any pending migrations."'
+
   tripbot:dev:db:seed:
-    desc: run the one-shot DB seed Job in the stage cluster; idempotent — skips if videos table already has real rows
+    desc: run the one-shot DB seed Job in the development cluster; idempotent — skips if videos table already has real rows
     aliases: [tripbot:db:seed]
     cmds:
       - kubectl apply -k k8s/apps/tripbot/overlays/development

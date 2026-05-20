@@ -18,6 +18,13 @@
 #
 # Hostname is set via the HostnameConfig sub-resource (Talos 1.13+ pattern).
 # Setting machine.network.hostname in v1alpha1 conflicts with HostnameConfig.
+#
+# KubeSpan is a creation-time feature — it takes effect on a wipe-reinstall
+# (apply-config), not when patched onto the running node. Added 2026-05-20.
+# Disk encryption was attempted here too but DEFERRED (see the note below — it
+# needs a SecureBoot image). Cilium (cni.name=none + proxy.disabled) is likewise
+# NOT here yet — deferred to a follow-up wipe once the base rebuild is green, so
+# the CNI swap is isolated as its own variable.
 
 machine:
   install:
@@ -27,9 +34,28 @@ machine:
     interfaces:
       - interface: enp88s0
         dhcp: true
+    # KubeSpan — WireGuard full-mesh between nodes, auto-keyed per node on first
+    # boot. Dormant on this single-node cluster, but enabling it now means the
+    # plumbing is tested before a second node lands (which could then join over
+    # the public internet with no firewall config). Requires cluster.discovery.
+    kubespan:
+      enabled: true
+  # Disk encryption DEFERRED (2026-05-20). TPM-sealed LUKS2 (systemDiskEncryption
+  # with `tpm: {}`) requires a Talos SecureBoot image: it needs the PCR signing
+  # key at /.extra/tpm2-pcr-public-key.pem, which only ships in SecureBoot
+  # installers. On the standard image the STATE volume fails to format
+  # ("failed to read pcr signing public key") and the node loops at "Installing"
+  # — hit empirically on the first wipe. Re-add once we move to a SecureBoot
+  # image + UEFI Secure Boot (+ key enrollment). Until then, at-rest protection
+  # is physical security; the S3 postgres dump + the SOPS-stashed PKI are the
+  # recovery path. Follow-up tracked in vault/infra/TODO.md.
 
 cluster:
   allowSchedulingOnControlPlanes: true
+  # Required by KubeSpan for peer discovery. Default-on in recent Talos; set
+  # explicitly so the dependency is visible.
+  discovery:
+    enabled: true
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig
