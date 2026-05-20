@@ -1,6 +1,31 @@
 # infra
 
 
+## environments
+
+Four environments across two clusters and two overlay stacks. Operational
+reference lives in the vault (`infra/kubernetes.md`); the design rationale
+is `vault/decisions/stage-prod-cotenancy.md`.
+
+| Env | Cluster | Runtime | Secrets | AWS account | Task prefix |
+|---|---|---|---|---|---|
+| **local** | `adanalife-bees` | k3d (Mac/Colima) | `secret.env` | — | `k8s:apply` |
+| **development** | `adanalife-bees` | k3d (Mac/Colima) | ESO | adanalife-stage | `k8s:dev:*` |
+| **stage-1** | `adanalife-minipc` | Talos (bare metal) | ESO | adanalife-stage | `k8s:stage:*` |
+| **prod-1** | `adanalife-minipc` | Talos (bare metal) | ESO | adanalife-prod | `k8s:prod:*` |
+
+- **local / development** run on the residential k3d cluster; development
+  adds the full platform stack + real DNS. The sections below cover them.
+- **stage-1 / prod-1** co-tenant the one mini-PC Talos cluster,
+  namespace-separated (`stage-1` / `default`) with per-account ESO stores —
+  stage reuses prod's platform stack, no second install. Talos bring-up +
+  day-2 ops live in the vault's `infra/adanalife-minipc-bootstrap.md`.
+
+The app overlays form two stacks — `base → local → development`
+(secret.env) and `base → _eso → {prod-1, stage-1}` (ESO) — so prod and
+stage differ only by config values.
+
+
 ## running kubernetes locally
 
 Local app stack (postgres + tripbot + vlc-server + obs) on k3d. Manifests
