@@ -6,7 +6,7 @@
 # Raw VNC (5900) and the websocket (4455) stay cluster-internal; the
 # websocket is what vlc-server/onscreens-server poll for stream stats.
 #
-# Streaming toggle: `obs-secret` is created imperatively by
+# Streaming toggle: `obs-stream-key` is created imperatively by
 # `task obs:prod:stream:on` (pulls STREAM_KEY from the adanalife-prod
 # SM account). While the prod k8s/obs/twitch-stream-key holds a
 # placeholder copy of the stage key, this still streams to

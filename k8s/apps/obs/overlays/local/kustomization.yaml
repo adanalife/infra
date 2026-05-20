@@ -5,7 +5,7 @@ resources:
   - ../../base
   - host-access.yaml
 
-# obs-secret is created/deleted imperatively by
+# obs-stream-key is created/deleted imperatively by
 # `task obs:{stage,prod}:stream:{on,off}` from the Taskfile, NOT via
 # kustomize. The
 # Secret's existence + content is the Twitch streaming toggle (see the
