@@ -9,11 +9,12 @@
 # vlc-server/onscreens-server poll for stream stats).
 #
 # Streaming toggle: `obs-secret` is created imperatively by
-# `task obs:stream:on` (pulls STREAM_KEY from adanalife-stage SM).
-# The task is currently env-agnostic and always reads from the stage
-# AWS account — intentional safety property while we're not ready to
-# go live on the prod Twitch account. See vault/infra/TODO.md for
-# the planned obs:stage:stream:on / obs:prod:stream:on split.
+# `task obs:prod:stream:on` (pulls STREAM_KEY from the adanalife-prod
+# SM account). While the prod k8s/obs/twitch-stream-key holds a
+# placeholder copy of the stage key, this still streams to
+# adanalife_staging — the cutover to the live adanalife_ channel is a
+# `put-secret-value` of the real key, no manifest change. Run
+# `task obs:stage:stream:on` to force the stage key explicitly.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

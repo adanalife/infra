@@ -5,8 +5,9 @@ resources:
   - ../../base
   - host-access.yaml
 
-# obs-secret is created/deleted imperatively by `task obs:stream:on` /
-# `task obs:stream:off` from the Taskfile, NOT via kustomize. The
+# obs-secret is created/deleted imperatively by
+# `task obs:{stage,prod}:stream:on` / `task obs:stream:off` from the
+# Taskfile, NOT via kustomize. The
 # Secret's existence + content is the Twitch streaming toggle (see the
 # OBS deployment's envFrom for the rationale). Pulling STREAM_KEY out
 # of kustomize means an apply of this overlay never accidentally

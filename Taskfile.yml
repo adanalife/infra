@@ -731,23 +731,34 @@ tasks:
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-secret is `optional: true`, so the existence + content of that
-  # Secret IS the stream state. `obs:stream:on` pulls the STREAM_KEY
-  # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and creates
-  # the Secret; `obs:stream:off` deletes the Secret. Either way we
+  # Secret IS the stream state. The `:on` tasks pull the STREAM_KEY
+  # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and create
+  # the Secret; `obs:stream:off` deletes it. Either way we
   # rollout-restart obs so the entrypoint re-reads STREAM_KEY at boot
   # — Kubernetes doesn't propagate Secret changes to running pods'
   # env vars.
-  obs:stream:on:
-    desc: enable Twitch streaming on OBS (pulls STREAM_KEY from SM, creates obs-secret, restarts OBS)
+  #
+  # `:on` is env-prefixed (obs:{stage,prod}:stream:on) because the key
+  # is sourced from a specific AWS account, NOT from whatever cluster
+  # kubectl points at — the AWS profile is the targeting, so it must be
+  # explicit. `obs:stream:off` stays un-prefixed: it only deletes the
+  # local obs-secret in the current context and touches no AWS account.
+  #
+  # The two `:on` tasks always source from their named account, so the
+  # operator picks the channel by picking the task — and the final echo
+  # surfaces both the source profile and the live kubectl context so a
+  # cluster/key mismatch is visible.
+  obs:stage:stream:on:
+    desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
+        msg: "no reachable cluster — point kubectl at the target cluster first"
       - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — run `task k8s:stage:apply` first"
+        msg: "obs Deployment not found in the current context — apply the overlay first"
     cmds:
       - |
         set -euo pipefail
@@ -758,7 +769,30 @@ tasks:
           --dry-run=client -o yaml | kubectl apply -f - >/dev/null
       - kubectl rollout restart deploy/obs
       - kubectl rollout status deploy/obs --timeout=120s
-      - echo "OBS streaming to Twitch (adanalife_staging via stage-1 SM)"
+      - 'echo "OBS streaming — key from adanalife-stage SM (→ adanalife_staging); kubectl context: $(kubectl config current-context)"'
+
+  obs:prod:stream:on:
+    desc: "stream OBS using the prod-1 stream key (→ adanalife_; a placeholder copy of the stage key streams to adanalife_staging until the real key is seeded)"
+    preconditions:
+      - sh: command -v aws-vault >/dev/null
+        msg: "aws-vault not found — install with `brew install aws-vault`"
+      - sh: command -v kubectl >/dev/null
+        msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster — point kubectl at the target cluster first"
+      - sh: kubectl get deploy obs >/dev/null 2>&1
+        msg: "obs Deployment not found in the current context — apply the overlay first"
+    cmds:
+      - |
+        set -euo pipefail
+        sk=$(aws-vault exec adanalife-prod -- aws secretsmanager get-secret-value \
+          --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
+        kubectl create secret generic obs-secret \
+          --from-literal=STREAM_KEY="$sk" \
+          --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+      - kubectl rollout restart deploy/obs
+      - kubectl rollout status deploy/obs --timeout=120s
+      - 'echo "OBS streaming — key from adanalife-prod SM; kubectl context: $(kubectl config current-context)"'
 
   obs:stream:off:
     desc: disable Twitch streaming on OBS (deletes obs-secret, restarts OBS to idle)
