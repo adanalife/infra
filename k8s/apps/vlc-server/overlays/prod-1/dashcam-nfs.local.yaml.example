@@ -22,12 +22,13 @@ spec:
   # the vlc-server page-cache priming work).
   #
   # IMPORTANT — server-side ceiling: rsize/wsize negotiate to
-  # min(client request, server max). The Synology is currently capped at
-  # 8 KB, so the 1 MiB requested below will be negotiated DOWN to 8 KB
-  # until the NAS-side transfer size is raised (DSM NFS settings → bump to
-  # 256 KB–1 MB). At 8 KB a ~150 MB clip is ~19k read RPCs vs ~150 at
-  # 1 MiB — raising the server cap is the bigger lever than this option.
-  # Verify the negotiated value on the node with `nfsstat -m` after mount.
+  # min(client request, server max). Set the Synology transfer size to its
+  # max (32 KB in the DSM UI). The 1 MiB requested below then negotiates
+  # DOWN to that 32 KB — requesting the max keeps this future-proof if the
+  # NAS ceiling ever rises. 32 KB is ~4x fewer read RPCs than the old 8 KB
+  # default (~4.8k vs ~19k for a 150 MB clip); the page-cache primer and a
+  # NAS SSD read cache matter more since they avoid the per-RPC cost
+  # entirely. Verify negotiated value on the node with `nfsstat -m`.
   #
   # NOTE: mountOptions are read when the PV is created/mounted. Changing
   # them on a bound PV means recreating it: delete the PVC + PV, re-apply,
