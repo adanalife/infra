@@ -8,7 +8,7 @@ reference lives in the vault (`infra/kubernetes.md`); the design rationale
 is `vault/decisions/stage-prod-cotenancy.md`.
 
 | Env | Cluster | Runtime | Secrets | AWS account | Task prefix |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | **local** | `adanalife-bees` | k3d (Mac/Colima) | `secret.env` | — | `k8s:apply` |
 | **development** | `adanalife-bees` | k3d (Mac/Colima) | ESO | adanalife-stage | `k8s:dev:*` |
 | **stage-1** | `adanalife-minipc` | Talos (bare metal) | ESO | adanalife-stage | `k8s:stage:*` |
