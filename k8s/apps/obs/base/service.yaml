@@ -13,3 +13,6 @@ spec:
     - name: websocket
       port: 4455
       targetPort: websocket
+    - name: novnc
+      port: 6080
+      targetPort: novnc
