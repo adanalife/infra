@@ -57,6 +57,7 @@ resource "grafana_folder" "tripbot" {
 #   __DS_TEMPO__       →  tempo DS uid
 locals {
   dashboard_files = toset([
+    "stream-at-a-glance",
     "tripbot-service-health",
     "vlc-server-service-health",
     "onscreens-server-service-health",
