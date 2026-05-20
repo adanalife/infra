@@ -19,9 +19,15 @@ spec:
   # Tuned for this workload: a single read-only consumer of an immutable
   # video corpus. The goal is to minimize cold file-open latency, which is
   # what makes OBS's dashcam source flash at clip transitions (pairs with
-  # the vlc-server page-cache priming work). Safe on NFSv3 (the Synology
-  # default); to move to NFSv4.1 — which makes nconnect a true session
-  # trunk — enable NFSv4 in DSM first, then add `nfsvers=4.1`.
+  # the vlc-server page-cache priming work).
+  #
+  # IMPORTANT — server-side ceiling: rsize/wsize negotiate to
+  # min(client request, server max). The Synology is currently capped at
+  # 8 KB, so the 1 MiB requested below will be negotiated DOWN to 8 KB
+  # until the NAS-side transfer size is raised (DSM NFS settings → bump to
+  # 256 KB–1 MB). At 8 KB a ~150 MB clip is ~19k read RPCs vs ~150 at
+  # 1 MiB — raising the server cap is the bigger lever than this option.
+  # Verify the negotiated value on the node with `nfsstat -m` after mount.
   #
   # NOTE: mountOptions are read when the PV is created/mounted. Changing
   # them on a bound PV means recreating it: delete the PVC + PV, re-apply,
@@ -30,8 +36,9 @@ spec:
     - ro          # read-only corpus
     - hard        # retry indefinitely rather than return I/O errors
     - noatime     # never write access times (read-only anyway)
-    - nconnect=8  # parallel TCP connections to the NAS (kernel >=5.3)
-    - rsize=1048576  # 1 MiB read blocks — fewer round-trips on large files
+    - nfsvers=4.1 # Synology max; with nconnect this is a session trunk
+    - nconnect=8  # parallel connections / trunk sessions (kernel >=5.3)
+    - rsize=1048576  # request 1 MiB reads — capped to server max (see above)
     - wsize=1048576
     - actimeo=600 # cache file attributes 10 min (corpus never changes)
     - nocto       # skip close-to-open revalidation — safe for an immutable,
