@@ -10,11 +10,12 @@
 # (which env's tasks target which cluster). Host-based names decouple
 # cluster identity from env assignment.
 #
-# Local overrides: this file is the committed, machine-agnostic config.
-# For host-specific extras (e.g., extra host bind-mounts for NAS-backed
-# storage on the home network), create `k3d-config.bees.local.yaml`
-# (gitignored) as a full superset of this file. The `k8s:dev:cluster:up`
-# task prefers the local override if present. See `k3d-config.bees.local.yaml.example`.
+# This is the only k3d config for development — it mounts the committed
+# example video and is what `task k8s:dev:cluster:up` always uses. To
+# stream a real dashcam directory instead, pass DASHCAM_NAS=<host path>
+# to cluster:up; the task adds a :ro `/host/nas-dashcam` bind-mount via a
+# `--volume` CLI flag (k3d merges it with this config), keeping the real
+# footage path out of git. See the development-nas overlay.
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
 # *.dev.whereisdana.today URLs (managed by external-dns in development
@@ -47,11 +48,11 @@ agents: 0
 # them. k3d nodes are themselves containers, so without this the host
 # filesystem isn't visible to pods.
 #
-# The development-nas overlay expects an additional `/host/nas-dashcam`
-# volume entry pointing at a host-mounted dashcam source. That entry is
-# omitted here because the source path is host-specific; add it in
-# `k3d-config.bees.local.yaml` (gitignored) if you intend to apply the
-# development-nas overlay.
+# The development-nas overlay reads from an additional `/host/nas-dashcam`
+# mount. That entry is omitted here because the source path is
+# host-specific; it's added at create time via `task k8s:dev:cluster:up
+# DASHCAM_NAS=<host path>` when you intend to apply the development-nas
+# overlay.
 volumes:
   - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
     nodeFilters:

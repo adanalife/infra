@@ -165,19 +165,20 @@ tasks:
   #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
   #             deployed" sequence; each step delegates to its canonical task
   k8s:dev:cluster:up:
-    desc: "create the local k3d cluster on bees (development) — prefers k8s/k3d-config.bees.local.yaml if present, else falls back to k8s/k3d-config.bees.yaml"
+    desc: "create the local k3d cluster on bees (development) — example video by default; pass DASHCAM_NAS=<host path> to also mount a real dashcam dir at /host/nas-dashcam for the development-nas overlay"
     cmds:
-      # Prefer the gitignored local override (which adds host-specific
-      # bind-mounts like the NAS dashcam share) when it exists; otherwise
-      # use the committed base config. The override must be a full
-      # superset because k3d doesn't merge config files — see
-      # k3d-config.bees.local.yaml.example for the shape.
+      # Development plays the committed example video (mounted at
+      # /host/dashcam) by default — the 99% case. To stream a real dashcam
+      # directory instead, pass its host path as DASHCAM_NAS=<path>; it's
+      # bind-mounted :ro at /host/nas-dashcam for the development-nas
+      # overlay (task k8s:dev:apply-nas). The path is a runtime arg so the
+      # real footage location never gets committed. k3d bind-mounts are
+      # fixed at create time, so this must be set on cluster:up, not apply.
       - |
-        if [ -f k8s/k3d-config.bees.local.yaml ]; then
-          echo "using k8s/k3d-config.bees.local.yaml (local override)"
-          k3d cluster create -c k8s/k3d-config.bees.local.yaml
+        if [ -n "{{.DASHCAM_NAS}}" ]; then
+          echo "mounting dashcam: {{.DASHCAM_NAS}} -> /host/nas-dashcam (:ro)"
+          k3d cluster create -c k8s/k3d-config.bees.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
         else
-          echo "using k8s/k3d-config.bees.yaml (no local override present)"
           k3d cluster create -c k8s/k3d-config.bees.yaml
         fi
 
@@ -297,7 +298,7 @@ tasks:
       - kubectl apply -k k8s/overlays/development
 
   k8s:dev:apply-nas:
-    desc: "apply development-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires the NAS share to be mounted on the cluster host per k3d-config.bees.local.yaml and the cluster rebuilt with that override)"
+    desc: "apply development-nas overlay — vlc-server reads dashcam from /host/nas-dashcam (requires the cluster to have been created with DASHCAM_NAS=<host path> set; see k8s:dev:cluster:up)"
     cmds:
       - kubectl apply -k k8s/overlays/development-nas
 
