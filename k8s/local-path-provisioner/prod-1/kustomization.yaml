@@ -1,0 +1,59 @@
+# rancher/local-path-provisioner for adanalife-minipc (prod-1).
+#
+# Talos ships no storage provisioner, so this supplies the cluster's dynamic
+# PV backing: a `local-path` StorageClass (Delete) for ephemeral volumes. The
+# `local-path-retain` StorageClass (Retain) that Postgres uses is defined
+# separately in k8s/apps/postgres/overlays/prod-1/storageclass.yaml.
+#
+# Codifies what the bootstrap runbook (Phase 5.0) previously did by hand. Two
+# Talos-specific adjustments, applied as patches over the upstream manifest:
+#
+#   1. config.json nodePathMap retargeted /opt -> /var/lib. Talos mounts /opt
+#      read-only, so the provisioner's default host path can't create volume
+#      dirs; /var is writable. Applying this in the manifest (rather than the
+#      runbook's apply-then-patch-then-rollout) means the provisioner pod
+#      reads the corrected path on first start — no rollout restart needed.
+#
+#   2. local-path-storage namespace labeled PSS-privileged. The provisioner
+#      spawns a helper-pod that hostPath-mounts the node dir to set up / tear
+#      down volumes; Talos enforces PodSecurity `baseline` cluster-wide, which
+#      blocks hostPath. kube-system is exempt, but this provisioner lives in
+#      its own namespace, so it needs the explicit privileged label.
+#
+# Applied via `kubectl apply -k` at the top of `task k8s:prod:platform:up`,
+# before any PVC-consuming workload. Pinned to v0.0.32 (the validated running
+# version); bumping is a separate decision per use-latest-stable-when-adding.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.32/deploy/local-path-storage.yaml
+
+patches:
+  # Talos /opt is read-only — provision volumes under writable /var/lib.
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: local-path-config
+        namespace: local-path-storage
+      data:
+        config.json: |
+          {
+            "nodePathMap":[
+              {
+                "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
+                "paths":["/var/lib/local-path-provisioner"]
+              }
+            ]
+          }
+  # Helper-pod needs hostPath; Talos PSS baseline blocks it without this.
+  - patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: local-path-storage
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged

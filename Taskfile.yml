@@ -642,6 +642,12 @@ tasks:
       - sh: test -f k8s/external-dns/prod-1/values.local.yml
         msg: "k8s/external-dns/prod-1/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
     cmds:
+      # local-path-provisioner — cluster storage backing. Must precede any
+      # PVC-consuming workload (postgres). Codified from the former manual
+      # bootstrap-runbook Phase 5.0 steps; see k8s/local-path-provisioner/prod-1.
+      - kubectl apply -k k8s/local-path-provisioner/prod-1
+      - kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=120s
+      - 'echo "local-path-provisioner up. StorageClass local-path available; local-path-retain comes from the postgres overlay."'
       - helm repo add external-secrets https://charts.external-secrets.io
       - helm repo add grafana https://grafana.github.io/helm-charts
       - helm repo add traefik https://traefik.github.io/charts
