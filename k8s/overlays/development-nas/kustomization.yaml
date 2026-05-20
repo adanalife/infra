@@ -1,9 +1,9 @@
-# Umbrella overlay for stage-1 when the cluster host is on the home LAN.
-# Identical to k8s/overlays/stage-1 except vlc-server uses the NAS-backed
-# dashcam overlay (stage-1-nas) instead of the local hostPath overlay.
+# Umbrella overlay for development when the cluster host is on the home LAN.
+# Identical to k8s/overlays/development except vlc-server uses the NAS-backed
+# dashcam overlay (development-nas) instead of the local hostPath overlay.
 #
-# Apply with: task k8s:stage:apply-nas
-# Use stage-1 (task k8s:stage:apply) when away from the home network.
+# Apply with: task k8s:dev:apply-nas
+# Use development (task k8s:dev:apply) when away from the home network.
 #
 # Prerequisites:
 #   - The NAS share that holds the dashcam footage must be mounted on the
@@ -17,10 +17,10 @@ kind: Kustomization
 
 resources:
   - ../../apps/postgres/overlays/local
-  - ../../apps/tripbot/overlays/stage-1
-  - ../../apps/vlc-server/overlays/stage-1-nas
+  - ../../apps/tripbot/overlays/development
+  - ../../apps/vlc-server/overlays/development-nas
   - ../../apps/obs/overlays/local
 # The cloudflared Deployment (tunnel client for *.whalecore.com) is
-# opt-in — bring it up with `task k8s:stage:tunnel:up`. It lives in
+# opt-in — bring it up with `task k8s:dev:tunnel:up`. It lives in
 # its own `cloudflared` namespace and is no longer part of this
 # umbrella.

@@ -2,9 +2,9 @@
 # CRDs (ClusterSecretStore, ExternalSecret, etc.) are installed by
 # default — no installCRDs flag required on this chart.
 #
-# Shared across stage-1 + prod-1 — the prod-1 Taskfile target uses
+# Shared across development + prod-1 — the prod-1 Taskfile target uses
 # this same file. Per-env config (like the ClusterSecretStore) lives
-# under {stage-1,prod-1}/.
+# under {development,prod-1}/.
 #
 # Defaults are fine for a single-node k3d. Override resource limits
 # if/when this gets ported to a real cluster.

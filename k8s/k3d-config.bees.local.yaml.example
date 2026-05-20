@@ -1,11 +1,11 @@
 # Optional per-machine override for k3d-config.bees.yaml. Copy this file
 # to `k3d-config.bees.local.yaml` (gitignored) and fill in the host-specific
-# NAS bind-mount path. The `k8s:stage:cluster:up` task prefers this file
+# NAS bind-mount path. The `k8s:dev:cluster:up` task prefers this file
 # over the committed `k3d-config.bees.yaml` when it exists.
 #
 # This file must be a full superset of `k3d-config.bees.yaml` — k3d
 # doesn't merge config files. The only intended difference is the
-# additional `/host/nas-dashcam` volume entry used by the stage-1-nas
+# additional `/host/nas-dashcam` volume entry used by the development-nas
 # overlay (vlc-server reads dashcam footage from a host-mounted NAS share).
 #
 # Mount path must be a directory the cluster host's user can read. The

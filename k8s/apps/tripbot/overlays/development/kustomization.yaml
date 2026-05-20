@@ -1,7 +1,7 @@
 # Stage-1 overlay for tripbot. Extends the local overlay (configmap
 # merge, secret patches, sentry + OTLP envFrom) and reroutes the
 # Ingress from `tripbot.localhost` (set by the local overlay's host
-# patch) to `tripbot.stage.whereisdana.today`, with an external-dns
+# patch) to `tripbot.dev.whereisdana.today`, with an external-dns
 # annotation so the platform stack publishes a Route53 record.
 #
 # Today this URL is dormant: external-dns will create the A record
@@ -35,15 +35,15 @@ patches:
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: tripbot.stage.whereisdana.today
+        value: tripbot.dev.whereisdana.today
       - op: add
         path: /metadata/annotations
         value:
-          external-dns.alpha.kubernetes.io/hostname: tripbot.stage.whereisdana.today
+          external-dns.alpha.kubernetes.io/hostname: tripbot.dev.whereisdana.today
           # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
       # - op: add
       #   path: /spec/tls
       #   value:
       #     - hosts:
-      #         - tripbot.stage.whereisdana.today
+      #         - tripbot.dev.whereisdana.today
       #       secretName: tripbot-tls

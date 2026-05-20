@@ -1,5 +1,5 @@
 # Helm values for prometheus-community/prometheus-node-exporter.
-# Shared across stage-1 + prod-1 — same chart, same values, only the
+# Shared across development + prod-1 — same chart, same values, only the
 # install namespace differs (always monitoring-host).
 #
 # Why isolated: node-exporter is the one workload in the monitoring

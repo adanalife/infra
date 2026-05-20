@@ -1,10 +1,10 @@
 # Ingress for the kubernetes-dashboard chart at
-# k8s-dashboard.stage.whereisdana.today. external-dns publishes a
+# k8s-dashboard.dev.whereisdana.today. external-dns publishes a
 # Route53 record (target = host public IPv4 via external-dns
 # --default-targets, set per-machine in values.local.yml).
 #
 # HTTP-only today. cert-manager is installed and proven (the smoke-test
-# Certificate in k8s/cert-manager/stage-1/ issues against LE staging on
+# Certificate in k8s/cert-manager/development/ issues against LE staging on
 # every cluster bring-up). The remaining blocker is the home-network
 # port-forward — once inbound 443 reaches traefik, uncomment the
 # cert-manager.io/cluster-issuer annotation AND the tls: block below to
@@ -23,16 +23,16 @@ metadata:
   name: k8s-dashboard
   namespace: kube-system
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: k8s-dashboard.stage.whereisdana.today
+    external-dns.alpha.kubernetes.io/hostname: k8s-dashboard.dev.whereisdana.today
     # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
 spec:
   ingressClassName: traefik
   # tls:
   #   - hosts:
-  #       - k8s-dashboard.stage.whereisdana.today
+  #       - k8s-dashboard.dev.whereisdana.today
   #     secretName: k8s-dashboard-tls
   rules:
-    - host: k8s-dashboard.stage.whereisdana.today
+    - host: k8s-dashboard.dev.whereisdana.today
       http:
         paths:
           - path: /

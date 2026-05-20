@@ -1,6 +1,6 @@
 # Stage-1 overlay: extends the local overlay (configmap merge,
 # host-access Service, dashcam hostPath) and adds a public Ingress
-# for vlc.stage.whereisdana.today via the platform stack
+# for vlc.dev.whereisdana.today via the platform stack
 # (external-dns + helm-installed traefik).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

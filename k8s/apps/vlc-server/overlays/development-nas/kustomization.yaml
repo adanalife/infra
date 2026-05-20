@@ -1,15 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Extends stage-1 (which extends local), replacing the local hostPath
+# Extends development (which extends local), replacing the local hostPath
 # dashcam volume with one sourced from a host-mounted NAS share.
 # The NAS path is bind-mounted :ro into the k3d node via the gitignored
 # `k3d-config.bees.local.yaml` (see the `.example` for the shape),
 # providing read-only enforcement at two levels: Docker bind mount + volumeMount.
 # Use when the cluster host is on the home LAN with the NAS share mounted.
-# Use stage-1 (task k8s:stage:apply) when away from home.
+# Use development (task k8s:dev:apply) when away from home.
 resources:
-  - ../stage-1
+  - ../development
 
 patches:
   # Replace the hostPath dashcam volume (local overlay, /host/dashcam) with the

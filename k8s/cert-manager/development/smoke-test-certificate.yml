@@ -22,4 +22,4 @@ spec:
     name: letsencrypt-staging-route53
     kind: ClusterIssuer
   dnsNames:
-    - cert-test.stage.whereisdana.today
+    - cert-test.dev.whereisdana.today

@@ -1,6 +1,6 @@
 # Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
 # in-cluster collectors that fill the dashboards landed in
-# terraform/stage-1/grafana-dashboards/:
+# terraform/development/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
@@ -19,7 +19,7 @@
 # is enough to pick up new tokens without redeploying the chart.
 
 cluster:
-  name: stage-1
+  name: development
 
 destinations:
   metrics:
@@ -84,7 +84,7 @@ clusterMetrics:
         - kube_namespace_created
 
 # hostMetrics scrapes node-exporter — which is installed separately
-# in the `monitoring-host` namespace (see Taskfile k8s:stage:platform:up
+# in the `monitoring-host` namespace (see Taskfile k8s:dev:platform:up
 # and k8s/monitoring/host-namespace.yml). hostMetrics's annotation-based
 # discovery picks up the prometheus.io/scrape-annotated node-exporter
 # pods across namespaces.

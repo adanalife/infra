@@ -10,7 +10,7 @@
 # cross-env-shared). Future cross-cutting observability secrets land
 # here too.
 #
-# Applied via each env's umbrella overlay (`k8s/overlays/{stage-1,prod-1}`),
+# Applied via each env's umbrella overlay (`k8s/overlays/{development,prod-1}`),
 # so a cluster bring-up via `task k8s:{stage,prod}:apply` always brings
 # these along. No per-env overlay is needed — SM container names are
 # identical across envs, and the ClusterSecretStore env-routes via the

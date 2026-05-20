@@ -152,7 +152,7 @@ tasks:
           --format='value(keyString)' \
           --quiet
 
-  # k3d cluster lifecycle. Tasks are env-prefixed (k8s:stage:* / k8s:prod:*)
+  # k3d cluster lifecycle. Tasks are env-prefixed (k8s:dev:* / k8s:prod:*)
   # following the tf:stage:* / tf:prod:* pattern; the cluster name embedded
   # in each k3d-config is host-based (adanalife-bees, adanalife-empty) so
   # the cluster identity survives any future env-reassignment.
@@ -164,8 +164,8 @@ tasks:
   #   start   → resume a stopped cluster (counterpart to stop)
   #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
   #             deployed" sequence; each step delegates to its canonical task
-  k8s:stage:cluster:up:
-    desc: "create the local k3d cluster on bees (stage-1) — prefers k8s/k3d-config.bees.local.yaml if present, else falls back to k8s/k3d-config.bees.yaml"
+  k8s:dev:cluster:up:
+    desc: "create the local k3d cluster on bees (development) — prefers k8s/k3d-config.bees.local.yaml if present, else falls back to k8s/k3d-config.bees.yaml"
     cmds:
       # Prefer the gitignored local override (which adds host-specific
       # bind-mounts like the NAS dashcam share) when it exists; otherwise
@@ -181,27 +181,27 @@ tasks:
           k3d cluster create -c k8s/k3d-config.bees.yaml
         fi
 
-  k8s:stage:cluster:down:
-    desc: tear down the local k3d cluster on bees (delete; use k8s:stage:cluster:stop to suspend without wipe)
+  k8s:dev:cluster:down:
+    desc: tear down the local k3d cluster on bees (delete; use k8s:dev:cluster:stop to suspend without wipe)
     cmds:
       - k3d cluster delete adanalife-bees
 
-  k8s:stage:cluster:stop:
+  k8s:dev:cluster:stop:
     desc: suspend the local k3d cluster on bees (containers down, cluster definition + state preserved)
     cmds:
       - k3d cluster stop adanalife-bees
 
-  k8s:stage:cluster:start:
-    desc: resume a stopped local k3d cluster on bees (counterpart to k8s:stage:cluster:stop)
+  k8s:dev:cluster:start:
+    desc: resume a stopped local k3d cluster on bees (counterpart to k8s:dev:cluster:stop)
     cmds:
       - k3d cluster start adanalife-bees
 
-  k8s:stage:cluster:rebuild:
-    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + stage-1 app manifests. Each step is the canonical task; failures short-circuit the chain.
+  k8s:dev:cluster:rebuild:
+    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + development app manifests. Each step is the canonical task; failures short-circuit the chain.
     cmds:
-      - task: k8s:stage:cluster:up
-      - task: k8s:stage:platform:up
-      - task: k8s:stage:apply
+      - task: k8s:dev:cluster:up
+      - task: k8s:dev:platform:up
+      - task: k8s:dev:apply
 
   k8s:prod:cluster:up:
     desc: create the local k3d cluster on empty (prod-1)
@@ -291,15 +291,15 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/local
 
-  k8s:stage:apply:
-    desc: apply stage-1 overlay (apps only — bring up cloudflared separately via k8s:stage:tunnel:up)
+  k8s:dev:apply:
+    desc: apply development overlay (apps only — bring up cloudflared separately via k8s:dev:tunnel:up)
     cmds:
-      - kubectl apply -k k8s/overlays/stage-1
+      - kubectl apply -k k8s/overlays/development
 
-  k8s:stage:apply-nas:
-    desc: "apply stage-1-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires the NAS share to be mounted on the cluster host per k3d-config.bees.local.yaml and the cluster rebuilt with that override)"
+  k8s:dev:apply-nas:
+    desc: "apply development-nas overlay — vlc-server reads dashcam from NAS via /host/nas-dashcam (home network only; requires the NAS share to be mounted on the cluster host per k3d-config.bees.local.yaml and the cluster rebuilt with that override)"
     cmds:
-      - kubectl apply -k k8s/overlays/stage-1-nas
+      - kubectl apply -k k8s/overlays/development-nas
 
   k8s:prod:apply:
     desc: apply prod-1 overlay (shared-secrets + postgres + vlc-server; tripbot/obs added when their prod-1 overlays land)
@@ -307,16 +307,16 @@ tasks:
       - kubectl apply -k k8s/overlays/prod-1
 
   # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
-  # nor `k8s:stage:apply`. Brings up the `cloudflared` namespace, seeds
+  # nor `k8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
   # the tunnel-token Secret from terraform output, and applies the
   # Deployment in one gesture.
   #
-  # **stage-1 only** — there is no tunnel in prod-1.
+  # **development only** — there is no tunnel in prod-1.
   #
   # The status check makes re-runs cheap (no aws-vault / keybase
-  # reprompt). `task --force k8s:stage:tunnel:up` force-rotates the
+  # reprompt). `task --force k8s:dev:tunnel:up` force-rotates the
   # token if the underlying tunnel is recreated.
-  k8s:stage:tunnel:up:
+  k8s:dev:tunnel:up:
     desc: bring up the cloudflared tunnel client (namespace + token Secret + Deployment)
     status:
       - kubectl get secret cloudflared-secret -n cloudflared >/dev/null 2>&1
@@ -327,7 +327,7 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
+        msg: "no reachable cluster — run `task k8s:dev:cluster:up` first"
     cmds:
       # Ensure namespace exists before the secret lands in it. The
       # kustomize apply below also declares the namespace; this is
@@ -345,12 +345,12 @@ tasks:
             --dry-run=client -o yaml | kubectl apply -f -
           echo "applied cloudflared-secret Secret to cloudflared namespace"
         fi
-      - kubectl apply -k k8s/platform/cloudflared/overlays/stage-1
+      - kubectl apply -k k8s/platform/cloudflared/overlays/development
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/cloudflared -n cloudflared
       - echo "cloudflared up. Tunnel routes (terraform/stage-1/cloudflare-tunnel.tf) now have a client."
 
-  k8s:stage:tunnel:down:
+  k8s:dev:tunnel:down:
     desc: tear down the cloudflared tunnel client (Deployment + Secret + namespace)
     preconditions:
       - sh: command -v kubectl >/dev/null
@@ -361,7 +361,7 @@ tasks:
       # Deleting the namespace via the kustomize manifest sweeps the
       # Deployment and the out-of-band Secret with it. --ignore-not-found
       # keeps the task idempotent across repeat runs.
-      - kubectl delete -k k8s/platform/cloudflared/overlays/stage-1 --ignore-not-found
+      - kubectl delete -k k8s/platform/cloudflared/overlays/development --ignore-not-found
 
   # Bootstrap the cluster Secrets that don't survive a recreate but
   # have to exist before the platform stack can come up:
@@ -370,7 +370,7 @@ tasks:
   #     IAM access key for ESO to read SM. PGP-decrypted via keybase.
   #
   # The cloudflared tunnel token is bootstrapped separately by
-  # `k8s:stage:tunnel:up` so the tunnel stays opt-in (it's stage-1
+  # `k8s:dev:tunnel:up` so the tunnel stays opt-in (it's development-env-only
   # only and will eventually be retired in favor of the
   # external-dns/traefik HTTPS path).
   #
@@ -383,11 +383,11 @@ tasks:
   # Used as a dep by `k8s:<env>:platform:up` so the platform stack always
   # has its credentials, but the inner status checks make repeat runs
   # cheap (no aws-vault / keybase reprompt when nothing's missing).
-  k8s:stage:bootstrap-secrets:
-    desc: apply stage-1 ESO bootstrap Secret + write external-dns values.local.yml (no plaintext on disk)
+  k8s:dev:bootstrap-secrets:
+    desc: apply development ESO bootstrap Secret + write external-dns values.local.yml (no plaintext on disk)
     status:
       - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
-      - test -f k8s/external-dns/stage-1/values.local.yml
+      - test -f k8s/external-dns/development/values.local.yml
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault` (see infra/README.md)"
@@ -398,7 +398,7 @@ tasks:
       - sh: command -v curl >/dev/null
         msg: "curl not found — required to fetch host public IP for external-dns default-targets"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
+        msg: "no reachable cluster — run `task k8s:dev:cluster:up` first"
     cmds:
       # eso-aws-credentials: ESOSecretsReader access key for ESO.
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
@@ -423,9 +423,9 @@ tasks:
       # external-dns.alpha.kubernetes.io/target annotation resolves to
       # this machine. File-based (not a Secret) because helm values are
       # consumed at chart install, not at pod runtime — re-run this
-      # task and `task k8s:stage:platform:up` after a home-IP rotation.
+      # task and `task k8s:dev:platform:up` after a home-IP rotation.
       - |
-        values_file=k8s/external-dns/stage-1/values.local.yml
+        values_file=k8s/external-dns/development/values.local.yml
         if [ -f "$values_file" ]; then
           echo "$values_file already present, skipping"
         else
@@ -434,9 +434,9 @@ tasks:
           # addresses, and ifconfig.me prefers v6 when the host has it.
           ip=$(curl -4 -fsS ifconfig.me)
           cat > "$values_file" <<YAML
-        # Generated by \`task k8s:stage:bootstrap-secrets\` — host public IP
+        # Generated by \`task k8s:dev:bootstrap-secrets\` — host public IP
         # snapshot for external-dns --default-targets. Re-run the task
-        # after an IP rotation, then \`task k8s:stage:platform:up\` to roll
+        # after an IP rotation, then \`task k8s:dev:platform:up\` to roll
         # the chart with the new value.
         #
         # --force-default-targets is required because traefik writes
@@ -539,18 +539,18 @@ tasks:
   # A smoke-test Certificate (cert-test.<env>.whereisdana.today, LE
   # staging) ships in the cert-manager kustomize so the pipeline is
   # exercised even before any app Ingress requests a cert.
-  k8s:stage:platform:up:
+  k8s:dev:platform:up:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the bees cluster
-    deps: [k8s:stage:bootstrap-secrets]
+    deps: [k8s:dev:bootstrap-secrets]
     preconditions:
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:stage:cluster:up` first"
-      - sh: test -f k8s/external-dns/stage-1/values.local.yml
-        msg: "k8s/external-dns/stage-1/values.local.yml missing — run `task k8s:stage:bootstrap-secrets` first"
+        msg: "no reachable cluster — run `task k8s:dev:cluster:up` first"
+      - sh: test -f k8s/external-dns/development/values.local.yml
+        msg: "k8s/external-dns/development/values.local.yml missing — run `task k8s:dev:bootstrap-secrets` first"
     cmds:
       - helm repo add external-secrets https://charts.external-secrets.io
       - helm repo add grafana https://grafana.github.io/helm-charts
@@ -561,13 +561,13 @@ tasks:
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
-          -f k8s/external-secrets/stage-1/values.yml
+          -f k8s/external-secrets/development/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
-      - kubectl apply -k k8s/external-secrets/stage-1
+      - kubectl apply -k k8s/external-secrets/development
       - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
@@ -575,25 +575,25 @@ tasks:
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/traefik -n kube-system
       - 'echo "Traefik up. App Ingresses (ingressClassName=traefik) will route through this."'
-      - kubectl apply -k k8s/external-dns/stage-1
+      - kubectl apply -k k8s/external-dns/development
       - kubectl wait --for=condition=Ready --timeout=120s
           externalsecret/external-dns-aws-credentials -n kube-system
       - helm upgrade --install external-dns external-dns/external-dns
           -n kube-system
-          -f k8s/external-dns/stage-1/config.yml
-          -f k8s/external-dns/stage-1/values.local.yml
+          -f k8s/external-dns/development/config.yml
+          -f k8s/external-dns/development/values.local.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns -n kube-system
       - 'echo "external-dns up. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
       - helm upgrade --install cert-manager jetstack/cert-manager
           -n kube-system
-          -f k8s/cert-manager/stage-1/config.yml
+          -f k8s/cert-manager/development/config.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment -n kube-system -l app.kubernetes.io/instance=cert-manager
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clusterissuers.cert-manager.io
           crd/certificates.cert-manager.io
-      - kubectl apply -k k8s/cert-manager/stage-1
+      - kubectl apply -k k8s/cert-manager/development
       - kubectl wait --for=condition=Ready --timeout=120s
           externalsecret/cert-manager-aws-credentials -n kube-system
       - 'echo "cert-manager up. Annotate an Ingress with cert-manager.io/cluster-issuer=letsencrypt-staging-route53 to request a cert."'
@@ -604,7 +604,7 @@ tasks:
       # kubectl (not kustomize) because env-specific kustomizations
       # can't reference a shared file outside their directory.
       - kubectl apply -f k8s/monitoring/host-namespace.yml
-      - kubectl apply -k k8s/monitoring/stage-1
+      - kubectl apply -k k8s/monitoring/development
       - helm upgrade --install node-exporter prometheus-community/prometheus-node-exporter
           -n monitoring-host
           -f k8s/monitoring/node-exporter/values.yml
@@ -623,11 +623,11 @@ tasks:
           || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
-          -f k8s/monitoring/stage-1/values.yml
+          -f k8s/monitoring/development/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
-  # KEEP-IN-SYNC with k8s:stage:platform:up; structural changes should
+  # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
   # mirror to both unless deliberately env-specific.
   k8s:prod:platform:up:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the empty cluster
@@ -657,7 +657,7 @@ tasks:
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
-          -f k8s/external-secrets/stage-1/values.yml
+          -f k8s/external-secrets/development/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
       - kubectl wait --for=condition=Established --timeout=60s
@@ -854,7 +854,7 @@ tasks:
   # host-access LoadBalancer overlays (k8s/apps/{obs,vlc-server}/overlays/local)
   # already expose VNC at host ports 5902 / 5903 via klipper-lb when the
   # local overlay is applied — these tasks are the cluster-agnostic
-  # alternative when that overlay isn't in play (e.g. on stage-1, or
+  # alternative when that overlay isn't in play (e.g. on development, or
   # when iterating without applying the local overlay). Backgrounded
   # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
   # find it. Re-running :up overwrites the PID file; if :down can't
@@ -1002,8 +1002,8 @@ tasks:
   # The :db:* tasks open kubectl port-forwards to the cluster Postgres
   # (a headless ClusterIP, otherwise unreachable from outside the cluster) —
   # primarily for the auth-bootstrap CLI and psql poking.
-  tripbot:stage:db:up:
-    desc: start a local kubectl port-forward to the stage cluster Postgres at localhost:5432
+  tripbot:dev:db:up:
+    desc: start a local kubectl port-forward to the development cluster Postgres at localhost:5432
     aliases: [tripbot:db:up]
     cmds:
       - mkdir -p /tmp/adanalife-tasks
@@ -1011,8 +1011,8 @@ tasks:
       - echo $! > /tmp/adanalife-tasks/tripbot-db.pid
       - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
 
-  tripbot:stage:db:down:
-    desc: stop the local kubectl port-forward to the stage cluster Postgres
+  tripbot:dev:db:down:
+    desc: stop the local kubectl port-forward to the development cluster Postgres
     aliases: [tripbot:db:down]
     cmds:
       - |
@@ -1024,11 +1024,11 @@ tasks:
           echo "No tripbot Postgres port-forward PID file found — nothing to stop"
         fi
 
-  tripbot:stage:db:seed:
+  tripbot:dev:db:seed:
     desc: run the one-shot DB seed Job in the stage cluster; idempotent — skips if videos table already has real rows
     aliases: [tripbot:db:seed]
     cmds:
-      - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
+      - kubectl apply -k k8s/apps/tripbot/overlays/development
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
@@ -1042,12 +1042,12 @@ tasks:
         fi
       - kubectl logs job/tripbot-seed
 
-  tripbot:stage:auth:bootstrap:
-    desc: run the interactive Twitch OAuth bootstrap job against stage-1; port-forwards 8080 so the browser callback reaches the pod
+  tripbot:dev:auth:bootstrap:
+    desc: run the interactive Twitch OAuth bootstrap job against development; port-forwards 8080 so the browser callback reaches the pod
     aliases: [tripbot:auth:bootstrap]
     cmds:
       - kubectl delete job tripbot-auth-bootstrap --ignore-not-found
-      - kubectl apply -k k8s/apps/tripbot/overlays/stage-1
+      - kubectl apply -k k8s/apps/tripbot/overlays/development
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap

@@ -1,10 +1,10 @@
-# Umbrella overlay for the "stage-1 mode" — the local k3d cluster
+# Umbrella overlay for the "development mode" — the local k3d cluster
 # wired to a public Cloudflare Tunnel for *.whalecore.com plus
-# external-dns + traefik for *.stage.whereisdana.today. `kubectl apply
-# -k k8s/overlays/stage-1` brings up the four-app stack.
+# external-dns + traefik for *.dev.whereisdana.today. `kubectl apply
+# -k k8s/overlays/development` brings up the four-app stack.
 #
 # vlc-server and tripbot have graduated into their own
-# apps/<app>/overlays/stage-1 so they can carry public Ingresses.
+# apps/<app>/overlays/development so they can carry public Ingresses.
 # postgres + obs continue to reuse their local overlays — postgres
 # stays internal, obs only needs VNC port-forward access for now.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -16,14 +16,14 @@ resources:
   # See vault/decisions/shared-secrets-not-owned-by-workload.md.
   - ../../shared-secrets/base
   - ../../apps/postgres/overlays/local
-  - ../../apps/tripbot/overlays/stage-1
-  - ../../apps/vlc-server/overlays/stage-1
+  - ../../apps/tripbot/overlays/development
+  - ../../apps/vlc-server/overlays/development
   - ../../apps/obs/overlays/local
-# Traefik is installed via helm by `task k8s:stage:platform:up` — see
+# Traefik is installed via helm by `task k8s:dev:platform:up` — see
 # k8s/traefik/values.yml. Dashboard is reachable via port-forward
 # only; not exposed through the Cloudflare Tunnel.
 #
 # The cloudflared Deployment (tunnel client for *.whalecore.com) is
-# opt-in — bring it up with `task k8s:stage:tunnel:up`. It lives in
+# opt-in — bring it up with `task k8s:dev:tunnel:up`. It lives in
 # its own `cloudflared` namespace and is no longer part of this
 # umbrella.

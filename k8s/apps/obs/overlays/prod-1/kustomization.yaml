@@ -24,7 +24,7 @@ resources:
 # entrypoint default — the manifest tells the full story.
 #
 # OBS_STREAM_ENCODER=ffmpeg_vaapi opts this overlay into VAAPI
-# hardware encode via the iGPU. Entrypoint default is x264 so stage-1
+# hardware encode via the iGPU. Entrypoint default is x264 so development
 # (k3d on a Mac laptop, no /dev/dri) stays on software encode without
 # surprise.
 configMapGenerator:
