@@ -31,6 +31,19 @@ configMapGenerator:
       # Override the local overlay's stage-1 tag — see that overlay for
       # why this exists.
       - SENTRY_ENVIRONMENT=prod-1
+      # Hardware-accelerated continuous output to smooth clip transitions.
+      # VLC_SOUT_TRANSCODE wraps the rtp leg in a libavcodec h264_vaapi
+      # transcode stage; with :sout-keep the encoder stays warm across
+      # libvlc input changes so OBS doesn't see a clip-boundary
+      # disconnect/reconnect. Pinned VLC_AVCODEC_HW=vaapi (default "any")
+      # so a missing/unreachable VAAPI device fails loudly instead of
+      # silently dropping to software — the same silent-fallback class
+      # that bit the OBS encoder in tripbot#584. The iGPU reaches libvlc
+      # via the Intel device plugin (gpu.intel.com/i915 request in base,
+      # /dev/dri/renderD128). Needs a tripbot image with VLC_SOUT_TRANSCODE
+      # support (adanalife/tripbot#615).
+      - VLC_SOUT_TRANSCODE=true
+      - VLC_AVCODEC_HW=vaapi
 
 patches:
   # Mount the dashcam NFS PVC at the corpus path.
