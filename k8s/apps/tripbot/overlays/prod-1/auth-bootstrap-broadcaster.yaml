@@ -1,26 +1,18 @@
-# Standalone prod-1 auth-bootstrap Job for the BOT account. Applied via
-# `task tripbot:prod:auth:bootstrap:bot` — NOT part of the prod-1
-# umbrella overlay because this is a one-shot interactive workflow that
-# shouldn't run on every `task k8s:prod:apply` (it'd burn its 5-minute
-# Twitch-callback timeout each time).
+# Standalone prod-1 auth-bootstrap Job for the BROADCASTER account
+# (adanalife_). Applied via `task tripbot:prod:auth:bootstrap:broadcaster`.
+# Sibling of auth-bootstrap.yaml (the bot leg) — see that file for the
+# umbrella-overlay rationale and the env-literal mirror-the-ConfigMap
+# convention.
 #
-# The broadcaster account has its own sibling Job
-# (auth-bootstrap-broadcaster.yaml) — both must be bootstrapped for
-# subscriber/follower polling + real-time EventSub to work.
-#
-# Config flows via direct env: entries rather than envFrom configMapRef
-# so the manifest can be applied with raw `kubectl apply -f` — the
-# kustomize-generated ConfigMap (tripbot-config-<hash>) wouldn't resolve
-# in that path. ESO-materialized Secrets keep their declared names, so
-# envFrom secretRef works without hash gymnastics.
-#
-# The env: literals here are kept in sync with the prod-1 ConfigMap
-# merge in kustomization.yaml by convention — both need to change
-# together for values like CHANNEL_NAME or BOT_USERNAME.
+# The broadcaster leg requests BroadcasterScopes
+# (channel:read:subscriptions, moderator:read:followers,
+# user:edit:broadcast) and writes a row keyed by CHANNEL_NAME
+# (adanalife_) to oauth_tokens. cmd/auth-bootstrap's identity check
+# refuses to write the row if the wrong account signs in.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tripbot-auth-bootstrap-bot
+  name: tripbot-auth-bootstrap-broadcaster
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 600
@@ -32,7 +24,7 @@ spec:
           image: adanalife/tripbot:latest
           imagePullPolicy: Always
           command: ["/usr/local/bin/auth-bootstrap"]
-          args: ["--account=bot"]
+          args: ["--account=broadcaster"]
           ports:
             - containerPort: 8080
           env:
