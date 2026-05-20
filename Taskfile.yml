@@ -733,7 +733,7 @@ tasks:
   # obs-secret is `optional: true`, so the existence + content of that
   # Secret IS the stream state. The `:on` tasks pull the STREAM_KEY
   # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and create
-  # the Secret; `obs:stream:off` deletes it. Either way we
+  # the Secret; the `:off` tasks delete it. Either way we
   # rollout-restart obs so the entrypoint re-reads STREAM_KEY at boot
   # — Kubernetes doesn't propagate Secret changes to running pods'
   # env vars.
@@ -741,13 +741,13 @@ tasks:
   # `:on` is env-prefixed (obs:{stage,prod}:stream:on) because the key
   # is sourced from a specific AWS account, NOT from whatever cluster
   # kubectl points at — the AWS profile is the targeting, so it must be
-  # explicit. `obs:stream:off` stays un-prefixed: it only deletes the
-  # local obs-secret in the current context and touches no AWS account.
+  # explicit, and the final echo surfaces both the source profile and
+  # the live kubectl context so a cluster/key mismatch is visible.
   #
-  # The two `:on` tasks always source from their named account, so the
-  # operator picks the channel by picking the task — and the final echo
-  # surfaces both the source profile and the live kubectl context so a
-  # cluster/key mismatch is visible.
+  # `:off` is exposed under both env namespaces for symmetry, but the
+  # work is env-agnostic (it only deletes the current cluster's
+  # obs-secret — no AWS account), so both delegate to one shared
+  # internal task.
   obs:stage:stream:on:
     desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
     preconditions:
@@ -794,19 +794,35 @@ tasks:
       - kubectl rollout status deploy/obs --timeout=120s
       - 'echo "OBS streaming — key from adanalife-prod SM; kubectl context: $(kubectl config current-context)"'
 
-  obs:stream:off:
-    desc: disable Twitch streaming on OBS (deletes obs-secret, restarts OBS to idle)
+  # Stop streaming, keep OBS running. Deletes obs-secret and restarts
+  # the pod so it boots in idle (VNC-only) mode — the container stays
+  # up, only the Twitch publish stops. Exposed under both env
+  # namespaces for symmetry with the `:on` tasks; the work is
+  # env-agnostic (no AWS account — it only touches the local cluster's
+  # obs-secret), so both delegate to one shared implementation.
+  obs:stage:stream:off:
+    desc: "stop OBS streaming on the current cluster (OBS stays up in idle/VNC mode)"
+    cmds:
+      - task: obs:stream:off:_run
+
+  obs:prod:stream:off:
+    desc: "stop OBS streaming on the current cluster (OBS stays up in idle/VNC mode)"
+    cmds:
+      - task: obs:stream:off:_run
+
+  obs:stream:off:_run:
+    internal: true
     preconditions:
       - sh: command -v kubectl >/dev/null
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster"
+        msg: "no reachable cluster — point kubectl at the target cluster first"
       - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found"
+        msg: "obs Deployment not found in the current context"
     cmds:
       - kubectl delete secret obs-secret --ignore-not-found
       - kubectl rollout restart deploy/obs
       - kubectl rollout status deploy/obs --timeout=120s
-      - echo "OBS idle (not streaming)"
+      - 'echo "OBS idle (not streaming) — container still up; kubectl context: $(kubectl config current-context)"'
 
   k8s:logs:
     desc: tail logs across all app pods
