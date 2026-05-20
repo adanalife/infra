@@ -31,13 +31,21 @@ resources:
   - ../../apps/tripbot/overlays/stage-1
 
 patches:
-  # Env-route every ExternalSecret in the stage stack to the stage account
-  # via the namespace-locked aws-secretsmanager-stage store. Covers the
-  # base twitch/maps secrets, the shared OTLP/Sentry secrets, and the
-  # postgres + tripbot DB secrets — all in one place, so the underlying
-  # files stay identical to prod-1.
+  # Env-route the SHARED, store-agnostic ExternalSecrets to the stage
+  # account. These five live in dirs reused verbatim across environments
+  # (shared-secrets/base + tripbot/base), so they hardcode the prod store
+  # name `aws-secretsmanager` and can't be edited per-env without a fork.
+  # This patch repoints exactly them — by name — to the namespace-locked
+  # stage store. The stage-OWNED ExternalSecrets (postgres-credentials,
+  # tripbot-database-creds) already name aws-secretsmanager-stage directly
+  # in their own files, so they're not touched here.
+  #
+  # (The cleaner end state — namespaced SecretStores sharing one name, so
+  # no file names a store-per-env and this patch disappears — is deferred
+  # to the prod-namespace-move / mini-reset phase. See infra TODO.)
   - target:
       kind: ExternalSecret
+      name: ^(grafana-cloud-otlp|sentry-tripbot|sentry-vlc-server|tripbot-twitch-creds|tripbot-google-maps-api-key)$
     patch: |-
       - op: replace
         path: /spec/secretStoreRef/name
