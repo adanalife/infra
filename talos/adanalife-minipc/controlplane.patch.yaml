@@ -19,12 +19,12 @@
 # Hostname is set via the HostnameConfig sub-resource (Talos 1.13+ pattern).
 # Setting machine.network.hostname in v1alpha1 conflicts with HostnameConfig.
 #
-# Disk encryption + KubeSpan are creation-time features — they take effect on a
-# wipe-reinstall (talosctl reset + apply-config), NOT when patched onto the
-# already-running node. Both were added 2026-05-20 ahead of the first planned
-# wipe-and-rebuild. Cilium (cni.name=none + proxy.disabled) is deliberately NOT
-# here yet — deferred to a follow-up wipe once the base rebuild is green, so the
-# CNI swap is isolated as its own variable.
+# KubeSpan is a creation-time feature — it takes effect on a wipe-reinstall
+# (apply-config), not when patched onto the running node. Added 2026-05-20.
+# Disk encryption was attempted here too but DEFERRED (see the note below — it
+# needs a SecureBoot image). Cilium (cni.name=none + proxy.disabled) is likewise
+# NOT here yet — deferred to a follow-up wipe once the base rebuild is green, so
+# the CNI swap is isolated as its own variable.
 
 machine:
   install:
@@ -40,28 +40,15 @@ machine:
     # the public internet with no firewall config). Requires cluster.discovery.
     kubespan:
       enabled: true
-  # TPM-sealed LUKS2 encryption (MS-01 Intel PTT/fTPM). Encrypts STATE (machine
-  # config + secrets) and EPHEMERAL (containerd state, pod logs, and the
-  # local-path PVCs — including postgres). Transparent at runtime; a powered-off
-  # disk pulled from the box is just ciphertext.
-  #
-  # Caveats (documented in the bootstrap runbook Phase 3.x):
-  #   - Install-time only — applies on the wipe-reinstall, not the running node.
-  #   - TPM-sealed keys break if the TPM is cleared or firmware/PCR state shifts
-  #     significantly. Recovery is non-catastrophic here: STATE re-applies from
-  #     the SOPS-stashed config, EPHEMERAL/postgres restores from the S3 dump.
-  #     The first wipe is where we confirm the keys survive a `talosctl reset`.
-  systemDiskEncryption:
-    state:
-      provider: luks2
-      keys:
-        - slot: 0
-          tpm: {}
-    ephemeral:
-      provider: luks2
-      keys:
-        - slot: 0
-          tpm: {}
+  # Disk encryption DEFERRED (2026-05-20). TPM-sealed LUKS2 (systemDiskEncryption
+  # with `tpm: {}`) requires a Talos SecureBoot image: it needs the PCR signing
+  # key at /.extra/tpm2-pcr-public-key.pem, which only ships in SecureBoot
+  # installers. On the standard image the STATE volume fails to format
+  # ("failed to read pcr signing public key") and the node loops at "Installing"
+  # — hit empirically on the first wipe. Re-add once we move to a SecureBoot
+  # image + UEFI Secure Boot (+ key enrollment). Until then, at-rest protection
+  # is physical security; the S3 postgres dump + the SOPS-stashed PKI are the
+  # recovery path. Follow-up tracked in vault/infra/TODO.md.
 
 cluster:
   allowSchedulingOnControlPlanes: true
