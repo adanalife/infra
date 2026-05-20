@@ -939,6 +939,57 @@ tasks:
           echo "No vlc-server VNC port-forward PID file found — nothing to stop"
         fi
 
+  # Talos PKI (adanalife-minipc). The generated machine configs + talosconfig
+  # hold the cluster CA key, bootstrap/trustd tokens, and etcd encryption
+  # secrets. They're SOPS-encrypted with the prod-1 KMS key
+  # (alias/sops-talos-pki, terraform/prod-1/sops.tf) and committed as
+  # talos/adanalife-minipc/*.sops.yaml; the plaintext stays gitignored.
+  # Bootstrap order + full workflow: vault/infra/adanalife-minipc-bootstrap.md
+  # Phase 4. Encrypted as opaque binary blobs because the configs are
+  # multi-document YAML (sops's native YAML store doesn't handle multi-doc).
+  talos:minipc:secrets:decrypt:
+    desc: decrypt the SOPS-sealed adanalife-minipc Talos PKI into gitignored plaintext
+    dir: talos/adanalife-minipc
+    preconditions:
+      - sh: command -v sops >/dev/null
+        msg: "sops not found — install with `brew install sops`"
+    cmds:
+      # Decrypt reads the KMS key ARN from each file's sops metadata — no
+      # terraform output or --kms needed, so this works on a fresh checkout.
+      - |
+        aws-vault exec adanalife-prod -- bash -c '
+          set -euo pipefail
+          for pair in "controlplane.sops.yaml:controlplane.yaml" "worker.sops.yaml:worker.yaml" "talosconfig.sops.yaml:talosconfig"; do
+            src=${pair%%:*}; dst=${pair##*:}
+            sops -d --output-type binary "$src" > "$dst"
+          done
+          chmod 600 controlplane.yaml worker.yaml talosconfig
+        '
+      - 'echo "Talos PKI decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step (runbook Phase 4) before apply-config."'
+
+  talos:minipc:secrets:encrypt:
+    desc: re-seal the adanalife-minipc Talos PKI to SOPS after regenerating/rotating it
+    dir: talos/adanalife-minipc
+    preconditions:
+      - sh: command -v sops >/dev/null
+        msg: "sops not found — install with `brew install sops`"
+      - sh: test -f controlplane.yaml && test -f worker.yaml && test -f talosconfig
+        msg: "plaintext Talos PKI not present in talos/adanalife-minipc — nothing to encrypt"
+    cmds:
+      # Sources the KMS key ARN from terraform output (key must already be
+      # applied via `task tf:prod:apply`). --input-type binary treats each
+      # file as one opaque blob, sidestepping the multi-doc-YAML limitation.
+      - |
+        aws-vault exec adanalife-prod -- bash -c '
+          set -euo pipefail
+          kms=$(terraform -chdir=../../terraform/prod-1 output -raw sops_talos_kms_key_arn)
+          for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml"; do
+            src=${pair%%:*}; dst=${pair##*:}
+            sops -e --input-type binary --output-type yaml --kms "$kms" "$src" > "$dst"
+          done
+        '
+      - 'echo "Talos PKI re-sealed to *.sops.yaml. Commit the updated encrypted files."'
+
   talos:minipc:dashboard:
     desc: open the talosctl TUI dashboard against the minipc node
     cmds:

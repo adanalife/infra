@@ -1,10 +1,15 @@
 # Generated Talos machine configs contain PKI material (CA private key,
-# bootstrap token, encryption secrets) — never commit them as-is.
-# See controlplane.patch.yaml for the non-secret machine config we DO commit.
+# bootstrap token, encryption secrets) — never commit them as plaintext.
 #
-# TODO: replace this gitignore-based approach with SOPS-encrypted committed
-# configs, or a Secrets Manager round-trip per
-# vault/decisions/secrets-manager-for-tf-providers.md
+# These are SOPS-encrypted (prod-1 KMS key alias/sops-talos-pki) and the
+# encrypted *.sops.yaml versions ARE committed — see terraform/prod-1/sops.tf
+# and `task talos:minipc:secrets:{encrypt,decrypt}`. The plaintext below stays
+# local-only; regenerate it on a fresh checkout with
+# `task talos:minipc:secrets:decrypt`.
+#
+# controlplane.patch.yaml (the non-secret machine config patch) is committed
+# separately. controlplane.patched.yaml is derived (controlplane.yaml + that
+# patch) so it's gitignored too — regenerate via the runbook Phase 4 step.
 controlplane.yaml
 worker.yaml
 controlplane.patched.yaml
@@ -13,8 +18,6 @@ talosconfig
 secrets.yaml
 
 # Local backup patterns (zip archives, "copy of" folders, .bak files).
-# Dana keeps off-laptop backups of the secret-bearing files until the
-# proper SOPS/Secrets-Manager stash lands.
 *.zip
 *.bak
 * copy/
