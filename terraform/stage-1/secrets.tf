@@ -289,6 +289,13 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
   name        = "k8s/obs/twitch-stream-key"
   description = "Twitch RTMP stream key for adanalife_staging. Consumed by OBS via ESO. Rotate from the Twitch dashboard, then put-secret-value here."
 
+  # Same SM name lives in both the stage-1 and prod-1 accounts; the
+  # Environment tag is what tells them apart when both clusters run on
+  # the same host. The name stays env-neutral by deliberate choice.
+  tags = {
+    Environment = "stage-1"
+  }
+
   # CI-driven applies need the lifecycle policy attached to CITerraformRole
   # before AWS will accept CreateSecret on this ARN. Local applies (admin role)
   # don't care, but the explicit ordering is required for a CI bootstrap to

@@ -212,6 +212,13 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
   name        = "k8s/obs/twitch-stream-key"
   description = "Twitch RTMP stream key for adanalife (production). Consumed by OBS via ESO. Rotate from the Twitch dashboard, then put-secret-value here."
 
+  # Same SM name lives in both the stage-1 and prod-1 accounts; the
+  # Environment tag is what tells them apart when both clusters run on
+  # the same host. The name stays env-neutral by deliberate choice.
+  tags = {
+    Environment = "prod-1"
+  }
+
   depends_on = [aws_iam_role_policy_attachment.ci_terraform_twitch_stream_key_manage]
 }
 
