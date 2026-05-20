@@ -748,8 +748,15 @@ tasks:
   # work is env-agnostic (it only deletes the current cluster's
   # obs-secret — no AWS account), so both delegate to one shared
   # internal task.
+  # NAMESPACE defaults to `default` (where prod-1 lives today). Once
+  # stage-1 and prod-1 co-tenant on the one mini-PC cluster in their own
+  # namespaces, run with NAMESPACE=stage-1 / NAMESPACE=prod-1 (or flip
+  # the per-task defaults below) so the obs-secret + rollout land in the
+  # right env's namespace instead of whatever the kube-context default is.
   obs:stage:stream:on:
     desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
+    vars:
+      NAMESPACE: '{{.NAMESPACE | default "default"}}'
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -757,8 +764,8 @@ tasks:
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found in the current context — apply the overlay first"
+      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
     cmds:
       - |
         set -euo pipefail
@@ -766,13 +773,15 @@ tasks:
           --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
         kubectl create secret generic obs-secret \
           --from-literal=STREAM_KEY="$sk" \
-          --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-      - kubectl rollout restart deploy/obs
-      - kubectl rollout status deploy/obs --timeout=120s
-      - 'echo "OBS streaming — key from adanalife-stage SM (→ adanalife_staging); kubectl context: $(kubectl config current-context)"'
+          --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
+      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS streaming — key from adanalife-stage SM (→ adanalife_staging); namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   obs:prod:stream:on:
     desc: "stream OBS using the prod-1 stream key (→ adanalife_; a placeholder copy of the stage key streams to adanalife_staging until the real key is seeded)"
+    vars:
+      NAMESPACE: '{{.NAMESPACE | default "default"}}'
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -780,8 +789,8 @@ tasks:
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found in the current context — apply the overlay first"
+      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
     cmds:
       - |
         set -euo pipefail
@@ -789,10 +798,10 @@ tasks:
           --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
         kubectl create secret generic obs-secret \
           --from-literal=STREAM_KEY="$sk" \
-          --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-      - kubectl rollout restart deploy/obs
-      - kubectl rollout status deploy/obs --timeout=120s
-      - 'echo "OBS streaming — key from adanalife-prod SM; kubectl context: $(kubectl config current-context)"'
+          --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
+      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS streaming — key from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   # Stop streaming, keep OBS running. Deletes obs-secret and restarts
   # the pod so it boots in idle (VNC-only) mode — the container stays
@@ -801,28 +810,34 @@ tasks:
   # env-agnostic (no AWS account — it only touches the local cluster's
   # obs-secret), so both delegate to one shared implementation.
   obs:stage:stream:off:
-    desc: "stop OBS streaming on the current cluster (OBS stays up in idle/VNC mode)"
+    desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
     cmds:
       - task: obs:stream:off:_run
+        vars:
+          NAMESPACE: '{{.NAMESPACE | default "default"}}'
 
   obs:prod:stream:off:
-    desc: "stop OBS streaming on the current cluster (OBS stays up in idle/VNC mode)"
+    desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
     cmds:
       - task: obs:stream:off:_run
+        vars:
+          NAMESPACE: '{{.NAMESPACE | default "default"}}'
 
   obs:stream:off:_run:
     internal: true
+    requires:
+      vars: [NAMESPACE]
     preconditions:
       - sh: command -v kubectl >/dev/null
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found in the current context"
+      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs Deployment not found in namespace {{.NAMESPACE}}"
     cmds:
-      - kubectl delete secret obs-secret --ignore-not-found
-      - kubectl rollout restart deploy/obs
-      - kubectl rollout status deploy/obs --timeout=120s
-      - 'echo "OBS idle (not streaming) — container still up; kubectl context: $(kubectl config current-context)"'
+      - kubectl delete secret obs-secret -n {{.NAMESPACE}} --ignore-not-found
+      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS idle (not streaming) — container still up; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   k8s:logs:
     desc: tail logs across all app pods
