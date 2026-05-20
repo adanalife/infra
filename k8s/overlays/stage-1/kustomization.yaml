@@ -9,16 +9,16 @@
 #     cert-manager / monitoring) — no second install.
 #   - Namespace isolation: everything lands in `stage-1` (the `namespace`
 #     field below); prod stays in `default`.
-#   - Secret isolation: the patch below repoints every ExternalSecret to
-#     the namespace-locked `aws-secretsmanager-stage` ClusterSecretStore
-#     (k8s/external-secrets/stage-1), which reads the adanalife-stage
-#     account. The app/base ExternalSecret files name `aws-secretsmanager`
-#     so they stay diff-identical to prod-1; this is the single point that
-#     env-routes them to stage.
+#   - Secret isolation: everything reads the namespace-locked
+#     `aws-secretsmanager-stage` ClusterSecretStore (k8s/external-secrets/
+#     stage-1), which reads the adanalife-stage account. The stage-owned
+#     ExternalSecrets name that store directly; the SHARED, store-agnostic
+#     ones (shared-secrets/base + tripbot/base, which can't be edited
+#     per-env) are env-routed to it by the named patch below.
 #
-# Scope so far: shared observability secrets + postgres + tripbot
-# (outbound-only). vlc-server + OBS (GPU, low quality, streaming off) land
-# in a follow-up commit.
+# Full app set: shared observability secrets + postgres + tripbot
+# (outbound-only) + vlc-server + OBS (both on the shared iGPU at low
+# quality, streaming off by default, cluster-internal — no Ingress).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -29,6 +29,8 @@ resources:
   - ../../shared-secrets/base
   - ../../apps/postgres/overlays/stage-1
   - ../../apps/tripbot/overlays/stage-1
+  - ../../apps/vlc-server/overlays/stage-1
+  - ../../apps/obs/overlays/stage-1
 
 patches:
   # Env-route the SHARED, store-agnostic ExternalSecrets to the stage

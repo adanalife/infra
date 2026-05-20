@@ -307,6 +307,15 @@ tasks:
     cmds:
       - kubectl apply -k k8s/overlays/prod-1
 
+  k8s:stage:apply:
+    desc: apply the stage-1 overlay (shared-secrets + postgres + tripbot + vlc-server + OBS) into the stage-1 namespace on the mini-PC cluster
+    cmds:
+      # Pre-reqs: task tf:stage:apply (postgres creds), task
+      # k8s:stage:bootstrap-secrets (stage ESO store), and a populated
+      # k8s/apps/vlc-server/overlays/stage-1/dashcam-nfs.local.yaml.
+      # Reuses prod's platform stack — there is no k8s:stage:platform:up.
+      - kubectl apply -k k8s/overlays/stage-1
+
   # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
   # nor `k8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
   # the tunnel-token Secret from terraform output, and applies the
@@ -1065,6 +1074,26 @@ tasks:
           echo "tripbot Postgres port-forward stopped"
         else
           echo "No tripbot Postgres port-forward PID file found — nothing to stop"
+        fi
+
+  tripbot:stage:db:up:
+    desc: start a kubectl port-forward to the stage-1 cluster Postgres at localhost:5433 (5433 to avoid colliding with a dev/prod forward on 5432)
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      - kubectl port-forward -n stage-1 svc/postgres 5433:5432 > /dev/null 2>&1 &
+      - echo $! > /tmp/adanalife-tasks/tripbot-stage-db.pid
+      - 'echo "stage-1 Postgres port-forward started — psql at localhost:5433 (PID $(cat /tmp/adanalife-tasks/tripbot-stage-db.pid))"'
+
+  tripbot:stage:db:down:
+    desc: stop the kubectl port-forward to the stage-1 cluster Postgres
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/tripbot-stage-db.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/tripbot-stage-db.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/tripbot-stage-db.pid
+          echo "stage-1 Postgres port-forward stopped"
+        else
+          echo "No stage-1 Postgres port-forward PID file found — nothing to stop"
         fi
 
   # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
