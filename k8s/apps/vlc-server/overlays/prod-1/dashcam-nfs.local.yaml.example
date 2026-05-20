@@ -16,6 +16,26 @@ spec:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
+  # Tuned for this workload: a single read-only consumer of an immutable
+  # video corpus. The goal is to minimize cold file-open latency, which is
+  # what makes OBS's dashcam source flash at clip transitions (pairs with
+  # the vlc-server page-cache priming work). Safe on NFSv3 (the Synology
+  # default); to move to NFSv4.1 — which makes nconnect a true session
+  # trunk — enable NFSv4 in DSM first, then add `nfsvers=4.1`.
+  #
+  # NOTE: mountOptions are read when the PV is created/mounted. Changing
+  # them on a bound PV means recreating it: delete the PVC + PV, re-apply,
+  # then restart the vlc-server pod.
+  mountOptions:
+    - ro          # read-only corpus
+    - hard        # retry indefinitely rather than return I/O errors
+    - noatime     # never write access times (read-only anyway)
+    - nconnect=8  # parallel TCP connections to the NAS (kernel >=5.3)
+    - rsize=1048576  # 1 MiB read blocks — fewer round-trips on large files
+    - wsize=1048576
+    - actimeo=600 # cache file attributes 10 min (corpus never changes)
+    - nocto       # skip close-to-open revalidation — safe for an immutable,
+                  # single-consumer mount; saves a GETATTR round-trip per open
   nfs:
     server: <NFS server address>
     path: <export path>
