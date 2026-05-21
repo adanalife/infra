@@ -204,32 +204,12 @@ tasks:
       - task: k8s:dev:platform:up
       - task: k8s:dev:apply
 
-  k8s:prod:cluster:up:
-    desc: create the local k3d cluster on empty (prod-1)
-    cmds:
-      - k3d cluster create -c k8s/k3d-config.empty.yaml
-
-  k8s:prod:cluster:down:
-    desc: tear down the local k3d cluster on empty (delete; use k8s:prod:cluster:stop to suspend without wipe)
-    cmds:
-      - k3d cluster delete adanalife-empty
-
-  k8s:prod:cluster:stop:
-    desc: suspend the local k3d cluster on empty (containers down, cluster definition + state preserved)
-    cmds:
-      - k3d cluster stop adanalife-empty
-
-  k8s:prod:cluster:start:
-    desc: resume a stopped local k3d cluster on empty (counterpart to k8s:prod:cluster:stop)
-    cmds:
-      - k3d cluster start adanalife-empty
-
-  k8s:prod:cluster:rebuild:
-    desc: Full empty-cluster rebuild — cluster + platform helm charts + app overlays (shared-secrets, postgres, vlc-server; tripbot/obs when their overlays land).
-    cmds:
-      - task: k8s:prod:cluster:up
-      - task: k8s:prod:platform:up
-      - task: k8s:prod:apply
+  # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
+  # cluster — its lifecycle is talosctl wipe-and-rebuild (see
+  # vault/infra/adanalife-minipc-bootstrap.md). The k8s:prod:* tasks below
+  # (bootstrap-secrets / platform:up / apply) target the live Talos cluster;
+  # there is no k8s:prod:cluster:* (the old k3d-on-empty tasks were vestigial
+  # and were dropped post-convergence).
 
   k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
@@ -489,7 +469,7 @@ tasks:
       - sh: command -v curl >/dev/null
         msg: "curl not found — required to fetch host public IP for external-dns default-targets"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:prod:cluster:up` first"
+        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
       # eso-aws-credentials goes in BOTH external-secrets (for the
       # aws-secretsmanager-cluster ClusterSecretStore that platform
@@ -709,7 +689,7 @@ tasks:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:prod:cluster:up` first"
+        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
       - sh: test -f k8s/external-dns/prod-1/values.local.yml
         msg: "k8s/external-dns/prod-1/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
     cmds:
