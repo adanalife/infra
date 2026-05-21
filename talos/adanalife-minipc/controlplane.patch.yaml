@@ -30,11 +30,24 @@
 # ride this wipe. Cilium itself is installed via helm as the FIRST platform step
 # (k8s:<env>:platform:up); until it's up the node stays NotReady (no CNI), so
 # `talosctl health` won't go fully green until the helm install lands — expected.
+#
+# Tailscale: the installer schematic bakes in the siderolabs/tailscale extension
+# (schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale; the GPU
+# extension is UNCHANGED, so the proven VAAPI path is untouched). Its config —
+# an ExtensionServiceConfig carrying the secret TS_AUTHKEY — is NOT in this
+# (committed, non-secret) patch: it lives in tailscale.patch.yaml (gitignored
+# plaintext) / tailscale.patch.sops.yaml (committed, SOPS-sealed), applied as an
+# extra `--patch` at apply time. See tailscale.patch.yaml.example and the
+# bootstrap runbook's Tailscale section. Creation-time like KubeSpan — takes
+# effect on a wipe-reinstall, not a live patch.
 
 machine:
   install:
     disk: /dev/nvme0n1
-    image: factory.talos.dev/installer/2dcd442954d67662d41c61bdb92165aaf7189aff9997bd011b6968c12ce8d9c0:v1.13.2
+    # Schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale. Was
+    # 2dcd44…; tailscale added 2026-05-20 with i915-ucode kept byte-identical.
+    # Regenerate via the curl block in the bootstrap runbook if extensions change.
+    image: factory.talos.dev/installer/fb46591af14131d1c3ae89c8ce50f0fd6705113d0493a90cd06b8c1d669c9199:v1.13.2
   network:
     interfaces:
       - interface: enp88s0
@@ -45,6 +58,14 @@ machine:
     # the public internet with no firewall config). Requires cluster.discovery.
     kubespan:
       enabled: true
+  # IP forwarding for the Tailscale subnet router (TS_ROUTES=192.168.1.0/24 in
+  # tailscale.patch.yaml). Tailscale advertises the home LAN so off-LAN tailnet
+  # clients reach 192.168.1.200 (and the Synology, etc.) with no cert-SAN/endpoint
+  # changes; forwarding lets the node route to *other* LAN hosts. Host-level
+  # (machine.sysctls), not pod-level — hostNetwork pods can't set sysctls.
+  sysctls:
+    net.ipv4.ip_forward: "1"
+    net.ipv6.conf.all.forwarding: "1"
   # Disk encryption DEFERRED (2026-05-20). TPM-sealed LUKS2 (systemDiskEncryption
   # with `tpm: {}`) requires a Talos SecureBoot image: it needs the PCR signing
   # key at /.extra/tpm2-pcr-public-key.pem, which only ships in SecureBoot

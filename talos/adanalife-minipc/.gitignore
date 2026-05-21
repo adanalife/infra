@@ -17,6 +17,11 @@ worker.patched.yaml
 talosconfig
 secrets.yaml
 
+# Tailscale ExtensionServiceConfig with the real TS_AUTHKEY. Committed only as
+# the SOPS-sealed tailscale.patch.sops.yaml; the .example (placeholder key) is
+# committed too. Regenerate plaintext via `task talos:minipc:secrets:decrypt`.
+tailscale.patch.yaml
+
 # Local backup patterns (zip archives, "copy of" folders, .bak files).
 *.zip
 *.bak
