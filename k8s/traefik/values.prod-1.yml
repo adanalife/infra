@@ -59,20 +59,23 @@ service:
 # copies it from the traefik Service's status — but on the minipc the Service
 # is LoadBalancer with EXTERNAL-IP <pending> forever (no LB controller; traffic
 # flows through hostNetwork above), so there's nothing to copy and the status
-# stays empty. Point traefik at the node's LAN IP directly instead: it then
-# stamps 192.168.1.200 into every managed Ingress's status, and external-dns
-# picks it up natively.
+# stays empty. Point traefik at the node's LAN IP directly instead (via
+# ingressEndpoint.ip): it then stamps that IP into every managed Ingress's
+# status, and external-dns picks it up natively.
 #
 # `ip` and `publishedService` are mutually exclusive ingress-endpoint sources,
 # so disable the (no-op here) publishedService copy inherited from values.yml.
 # Dev/k3d keeps publishedService (klipper-lb fills the Service IP there) by not
 # layering this file.
+#
+# ingressEndpoint.ip itself is NOT pinned here — the node's LAN IP is
+# host-specific, so it's discovered from the node's InternalIP and written to
+# the gitignored k8s/traefik/values.local.yml by `task k8s:prod:bootstrap-secrets`,
+# layered onto this file at helm-install time. See values.local.yml.example.
 providers:
   kubernetesIngress:
     publishedService:
       enabled: false
-    ingressEndpoint:
-      ip: 192.168.1.200
 
 # Override the chart default of 8000/8443 to bind real 80/443 under
 # hostNetwork.
