@@ -60,6 +60,10 @@ hubble:
 # Pod annotations so grafana-k8s-monitoring's annotationAutodiscovery
 # scrapes Cilium's metrics (same pattern as external-secrets/traefik values).
 operator:
+  # Single-node cluster — the chart's default 2 operator replicas have pod
+  # anti-affinity, so the 2nd sits Pending forever. One operator is plenty;
+  # bump back to 2 if/when a second node joins.
+  replicas: 1
   prometheus:
     enabled: true
 prometheus:

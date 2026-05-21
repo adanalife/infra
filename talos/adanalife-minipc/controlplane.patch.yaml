@@ -70,4 +70,8 @@ cluster:
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig
+# auto must be overridden to "off" — the base controlplane.yaml ships
+# `auto: stable`, and Talos rejects an auto-generating mode + a static
+# hostname together. Quoted so YAML doesn't coerce `off` to boolean false.
+auto: "off"
 hostname: adanalife-minipc
