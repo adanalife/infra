@@ -20,7 +20,9 @@
 #      dev.whereisdana.today from the parent whereisdana.today zone.
 
 resource "aws_route53_zone" "dev_subdomain_zone" {
-  name = "dev.${var.primary_domain}"
+  # secondary_domain is whereisdana.today (primary_domain is dana.lol — the
+  # tripbot/vlc/obs hosts live under *.dev.whereisdana.today, matching prod/stage).
+  name = "dev.${var.secondary_domain}"
 }
 
 # Scope the SHARED external-dns principal's ChangeResourceRecordSets to the
