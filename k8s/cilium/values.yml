@@ -1,0 +1,66 @@
+# Helm values for the cilium/cilium chart on adanalife-minipc (Talos).
+# Cilium is the CNI + kube-proxy replacement — Talos installs neither (see
+# cluster.network.cni.name=none + cluster.proxy.disabled in
+# talos/adanalife-minipc/controlplane.patch.yaml). Installed as the FIRST
+# platform step by `task k8s:<env>:platform:up`; the node stays NotReady
+# until this lands.
+#
+# Talos specifics (per the Talos "Deploying Cilium" guide):
+#   - cgroup.autoMount.enabled=false + hostRoot=/sys/fs/cgroup — Talos
+#     mounts the cgroup2 fs itself; Cilium must not try to remount it.
+#   - securityContext.capabilities — Talos runs a locked-down host, so the
+#     agent + cleanup pods need their capability sets named explicitly.
+#   - k8sServiceHost=localhost / k8sServicePort=7445 — KubePrism, Talos's
+#     in-host API-server load balancer (default-on 1.5+). With kube-proxy
+#     gone, Cilium needs a kube-apiserver address that doesn't depend on a
+#     ClusterIP; KubePrism gives a stable localhost endpoint.
+
+ipam:
+  mode: kubernetes
+
+# eBPF kube-proxy replacement (Talos ships no kube-proxy).
+kubeProxyReplacement: true
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# Hubble — flow visibility + the web service map Dana wanted (DNS-aware,
+# shows pod → twitch.tv egress, not just IP↔IP). Reached via port-forward
+# (task) for now; can get an internal-IP Ingress later like the other UIs.
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+
+# Pod annotations so grafana-k8s-monitoring's annotationAutodiscovery
+# scrapes Cilium's metrics (same pattern as external-secrets/traefik values).
+operator:
+  prometheus:
+    enabled: true
+prometheus:
+  enabled: true

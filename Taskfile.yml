@@ -713,6 +713,19 @@ tasks:
       - sh: test -f k8s/external-dns/prod-1/values.local.yml
         msg: "k8s/external-dns/prod-1/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
     cmds:
+      # Cilium FIRST — it is the CNI + kube-proxy replacement (Talos installs
+      # neither; see controlplane.patch.yaml). Until it's up the node is
+      # NotReady and nothing else can schedule, so it precedes everything.
+      # KubePrism (localhost:7445) gives the agent a stable kube-apiserver
+      # endpoint with no kube-proxy / ClusterIP dependency.
+      - helm repo add cilium https://helm.cilium.io/
+      - helm repo update
+      - helm upgrade --install cilium cilium/cilium
+          -n kube-system
+          -f k8s/cilium/values.yml
+      - kubectl -n kube-system rollout status daemonset/cilium --timeout=180s
+      - kubectl wait --for=condition=Ready node --all --timeout=180s
+      - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
       # local-path-provisioner — cluster storage backing. Must precede any
       # PVC-consuming workload (postgres). Codified from the former manual
       # bootstrap-runbook Phase 5.0 steps; see k8s/local-path-provisioner/prod-1.
