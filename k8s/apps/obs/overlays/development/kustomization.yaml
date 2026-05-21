@@ -1,0 +1,11 @@
+# OBS development overlay (k3d). Extends the local overlay (host-access
+# Service for VNC, low quality, software encode — no iGPU on the laptop)
+# and adds the browser noVNC Ingress at obs.dev.whereisdana.today, matching
+# vlc-server's dev overlay. Streaming stays off by default (obs-stream-key
+# is the imperative toggle).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../local
+  - ingress.yaml

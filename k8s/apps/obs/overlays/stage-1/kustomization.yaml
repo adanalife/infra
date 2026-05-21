@@ -1,7 +1,6 @@
-# OBS stage-1 overlay. Mirrors prod-1's iGPU + VAAPI encode setup but at
-# LOW quality, and with NO Ingress — stage OBS is cluster-internal,
-# reached via `kubectl port-forward` to the noVNC port rather than a public
-# obs.stage.* URL.
+# OBS stage-1 overlay. Mirrors prod-1's iGPU + VAAPI encode setup and its
+# internal-IP noVNC Ingress (obs.stage.whereisdana.today, LAN-only), but at
+# LOW quality.
 #
 # Streaming is OFF by default: like prod, the `obs-stream-key` Secret is
 # created imperatively (task obs:stage:stream:on, which pulls the
@@ -12,6 +11,7 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - ingress.yaml
 
 # LOW quality for stage (prod runs `high`). OBS_STREAM_ENCODER opts into
 # VAAPI hardware encode via the iGPU — OBS exposes the VAAPI H.264 encoder

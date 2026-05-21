@@ -1,0 +1,34 @@
+# Internal-IP ingress for stage vlc-server — same shape as prod-1's, with
+# the stage hostname. external-dns publishes a public Route53 record
+# pointing at the mini-PC LAN IP, so vlc.stage.whereisdana.today resolves
+# anywhere but is only reachable on the home network. cert-manager issues
+# via DNS-01 (independent of inbound reachability). No in-process auth, so
+# LAN-only reachability is the gate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vlc-server
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: vlc.stage.whereisdana.today
+    # See prod-1's ingress for the hardcoded-target rationale (external-dns
+    # 0.21 doesn't synthesize default-targets from helm-traefik's empty
+    # Ingress.status.loadBalancer).
+    external-dns.alpha.kubernetes.io/target: 192.168.1.200
+    cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - vlc.stage.whereisdana.today
+      secretName: vlc-tls
+  rules:
+    - host: vlc.stage.whereisdana.today
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vlc-server
+                port:
+                  name: http

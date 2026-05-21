@@ -32,3 +32,27 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=prod-1
+
+patches:
+  # Internal-IP Ingress for tripbot's web UI at tripbot.prod.whereisdana.today
+  # — external-dns publishes the record at the mini-PC LAN IP, so it's
+  # LAN-only. cert-manager issues via DNS-01. Same shape as vlc/obs prod.
+  - target:
+      kind: Ingress
+      name: tripbot
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tripbot.prod.whereisdana.today
+      - op: add
+        path: /metadata/annotations
+        value:
+          external-dns.alpha.kubernetes.io/hostname: tripbot.prod.whereisdana.today
+          external-dns.alpha.kubernetes.io/target: 192.168.1.200
+          cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts:
+              - tripbot.prod.whereisdana.today
+            secretName: tripbot-tls

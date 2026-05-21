@@ -32,3 +32,27 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=stage-1
+
+patches:
+  # Internal-IP Ingress for tripbot's web UI at tripbot.stage.whereisdana.today
+  # — LAN-only via external-dns at the mini-PC IP, cert-manager DNS-01. Same
+  # shape as prod, only the hostname differs.
+  - target:
+      kind: Ingress
+      name: tripbot
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tripbot.stage.whereisdana.today
+      - op: add
+        path: /metadata/annotations
+        value:
+          external-dns.alpha.kubernetes.io/hostname: tripbot.stage.whereisdana.today
+          external-dns.alpha.kubernetes.io/target: 192.168.1.200
+          cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts:
+              - tripbot.stage.whereisdana.today
+            secretName: tripbot-tls

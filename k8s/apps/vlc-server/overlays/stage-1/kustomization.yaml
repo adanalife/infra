@@ -1,10 +1,9 @@
 # vlc-server stage-1 overlay. Mirrors prod-1 (extends base directly, NFS
-# dashcam, iGPU via the Intel device plugin) with three deltas: ENV=staging
-# / stage-1 telemetry tags, its own NFS PV (vlc-dashcam-nfs-stage — PVs
-# bind 1:1, so stage can't reuse prod's even though it's the same export),
-# and NO Ingress — stage vlc-server is cluster-internal, reached via
-# `kubectl port-forward` rather than a public vlc.stage.* URL. (vlc-server
-# has no in-process auth, so not publishing it keeps the surface smaller.)
+# dashcam, iGPU via the Intel device plugin, internal-IP Ingress) with two
+# deltas: ENV=staging / stage-1 telemetry tags, and its own NFS PV
+# (vlc-dashcam-nfs-stage — PVs bind 1:1, so stage can't reuse prod's even
+# though it's the same export). The Ingress is LAN-only (external-dns
+# target = mini-PC LAN IP), same as prod.
 #
 # Pre-reqs (satisfied by task k8s:stage:apply):
 # - dashcam-nfs.local.yaml populated from .example (gitignored) — shares
@@ -16,6 +15,7 @@ kind: Kustomization
 resources:
   - ../../base
   - dashcam-nfs.local.yaml
+  - ingress.yaml
 
 configMapGenerator:
   - name: vlc-server-config
