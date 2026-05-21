@@ -1,44 +1,47 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# The laptop overlay — the ONE place secret.env survives, and only for the
+# local disposable Postgres DB creds (DATABASE_*). Everything else (Twitch,
+# Maps, Sentry, OTLP) comes from ESO via base, exactly like the cloud envs.
+# So this overlay: (1) builds tripbot-secret from the DB-only secret.env,
+# (2) swaps the DB envFrom from the ESO tripbot-database-creds to that
+# secret, (3) drops the ESO database-external-secret (no cloud DB locally),
+# (4) reroutes the Ingress to tripbot.localhost, and (5) re-adds the
+# secret.env-wired seed + auth-bootstrap Jobs that run on apply for laptop
+# convenience.
 resources:
   - ../../base
-  # All workload-specific ExternalSecrets (Twitch creds, Maps API key)
-  # now live in ../../base — see base/kustomization.yaml for the rationale.
-  # Cross-cutting observability secrets live in k8s/shared-secrets/base
-  # per vault/decisions/shared-secrets-not-owned-by-workload.md.
+  - seed-job.yaml
+  - auth-job.yaml
 
-# secret.env is gitignored — copy from secret.env.example.
+# secret.env is gitignored — copy from secret.env.example. DB creds only.
 secretGenerator:
   - name: tripbot-secret
     envs:
       - secret.env
 
-# Merge environment-specific values into the base ConfigMap. ENV is
-# what tripbot's main package checks at startup; without it the bot
-# refuses to boot. The OTEL_* defaults turn the SDK on for development; the
-# OTLP endpoint + auth header arrive via the grafana-cloud-otlp Secret
-# (envFrom patch below).
+# Non-secret config (was partly hiding in secret.env). ENV=staging matches
+# the borrowed stage identity; the env tags split this machine out in
+# Sentry/Tempo/Loki.
 configMapGenerator:
   - name: tripbot-config
     behavior: merge
     literals:
       - ENV=staging
+      - CHANNEL_NAME=adanalife_staging
+      - BOT_USERNAME=tripbot4000
+      - EXTERNAL_URL=http://tripbot.localhost
+      - GOOGLE_APPS_PROJECT_ID=tripbot-stage
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=development,service.namespace=tripbot
-      # Partitions Sentry events by env. Per
-      # vault/decisions/observability-projects-by-component.md, stage and prod
-      # share one Sentry project per service; this tag is what splits them
-      # in the UI. Matches OTEL_RESOURCE_ATTRIBUTES deployment.environment
-      # above so a Sentry event tag and the matching Tempo/Loki record use
-      # the same string. Prod-1 overrides to "prod-1".
       - SENTRY_ENVIRONMENT=development
 
 patches:
-  # Local Ingress hostname — `tripbot.localhost` resolves to 127.0.0.1
-  # on most systems via the .localhost TLD, hitting traefik on port 80.
+  # Local Ingress hostname — tripbot.localhost resolves to 127.0.0.1 via
+  # the .localhost TLD, hitting traefik on port 80.
   - target:
       kind: Ingress
       name: tripbot
@@ -46,62 +49,26 @@ patches:
       - op: replace
         path: /spec/rules/0/host
         value: tripbot.localhost
-  # Inject the Grafana Cloud OTLP env vars (endpoint + headers) from the
-  # ExternalSecret-managed Secret. The ExternalSecret lives in
-  # k8s/shared-secrets/base/; pod startup fails loud if it isn't
-  # applied alongside this overlay (per the env's umbrella overlay).
+  # DB creds come from the on-disk secret.env (tripbot-secret), not the ESO
+  # tripbot-database-creds — the laptop Postgres uses its local password.
+  # base's envFrom has tripbot-database-creds at index 1 of both containers.
   - target:
       kind: Deployment
       name: tripbot
     patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: grafana-cloud-otlp
-            optional: false
-  # Inject SENTRY_DSN from the ExternalSecret-managed `sentry-tripbot`
-  # Secret. Same shared-secrets origin as OTLP above.
+      - op: replace
+        path: /spec/template/spec/initContainers/0/envFrom/1/secretRef/name
+        value: tripbot-secret
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom/1/secretRef/name
+        value: tripbot-secret
+  # Drop the ESO DB ExternalSecret — the laptop has no cloud Postgres.
   - target:
-      kind: Deployment
-      name: tripbot
+      kind: ExternalSecret
+      name: tripbot-database-creds
     patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: sentry-tripbot
-            optional: false
-  # Inject Twitch credentials (TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
-  # TWITCH_AUTH_TOKEN) from the ExternalSecret-managed
-  # `tripbot-twitch-creds` Secret. optional:true so the pod stays up
-  # while ESO reconciles. Appended last so the real values from SM
-  # override any stub Twitch values still in the secretGenerator-built
-  # `tripbot-secret` (later envFrom entries win).
-  - target:
-      kind: Deployment
-      name: tripbot
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: tripbot-twitch-creds
-            optional: true
-  # Inject GOOGLE_MAPS_API_KEY from the ExternalSecret-managed
-  # `tripbot-google-maps-api-key` Secret. optional:true so the pod
-  # stays up while ESO reconciles — the bot boots with the `stub`
-  # value from secret.env (required:"true" in config) and switches
-  # to the real key on the next pod restart after ESO syncs. Stub
-  # works for `!location` to no-op gracefully; real Geocoding calls
-  # need the real key.
-  - target:
-      kind: Deployment
-      name: tripbot
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: tripbot-google-maps-api-key
-            optional: true
+      $patch: delete
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: tripbot-database-creds

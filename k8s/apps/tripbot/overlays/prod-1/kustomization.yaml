@@ -1,24 +1,22 @@
-# tripbot prod-1 overlay. Extends the shared ESO base (../_eso) — which
-# carries all the wiring common to credentialed envs — so this file is
-# just prod's config VALUES plus its database-external-secret (which names
-# the prod store). stage-1 is the same shape; the two differ only here.
+# tripbot prod-1 overlay. Extends base (the canonical ESO/production shape)
+# and adds only prod's config VALUES — stage-1 is the same shape, the two
+# differ only by the literals below.
 #
-# Pre-reqs (all satisfied by `task k8s:prod:apply`):
-# - k8s/shared-secrets/base applied (owns the Sentry + OTLP ExternalSecrets)
-# - k8s/tripbot/twitch-creds + k8s/tripbot/google-maps-api-key SM containers
-#   populated in the adanalife-prod account
-# - postgres prod-1 overlay applied (database-external-secret reads the same
-#   k8s/postgres/credentials SM container)
+# Pre-reqs (all satisfied by `task k8s:prod:apply` + bootstrap):
+# - k8s/shared-secrets/base applied (Sentry + OTLP ExternalSecrets)
+# - the adanalife-prod account's tripbot twitch-creds + google-maps-api-key
+#   + postgres/credentials SM containers populated
+# - the namespaced aws-secretsmanager SecretStore + eso-aws-credentials
+#   present in the prod-1 namespace (umbrella + bootstrap)
 #
-# Tripbot is outbound-only in prod (Ingress dropped in ../_eso); the seed +
+# EXTERNAL_URL is the in-cluster web address; the public Ingress host comes
+# from the base ingress + the per-env host patch (see Phase 4). The seed +
 # auth-bootstrap Jobs run via tasks, not on apply.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../_eso
-  # prod DATABASE_* materialization from k8s/postgres/credentials.
-  - database-external-secret.yaml
+  - ../../base
 
 configMapGenerator:
   - name: tripbot-config
