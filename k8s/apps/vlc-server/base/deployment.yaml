@@ -18,10 +18,25 @@ spec:
       labels:
         app: vlc-server
     spec:
+      # Partial PodSecurity-restricted hardening: seccomp + no-privesc +
+      # drop all caps. The container still runs as root (supervisord +
+      # syslog-ng writing /var/log, libvlc reaching /dev/dri as root via
+      # owner bits) — root needs no capabilities for any of that, so
+      # dropping ALL is safe. runAsNonRoot is deferred: it needs a
+      # Dockerfile rework in the tripbot repo (non-root user, syslog to a
+      # writable path, render-group GID for the iGPU) + live GPU
+      # verification, tracked as a follow-up.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: vlc-server
           image: adanalife/vlc:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8080
