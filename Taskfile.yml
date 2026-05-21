@@ -288,13 +288,41 @@ tasks:
       - kubectl apply -k k8s/overlays/prod-1
 
   k8s:stage:apply:
-    desc: apply the stage-1 overlay (shared-secrets + postgres + tripbot + vlc-server + OBS) into the stage-1 namespace on the mini-PC cluster
+    desc: apply the stage-1 overlay (shared-secrets + postgres + tripbot + vlc-server + OBS) + stage external-dns into the mini-PC cluster
+    deps: [k8s:stage:bootstrap-secrets]
+    preconditions:
+      - sh: test -f k8s/external-dns/stage-1/values.local.yml
+        msg: "k8s/external-dns/stage-1/values.local.yml missing — run `task k8s:stage:bootstrap-secrets` first"
     cmds:
       # Pre-reqs: task tf:stage:apply (postgres creds), task
-      # k8s:stage:bootstrap-secrets (stage ESO store), and a populated
+      # k8s:stage:bootstrap-secrets (stage ESO store + external-dns
+      # values.local), and a populated
       # k8s/apps/vlc-server/overlays/stage-1/dashcam-nfs.local.yaml.
-      # Reuses prod's platform stack — there is no k8s:stage:platform:up.
+      #
+      # Stage reuses prod's SHARED platform stack (traefik / ESO operator /
+      # cert-manager controller / monitoring) — there is still no
+      # k8s:stage:platform:up. The one env-specific platform piece is
+      # external-dns: stage runs its OWN in stage-1-platform, reading the
+      # adanalife-stage account so it can write the stage.whereisdana.today
+      # zone (no cross-account). The namespaced cert-manager Issuers ship in
+      # the umbrella below.
       - kubectl apply -k k8s/overlays/stage-1
+      # Stage external-dns (own instance, stage account, stage zone). The
+      # kustomize apply creates stage-1-platform + its SecretStore +
+      # ExternalSecret; the helm release name differs from prod's
+      # (external-dns-stage) because the chart's RBAC is cluster-scoped.
+      - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
+      - helm repo update external-dns
+      - kubectl apply -k k8s/external-dns/stage-1
+      - kubectl wait --for=condition=Ready --timeout=120s
+          externalsecret/external-dns-aws-credentials -n stage-1-platform
+      - helm upgrade --install external-dns-stage external-dns/external-dns
+          -n stage-1-platform
+          -f k8s/external-dns/stage-1/config.yml
+          -f k8s/external-dns/stage-1/values.local.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/external-dns-stage -n stage-1-platform
+      - 'echo "stage external-dns up in stage-1-platform. *.stage.whereisdana.today records now publish to the adanalife-stage zone."'
 
   # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
   # nor `k8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
@@ -470,30 +498,32 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first (also the source of the node InternalIP target)"
     cmds:
-      # eso-aws-credentials goes in BOTH external-secrets (for the
-      # aws-secretsmanager-cluster ClusterSecretStore that platform
-      # components use) AND the prod-1 namespace (for the namespaced
-      # aws-secretsmanager SecretStore the apps use). Same prod-account
-      # creds in both.
+      # eso-aws-credentials goes in THREE namespaces (same prod-account
+      # creds in all): external-secrets (for the aws-secretsmanager-cluster
+      # ClusterSecretStore the kube-system platform components use), prod-1
+      # (for the namespaced aws-secretsmanager SecretStore the apps use), and
+      # prod-1-platform (for the namespaced store external-dns reads).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1 --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace prod-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
         if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1 \
-           && kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1; then
+           && kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n prod-1-platform >/dev/null 2>&1; then
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          for ns in external-secrets prod-1; do
+          for ns in external-secrets prod-1 prod-1-platform; do
             kubectl create secret generic eso-aws-credentials \
               --namespace="$ns" \
               --from-literal=AWS_ACCESS_KEY_ID="$ak" \
               --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
               --dry-run=client -o yaml | kubectl apply -f -
           done
-          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 namespaces"
+          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-platform namespaces"
         fi
       - |
         set -euo pipefail
@@ -540,18 +570,22 @@ tasks:
         fi
 
   # Stage-1 ESO bootstrap on the mini-PC Talos cluster. Seeds the
-  # adanalife-stage reader creds as eso-aws-credentials in the stage-1
-  # namespace — that's all stage needs: its namespaced aws-secretsmanager
-  # SecretStore (shipped in the stage-1 umbrella) reads them in-namespace.
-  # Stage does NOT touch external-secrets — prod owns the cluster-scoped
-  # aws-secretsmanager-cluster store there. Isolation is by AWS account
-  # (stage creds only read the stage account) AND by namespace (the store
-  # is unreachable from prod-1). No external-dns values.local.yml step —
-  # stage reuses prod's external-dns. Point kubectl at adanalife-minipc.
+  # adanalife-stage reader creds as eso-aws-credentials into BOTH stage-1
+  # (the app namespace's aws-secretsmanager SecretStore, shipped in the
+  # umbrella) and stage-1-platform (the namespaced store stage's own
+  # external-dns reads). Stage does NOT touch external-secrets — prod owns
+  # the cluster-scoped aws-secretsmanager-cluster store there. Isolation is
+  # by AWS account (stage creds only read the stage account) AND by
+  # namespace (the stores are unreachable from prod). Also writes the
+  # stage external-dns values.local.yml (stage now has its OWN external-dns
+  # in stage-1-platform, reading the stage account). Point kubectl at
+  # adanalife-minipc.
   k8s:stage:bootstrap-secrets:
-    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into the stage-1 namespace (mini-PC cluster)
+    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-platform + write stage external-dns values.local.yml (mini-PC cluster)
     status:
       - kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1
+      - test -f k8s/external-dns/stage-1/values.local.yml
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -559,27 +593,52 @@ tasks:
         msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: command -v curl >/dev/null
+        msg: "curl not found — required to fetch host public IP for external-dns default-targets"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
       - kubectl create namespace stage-1 --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace stage-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
-        if kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1; then
-          echo "eso-aws-credentials already present in stage-1, skipping"
+        if kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1; then
+          echo "eso-aws-credentials already present in stage-1 + stage-1-platform, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          kubectl create secret generic eso-aws-credentials \
-            --namespace=stage-1 \
-            --from-literal=AWS_ACCESS_KEY_ID="$ak" \
-            --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          echo "applied eso-aws-credentials Secret to the stage-1 namespace"
+          for ns in stage-1 stage-1-platform; do
+            kubectl create secret generic eso-aws-credentials \
+              --namespace="$ns" \
+              --from-literal=AWS_ACCESS_KEY_ID="$ak" \
+              --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          done
+          echo "applied eso-aws-credentials Secret to stage-1 + stage-1-platform namespaces"
         fi
-      # The stage SecretStore (aws-secretsmanager, namespaced) ships in the
-      # stage-1 umbrella and comes up with `task k8s:stage:apply`.
+      # The stage SecretStore (aws-secretsmanager, namespaced) ships in both
+      # the stage-1 umbrella and k8s/external-dns/stage-1.
+      - |
+        values_file=k8s/external-dns/stage-1/values.local.yml
+        if [ -f "$values_file" ]; then
+          echo "$values_file already present, skipping"
+        else
+          set -euo pipefail
+          # adanalife-minipc is LAN-only; external-dns publishes the node's
+          # LAN IP. Override via EXTERNAL_DNS_TARGET_IP=<ip>.
+          ip="${EXTERNAL_DNS_TARGET_IP:-192.168.1.200}"
+          cat > "$values_file" <<YAML
+        # Generated by \`task k8s:stage:bootstrap-secrets\` — LAN IP target
+        # for the stage external-dns --default-targets. Override default via
+        # EXTERNAL_DNS_TARGET_IP env var, or hand-edit this file.
+        extraArgs:
+          - --default-targets=$ip
+          - --force-default-targets
+        YAML
+          echo "wrote $values_file (default-targets=$ip)"
+        fi
 
   # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
   # into the local cluster. Idempotent — re-run after a cluster recreate or
@@ -762,16 +821,23 @@ tasks:
       # the Route53 record; DNS + cert reconcile once external-dns/cert-manager
       # come up below.
       - kubectl apply -f k8s/traefik/prod-1/dashboard-ingress.yaml
+      # external-dns runs in the prod-1-platform namespace (not kube-system)
+      # so the prod-1 app namespace stays pod-clean. The kustomize apply
+      # creates the namespace + its namespaced aws-secretsmanager SecretStore
+      # + the external-dns ExternalSecret (reading the prod account, no
+      # cross-account). It watches Ingresses cluster-wide (chart ClusterRole)
+      # and publishes prod.whereisdana.today records — including the platform
+      # ingresses in kube-system (hubble/traefik).
       - kubectl apply -k k8s/external-dns/prod-1
       - kubectl wait --for=condition=Ready --timeout=120s
-          externalsecret/external-dns-aws-credentials -n kube-system
+          externalsecret/external-dns-aws-credentials -n prod-1-platform
       - helm upgrade --install external-dns external-dns/external-dns
-          -n kube-system
+          -n prod-1-platform
           -f k8s/external-dns/prod-1/config.yml
           -f k8s/external-dns/prod-1/values.local.yml
       - kubectl wait --for=condition=Available --timeout=120s
-          deployment/external-dns -n kube-system
-      - 'echo "external-dns up. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
+          deployment/external-dns -n prod-1-platform
+      - 'echo "external-dns up in prod-1-platform. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
       - helm upgrade --install cert-manager jetstack/cert-manager
           -n kube-system
           -f k8s/cert-manager/prod-1/config.yml

@@ -14,7 +14,9 @@ metadata:
   name: obs
   annotations:
     external-dns.alpha.kubernetes.io/hostname: obs.prod.whereisdana.today
-    cert-manager.io/cluster-issuer: letsencrypt-route53
+    # Namespaced Issuer in this app namespace (k8s/cert-manager/app-issuer/
+    # prod-1) — solves DNS-01 with the prod account, no cross-account.
+    cert-manager.io/issuer: letsencrypt-route53
 spec:
   ingressClassName: traefik
   tls:

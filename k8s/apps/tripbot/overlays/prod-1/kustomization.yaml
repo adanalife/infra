@@ -51,7 +51,7 @@ patches:
         path: /metadata/annotations
         value:
           external-dns.alpha.kubernetes.io/hostname: tripbot.prod.whereisdana.today
-          cert-manager.io/cluster-issuer: letsencrypt-route53
+          cert-manager.io/issuer: letsencrypt-route53
       - op: add
         path: /spec/tls
         value:

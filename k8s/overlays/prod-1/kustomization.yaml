@@ -24,6 +24,12 @@ resources:
   # owned at the cluster level, not by any workload.
   # See vault/decisions/shared-secrets-not-owned-by-workload.md.
   - ../../shared-secrets/base
+  # Namespaced cert-manager Issuers (+ DNS-01 Route53 creds) for the app
+  # ingresses, so each env solves DNS-01 with its own account — no
+  # cross-account. App ingresses use cert-manager.io/issuer; the
+  # kube-system ClusterIssuers stay for the platform (hubble/traefik)
+  # ingresses. Issuer/Secret only (no pods).
+  - ../../cert-manager/app-issuer/prod-1
   - ../../apps/postgres/overlays/prod-1
   - ../../apps/vlc-server/overlays/prod-1
   - ../../apps/tripbot/overlays/prod-1

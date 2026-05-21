@@ -1,0 +1,8 @@
+# stage-1-platform — the env-specific platform namespace. Holds stage's
+# env-scoped platform workloads (currently just external-dns) so the
+# stage-1 app namespace shows only application pods (tripbot/vlc/obs/
+# postgres). Mirror of prod-1-platform.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stage-1-platform
