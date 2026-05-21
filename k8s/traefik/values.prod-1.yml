@@ -52,6 +52,28 @@ securityContext:
 service:
   type: LoadBalancer
 
+# Make external-dns able to publish a target for every traefik-managed Ingress
+# WITHOUT a per-Ingress `external-dns.alpha.kubernetes.io/target` annotation.
+# external-dns reads its target from Ingress.status.loadBalancer.ingress[].ip;
+# something has to write that. values.yml enables `publishedService`, which
+# copies it from the traefik Service's status — but on the minipc the Service
+# is LoadBalancer with EXTERNAL-IP <pending> forever (no LB controller; traffic
+# flows through hostNetwork above), so there's nothing to copy and the status
+# stays empty. Point traefik at the node's LAN IP directly instead: it then
+# stamps 192.168.1.200 into every managed Ingress's status, and external-dns
+# picks it up natively.
+#
+# `ip` and `publishedService` are mutually exclusive ingress-endpoint sources,
+# so disable the (no-op here) publishedService copy inherited from values.yml.
+# Dev/k3d keeps publishedService (klipper-lb fills the Service IP there) by not
+# layering this file.
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: false
+    ingressEndpoint:
+      ip: 192.168.1.200
+
 # Override the chart default of 8000/8443 to bind real 80/443 under
 # hostNetwork.
 ports:
