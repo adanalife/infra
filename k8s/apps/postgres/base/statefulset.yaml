@@ -13,9 +13,22 @@ spec:
       labels:
         app: postgres
     spec:
+      # Partial PodSecurity-restricted hardening: seccomp + no-privesc.
+      # capabilities.drop:[ALL] and runAsNonRoot are deferred together:
+      # the postgres:16-alpine entrypoint starts as root and chowns a fresh
+      # PGDATA to the postgres user (needs CAP_CHOWN), so dropping caps
+      # without also setting runAsUser:70 + fsGroup would break first-boot
+      # on an empty PVC. Do those as one verified follow-up change.
+      # (allowPrivilegeEscalation:false is safe — the
+      # entrypoint's gosu root->postgres drop works under no_new_privs.)
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:16-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
           ports:
             - name: postgres
               containerPort: 5432
