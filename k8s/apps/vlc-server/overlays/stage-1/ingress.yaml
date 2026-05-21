@@ -14,7 +14,9 @@ metadata:
     # 0.21 doesn't synthesize default-targets from helm-traefik's empty
     # Ingress.status.loadBalancer).
     external-dns.alpha.kubernetes.io/target: 192.168.1.200
-    cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+    # Namespaced Issuer in this app namespace (k8s/cert-manager/app-issuer/
+    # stage-1) — solves DNS-01 with the stage account, no cross-account.
+    cert-manager.io/issuer: letsencrypt-staging-route53
 spec:
   ingressClassName: traefik
   tls:
