@@ -69,6 +69,14 @@ variable "secondary_stage_nameservers" {
   default = []
 }
 
+# dev.whereisdana.today nameservers — obtained from terraform/stage-1's
+# dev_route53_name_servers output after that zone is applied. Empty default
+# leaves the delegation record uncreated (see route53.tf).
+variable "secondary_dev_nameservers" {
+  type    = list(string)
+  default = []
+}
+
 variable "account_names" {
   type    = list(string)
   default = []
