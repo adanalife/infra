@@ -6,19 +6,25 @@
 # Raw VNC (5900) and the websocket (4455) stay cluster-internal; the
 # websocket is what vlc-server/onscreens-server poll for stream stats.
 #
-# Streaming toggle: `obs-stream-key` is created imperatively by
-# `task obs:prod:stream:on` (pulls STREAM_KEY from the adanalife-prod
-# SM account). While the prod k8s/obs/twitch-stream-key holds a
-# placeholder copy of the stage key, this still streams to
-# adanalife_staging — the cutover to the live adanalife_ channel is a
-# `put-secret-value` of the real key, no manifest change. Run
-# `task obs:stage:stream:on` to force the stage key explicitly.
+# Streaming is ON by default in prod: stream-key-external-secret.yaml
+# pulls STREAM_KEY from the adanalife-prod SM account via ESO, so
+# `task k8s:prod:apply` (and every post-wipe bring-up) materializes the
+# `obs-stream-key` Secret and OBS starts streaming on its own. Toggle it
+# off with `task obs:prod:stream:off` (deletes the ExternalSecret +
+# Secret); back on with `task obs:prod:stream:on` (re-applies the
+# ExternalSecret) — see Taskfile.
+#
+# While the prod k8s/obs/twitch-stream-key holds a placeholder copy of
+# the stage key, this still streams to adanalife_staging — the cutover to
+# the live adanalife_ channel is a `put-secret-value` of the real key, no
+# manifest change.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
   - ../../base
   - ingress.yaml
+  - stream-key-external-secret.yaml
 
 # OBS_QUALITY_PRESET=high is explicit even though `high` is the
 # entrypoint default — the manifest tells the full story.

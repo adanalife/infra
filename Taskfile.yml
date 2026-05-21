@@ -801,28 +801,31 @@ tasks:
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-stream-key is `optional: true`, so the existence + content of that
-  # Secret IS the stream state. The `:on` tasks pull the STREAM_KEY
-  # from AWS Secrets Manager (k8s/obs/twitch-stream-key) and create
-  # the Secret; the `:off` tasks delete it. Either way we
-  # rollout-restart obs so the entrypoint re-reads STREAM_KEY at boot
-  # — Kubernetes doesn't propagate Secret changes to running pods'
-  # env vars.
+  # Secret IS the stream state. Either way we rollout-restart obs so the
+  # entrypoint re-reads STREAM_KEY at boot — Kubernetes doesn't propagate
+  # Secret changes to running pods' env vars.
   #
-  # `:on` is env-prefixed (obs:{stage,prod}:stream:on) because the key
-  # is sourced from a specific AWS account, NOT from whatever cluster
-  # kubectl points at — the AWS profile is the targeting, so it must be
-  # explicit, and the final echo surfaces both the source profile and
-  # the live kubectl context so a cluster/key mismatch is visible.
+  # PROD is on-by-default and goes through ESO: the obs-stream-key
+  # ExternalSecret lives in the prod-1 overlay (stream-key-external-secret.yaml),
+  # so `task k8s:prod:apply` materializes the Secret on every bring-up and OBS
+  # streams without a manual step. `obs:prod:stream:on` just re-applies that
+  # ExternalSecret (e.g. after an `:off`); `obs:prod:stream:off` deletes the
+  # ExternalSecret AND the Secret so ESO can't re-materialize it — the pause
+  # survives the refresh interval and lasts until the next apply/wipe.
   #
-  # `:off` is exposed under both env namespaces for symmetry, but the
-  # work is env-agnostic (it only deletes the current cluster's
-  # obs-stream-key — no AWS account), so both delegate to one shared
-  # internal task.
-  # NAMESPACE defaults to `default` (where prod-1 lives today). Once
-  # stage-1 and prod-1 co-tenant on the one mini-PC cluster in their own
-  # namespaces, run with NAMESPACE=stage-1 / NAMESPACE=prod-1 (or flip
-  # the per-task defaults below) so the obs-stream-key + rollout land in the
-  # right env's namespace instead of whatever the kube-context default is.
+  # STAGE is off-by-default and stays imperative: there's no stage
+  # ExternalSecret, so `obs:stage:stream:on` pulls STREAM_KEY from the
+  # adanalife-stage SM account and creates the Secret directly. That `:on`
+  # is env-prefixed because the key is sourced from a specific AWS account,
+  # NOT from whatever cluster kubectl points at — the AWS profile is the
+  # targeting, so it must be explicit, and the final echo surfaces both the
+  # source profile and the live kubectl context so a cluster/key mismatch is
+  # visible.
+  #
+  # `:off` is exposed under both env namespaces; the shared internal task
+  # deletes both the ExternalSecret (no-op in stage, which has none) and the
+  # Secret in the current cluster — no AWS account needed. Run with
+  # NAMESPACE=stage-1 / NAMESPACE=prod-1 to override the per-task defaults.
   obs:stage:stream:on:
     desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
     vars:
@@ -848,37 +851,41 @@ tasks:
       - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
       - 'echo "OBS streaming — key from adanalife-stage SM (→ adanalife_staging); namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
+  # Prod streaming is on-by-default via the overlay's ExternalSecret, so
+  # this task only matters as the inverse of `:off`: re-apply the
+  # ExternalSecret, wait for ESO to materialize the Secret, then roll obs.
+  # No aws-vault — ESO reads the adanalife-prod account itself.
   obs:prod:stream:on:
-    desc: "stream OBS using the prod-1 stream key (→ adanalife_; a placeholder copy of the stage key streams to adanalife_staging until the real key is seeded)"
+    desc: "resume prod OBS streaming (re-applies the obs-stream-key ExternalSecret; ESO pulls STREAM_KEY from the adanalife-prod SM account → adanalife_, or adanalife_staging while the key is a placeholder)"
     vars:
       NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
     preconditions:
-      - sh: command -v aws-vault >/dev/null
-        msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
       - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
+      - sh: kubectl get secretstore aws-secretsmanager -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "aws-secretsmanager SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
     cmds:
-      - |
-        set -euo pipefail
-        sk=$(aws-vault exec adanalife-prod -- aws secretsmanager get-secret-value \
-          --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
-        kubectl create secret generic obs-stream-key \
-          --from-literal=STREAM_KEY="$sk" \
-          --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
+      - kubectl apply -n {{.NAMESPACE}} -f k8s/apps/obs/overlays/prod-1/stream-key-external-secret.yaml
+      - kubectl wait --for=condition=Ready externalsecret/obs-stream-key -n {{.NAMESPACE}} --timeout=120s
       - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
       - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming — key from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - 'echo "OBS streaming — obs-stream-key materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
-  # Stop streaming, keep OBS running. Deletes obs-stream-key and restarts
-  # the pod so it boots in idle (VNC-only) mode — the container stays
-  # up, only the Twitch publish stops. Exposed under both env
-  # namespaces for symmetry with the `:on` tasks; the work is
-  # env-agnostic (no AWS account — it only touches the local cluster's
-  # obs-stream-key), so both delegate to one shared implementation.
+  # Stop streaming, keep OBS running. Deletes the obs-stream-key
+  # ExternalSecret (if any — prod has one, stage doesn't) AND the
+  # obs-stream-key Secret, then restarts the pod so it boots in idle
+  # (VNC-only) mode — the container stays up, only the Twitch publish
+  # stops. Deleting the ExternalSecret first is what makes the pause
+  # durable in prod: otherwise ESO would re-materialize the Secret on its
+  # next refresh. The pause lasts until the next `task k8s:prod:apply` or
+  # cluster wipe re-applies the overlay. Exposed under both env namespaces
+  # for symmetry with the `:on` tasks; the work is env-agnostic (no AWS
+  # account — it only touches the local cluster), so both delegate to one
+  # shared implementation.
   obs:stage:stream:off:
     desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
     cmds:
@@ -904,6 +911,8 @@ tasks:
       - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "obs Deployment not found in namespace {{.NAMESPACE}}"
     cmds:
+      # ExternalSecret first so ESO stops owning (and re-creating) the Secret.
+      - kubectl delete externalsecret obs-stream-key -n {{.NAMESPACE}} --ignore-not-found
       - kubectl delete secret obs-stream-key -n {{.NAMESPACE}} --ignore-not-found
       - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
       - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
