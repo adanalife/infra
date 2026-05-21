@@ -1,4 +1,4 @@
-# KEEP-IN-SYNC: k8s/cert-manager/app-issuer/{prod-1,stage-1}/issuer.yml
+# KEEP-IN-SYNC: k8s/cert-manager/app-issuer/{prod-1,stage-1,development}/issuer.yml
 # (identical except the route53 `role:` ARN — prod's vs stage's
 # ExternalDNSRole, in their respective accounts).
 #

@@ -22,6 +22,10 @@ resources:
   # owned at the cluster level, not by any workload.
   # See vault/decisions/shared-secrets-not-owned-by-workload.md.
   - ../../shared-secrets/base
+  # Namespaced cert-manager Issuers (letsencrypt-route53 +
+  # -staging-route53) + their Route53 creds, for app Ingress TLS via
+  # DNS-01. Byte-identical to stage-1 (dev borrows the stage account).
+  - ../../cert-manager/app-issuer/development
   - ../../apps/postgres/overlays/development
   - ../../apps/tripbot/overlays/development
   - ../../apps/vlc-server/overlays/development

@@ -48,6 +48,23 @@ resource "aws_route53_record" "secondary_stage_nameservers" {
   records = var.secondary_stage_nameservers
 }
 
+# delegate dev.whereisdana.today to the dev zone managed in terraform/stage-1
+# (dev borrows the stage account). count-guarded because the nameservers
+# aren't known until that zone's first apply: apply stage-1, copy its
+# dev_route53_name_servers output into secondary_dev_nameservers below, then
+# apply here. Empty (the default) = no record yet, so this never errors on a
+# core apply done before the dev zone exists. dev has no dana.lol zone, so
+# there's no primary (dana.lol) counterpart.
+resource "aws_route53_record" "secondary_dev_nameservers" {
+  count   = length(var.secondary_dev_nameservers) > 0 ? 1 : 0
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "dev.${aws_route53_zone.secondary.name}"
+  type    = "NS"
+  ttl     = "30"
+
+  records = var.secondary_dev_nameservers
+}
+
 resource "aws_route53_record" "primary_naked" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = var.domain
