@@ -26,7 +26,7 @@ metadata:
     external-dns.alpha.kubernetes.io/hostname: traefik.prod.whereisdana.today
     # See vlc-server's ingress for the hardcoded-target rationale.
     external-dns.alpha.kubernetes.io/target: 192.168.1.200
-    cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+    cert-manager.io/cluster-issuer: letsencrypt-route53
 spec:
   ingressClassName: traefik
   tls:
