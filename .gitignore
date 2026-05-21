@@ -25,6 +25,9 @@ k8s/**/credentials
 k8s/**/secret-access-key
 k8s/**/secret.env
 
+# Local Postgres dumps (tripbot:stage:db:backup writes here by default)
+backups/
+
 # Per-machine local overrides — values.local.yml (helm) and *.local.yaml
 # (kustomize manifests with host-specific addresses/paths), generated or
 # hand-edited per host.
