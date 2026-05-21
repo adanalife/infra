@@ -34,14 +34,13 @@ secondary_stage_nameservers = [
 ]
 
 # dev.whereisdana.today — obtained from `terraform output dev_route53_name_servers`
-# in terraform/stage-1 after applying the dev zone. Uncomment + fill, then
-# apply core to create the NS delegation record.
-# secondary_dev_nameservers = [
-#   "ns-xxxx.awsdns-xx.org",
-#   "ns-xxxx.awsdns-xx.co.uk",
-#   "ns-xxx.awsdns-xx.com",
-#   "ns-xxx.awsdns-xx.net",
-# ]
+# in terraform/stage-1 after applying the dev zone.
+secondary_dev_nameservers = [
+  "ns-1426.awsdns-50.org",
+  "ns-1886.awsdns-43.co.uk",
+  "ns-73.awsdns-09.com",
+  "ns-940.awsdns-53.net",
+]
 
 # these are obtained after running Terraform on prod
 primary_prod_nameservers = [
