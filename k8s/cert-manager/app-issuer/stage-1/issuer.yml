@@ -9,10 +9,8 @@
 # no cross-account. The kube-system ClusterIssuers stay for the PLATFORM
 # ingresses (hubble/traefik), which live in kube-system and are prod-zone.
 #
-# !!! PHASE-1 FILL-IN !!! The `role:` ARN below is a PLACEHOLDER. Replace
-# STAGE_ACCOUNT_ID with the adanalife-stage account ID once Phase 1 creates
-# the ExternalDNSRole in that account (mirror of prod's). Until then this
-# Issuer cannot solve DNS-01.
+# The role ARN is the adanalife-stage account's ExternalDNSRole (already
+# defined in terraform/stage-1, KEEP-IN-SYNC with prod).
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -34,7 +32,7 @@ spec:
             secretAccessKeySecretRef:
               name: cert-manager-aws-credentials
               key: secret-access-key
-            role: arn:aws:iam::STAGE_ACCOUNT_ID:role/ExternalDNSRole
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -56,4 +54,4 @@ spec:
             secretAccessKeySecretRef:
               name: cert-manager-aws-credentials
               key: secret-access-key
-            role: arn:aws:iam::STAGE_ACCOUNT_ID:role/ExternalDNSRole
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
