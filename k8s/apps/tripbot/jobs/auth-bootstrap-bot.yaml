@@ -27,10 +27,19 @@ spec:
           command: ["/usr/local/bin/auth-bootstrap"]
           args: ["--account=bot"]
           # Port 8080 is the OAuth callback listener; the task port-forwards
-          # it to localhost so the browser redirect lands here. EXTERNAL_URL
-          # (http://localhost:8080) comes from tripbot-config.
+          # it to localhost so the browser redirect lands here.
           ports:
             - containerPort: 8080
+          # The OAuth callback MUST return to this port-forwarded pod, so
+          # EXTERNAL_URL has to be http://localhost:8080 — NOT tripbot-config's
+          # value, which #557 set to the public ingress host. Routing the
+          # callback through the ingress would hit the (NotReady, 503) tripbot
+          # Deployment, not this Job. An explicit env entry overrides the
+          # envFrom configMap value of the same key. localhost:8080/auth/callback
+          # is the redirect URI registered in Twitch for the bootstrap path.
+          env:
+            - name: EXTERNAL_URL
+              value: http://localhost:8080
           envFrom:
             - configMapRef:
                 name: tripbot-config

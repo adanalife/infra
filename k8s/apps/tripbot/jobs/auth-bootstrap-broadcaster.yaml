@@ -26,6 +26,12 @@ spec:
           args: ["--account=broadcaster"]
           ports:
             - containerPort: 8080
+          # See auth-bootstrap-bot.yaml: the OAuth callback must return to this
+          # port-forwarded pod, so EXTERNAL_URL is pinned to localhost:8080 and
+          # overrides tripbot-config's #557 ingress host.
+          env:
+            - name: EXTERNAL_URL
+              value: http://localhost:8080
           envFrom:
             - configMapRef:
                 name: tripbot-config
