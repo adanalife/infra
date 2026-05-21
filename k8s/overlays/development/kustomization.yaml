@@ -22,7 +22,7 @@ resources:
   # owned at the cluster level, not by any workload.
   # See vault/decisions/shared-secrets-not-owned-by-workload.md.
   - ../../shared-secrets/base
-  - ../../apps/postgres/overlays/local
+  - ../../apps/postgres/overlays/development
   - ../../apps/tripbot/overlays/development
   - ../../apps/vlc-server/overlays/development
   - ../../apps/obs/overlays/local
