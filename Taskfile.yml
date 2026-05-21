@@ -1404,6 +1404,11 @@ tasks:
     cmds:
       - task: tripbot:prod:auth:bootstrap:bot
       - task: tripbot:prod:auth:bootstrap:broadcaster
+      # tripbot loads OAuth tokens at boot and doesn't hot-reload them, so the
+      # running pod keeps using its stale (restored) tokens and 401s every Helix
+      # call until restarted. Roll it so the freshly-written tokens load.
+      - kubectl rollout restart deploy/tripbot -n prod-1
+      - echo "Rolled tripbot to load both freshly-written tokens — watch with: kubectl rollout status deploy/tripbot -n prod-1"
 
   tripbot:prod:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token (chat:read/edit etc.) against prod-1; port-forwards 8080 so the browser callback reaches the pod
