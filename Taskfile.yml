@@ -1192,15 +1192,14 @@ tasks:
   tripbot:prod:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token (chat:read/edit etc.) against prod-1; port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # The auth-bootstrap Jobs are deliberately NOT part of the prod-1
-      # umbrella overlay (would otherwise re-run every k8s:prod:apply and
-      # burn each leg's 5min timeout). Standalone manifests at
-      # k8s/apps/tripbot/overlays/prod-1/auth-bootstrap{,-broadcaster}.yaml
-      # carry prod-shaped envFroms (tripbot-twitch-creds,
-      # tripbot-database-creds, tripbot-google-maps-api-key) and direct
-      # env: literals for the config-required values.
+      # The auth-bootstrap Jobs are deliberately NOT part of any umbrella
+      # overlay (would otherwise re-run every apply and burn each leg's
+      # 5min timeout). The shared, env-agnostic manifests at
+      # k8s/apps/tripbot/jobs/auth-bootstrap-{bot,broadcaster}.yaml envFrom
+      # the namespace's tripbot-config + the ESO Secrets, so the same files
+      # serve prod (default ns) and stage (stage-1 ns).
       - kubectl delete job tripbot-auth-bootstrap-bot --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/overlays/prod-1/auth-bootstrap.yaml
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot
@@ -1212,10 +1211,61 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token (channel:read:subscriptions, moderator:read:followers, user:edit:broadcast) against prod-1; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/overlays/prod-1/auth-bootstrap-broadcaster.yaml
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 2>/dev/null || true
       - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot\` to bring the bot online with both identities loaded."'
+
+  tripbot:stage:auth:bootstrap:
+    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4000 then adanalife_staging
+    cmds:
+      - task: tripbot:stage:auth:bootstrap:bot
+      - task: tripbot:stage:auth:bootstrap:broadcaster
+
+  tripbot:stage:auth:bootstrap:bot:
+    desc: bootstrap the BOT Twitch OAuth token against stage-1 (stage-1 namespace); port-forwards 8080 so the browser callback reaches the pod
+    cmds:
+      # Same shared, env-agnostic Job as prod (k8s/apps/tripbot/jobs/) —
+      # only the -n namespace differs. envFrom the stage-1 tripbot-config +
+      # the stage ESO Secrets.
+      - kubectl delete job tripbot-auth-bootstrap-bot -n stage-1 --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n stage-1
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1
+      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
+      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n stage-1 2>/dev/null || true
+      - echo "Bot bootstrap complete — tripbot4000 token written to stage Postgres."
+
+  tripbot:stage:auth:bootstrap:broadcaster:
+    desc: bootstrap the BROADCASTER Twitch OAuth token against stage-1; required for subscriber/follower polling + real-time EventSub
+    cmds:
+      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n stage-1 --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n stage-1
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1
+      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
+      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n stage-1 2>/dev/null || true
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n stage-1\` to bring the bot online with both identities."'
+
+  tripbot:stage:db:seed:
+    desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
+    cmds:
+      - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/seed.yaml -n stage-1
+      # kubectl wait doesn't short-circuit on Failed when asked for
+      # Complete — wait the full window then disambiguate after the fact.
+      - |
+        if ! kubectl wait --for=condition=complete --timeout=180s job/tripbot-seed -n stage-1; then
+          if kubectl get job tripbot-seed -n stage-1 -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' | grep -q True; then
+            echo "seed job failed"
+          else
+            echo "seed job timed out after 180s (still pending)"
+          fi
+          exit 1
+        fi
+      - kubectl logs job/tripbot-seed -n stage-1
