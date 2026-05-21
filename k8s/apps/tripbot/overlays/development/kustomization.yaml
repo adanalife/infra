@@ -22,12 +22,16 @@ configMapGenerator:
       - CHANNEL_NAME=adanalife_staging
       - BOT_USERNAME=tripbot4000
       # Internal Traefik Ingress host, matching prod/stage so the OAuth
-      # round-trip + logged reauth_url (tripbot#625) work on-LAN. NOTE: dev's
-      # Ingress tls/cert-manager block is still commented (the bees cluster has
-      # no cert-manager yet), so the https click-flow won't serve until that
-      # lands — the auth-bootstrap CLI (Taskfile overrides EXTERNAL_URL to
-      # localhost) is unaffected and remains how dev gets seeded meanwhile.
-      - EXTERNAL_URL=https://tripbot.dev.whereisdana.today
+      # round-trip + logged reauth_url (tripbot#625) work on-LAN with no
+      # port-forward. external-dns publishes the record at the bees host's
+      # LAN IP; cert-manager issues a real cert via DNS-01 (no inbound
+      # needed). The :9443 suffix is the one divergence from prod/stage —
+      # k3d's traefik LB is mapped to host :9443 (Colima can't bind :443
+      # without sudo), so both the reauth_url and the Twitch /auth/callback
+      # redirect_uri must carry the port. The matching Redirect URL
+      # (…:9443/auth/callback) must be registered in the shared stage
+      # Twitch app's dev console.
+      - EXTERNAL_URL=https://tripbot.dev.whereisdana.today:9443
       - GOOGLE_APPS_PROJECT_ID=tripbot-stage
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
@@ -36,10 +40,11 @@ configMapGenerator:
       - SENTRY_ENVIRONMENT=development
 
 patches:
-  # Public Ingress host for dev — external-dns publishes a record (LAN
-  # target on the dev cluster). The cert-manager annotation + tls block
-  # stay commented until the dev port-forward lands; see
-  # vault/decisions/k8s-platform-stack.md.
+  # Internal-IP Ingress for tripbot's web UI at tripbot.dev.whereisdana.today
+  # — external-dns publishes the record at the bees host's LAN IP, so it's
+  # LAN-only. cert-manager issues via DNS-01 against the namespaced
+  # letsencrypt-route53 Issuer (app-issuer/development). Same shape as
+  # prod/stage; served on traefik's :9443 entrypoint (k3d port mapping).
   - target:
       kind: Ingress
       name: tripbot
@@ -51,4 +56,10 @@ patches:
         path: /metadata/annotations
         value:
           external-dns.alpha.kubernetes.io/hostname: tripbot.dev.whereisdana.today
-          # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+          cert-manager.io/issuer: letsencrypt-route53
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts:
+              - tripbot.dev.whereisdana.today
+            secretName: tripbot-tls

@@ -1,6 +1,7 @@
 # KEEP-IN-SYNC: k8s/cert-manager/app-issuer/{prod-1,stage-1,development}/issuer.yml
 # (identical except the route53 `role:` ARN — prod's vs stage's
-# ExternalDNSRole, in their respective accounts).
+# ExternalDNSRole, in their respective accounts). development borrows the
+# adanalife-stage account, so it's byte-identical to stage-1.
 #
 # Namespaced Issuers for APP ingresses (tripbot/vlc/obs), stamped into the
 # env's app namespace by the umbrella. App ingresses reference these via
@@ -8,6 +9,9 @@
 # challenge is solved with that env's own account creds + ExternalDNSRole —
 # no cross-account. The kube-system ClusterIssuers stay for the PLATFORM
 # ingresses (hubble/traefik), which live in kube-system and are prod-zone.
+#
+# The role ARN is the adanalife-stage account's ExternalDNSRole (already
+# defined in terraform/stage-1, KEEP-IN-SYNC with prod).
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -29,7 +33,7 @@ spec:
             secretAccessKeySecretRef:
               name: cert-manager-aws-credentials
               key: secret-access-key
-            role: arn:aws:iam::704461573429:role/ExternalDNSRole
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -51,4 +55,4 @@ spec:
             secretAccessKeySecretRef:
               name: cert-manager-aws-credentials
               key: secret-access-key
-            role: arn:aws:iam::704461573429:role/ExternalDNSRole
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
