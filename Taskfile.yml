@@ -561,8 +561,11 @@ tasks:
             --dry-run=client -o yaml | kubectl apply -f -
           echo "applied eso-aws-credentials-stage Secret to external-secrets namespace"
         fi
-      - kubectl apply -k k8s/external-secrets/stage-1
-      - 'echo "stage ClusterSecretStore aws-secretsmanager-stage applied (locked to the stage-1 namespace)."'
+      # The stage SecretStore (aws-secretsmanager, namespaced) now ships in
+      # the stage-1 umbrella and comes up with `task k8s:stage:apply` — no
+      # separate store apply here. (The eso-aws-credentials seeding above
+      # still uses the interim external-secrets placement; the per-namespace
+      # bootstrap rework lands in the Taskfile parity pass.)
 
   # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
   # into the local cluster. Idempotent — re-run after a cluster recreate or
@@ -613,14 +616,14 @@ tasks:
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
-          -f k8s/external-secrets/development/values.yml
+          -f k8s/external-secrets/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
-      - kubectl apply -k k8s/external-secrets/development
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      - kubectl apply -k k8s/external-secrets/cluster-store
+      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -709,14 +712,14 @@ tasks:
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
-          -f k8s/external-secrets/development/values.yml
+          -f k8s/external-secrets/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
-      - kubectl apply -k k8s/external-secrets/prod-1
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      - kubectl apply -k k8s/external-secrets/cluster-store
+      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
