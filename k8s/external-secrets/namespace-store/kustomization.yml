@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# No namespace here — each env umbrella that includes this base stamps
+# the SecretStore into its own namespace via the umbrella's `namespace:`
+# field. The eso-aws-credentials Secret the store references is seeded
+# in-namespace by `task k8s:<env>:bootstrap-secrets`.
+resources:
+  - secret-store.yml

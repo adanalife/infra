@@ -1,6 +1,5 @@
 # stage-1 postgres overlay: a small disposable PVC on the default
-# local-path StorageClass + credentials sourced from AWS Secrets Manager
-# (adanalife-stage account) via ESO.
+# local-path StorageClass. Credentials come from ESO via base.
 #
 # Unlike prod-1 there is NO backup CronJob / backup ExternalSecret — stage
 # data is fresh-seeded and disposable, so it isn't backed up, and the
@@ -10,7 +9,6 @@ kind: Kustomization
 
 resources:
   - ../../base
-  - external-secret.yaml
 
 patches:
   - path: statefulset-patch.yaml

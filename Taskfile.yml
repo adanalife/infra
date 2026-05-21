@@ -397,6 +397,7 @@ tasks:
     desc: apply development ESO bootstrap Secret + write external-dns values.local.yml (no plaintext on disk)
     status:
       - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n development >/dev/null 2>&1
       - test -f k8s/external-dns/development/values.local.yml
     preconditions:
       - sh: command -v aws-vault >/dev/null
@@ -410,22 +411,30 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — run `task k8s:dev:cluster:up` first"
     cmds:
-      # eso-aws-credentials: ESOSecretsReader access key for ESO.
+      # eso-aws-credentials (ESOSecretsReader, adanalife-stage account that
+      # dev borrows) goes in BOTH external-secrets (for the
+      # aws-secretsmanager-cluster ClusterSecretStore platform components
+      # use) AND the development namespace (for the namespaced
+      # aws-secretsmanager SecretStore the apps use).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace development --dry-run=client -o yaml | kubectl apply -f -
       - |
-        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1; then
+        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n development >/dev/null 2>&1; then
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          kubectl create secret generic eso-aws-credentials \
-            --namespace=external-secrets \
-            --from-literal=AWS_ACCESS_KEY_ID="$ak" \
-            --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          echo "applied eso-aws-credentials Secret to external-secrets namespace"
+          for ns in external-secrets development; do
+            kubectl create secret generic eso-aws-credentials \
+              --namespace="$ns" \
+              --from-literal=AWS_ACCESS_KEY_ID="$ak" \
+              --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          done
+          echo "applied eso-aws-credentials Secret to external-secrets + development namespaces"
         fi
       # external-dns values.local.yml: per-machine helm override holding
       # the host's current public IP, fed to external-dns as
@@ -468,6 +477,7 @@ tasks:
     desc: apply prod-1 ESO bootstrap Secret + write external-dns values.local.yml (no plaintext on disk)
     status:
       - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1
       - test -f k8s/external-dns/prod-1/values.local.yml
     preconditions:
       - sh: command -v aws-vault >/dev/null
@@ -481,21 +491,30 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — run `task k8s:prod:cluster:up` first"
     cmds:
+      # eso-aws-credentials goes in BOTH external-secrets (for the
+      # aws-secretsmanager-cluster ClusterSecretStore that platform
+      # components use) AND the prod-1 namespace (for the namespaced
+      # aws-secretsmanager SecretStore the apps use). Same prod-account
+      # creds in both.
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace prod-1 --dry-run=client -o yaml | kubectl apply -f -
       - |
-        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1; then
+        if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1; then
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          kubectl create secret generic eso-aws-credentials \
-            --namespace=external-secrets \
-            --from-literal=AWS_ACCESS_KEY_ID="$ak" \
-            --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          echo "applied eso-aws-credentials Secret to external-secrets namespace"
+          for ns in external-secrets prod-1; do
+            kubectl create secret generic eso-aws-credentials \
+              --namespace="$ns" \
+              --from-literal=AWS_ACCESS_KEY_ID="$ak" \
+              --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          done
+          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 namespaces"
         fi
       - |
         values_file=k8s/external-dns/prod-1/values.local.yml
@@ -522,18 +541,19 @@ tasks:
           echo "wrote $values_file (default-targets=$ip)"
         fi
 
-  # Stage-1 ESO bootstrap on the mini-PC Talos cluster — seeds the
-  # adanalife-stage reader creds and applies the namespace-locked stage
-  # ClusterSecretStore. Co-tenants beside prod (which uses
-  # eso-aws-credentials + the `aws-secretsmanager` store): stage uses a
-  # *separate* credential (eso-aws-credentials-stage) reading the
-  # adanalife-stage account, so neither env can read the other's secrets.
-  # No external-dns values.local.yml step — stage reuses prod's external-dns
-  # on the shared cluster. Point kubectl at the adanalife-minipc context.
+  # Stage-1 ESO bootstrap on the mini-PC Talos cluster. Seeds the
+  # adanalife-stage reader creds as eso-aws-credentials in the stage-1
+  # namespace — that's all stage needs: its namespaced aws-secretsmanager
+  # SecretStore (shipped in the stage-1 umbrella) reads them in-namespace.
+  # Stage does NOT touch external-secrets — prod owns the cluster-scoped
+  # aws-secretsmanager-cluster store there. Isolation is by AWS account
+  # (stage creds only read the stage account) AND by namespace (the store
+  # is unreachable from prod-1). No external-dns values.local.yml step —
+  # stage reuses prod's external-dns. Point kubectl at adanalife-minipc.
   k8s:stage:bootstrap-secrets:
-    desc: apply stage-1 ESO bootstrap Secret (adanalife-stage account) + the namespace-locked stage ClusterSecretStore (mini-PC cluster)
+    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into the stage-1 namespace (mini-PC cluster)
     status:
-      - kubectl get secret eso-aws-credentials-stage -n external-secrets >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -544,25 +564,24 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
-      - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace stage-1 --dry-run=client -o yaml | kubectl apply -f -
       - |
-        if kubectl get secret eso-aws-credentials-stage -n external-secrets >/dev/null 2>&1; then
-          echo "eso-aws-credentials-stage already present, skipping"
+        if kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1; then
+          echo "eso-aws-credentials already present in stage-1, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          kubectl create secret generic eso-aws-credentials-stage \
-            --namespace=external-secrets \
+          kubectl create secret generic eso-aws-credentials \
+            --namespace=stage-1 \
             --from-literal=AWS_ACCESS_KEY_ID="$ak" \
             --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
             --dry-run=client -o yaml | kubectl apply -f -
-          echo "applied eso-aws-credentials-stage Secret to external-secrets namespace"
+          echo "applied eso-aws-credentials Secret to the stage-1 namespace"
         fi
-      - kubectl apply -k k8s/external-secrets/stage-1
-      - 'echo "stage ClusterSecretStore aws-secretsmanager-stage applied (locked to the stage-1 namespace)."'
+      # The stage SecretStore (aws-secretsmanager, namespaced) ships in the
+      # stage-1 umbrella and comes up with `task k8s:stage:apply`.
 
   # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
   # into the local cluster. Idempotent — re-run after a cluster recreate or
@@ -613,14 +632,14 @@ tasks:
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
-          -f k8s/external-secrets/development/values.yml
+          -f k8s/external-secrets/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
-      - kubectl apply -k k8s/external-secrets/development
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      - kubectl apply -k k8s/external-secrets/cluster-store
+      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -694,6 +713,19 @@ tasks:
       - sh: test -f k8s/external-dns/prod-1/values.local.yml
         msg: "k8s/external-dns/prod-1/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
     cmds:
+      # Cilium FIRST — it is the CNI + kube-proxy replacement (Talos installs
+      # neither; see controlplane.patch.yaml). Until it's up the node is
+      # NotReady and nothing else can schedule, so it precedes everything.
+      # KubePrism (localhost:7445) gives the agent a stable kube-apiserver
+      # endpoint with no kube-proxy / ClusterIP dependency.
+      - helm repo add cilium https://helm.cilium.io/
+      - helm repo update
+      - helm upgrade --install cilium cilium/cilium
+          -n kube-system
+          -f k8s/cilium/values.yml
+      - kubectl -n kube-system rollout status daemonset/cilium --timeout=180s
+      - kubectl wait --for=condition=Ready node --all --timeout=180s
+      - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
       # local-path-provisioner — cluster storage backing. Must precede any
       # PVC-consuming workload (postgres). Codified from the former manual
       # bootstrap-runbook Phase 5.0 steps; see k8s/local-path-provisioner/prod-1.
@@ -709,14 +741,14 @@ tasks:
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
-          -f k8s/external-secrets/development/values.yml
+          -f k8s/external-secrets/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment --all -n external-secrets
       - kubectl wait --for=condition=Established --timeout=60s
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
-      - kubectl apply -k k8s/external-secrets/prod-1
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager is ready for ExternalSecret consumers."
+      - kubectl apply -k k8s/external-secrets/cluster-store
+      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -814,7 +846,7 @@ tasks:
   obs:stage:stream:on:
     desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
     vars:
-      NAMESPACE: '{{.NAMESPACE | default "default"}}'
+      NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -839,7 +871,7 @@ tasks:
   obs:prod:stream:on:
     desc: "stream OBS using the prod-1 stream key (→ adanalife_; a placeholder copy of the stage key streams to adanalife_staging until the real key is seeded)"
     vars:
-      NAMESPACE: '{{.NAMESPACE | default "default"}}'
+      NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -872,14 +904,14 @@ tasks:
     cmds:
       - task: obs:stream:off:_run
         vars:
-          NAMESPACE: '{{.NAMESPACE | default "default"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
 
   obs:prod:stream:off:
     desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
     cmds:
       - task: obs:stream:off:_run
         vars:
-          NAMESPACE: '{{.NAMESPACE | default "default"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
 
   obs:stream:off:_run:
     internal: true
@@ -1059,7 +1091,7 @@ tasks:
     aliases: [tripbot:db:up]
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      - kubectl port-forward svc/postgres 5432:5432 > /dev/null 2>&1 &
+      - kubectl port-forward -n development svc/postgres 5432:5432 > /dev/null 2>&1 &
       - echo $! > /tmp/adanalife-tasks/tripbot-db.pid
       - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
 
@@ -1123,8 +1155,8 @@ tasks:
     vars:
       BUCKET: adanalife-prod-1-postgres-backups
     preconditions:
-      - sh: kubectl get pod postgres-0 >/dev/null 2>&1
-        msg: "postgres-0 not found — bring the cluster + postgres up first"
+      - sh: kubectl get pod postgres-0 -n prod-1 >/dev/null 2>&1
+        msg: "postgres-0 not found in prod-1 — bring the cluster + postgres up first"
     cmds:
       - |
         set -euo pipefail
@@ -1136,12 +1168,12 @@ tasks:
         fi
         echo "Restoring prod-1 Postgres from s3://{{.BUCKET}}/$key"
         aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/$key" - \
-          | kubectl exec -i postgres-0 -- sh -c \
+          | kubectl exec -i -n prod-1 postgres-0 -- sh -c \
             'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
         echo "Restore complete."
       - |
         set -euo pipefail
-        psql() { kubectl exec -i postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
+        psql() { kubectl exec -i -n prod-1 postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
         ver=$(psql "SELECT version FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         dirty=$(psql "SELECT dirty FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         echo "schema_migrations: version=$ver dirty=$dirty"
@@ -1150,38 +1182,60 @@ tasks:
           psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
           echo "cleared."
         fi
-      - 'echo "Next: kubectl rollout restart deploy/tripbot — its migrate init re-applies any pending migrations."'
+      - 'echo "Next: kubectl rollout restart deploy/tripbot -n prod-1 — its migrate init re-applies any pending migrations."'
 
   tripbot:dev:db:seed:
-    desc: run the one-shot DB seed Job in the development cluster; idempotent — skips if videos table already has real rows
+    desc: run the one-shot ESO-wired seed Job in the development namespace; idempotent — skips if the videos table already has real rows
     aliases: [tripbot:db:seed]
     cmds:
-      - kubectl apply -k k8s/apps/tripbot/overlays/development
+      # Same shared, env-agnostic Job as stage/prod (k8s/apps/tripbot/jobs/) —
+      # only the -n namespace differs.
+      - kubectl delete job tripbot-seed -n development --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/seed.yaml -n development
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
-        if ! kubectl wait --for=condition=complete --timeout=180s job/tripbot-seed; then
-          if kubectl get job tripbot-seed -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' | grep -q True; then
+        if ! kubectl wait --for=condition=complete --timeout=180s job/tripbot-seed -n development; then
+          if kubectl get job tripbot-seed -n development -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' | grep -q True; then
             echo "seed job failed"
           else
             echo "seed job timed out after 180s (still pending)"
           fi
           exit 1
         fi
-      - kubectl logs job/tripbot-seed
+      - kubectl logs job/tripbot-seed -n development
 
   tripbot:dev:auth:bootstrap:
-    desc: run the interactive Twitch OAuth bootstrap job against development; port-forwards 8080 so the browser callback reaches the pod
+    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against development back-to-back; dev borrows the stage identity, so sign in as tripbot4000 then adanalife_staging
     aliases: [tripbot:auth:bootstrap]
     cmds:
-      - kubectl delete job tripbot-auth-bootstrap --ignore-not-found
-      - kubectl apply -k k8s/apps/tripbot/overlays/development
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap
-      - echo "Port-forwarding localhost:8080 → job pod. Open the URL above in your browser."
-      - kubectl port-forward job/tripbot-auth-bootstrap 8080:8080 2>/dev/null || true
-      - echo "Bootstrap complete — token written to cluster Postgres."
+      - task: tripbot:dev:auth:bootstrap:bot
+      - task: tripbot:dev:auth:bootstrap:broadcaster
+
+  tripbot:dev:auth:bootstrap:bot:
+    desc: bootstrap the BOT Twitch OAuth token against development (development namespace); port-forwards 8080 so the browser callback reaches the pod
+    cmds:
+      # Same shared, env-agnostic Job as stage/prod — only -n differs.
+      - kubectl delete job tripbot-auth-bootstrap-bot -n development --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n development
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development
+      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
+      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n development 2>/dev/null || true
+      - echo "Bot bootstrap complete — token written to dev Postgres."
+
+  tripbot:dev:auth:bootstrap:broadcaster:
+    desc: bootstrap the BROADCASTER Twitch OAuth token against development; required for subscriber/follower polling + real-time EventSub
+    cmds:
+      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n development --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n development
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
+      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
+      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n development 2>/dev/null || true
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n development\` to bring the bot online with both identities."'
 
   tripbot:prod:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against prod-1 back-to-back; sign in as tripbot4000 on the first browser tab, then adanalife_ on the second
@@ -1197,27 +1251,27 @@ tasks:
       # 5min timeout). The shared, env-agnostic manifests at
       # k8s/apps/tripbot/jobs/auth-bootstrap-{bot,broadcaster}.yaml envFrom
       # the namespace's tripbot-config + the ESO Secrets, so the same files
-      # serve prod (default ns) and stage (stage-1 ns).
-      - kubectl delete job tripbot-auth-bootstrap-bot --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot
+      # serve prod (prod-1 ns) and stage (stage-1 ns) — only -n differs.
+      - kubectl delete job tripbot-auth-bootstrap-bot -n prod-1 --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n prod-1
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1
       - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 2>/dev/null || true
+      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n prod-1 2>/dev/null || true
       - echo "Bot bootstrap complete — tripbot4000 token written to prod Postgres."
 
   tripbot:prod:auth:bootstrap:broadcaster:
     desc: bootstrap the BROADCASTER Twitch OAuth token (channel:read:subscriptions, moderator:read:followers, user:edit:broadcast) against prod-1; required for subscriber/follower polling + real-time EventSub
     cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster
+      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n prod-1 --ignore-not-found
+      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n prod-1
+      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
+      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
+      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot\` to bring the bot online with both identities loaded."'
+      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n prod-1 2>/dev/null || true
+      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot -n prod-1\` to bring the bot online with both identities loaded."'
 
   tripbot:stage:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4000 then adanalife_staging

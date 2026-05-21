@@ -1,30 +1,22 @@
-# tripbot stage-1 overlay. Same shape as prod-1: extends the shared ESO
-# base (../_eso), so this file is just stage's config VALUES plus its
-# database-external-secret (which names the stage store directly). The
-# only differences from prod are the values below.
+# tripbot stage-1 overlay. Same shape as prod-1: extends base (the
+# canonical ESO/production shape), so this file is just stage's config
+# VALUES. The only differences from prod are the literals below.
 #
 # Identity: bot tripbot4000 in channel adanalife_staging (the same Twitch
-# identity the development/k3d env borrows — so dev and stage must not be
-# live at once; see vault/infra/TODO.md).
-#
-# Outbound-only like prod (Ingress dropped in ../_eso); EventSub uses the
-# WebSocket transport, so no public callback URL is needed. The seed +
-# auth-bootstrap Jobs run via tasks, not on apply.
+# identity the development env borrows — so dev and stage must not be live
+# at once; see vault/infra/TODO.md).
 #
 # Pre-reqs:
 # - shared-secrets applied via the stage-1 umbrella (Sentry + OTLP)
-# - the stage account's tripbot_twitch_creds + tripbot_google_maps_api_key
-#   SM containers populated (already exist; see terraform/stage-1)
-# - postgres stage-1 overlay applied + k8s/postgres/credentials populated
-#   (terraform-owned; database-external-secret reads it)
+# - the stage account's tripbot twitch-creds + google-maps-api-key +
+#   postgres/credentials SM containers populated (see terraform/stage-1)
+# - the namespaced aws-secretsmanager SecretStore + eso-aws-credentials
+#   present in the stage-1 namespace (umbrella + bootstrap)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../_eso
-  # stage DATABASE_* materialization from k8s/postgres/credentials, via
-  # the stage store (named directly — not routed through the umbrella patch).
-  - database-external-secret.yaml
+  - ../../base
 
 configMapGenerator:
   - name: tripbot-config
@@ -40,3 +32,27 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=stage-1
+
+patches:
+  # Internal-IP Ingress for tripbot's web UI at tripbot.stage.whereisdana.today
+  # — LAN-only via external-dns at the mini-PC IP, cert-manager DNS-01. Same
+  # shape as prod, only the hostname differs.
+  - target:
+      kind: Ingress
+      name: tripbot
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tripbot.stage.whereisdana.today
+      - op: add
+        path: /metadata/annotations
+        value:
+          external-dns.alpha.kubernetes.io/hostname: tripbot.stage.whereisdana.today
+          external-dns.alpha.kubernetes.io/target: 192.168.1.200
+          cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts:
+              - tripbot.stage.whereisdana.today
+            secretName: tripbot-tls

@@ -7,7 +7,6 @@ kind: Kustomization
 resources:
   - ../../base
   - storageclass.yaml
-  - external-secret.yaml
   - backup-external-secret.yaml
   - backup-cronjob.yaml
 

@@ -1,0 +1,31 @@
+# Browser noVNC ingress for stage OBS — same internal-IP shape as prod-1's,
+# with the stage hostname. external-dns publishes a public Route53 record
+# pointing at the mini-PC LAN IP, so obs.stage.whereisdana.today resolves
+# anywhere but is only reachable on the home network. cert-manager issues
+# via DNS-01. No auth — LAN-only reachability is the gate (wayvnc runs
+# auth-off inside the pod).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: obs
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: obs.stage.whereisdana.today
+    external-dns.alpha.kubernetes.io/target: 192.168.1.200
+    cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - obs.stage.whereisdana.today
+      secretName: obs-tls
+  rules:
+    - host: obs.stage.whereisdana.today
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: obs
+                port:
+                  name: novnc

@@ -33,7 +33,7 @@ spec:
             - configMapRef:
                 name: tripbot-config
             - secretRef:
-                name: tripbot-secret
+                name: tripbot-database-creds
       containers:
         - name: tripbot
           image: adanalife/tripbot:latest
@@ -41,11 +41,23 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # All secrets come from ESO (the namespaced aws-secretsmanager
+          # SecretStore). The laptop `local` overlay swaps the DB creds for
+          # its on-disk secret.env password; everything else stays ESO even
+          # there. All required — a missing Secret fails the pod loudly.
           envFrom:
             - configMapRef:
                 name: tripbot-config
             - secretRef:
-                name: tripbot-secret
+                name: tripbot-database-creds
+            - secretRef:
+                name: grafana-cloud-otlp
+            - secretRef:
+                name: sentry-tripbot
+            - secretRef:
+                name: tripbot-twitch-creds
+            - secretRef:
+                name: tripbot-google-maps-api-key
           livenessProbe:
             httpGet:
               path: /health/live

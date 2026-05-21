@@ -8,47 +8,29 @@
 #   - Reuses prod's platform stack (traefik / ESO / external-dns /
 #     cert-manager / monitoring) — no second install.
 #   - Namespace isolation: everything lands in `stage-1` (the `namespace`
-#     field below); prod stays in `default`.
-#   - Secret isolation: everything reads the namespace-locked
-#     `aws-secretsmanager-stage` ClusterSecretStore (k8s/external-secrets/
-#     stage-1), which reads the adanalife-stage account. The stage-owned
-#     ExternalSecrets name that store directly; the SHARED, store-agnostic
-#     ones (shared-secrets/base + tripbot/base, which can't be edited
-#     per-env) are env-routed to it by the named patch below.
+#     field below); prod runs in its own `prod-1` namespace.
+#   - Secret isolation: stage's in-namespace `aws-secretsmanager`
+#     SecretStore (../../external-secrets/namespace-store) reads the
+#     adanalife-stage account via stage's eso-aws-credentials. A namespaced
+#     store is unreachable from other namespaces, so isolation is
+#     structural — and EVERY ExternalSecret references it identically, so
+#     there's no per-env store name and no repoint patch.
 #
 # Full app set: shared observability secrets + postgres + tripbot
 # (outbound-only) + vlc-server + OBS (both on the shared iGPU at low
-# quality, streaming off by default, cluster-internal — no Ingress).
+# quality, streaming off by default).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: stage-1
 
 resources:
+  # Per-env namespaced SecretStore (aws-secretsmanager) reading the
+  # adanalife-stage account via stage's in-namespace eso-aws-credentials.
+  - ../../external-secrets/namespace-store
   # Cross-cutting observability ExternalSecrets (OTLP + Sentry DSNs).
   - ../../shared-secrets/base
   - ../../apps/postgres/overlays/stage-1
   - ../../apps/tripbot/overlays/stage-1
   - ../../apps/vlc-server/overlays/stage-1
   - ../../apps/obs/overlays/stage-1
-
-patches:
-  # Env-route the SHARED, store-agnostic ExternalSecrets to the stage
-  # account. These five live in dirs reused verbatim across environments
-  # (shared-secrets/base + tripbot/base), so they hardcode the prod store
-  # name `aws-secretsmanager` and can't be edited per-env without a fork.
-  # This patch repoints exactly them — by name — to the namespace-locked
-  # stage store. The stage-OWNED ExternalSecrets (postgres-credentials,
-  # tripbot-database-creds) already name aws-secretsmanager-stage directly
-  # in their own files, so they're not touched here.
-  #
-  # (The cleaner end state — namespaced SecretStores sharing one name, so
-  # no file names a store-per-env and this patch disappears — is deferred
-  # to the prod-namespace-move / mini-reset phase. See infra TODO.)
-  - target:
-      kind: ExternalSecret
-      name: ^(grafana-cloud-otlp|sentry-tripbot|sentry-vlc-server|tripbot-twitch-creds|tripbot-google-maps-api-key)$
-    patch: |-
-      - op: replace
-        path: /spec/secretStoreRef/name
-        value: aws-secretsmanager-stage

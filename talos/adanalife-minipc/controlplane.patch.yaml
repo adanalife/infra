@@ -22,9 +22,14 @@
 # KubeSpan is a creation-time feature — it takes effect on a wipe-reinstall
 # (apply-config), not when patched onto the running node. Added 2026-05-20.
 # Disk encryption was attempted here too but DEFERRED (see the note below — it
-# needs a SecureBoot image). Cilium (cni.name=none + proxy.disabled) is likewise
-# NOT here yet — deferred to a follow-up wipe once the base rebuild is green, so
-# the CNI swap is isolated as its own variable.
+# needs a SecureBoot image).
+#
+# Cilium CNI: cluster.network.cni.name=none + cluster.proxy.disabled=true tell
+# Talos to install NEITHER its default Flannel CNI NOR kube-proxy — Cilium
+# replaces both (eBPF kube-proxy replacement). These are creation-time, so they
+# ride this wipe. Cilium itself is installed via helm as the FIRST platform step
+# (k8s:<env>:platform:up); until it's up the node stays NotReady (no CNI), so
+# `talosctl health` won't go fully green until the helm install lands — expected.
 
 machine:
   install:
@@ -52,6 +57,12 @@ machine:
 
 cluster:
   allowSchedulingOnControlPlanes: true
+  # Cilium owns the dataplane — Talos installs no CNI and no kube-proxy.
+  network:
+    cni:
+      name: none
+  proxy:
+    disabled: true
   # Required by KubeSpan for peer discovery. Default-on in recent Talos; set
   # explicitly so the dependency is visible.
   discovery:

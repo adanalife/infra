@@ -1,0 +1,10 @@
+# development postgres overlay (k3d). Disposable like stage, but small
+# enough to ride base's default 5Gi PVC on the cluster's default
+# (local-path) StorageClass — no patch needed. Credentials come from ESO
+# via base (the adanalife-stage account, which dev borrows). Pure ESO,
+# same shape as stage minus the explicit storage sizing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base

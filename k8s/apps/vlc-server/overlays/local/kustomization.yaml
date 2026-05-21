@@ -47,30 +47,7 @@ configMapGenerator:
       # the same string. Prod-1 overrides to "prod-1".
       - SENTRY_ENVIRONMENT=development
 
-# Mount the dashcam video dir from the host (k3d-only).
+# Mount the dashcam video dir from the host (k3d-only). Sentry + OTLP
+# envFrom now live in base (all envs get them), so no patch here.
 patches:
   - path: dashcam-hostpath.yaml
-  # Inject the Grafana Cloud OTLP env vars from the shared-secrets
-  # ExternalSecret. optional: false — pod fails to start if the
-  # shared-secrets overlay isn't applied.
-  - target:
-      kind: Deployment
-      name: vlc-server
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: grafana-cloud-otlp
-            optional: false
-  # Inject SENTRY_DSN from the shared-secrets ExternalSecret.
-  - target:
-      kind: Deployment
-      name: vlc-server
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: sentry-vlc-server
-            optional: false

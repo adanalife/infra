@@ -1,34 +1,39 @@
-# Stage-1 overlay for tripbot. Extends the local overlay (configmap
-# merge, secret patches, sentry + OTLP envFrom) and reroutes the
-# Ingress from `tripbot.localhost` (set by the local overlay's host
-# patch) to `tripbot.dev.whereisdana.today`, with an external-dns
-# annotation so the platform stack publishes a Route53 record.
+# tripbot development overlay — the k3d cluster (adanalife-bees). Same
+# pure-ESO shape as stage-1/prod-1 (extends base), reading the
+# adanalife-stage account; dev borrows stage's Twitch identity
+# (tripbot4000 / adanalife_staging), so dev and stage must not be live at
+# once (see vault/infra/TODO.md). It differs from stage only by the env
+# tags + its Ingress host.
 #
-# Today this URL is dormant: external-dns will create the A record
-# pointing at the host's public IPv4, but the home-network router
-# isn't forwarding inbound 443 (or 9443) to the cluster yet — see
-# vault/decisions/k8s-platform-stack.md. Twitch EventSub callbacks
-# continue to flow through `tripbot.whalecore.com` via the existing
-# Cloudflare Tunnel until the port-forward lands and we update the
-# webhook URLs registered with Twitch.
-#
-# BEFORE FLIPPING TO HTTPS: /metrics is unauthenticated. Full audit +
-# remediation TODOs in vault/tripbot/http-endpoints.md and
-# vault/tripbot/tripbot/TODO.md.
+# Non-secret config that used to hide in secret.env (CHANNEL_NAME,
+# BOT_USERNAME, EXTERNAL_URL, GOOGLE_APPS_PROJECT_ID) now lives here in the
+# configMap; the actual secrets come from ESO via base.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../local
+  - ../../base
+
+configMapGenerator:
+  - name: tripbot-config
+    behavior: merge
+    literals:
+      - ENV=staging
+      - CHANNEL_NAME=adanalife_staging
+      - BOT_USERNAME=tripbot4000
+      - EXTERNAL_URL=http://localhost:8080
+      - GOOGLE_APPS_PROJECT_ID=tripbot-stage
+      - OTEL_SDK_DISABLED=false
+      - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=development,service.namespace=tripbot
+      - SENTRY_ENVIRONMENT=development
 
 patches:
-  # Override the local overlay's host patch (`tripbot.localhost`) and
-  # attach the external-dns hostname annotation. The cert-manager
-  # annotation + the tls op below stay commented until the
-  # port-forward lands so this URL can actually serve TLS — start with
-  # letsencrypt-staging-route53 to avoid LE prod's per-week
-  # duplicate-cert limit, flip to letsencrypt-route53 once the first
-  # cert issues clean.
+  # Public Ingress host for dev — external-dns publishes a record (LAN
+  # target on the dev cluster). The cert-manager annotation + tls block
+  # stay commented until the dev port-forward lands; see
+  # vault/decisions/k8s-platform-stack.md.
   - target:
       kind: Ingress
       name: tripbot
@@ -41,9 +46,3 @@ patches:
         value:
           external-dns.alpha.kubernetes.io/hostname: tripbot.dev.whereisdana.today
           # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
-      # - op: add
-      #   path: /spec/tls
-      #   value:
-      #     - hosts:
-      #         - tripbot.dev.whereisdana.today
-      #       secretName: tripbot-tls

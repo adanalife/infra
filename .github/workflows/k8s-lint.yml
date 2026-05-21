@@ -49,12 +49,13 @@ jobs:
           helm repo update
           helm upgrade --install external-secrets external-secrets/external-secrets \
             -n external-secrets --create-namespace \
-            -f k8s/external-secrets/development/values.yml \
+            -f k8s/external-secrets/values.yml \
             --wait
           kubectl wait --for=condition=Available --timeout=120s \
             deployment --all -n external-secrets
           kubectl wait --for=condition=Established --timeout=60s \
             crd/clustersecretstores.external-secrets.io \
+            crd/secretstores.external-secrets.io \
             crd/externalsecrets.external-secrets.io
 
       - name: Kustomize build (local + development)
@@ -62,7 +63,13 @@ jobs:
           kubectl kustomize k8s/overlays/local       > /tmp/local.yaml
           kubectl kustomize k8s/overlays/development  > /tmp/development.yaml
 
+      # The development overlay now lands in a `development` namespace
+      # (the convergence — prod-1/stage-1/development each run in their
+      # own namespace). Server-side dry-run validates namespaced objects
+      # against the target namespace, so it has to exist first. local
+      # stays in `default`.
       - name: Server-side dry-run apply (local + development)
         run: |
+          kubectl create namespace development --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply --dry-run=server -k k8s/overlays/local
           kubectl apply --dry-run=server -k k8s/overlays/development

@@ -31,9 +31,18 @@ spec:
               containerPort: 5900
             - name: rtsp
               containerPort: 8554
+          # Observability secrets via ESO (shared-secrets). Every env has
+          # them (the umbrella applies shared-secrets/base), so they live in
+          # base instead of being re-patched per overlay.
           envFrom:
             - configMapRef:
                 name: vlc-server-config
+            - secretRef:
+                name: sentry-vlc-server
+                optional: false
+            - secretRef:
+                name: grafana-cloud-otlp
+                optional: false
           # Bare-HTTP liveness — only fails when the HTTP server is hung
           # or the process is gone. Doesn't try to detect libvlc-internal
           # deadlock (false-positive risk during legitimate state

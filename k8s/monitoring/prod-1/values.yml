@@ -18,11 +18,14 @@
 # namespace, materialized by the ExternalSecret in external-secret.yaml.
 #
 # Only delta from development's values.yml is `cluster.name` — the shared
-# Grafana Cloud stack uses this label to separate prod-1 data from
-# development's in dashboard filters.
+# Grafana Cloud stack uses this label to separate clusters in dashboard
+# filters. It names the physical CLUSTER (adanalife-minipc), not an env:
+# stage-1 and prod-1 co-tenant this one mini-PC cluster and are separated
+# by the `namespace` label (which the chart attaches to every series) plus
+# each workload's deployment.environment OTEL attribute — NOT by cluster.
 
 cluster:
-  name: prod-1
+  name: adanalife-minipc
 
 destinations:
   metrics:
