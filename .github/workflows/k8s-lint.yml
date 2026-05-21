@@ -33,14 +33,15 @@ jobs:
             cp "$d/secret.env.example" "$d/secret.env"
           done
 
-      # ESO is the only chart this lint installs. The linted overlays
-      # embed ExternalSecret resources, so its CRDs must be registered
-      # before `kubectl --dry-run=server` can validate them. The other
-      # platform charts (cert-manager, external-dns) install no CRDs
-      # that any overlay references today, so they'd be dead weight here
-      # — add a helm step alongside this one if that ever changes.
+      # The linted overlays embed ExternalSecret resources (ESO) and, since
+      # the dev cluster's app Ingresses got DNS-01 TLS, namespaced
+      # cert-manager Issuer resources. Both charts' CRDs must be registered
+      # before `kubectl --dry-run=server` can validate those kinds — and
+      # cert-manager's validating webhook must be running, so the controller
+      # (not just the CRDs) is installed. external-dns installs no CRDs any
+      # overlay references, so it's still omitted; add a step if that changes.
       #
-      # Helm-install matches `task k8s:platform:up`. The CRD `Established`
+      # Helm-installs match `task k8s:dev:platform:up`. The CRD `Established`
       # wait dodges the kubectl-cache lag that otherwise produces
       # "no matches for kind" right after install.
       - name: Install External Secrets Operator (CRDs + controllers)
@@ -57,6 +58,21 @@ jobs:
             crd/clustersecretstores.external-secrets.io \
             crd/secretstores.external-secrets.io \
             crd/externalsecrets.external-secrets.io
+
+      - name: Install cert-manager (CRDs + controllers)
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            -n kube-system \
+            -f k8s/cert-manager/development/config.yml \
+            --wait
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment -n kube-system -l app.kubernetes.io/instance=cert-manager
+          kubectl wait --for=condition=Established --timeout=60s \
+            crd/issuers.cert-manager.io \
+            crd/clusterissuers.cert-manager.io \
+            crd/certificates.cert-manager.io
 
       - name: Kustomize build (local + development)
         run: |
