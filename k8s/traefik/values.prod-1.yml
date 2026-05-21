@@ -52,6 +52,31 @@ securityContext:
 service:
   type: LoadBalancer
 
+# Make external-dns able to publish a target for every traefik-managed Ingress
+# WITHOUT a per-Ingress `external-dns.alpha.kubernetes.io/target` annotation.
+# external-dns reads its target from Ingress.status.loadBalancer.ingress[].ip;
+# something has to write that. values.yml enables `publishedService`, which
+# copies it from the traefik Service's status — but on the minipc the Service
+# is LoadBalancer with EXTERNAL-IP <pending> forever (no LB controller; traffic
+# flows through hostNetwork above), so there's nothing to copy and the status
+# stays empty. Point traefik at the node's LAN IP directly instead (via
+# ingressEndpoint.ip): it then stamps that IP into every managed Ingress's
+# status, and external-dns picks it up natively.
+#
+# `ip` and `publishedService` are mutually exclusive ingress-endpoint sources,
+# so disable the (no-op here) publishedService copy inherited from values.yml.
+# Dev/k3d keeps publishedService (klipper-lb fills the Service IP there) by not
+# layering this file.
+#
+# ingressEndpoint.ip itself is NOT pinned here — the node's LAN IP is
+# host-specific, so it's discovered from the node's InternalIP and written to
+# the gitignored k8s/traefik/values.local.yml by `task k8s:prod:bootstrap-secrets`,
+# layered onto this file at helm-install time. See values.local.yml.example.
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: false
+
 # Override the chart default of 8000/8443 to bind real 80/443 under
 # hostNetwork.
 ports:
@@ -61,3 +86,11 @@ ports:
   websecure:
     port: 443
     hostPort: 443
+  # Expose the api/dashboard entrypoint on the traefik Service (chart
+  # default is expose.default=false) so the dashboard Ingress in
+  # k8s/traefik/prod-1/dashboard-ingress.yaml can route to it. Still
+  # only reachable through that LAN-only Ingress (or a port-forward) —
+  # the entrypoint isn't bound on hostNetwork.
+  traefik:
+    expose:
+      default: true

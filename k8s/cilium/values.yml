@@ -48,14 +48,38 @@ cgroup:
   hostRoot: /sys/fs/cgroup
 
 # Hubble — flow visibility + the web service map Dana wanted (DNS-aware,
-# shows pod → twitch.tv egress, not just IP↔IP). Reached via port-forward
-# (task) for now; can get an internal-IP Ingress later like the other UIs.
+# shows pod → twitch.tv egress, not just IP↔IP).
 hubble:
   enabled: true
   relay:
     enabled: true
   ui:
     enabled: true
+    # Internal-IP Ingress at hubble.prod.whereisdana.today — external-dns
+    # publishes the Route53 record at the mini-PC LAN IP (192.168.1.200),
+    # so the host resolves anywhere but is only reachable on the home
+    # network. cert-manager issues via DNS-01, independent of inbound
+    # reachability. Same shape as the vlc/obs/tripbot app Ingresses.
+    #
+    # Cilium is only installed on the minipc (Talos has no CNI; dev/k3d
+    # brings its own), so this file is effectively prod-only and the
+    # hostname can live here directly — there's a single Hubble per cluster.
+    #
+    # NO auth: Hubble UI ships no login, so reachability is gated entirely
+    # by the LAN-only target — same posture as vlc/obs. Add a traefik
+    # basic-auth middleware here before exposing beyond the LAN.
+    ingress:
+      enabled: true
+      className: traefik
+      annotations:
+        external-dns.alpha.kubernetes.io/hostname: hubble.prod.whereisdana.today
+        cert-manager.io/cluster-issuer: letsencrypt-route53
+      hosts:
+        - hubble.prod.whereisdana.today
+      tls:
+        - hosts:
+            - hubble.prod.whereisdana.today
+          secretName: hubble-ui-tls
 
 # Pod annotations so grafana-k8s-monitoring's annotationAutodiscovery
 # scrapes Cilium's metrics (same pattern as external-secrets/traefik values).

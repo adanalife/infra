@@ -17,10 +17,23 @@ spec:
       labels:
         app: obs
     spec:
+      # Partial PodSecurity-restricted hardening: seccomp + no-privesc +
+      # drop all caps. OBS listens only on high ports (5900/4455/6080) and
+      # reaches the iGPU as root via device-node owner bits, so it needs no
+      # Linux capabilities. runAsNonRoot is deferred — it needs a Dockerfile
+      # rework in the tripbot repo (non-root user, Xvfb/VNC + render-group
+      # GID) + live GPU verification, tracked as a follow-up.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: obs
           image: adanalife/obs:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: vnc
               containerPort: 5900

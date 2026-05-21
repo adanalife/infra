@@ -1,0 +1,44 @@
+# Browser access to the Traefik dashboard at traefik.prod.whereisdana.today.
+# Mirrors the vlc/obs/hubble prod Ingresses: external-dns publishes a public
+# Route53 record pointed at the mini-PC LAN IP, so the host resolves anywhere
+# but is only reachable on the home network; cert-manager issues via DNS-01.
+#
+# The Traefik chart only emits its own IngressRoute CRD for the dashboard,
+# which external-dns (sources=service,ingress) doesn't watch — so it'd get no
+# DNS record. A plain Ingress to the api entrypoint is the consistent path.
+# The api/dashboard runs on the `traefik` entrypoint (--api.insecure=true in
+# k8s/traefik/values.yml); k8s/traefik/values.prod-1.yml exposes that port on
+# the Service so this backend resolves.
+#
+# NO auth: --api.insecure=true means the dashboard has no login, so
+# reachability is gated entirely by the LAN-only target — same posture as
+# vlc/obs/hubble. Add a traefik basic-auth middleware before exposing beyond
+# the LAN.
+#
+# Applied by `task k8s:prod:platform:up` (kubectl apply -f) after the traefik
+# helm install — not a kustomize target, since traefik is helm-managed.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: traefik-dashboard
+  namespace: kube-system
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: traefik.prod.whereisdana.today
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - traefik.prod.whereisdana.today
+      secretName: traefik-dashboard-tls
+  rules:
+    - host: traefik.prod.whereisdana.today
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: traefik
+                port:
+                  name: traefik
