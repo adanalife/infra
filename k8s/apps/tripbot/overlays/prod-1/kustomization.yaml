@@ -9,9 +9,12 @@
 # - the namespaced aws-secretsmanager SecretStore + eso-aws-credentials
 #   present in the prod-1 namespace (umbrella + bootstrap)
 #
-# EXTERNAL_URL is the in-cluster web address; the public Ingress host comes
-# from the base ingress + the per-env host patch (see Phase 4). The seed +
-# auth-bootstrap Jobs run via tasks, not on apply.
+# EXTERNAL_URL is the internal Traefik Ingress host (same as the per-env host
+# patch below) so the OAuth round-trip — and the reauth_url tripbot logs when a
+# token is missing (tripbot#625) — work from any on-LAN browser without a
+# port-forward. It's LAN-only (external-dns publishes the mini-PC IP); the
+# /auth/callback URL must be registered as a Redirect URL in the Twitch dev
+# console. The seed + auth-bootstrap Jobs run via tasks, not on apply.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -25,7 +28,7 @@ configMapGenerator:
       - ENV=production
       - CHANNEL_NAME=adanalife_
       - BOT_USERNAME=tripbot4000
-      - EXTERNAL_URL=http://localhost:8080
+      - EXTERNAL_URL=https://tripbot.prod.whereisdana.today
       - GOOGLE_APPS_PROJECT_ID=tripbot-prod
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio

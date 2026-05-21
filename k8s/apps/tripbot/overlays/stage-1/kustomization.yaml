@@ -25,7 +25,7 @@ configMapGenerator:
       - ENV=staging
       - CHANNEL_NAME=adanalife_staging
       - BOT_USERNAME=tripbot4000
-      - EXTERNAL_URL=http://localhost:8080
+      - EXTERNAL_URL=https://tripbot.stage.whereisdana.today
       - GOOGLE_APPS_PROJECT_ID=tripbot-stage
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio

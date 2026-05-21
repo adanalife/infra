@@ -21,7 +21,13 @@ configMapGenerator:
       - ENV=staging
       - CHANNEL_NAME=adanalife_staging
       - BOT_USERNAME=tripbot4000
-      - EXTERNAL_URL=http://localhost:8080
+      # Internal Traefik Ingress host, matching prod/stage so the OAuth
+      # round-trip + logged reauth_url (tripbot#625) work on-LAN. NOTE: dev's
+      # Ingress tls/cert-manager block is still commented (the bees cluster has
+      # no cert-manager yet), so the https click-flow won't serve until that
+      # lands — the auth-bootstrap CLI (Taskfile overrides EXTERNAL_URL to
+      # localhost) is unaffected and remains how dev gets seeded meanwhile.
+      - EXTERNAL_URL=https://tripbot.dev.whereisdana.today
       - GOOGLE_APPS_PROJECT_ID=tripbot-stage
       - OTEL_SDK_DISABLED=false
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
