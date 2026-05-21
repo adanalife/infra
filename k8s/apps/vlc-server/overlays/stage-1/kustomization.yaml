@@ -49,26 +49,7 @@ patches:
           - name: dashcam
             mountPath: /opt/data/Dashcam/_all
             readOnly: true
-  - target:
-      kind: Deployment
-      name: vlc-server
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: sentry-vlc-server
-            optional: false
-  - target:
-      kind: Deployment
-      name: vlc-server
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
-        value:
-          secretRef:
-            name: grafana-cloud-otlp
-            optional: false
+  # Sentry + OTLP envFrom now live in base (all envs get them).
   # Request the iGPU via the Intel device plugin (k8s/intel-gpu-plugin/prod-1/,
   # a single cluster-wide install). -shared-dev-num=4 covers prod's vlc+obs
   # plus stage's vlc+obs = 4 concurrent claims.
