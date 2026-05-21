@@ -1032,7 +1032,7 @@ tasks:
   # Phase 4. Encrypted as opaque binary blobs because the configs are
   # multi-document YAML (sops's native YAML store doesn't handle multi-doc).
   talos:minipc:secrets:decrypt:
-    desc: decrypt the SOPS-sealed adanalife-minipc Talos PKI into gitignored plaintext
+    desc: decrypt the SOPS-sealed adanalife-minipc Talos PKI (+ tailscale patch) into gitignored plaintext
     dir: talos/adanalife-minipc
     preconditions:
       - sh: command -v sops >/dev/null
@@ -1040,19 +1040,22 @@ tasks:
     cmds:
       # Decrypt reads the KMS key ARN from each file's sops metadata — no
       # terraform output or --kms needed, so this works on a fresh checkout.
+      # tailscale.patch.sops.yaml is optional (only exists once tailscale is
+      # wired) — skip it if absent so the PKI decrypt never breaks.
       - |
         aws-vault exec adanalife-prod -- bash -c '
           set -euo pipefail
-          for pair in "controlplane.sops.yaml:controlplane.yaml" "worker.sops.yaml:worker.yaml" "talosconfig.sops.yaml:talosconfig"; do
+          for pair in "controlplane.sops.yaml:controlplane.yaml" "worker.sops.yaml:worker.yaml" "talosconfig.sops.yaml:talosconfig" "tailscale.patch.sops.yaml:tailscale.patch.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
+            [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
             sops -d --output-type binary "$src" > "$dst"
+            chmod 600 "$dst"
           done
-          chmod 600 controlplane.yaml worker.yaml talosconfig
         '
-      - 'echo "Talos PKI decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step (runbook Phase 4) before apply-config."'
+      - 'echo "Talos secrets decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step (runbook Phase 4) before apply-config."'
 
   talos:minipc:secrets:encrypt:
-    desc: re-seal the adanalife-minipc Talos PKI to SOPS after regenerating/rotating it
+    desc: re-seal the adanalife-minipc Talos PKI (+ tailscale patch) to SOPS after regenerating/rotating it
     dir: talos/adanalife-minipc
     preconditions:
       - sh: command -v sops >/dev/null
@@ -1063,16 +1066,19 @@ tasks:
       # Sources the KMS key ARN from terraform output (key must already be
       # applied via `task tf:prod:apply`). --input-type binary treats each
       # file as one opaque blob, sidestepping the multi-doc-YAML limitation.
+      # tailscale.patch.yaml is optional (only exists once tailscale is wired) —
+      # skip it if absent.
       - |
         aws-vault exec adanalife-prod -- bash -c '
           set -euo pipefail
           kms=$(terraform -chdir=../../terraform/prod-1 output -raw sops_talos_kms_key_arn)
-          for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml"; do
+          for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml" "tailscale.patch.yaml:tailscale.patch.sops.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
+            [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
             sops -e --input-type binary --output-type yaml --kms "$kms" "$src" > "$dst"
           done
         '
-      - 'echo "Talos PKI re-sealed to *.sops.yaml. Commit the updated encrypted files."'
+      - 'echo "Talos secrets re-sealed to *.sops.yaml. Commit the updated encrypted files."'
 
   talos:minipc:dashboard:
     desc: open the talosctl TUI dashboard against the minipc node
