@@ -30,6 +30,11 @@ resources:
   - ../../external-secrets/namespace-store
   # Cross-cutting observability ExternalSecrets (OTLP + Sentry DSNs).
   - ../../shared-secrets/base
+  # Namespaced cert-manager Issuers (+ DNS-01 Route53 creds) for the app
+  # ingresses, so stage solves DNS-01 with the adanalife-stage account —
+  # no cross-account. Mirror of prod-1. App ingresses use
+  # cert-manager.io/issuer. Issuer/Secret only (no pods).
+  - ../../cert-manager/app-issuer/stage-1
   - ../../apps/postgres/overlays/stage-1
   - ../../apps/tripbot/overlays/stage-1
   - ../../apps/vlc-server/overlays/stage-1

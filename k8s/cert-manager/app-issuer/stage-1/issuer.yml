@@ -1,0 +1,59 @@
+# KEEP-IN-SYNC: k8s/cert-manager/app-issuer/{prod-1,stage-1}/issuer.yml
+# (identical except the route53 `role:` ARN — prod's vs stage's
+# ExternalDNSRole, in their respective accounts).
+#
+# Namespaced Issuers for APP ingresses (tripbot/vlc/obs), stamped into the
+# env's app namespace by the umbrella. App ingresses reference these via
+# `cert-manager.io/issuer` (not cluster-issuer) so each env's DNS-01
+# challenge is solved with that env's own account creds + ExternalDNSRole —
+# no cross-account. The kube-system ClusterIssuers stay for the PLATFORM
+# ingresses (hubble/traefik), which live in kube-system and are prod-zone.
+#
+# !!! PHASE-1 FILL-IN !!! The `role:` ARN below is a PLACEHOLDER. Replace
+# STAGE_ACCOUNT_ID with the adanalife-stage account ID once Phase 1 creates
+# the ExternalDNSRole in that account (mirror of prod's). Until then this
+# Issuer cannot solve DNS-01.
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-staging-route53
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-route53-account
+    solvers:
+      - dns01:
+          route53:
+            region: us-east-1
+            accessKeyIDSecretRef:
+              name: cert-manager-aws-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: cert-manager-aws-credentials
+              key: secret-access-key
+            role: arn:aws:iam::STAGE_ACCOUNT_ID:role/ExternalDNSRole
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-route53
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-route53-account
+    solvers:
+      - dns01:
+          route53:
+            region: us-east-1
+            accessKeyIDSecretRef:
+              name: cert-manager-aws-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: cert-manager-aws-credentials
+              key: secret-access-key
+            role: arn:aws:iam::STAGE_ACCOUNT_ID:role/ExternalDNSRole
