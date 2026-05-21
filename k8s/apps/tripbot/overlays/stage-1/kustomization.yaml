@@ -48,7 +48,6 @@ patches:
         path: /metadata/annotations
         value:
           external-dns.alpha.kubernetes.io/hostname: tripbot.stage.whereisdana.today
-          external-dns.alpha.kubernetes.io/target: 192.168.1.200
           cert-manager.io/cluster-issuer: letsencrypt-route53
       - op: add
         path: /spec/tls

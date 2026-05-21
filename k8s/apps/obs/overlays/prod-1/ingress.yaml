@@ -14,11 +14,6 @@ metadata:
   name: obs
   annotations:
     external-dns.alpha.kubernetes.io/hostname: obs.prod.whereisdana.today
-    # See vlc-server's ingress for the hardcoded-target rationale
-    # (external-dns 0.21 doesn't synthesize default-targets from an empty
-    # Ingress.status.loadBalancer, which is what helm-installed traefik
-    # leaves it as).
-    external-dns.alpha.kubernetes.io/target: 192.168.1.200
     cert-manager.io/cluster-issuer: letsencrypt-route53
 spec:
   ingressClassName: traefik
