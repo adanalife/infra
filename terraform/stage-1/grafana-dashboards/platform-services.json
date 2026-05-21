@@ -1,7 +1,7 @@
 {
   "title": "12 — Platform Services",
   "uid": "platform-services",
-  "tags": ["platform", "external-dns", "cert-manager", "external-secrets"],
+  "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium"],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "1m",
@@ -370,6 +370,113 @@
         { "refId": "A", "expr": "sum by (status) (rate(externalsecret_sync_calls_total{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 400,
+      "type": "row",
+      "title": "cilium (datapath + agent)",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 37, "w": 24, "h": 1 }
+    },
+    {
+      "id": 401,
+      "type": "stat",
+      "title": "Endpoints ready",
+      "description": "Cilium-managed endpoints in the ready state — roughly one per running pod on the node.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(cilium_endpoint_state{cluster=~\"$cluster\", endpoint_state=\"ready\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 402,
+      "type": "stat",
+      "title": "Endpoints not ready",
+      "description": "Endpoints stuck out of the ready state (waiting-for-identity, regenerating, etc.). Steady non-zero values point at identity/policy churn.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(cilium_endpoint_state{cluster=~\"$cluster\", endpoint_state!=\"ready\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 403,
+      "type": "stat",
+      "title": "Policy import errors (last 1h)",
+      "description": "Failed CiliumNetworkPolicy imports. Non-zero = a policy the agent couldn't compile/apply.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(cilium_policy_import_errors_total{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 404,
+      "type": "stat",
+      "title": "Packet drops (last 1h)",
+      "description": "Datapath drops across all reasons. A baseline of policy-deny drops is normal; sudden spikes are the signal.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(cilium_drop_count_total{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 405,
+      "type": "timeseries",
+      "title": "Drop rate by reason",
+      "description": "Datapath drops/sec broken down by reason — distinguishes expected policy denies from datapath errors (CT full, no route, etc.).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 42, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (reason) (rate(cilium_drop_count_total{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{reason}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] }
+    },
+    {
+      "id": 406,
+      "type": "timeseries",
+      "title": "BPF map pressure",
+      "description": "Per-map fill ratio (0–1). Approaching 1 means a BPF map is near capacity and entries may start getting evicted/rejected.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 42, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "max by (map_name) (cilium_bpf_map_pressure{cluster=~\"$cluster\"})", "legendFormat": "{{map_name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] }
     }
   ]
 }

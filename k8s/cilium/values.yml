@@ -73,12 +73,7 @@ hubble:
       className: traefik
       annotations:
         external-dns.alpha.kubernetes.io/hostname: hubble.prod.whereisdana.today
-        # See vlc-server's ingress for the hardcoded-target rationale
-        # (external-dns 0.21 doesn't synthesize default-targets from the
-        # empty Ingress.status.loadBalancer that helm-installed traefik
-        # leaves behind).
-        external-dns.alpha.kubernetes.io/target: 192.168.1.200
-        cert-manager.io/cluster-issuer: letsencrypt-staging-route53
+        cert-manager.io/cluster-issuer: letsencrypt-route53
       hosts:
         - hubble.prod.whereisdana.today
       tls:

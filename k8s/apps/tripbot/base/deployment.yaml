@@ -12,6 +12,15 @@ spec:
       labels:
         app: tripbot
     spec:
+      # Pod runs fully PodSecurity-restricted compliant: the tripbot and
+      # migrate images are static CGO_ENABLED=0 Go binaries (+ the migrate
+      # CLI) that need no root, no volumes, and no Linux capabilities.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       # Run db migrations to head before tripbot starts. Same image as
       # the main container — tripbot v2.3.1+ bakes the migrate CLI and
       # db/migrate/*.sql into the image. `migrate up` is idempotent, so
@@ -22,6 +31,10 @@ spec:
         - name: migrate
           image: adanalife/tripbot:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           command: ["migrate"]
           args:
             - "-path"
@@ -38,6 +51,10 @@ spec:
         - name: tripbot
           image: adanalife/tripbot:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8080
