@@ -25,10 +25,11 @@ ingressClass:
   isDefaultClass: true
 
 # Expose the API + dashboard. --api.insecure=true means no auth on
-# the dashboard, accessed via `kubectl port-forward svc/traefik
-# 9000:9000` for laptop-loopback only. If/when Traefik gets exposed
-# at a real public hostname, swap this for an IngressRoute with
-# auth middleware.
+# the dashboard. On dev (bees/k3d) it's port-forward only:
+# `kubectl port-forward deploy/traefik 8080:8080`. On prod (minipc) it's
+# reachable LAN-only at traefik.prod.whereisdana.today via a plain Ingress
+# (k8s/traefik/prod-1/dashboard-ingress.yaml) — a basic-auth middleware
+# would be the next step before exposing it beyond the LAN.
 additionalArguments:
   - "--api.insecure=true"
   - "--api.dashboard=true"
@@ -72,9 +73,10 @@ metrics:
     addRoutersLabels: true
     addServicesLabels: true
 
-# Dashboard reachable via port-forward only (entryPoint `traefik`
-# is exposed on port 9000). IngressRoute disabled because we don't
-# want it accidentally routed via Cloudflare Tunnel.
+# Chart's own dashboard IngressRoute stays disabled — external-dns
+# (sources=service,ingress) doesn't watch the IngressRoute CRD, so it'd
+# get no Route53 record. Prod exposes the dashboard via a plain Ingress
+# instead (k8s/traefik/prod-1/dashboard-ingress.yaml); dev is port-forward.
 ingressRoute:
   dashboard:
     enabled: false

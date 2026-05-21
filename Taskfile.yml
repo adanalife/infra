@@ -736,6 +736,11 @@ tasks:
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/traefik -n kube-system
       - 'echo "Traefik up on hostNetwork (binds 192.168.1.200:80/443 directly). App Ingresses (ingressClassName=traefik) will route through this."'
+      # Dashboard Ingress (traefik.prod.whereisdana.today, LAN-only). Plain
+      # Ingress rather than the chart's IngressRoute so external-dns publishes
+      # the Route53 record; DNS + cert reconcile once external-dns/cert-manager
+      # come up below.
+      - kubectl apply -f k8s/traefik/prod-1/dashboard-ingress.yaml
       - kubectl apply -k k8s/external-dns/prod-1
       - kubectl wait --for=condition=Ready --timeout=120s
           externalsecret/external-dns-aws-credentials -n kube-system

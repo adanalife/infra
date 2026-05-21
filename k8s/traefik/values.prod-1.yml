@@ -61,3 +61,11 @@ ports:
   websecure:
     port: 443
     hostPort: 443
+  # Expose the api/dashboard entrypoint on the traefik Service (chart
+  # default is expose.default=false) so the dashboard Ingress in
+  # k8s/traefik/prod-1/dashboard-ingress.yaml can route to it. Still
+  # only reachable through that LAN-only Ingress (or a port-forward) —
+  # the entrypoint isn't bound on hostNetwork.
+  traefik:
+    expose:
+      default: true
