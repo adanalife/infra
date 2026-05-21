@@ -11,6 +11,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Prod runs in its own `prod-1` namespace (was the cluster `default`),
+# symmetric with stage-1. Co-tenancy on the mini-PC is now namespace +
+# per-account ESO store, with no environment squatting in `default`.
+namespace: prod-1
+
 resources:
   # Cross-cutting observability ExternalSecrets (OTLP + Sentry DSNs)
   # owned at the cluster level, not by any workload.
