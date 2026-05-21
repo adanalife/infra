@@ -19,9 +19,3 @@ kubectl apply -k k8s/external-dns/stage-1
 # update k8s/external-dns/stage-1/config.yml with secret name...
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm upgrade --install dns bitnami/external-dns -f k8s/external-dns/stage-1/config.yml -n kube-system
-
-
-# k8s-dashboard
-helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
-helm upgrade --install k8s-dashboard kubernetes-dashboard/kubernetes-dashboard -f k8s/k8s-dashboard/stage-1/config.yml -n kube-system
-kubectl apply -k k8s/k8s-dashboard/stage-1
