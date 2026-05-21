@@ -66,6 +66,15 @@ machine:
   sysctls:
     net.ipv4.ip_forward: "1"
     net.ipv6.conf.all.forwarding: "1"
+  # Extra cert SANs so kubectl/talosctl can reach the API by the node's Tailscale
+  # identity, not just 192.168.1.200 — works from any tailnet device with no
+  # subnet route, and survives the Maine move (the tailnet name/IP are
+  # location-independent; the LAN IP is not). machine.certSANs covers the Talos
+  # API (apid); cluster.apiServer.certSANs (below) covers kube-apiserver. The IP
+  # is the current tailscale0 address; the MagicDNS name is the stable anchor.
+  certSANs:
+    - adanalife-minipc.tail020deb.ts.net
+    - 100.71.27.106
   # Disk encryption DEFERRED (2026-05-20). TPM-sealed LUKS2 (systemDiskEncryption
   # with `tpm: {}`) requires a Talos SecureBoot image: it needs the PCR signing
   # key at /.extra/tpm2-pcr-public-key.pem, which only ships in SecureBoot
@@ -88,6 +97,13 @@ cluster:
   # explicitly so the dependency is visible.
   discovery:
     enabled: true
+  # kube-apiserver serving-cert SANs for Tailscale-native kubectl (see
+  # machine.certSANs above). Lets `server: https://adanalife-minipc.tail020deb.ts.net:6443`
+  # verify TLS from any tailnet device.
+  apiServer:
+    certSANs:
+      - adanalife-minipc.tail020deb.ts.net
+      - 100.71.27.106
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig
