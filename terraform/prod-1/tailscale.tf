@@ -217,14 +217,25 @@ resource "aws_secretsmanager_secret_version" "tailscale_node_authkey" {
 # from stage-1 — tailscale is prod-1-only. Same shape as the per-secret grants
 # in secrets.tf: read on the bootstrap container (the provider data-sources it
 # during plan), full lifecycle + PutSecretValue on the two TF-owned containers.
+locals {
+  tailscale_secret_arns = [
+    "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-api-key-*",
+    "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/tailscale/operator-oauth-*",
+    "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-node-authkey-*",
+  ]
+}
+
 data "aws_iam_policy_document" "ci_terraform_tailscale_secrets" {
+  # terraform PLAN refreshes ALL THREE secret_version resources, which reads
+  # their values — so CI needs GetSecretValue on every tailscale container, not
+  # just the bootstrap one the provider data-sources.
   statement {
-    sid       = "ReadBootstrap"
+    sid       = "Read"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret", "secretsmanager:ListSecretVersionIds"]
-    resources = [aws_secretsmanager_secret.tailscale_api_key.arn]
+    resources = local.tailscale_secret_arns
   }
   statement {
-    sid = "ManageTFOwned"
+    sid = "Manage"
     actions = [
       "secretsmanager:CreateSecret",
       "secretsmanager:DeleteSecret",
@@ -233,11 +244,7 @@ data "aws_iam_policy_document" "ci_terraform_tailscale_secrets" {
       "secretsmanager:UpdateSecret",
       "secretsmanager:PutSecretValue",
     ]
-    resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-api-key-*",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/tailscale/operator-oauth-*",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-node-authkey-*",
-    ]
+    resources = local.tailscale_secret_arns
   }
 }
 
