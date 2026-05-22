@@ -13,13 +13,16 @@
 # (a 100.x/CGNAT name, unlike the 192.168.1.200 LAN IP). Supersedes the
 # cert-SAN + per-wipe-IP-churn workaround on ~/.kube/adanalife-minipc-ts.
 #
-# mode "noauth": the proxy talks to kube-apiserver with the operator's own
-# identity; access is gated by the tailnet ACL (our personal tailnet = only your
-# devices). Switch to "true" (auth mode) + an RBAC binding for your tailnet
-# identity if you ever want per-user authz inside the cluster. See
+# mode "true" (auth mode): the proxy maps your tailnet identity to a Kubernetes
+# user and applies RBAC. The RBAC grant lives in the TF-managed ACL via the
+# tailscale.com/cap/kubernetes capability — autogroup:admin → impersonate
+# system:masters (cluster-admin) when reaching tag:k8s-operator. So no client
+# cert: `tailscale configure kubeconfig tailscale-operator` + kubectl works from
+# any tailnet device, gated by that ACL grant. (noauth was tried first but
+# pairs the proxy with a bearer token the apiserver rejects → 401.) See
 # vault/infra/kube-contexts.md.
 apiServerProxyConfig:
-  mode: "noauth"
+  mode: "true"
 
 # Proxy devices the operator creates for exposed Services/Ingresses are tagged
 # tag:k8s (owned by tag:k8s-operator in the ACL, so the operator may assign it).

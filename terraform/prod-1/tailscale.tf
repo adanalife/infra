@@ -110,6 +110,22 @@ resource "tailscale_acl" "this" {
       // an untrusted identity ever joins the tailnet.
       "grants": [
           {"src": ["*"], "dst": ["*"], "ip": ["*"]},
+
+          // Kubernetes API-server proxy (auth mode). Lets admins reach the
+          // operator's apiserver proxy (tag:k8s-operator) as cluster-admin by
+          // impersonating the built-in system:masters group — no client cert,
+          // RBAC lives here in the ACL. `tailscale configure kubeconfig
+          // tailscale-operator` then works from any tailnet device. Narrow src
+          // / impersonate.groups if a non-admin ever needs scoped access.
+          {
+              "src": ["autogroup:admin"],
+              "dst": ["tag:k8s-operator"],
+              "app": {
+                  "tailscale.com/cap/kubernetes": [
+                      {"impersonate": {"groups": ["system:masters"]}},
+                  ],
+              },
+          },
       ],
 
       // Tailscale SSH. Won't touch the Talos node (it runs no SSH daemon — the
