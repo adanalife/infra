@@ -21,6 +21,18 @@ tasks:
     cmds:
       - aws-vault exec adanalife-stage -- terraform init {{.CLI_ARGS}}
 
+  tf:stage:init:reconfigure:
+    desc: terraform init -reconfigure against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:stage:init:migrate:
+    desc: terraform init -migrate-state against stage-1
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- terraform init -migrate-state {{.CLI_ARGS}}
+
   tf:stage:destroy:
     desc: terraform destroy against stage-1
     dir: terraform/stage-1
@@ -44,6 +56,18 @@ tasks:
     dir: terraform/prod-1
     cmds:
       - aws-vault exec adanalife-prod -- terraform init {{.CLI_ARGS}}
+
+  tf:prod:init:reconfigure:
+    desc: terraform init -reconfigure against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:prod:init:migrate:
+    desc: terraform init -migrate-state against prod-1
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:prod:destroy:
     desc: terraform destroy against prod-1
@@ -69,6 +93,18 @@ tasks:
     dir: terraform/core
     cmds:
       - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+
+  tf:core:init:reconfigure:
+    desc: terraform init -reconfigure against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:core:init:migrate:
+    desc: terraform init -migrate-state against core
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:core:destroy:
     desc: terraform destroy against core
