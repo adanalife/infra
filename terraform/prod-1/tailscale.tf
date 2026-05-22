@@ -3,59 +3,59 @@
 # ============================================================================
 #
 # NOT KEEP-IN-SYNC with stage-1 (deliberate). The tailnet is a single global
-# entity — there is one ACL, one operator — so it's managed once, here in
-# prod-1, the workspace that owns the adanalife-minipc cluster. stage-1 has no
-# tailscale.tf.
+# entity — one ACL, one operator — so it's managed once, here in prod-1, the
+# workspace that owns the adanalife-minipc cluster. stage-1 has no tailscale.tf.
 #
 # Credential flow mirrors the cloudflare provider (see secrets.tf +
 # vault/decisions/secrets-manager-for-tf-providers.md): the provider's own
-# bootstrap creds live in an SM container, populated out-of-band; everything
-# else (the operator OAuth client, the node auth key) is TF-owned and written
-# back into SM for ESO / the machine-config patch to consume.
+# bootstrap credential lives in an SM container, populated out-of-band;
+# everything else (the operator OAuth client, the node auth key) is TF-owned
+# and written back into SM for ESO / the machine-config patch to consume.
 #
-# ── Two-phase first apply ───────────────────────────────────────────────────
-#   1. Create just the bootstrap container (the provider can't auth yet):
-#        task tf:prod:apply -- -target=aws_secretsmanager_secret.tailscale_oauth \
-#                               -target=aws_secretsmanager_secret_version.tailscale_oauth
-#   2. Populate it (one-time, your side). Create an OAuth client in the admin
-#      console → Settings → OAuth clients with WRITE scopes
-#      `policy_file`, `oauth_keys`, `auth_keys`, then:
+# ── Bootstrap credential = a user API access token (NOT an OAuth client) ─────
+# An OAuth client can't be the provider credential here: the admin console
+# forces a *tag* on the auth_keys scope, and a tagged OAuth client then can't
+# mint the operator's client under a different tag (tag:k8s-operator). A user
+# API access token acts with your admin identity, so it can write the ACL,
+# create the operator OAuth client (any tag), and mint the node key with no tag
+# gymnastics. ⚠️ Tailscale API tokens expire (90 days) — when it lapses,
+# regenerate + re-`put-secret-value` (the provider can't auth until you do).
+# Future hardening: revisit an OAuth-client provider cred once the tag model is
+# proven, to escape the 90-day token treadmill.
+#
+# ── Two-phase first apply ────────────────────────────────────────────────────
+#   1. Create just the bootstrap container (provider can't auth yet):
+#        task tf:prod:apply -- -target=aws_secretsmanager_secret.tailscale_api_key \
+#                               -target=aws_secretsmanager_secret_version.tailscale_api_key
+#   2. Generate a Tailscale API access token (admin console → Settings → Keys →
+#      Generate access token) and store it:
 #        aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#          --secret-id prod-1/tailscale-oauth \
-#          --secret-string '{"client_id":"<id>","client_secret":"<secret>"}'
+#          --secret-id prod-1/tailscale-api-key --secret-string '<tskey-api-...>'
 #   3. Full apply — the provider authenticates and the ACL + operator client +
-#      node key all apply:
+#      node key all land:
 #        task tf:prod:apply
-#   (If an OAuth-client credential turns out unable to *create* OAuth clients,
-#    swap the bootstrap cred for a user API key — provider supports `api_key`.)
 
 # --- Provider bootstrap credential (SM, out-of-band populated) ---------------
 
-resource "aws_secretsmanager_secret" "tailscale_oauth" {
-  name        = "prod-1/tailscale-oauth"
-  description = "Bootstrap OAuth client for the tailscale Terraform provider."
+resource "aws_secretsmanager_secret" "tailscale_api_key" {
+  name        = "prod-1/tailscale-api-key"
+  description = "Tailscale API access token for the tailscale Terraform provider."
 }
 
-resource "aws_secretsmanager_secret_version" "tailscale_oauth" {
-  secret_id = aws_secretsmanager_secret.tailscale_oauth.id
-  # Valid JSON so jsondecode() in the provider block doesn't choke before the
-  # real value is populated; auth only actually fails when a tailscale_*
-  # resource hits the API (which is why phase 1 above is -target'd to SM only).
-  secret_string = jsonencode({ client_id = "placeholder", client_secret = "placeholder" })
+resource "aws_secretsmanager_secret_version" "tailscale_api_key" {
+  secret_id     = aws_secretsmanager_secret.tailscale_api_key.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
   lifecycle {
     ignore_changes = [secret_string]
   }
 }
 
-data "aws_secretsmanager_secret_version" "tailscale_oauth" {
-  secret_id = aws_secretsmanager_secret.tailscale_oauth.id
+data "aws_secretsmanager_secret_version" "tailscale_api_key" {
+  secret_id = aws_secretsmanager_secret.tailscale_api_key.id
 }
 
 provider "tailscale" {
-  oauth_client_id     = jsondecode(data.aws_secretsmanager_secret_version.tailscale_oauth.secret_string)["client_id"]
-  oauth_client_secret = jsondecode(data.aws_secretsmanager_secret_version.tailscale_oauth.secret_string)["client_secret"]
-  # Least-privilege: only what these resources touch (ACL + OAuth clients + keys).
-  scopes = ["policy_file", "oauth_keys", "auth_keys"]
+  api_key = data.aws_secretsmanager_secret_version.tailscale_api_key.secret_string
   # tailnet omitted → defaults to the tailnet owning the credential.
 }
 
@@ -131,13 +131,17 @@ resource "tailscale_acl" "this" {
 # --- Kubernetes operator OAuth client ----------------------------------------
 
 # Minted by TF; the operator authenticates with these to register itself, the
-# apiserver-proxy, and per-Service proxy devices on the tailnet.
+# apiserver-proxy, and per-Service proxy devices on the tailnet. depends_on the
+# ACL so tag:k8s-operator exists before the client tries to claim it.
 resource "tailscale_oauth_client" "operator" {
   description = "Tailscale K8s operator (adanalife-minipc)"
   # devices:core (register proxy devices) + auth_keys (mint their join keys).
+  # The tags below satisfy the "auth_keys scope needs a tag" requirement.
   # If a newer operator feature needs the `services` scope, add it here.
   scopes = ["devices:core", "auth_keys"]
   tags   = ["tag:k8s-operator"]
+
+  depends_on = [tailscale_acl.this]
 }
 
 # Operator creds → SM (TF owns the value). ESO materializes these into the
@@ -177,6 +181,8 @@ resource "tailscale_tailnet_key" "node" {
   expiry        = 7776000 # 90 days (the max)
   tags          = ["tag:k8s"]
   description   = "adanalife-minipc Talos node join key"
+
+  depends_on = [tailscale_acl.this]
 }
 
 resource "aws_secretsmanager_secret" "tailscale_node_authkey" {
@@ -199,7 +205,7 @@ data "aws_iam_policy_document" "ci_terraform_tailscale_secrets" {
   statement {
     sid       = "ReadBootstrap"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret", "secretsmanager:ListSecretVersionIds"]
-    resources = [aws_secretsmanager_secret.tailscale_oauth.arn]
+    resources = [aws_secretsmanager_secret.tailscale_api_key.arn]
   }
   statement {
     sid = "ManageTFOwned"
@@ -212,7 +218,7 @@ data "aws_iam_policy_document" "ci_terraform_tailscale_secrets" {
       "secretsmanager:PutSecretValue",
     ]
     resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-oauth-*",
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-api-key-*",
       "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/tailscale/operator-oauth-*",
       "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-node-authkey-*",
     ]
