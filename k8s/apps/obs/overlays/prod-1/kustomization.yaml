@@ -24,6 +24,7 @@ kind: Kustomization
 resources:
   - ../../base
   - ingress.yaml
+  - tailscale-ingress.yaml
   - stream-key-external-secret.yaml
 
 # OBS_QUALITY_PRESET=high is explicit even though `high` is the
