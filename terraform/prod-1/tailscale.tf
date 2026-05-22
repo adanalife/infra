@@ -133,7 +133,7 @@ resource "tailscale_acl" "this" {
 # Minted by TF; the operator authenticates with these to register itself, the
 # apiserver-proxy, and per-Service proxy devices on the tailnet.
 resource "tailscale_oauth_client" "operator" {
-  description = "Tailscale Kubernetes operator (adanalife-minipc / prod-1)."
+  description = "Tailscale K8s operator (adanalife-minipc)"
   # devices:core (register proxy devices) + auth_keys (mint their join keys).
   # If a newer operator feature needs the `services` scope, add it here.
   scopes = ["devices:core", "auth_keys"]
@@ -176,7 +176,7 @@ resource "tailscale_tailnet_key" "node" {
   preauthorized = true
   expiry        = 7776000 # 90 days (the max)
   tags          = ["tag:k8s"]
-  description   = "adanalife-minipc Talos node join key (subnet router)."
+  description   = "adanalife-minipc Talos node join key"
 }
 
 resource "aws_secretsmanager_secret" "tailscale_node_authkey" {
