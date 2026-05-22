@@ -303,25 +303,57 @@ tasks:
     aliases: [k8s:rollout]
     deps: [k8s:rollout:tripbot, k8s:rollout:vlc-server, k8s:rollout:obs]
 
+  # The k8s:*:diff tasks below are server-side dry-run previews (read-only) of
+  # what the matching :apply would change. Each :apply runs its diff first so
+  # there's always a preview before the cluster is mutated. The diff is
+  # best-effort — `kubectl diff` exits non-zero when a diff exists (and on a
+  # missing cluster), so it's `|| true`'d to never abort the apply. Deliberately
+  # NOT a blocking confirmation prompt: k8s:dev:apply is called by other tasks
+  # (k8s:dev:cluster:up) and would deadlock a non-interactive run.
+
+  k8s:diff:
+    desc: preview (server-side dry-run) what k8s:apply would change on the local cluster
+    cmds:
+      - kubectl diff -k k8s/overlays/local || true
+
   k8s:apply:
     desc: apply the local app manifests to the cluster
     cmds:
+      - task: k8s:diff
       - kubectl apply -k k8s/overlays/local
+
+  k8s:dev:diff:
+    desc: preview (server-side dry-run) what k8s:dev:apply would change
+    cmds:
+      - kubectl diff -k k8s/overlays/development || true
 
   k8s:dev:apply:
     desc: apply development overlay (apps only — bring up cloudflared separately via k8s:dev:tunnel:up)
     cmds:
+      - task: k8s:dev:diff
       - kubectl apply -k k8s/overlays/development
 
   k8s:dev:apply-nas:
     desc: "apply development-nas overlay — vlc-server reads dashcam from /host/nas-dashcam (requires the cluster to have been created with DASHCAM_NAS=<host path> set; see k8s:dev:cluster:up)"
     cmds:
+      - kubectl diff -k k8s/overlays/development-nas || true
       - kubectl apply -k k8s/overlays/development-nas
+
+  k8s:prod:diff:
+    desc: preview (server-side dry-run) what k8s:prod:apply would change
+    cmds:
+      - kubectl diff -k k8s/overlays/prod-1 || true
 
   k8s:prod:apply:
     desc: apply prod-1 overlay (shared-secrets + postgres + vlc-server; tripbot/obs added when their prod-1 overlays land)
     cmds:
+      - task: k8s:prod:diff
       - kubectl apply -k k8s/overlays/prod-1
+
+  k8s:stage:diff:
+    desc: preview (server-side dry-run) what k8s:stage:apply would change
+    cmds:
+      - kubectl diff -k k8s/overlays/stage-1 || true
 
   k8s:stage:apply:
     desc: apply the stage-1 overlay (shared-secrets + postgres + tripbot + vlc-server + OBS) + stage external-dns into the mini-PC cluster
@@ -330,6 +362,7 @@ tasks:
       - sh: test -f k8s/external-dns/stage-1/values.local.yml
         msg: "k8s/external-dns/stage-1/values.local.yml missing — run `task k8s:stage:bootstrap-secrets` first"
     cmds:
+      - task: k8s:stage:diff
       # Pre-reqs: task tf:stage:apply (postgres creds), task
       # k8s:stage:bootstrap-secrets (stage ESO store + external-dns
       # values.local), and a populated
