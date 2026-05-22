@@ -861,6 +861,7 @@ tasks:
       - helm repo add tailscale https://pkgs.tailscale.com/helmcharts
       - helm repo update tailscale
       - helm upgrade --install tailscale-operator tailscale/tailscale-operator
+          --version 1.98.3
           -n tailscale
           -f k8s/tailscale-operator/values.yml
       - kubectl wait --for=condition=Available --timeout=120s deployment --all -n tailscale
