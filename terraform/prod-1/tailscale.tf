@@ -134,7 +134,7 @@ resource "tailscale_acl" "this" {
 # apiserver-proxy, and per-Service proxy devices on the tailnet. depends_on the
 # ACL so tag:k8s-operator exists before the client tries to claim it.
 resource "tailscale_oauth_client" "operator" {
-  description = "Tailscale K8s operator (adanalife-minipc)"
+  description = "Tailscale K8s operator adanalife-minipc"
   # devices:core (register proxy devices) + auth_keys (mint their join keys).
   # The tags below satisfy the "auth_keys scope needs a tag" requirement.
   # If a newer operator feature needs the `services` scope, add it here.
@@ -225,13 +225,12 @@ data "aws_iam_policy_document" "ci_terraform_tailscale_secrets" {
   }
 }
 
-resource "aws_iam_policy" "ci_terraform_tailscale_secrets" {
-  name        = "AllowCITerraformManageProd1TailscaleSecrets"
-  description = "CI read (bootstrap creds) + lifecycle (operator creds, node key) for the tailscale SM containers in prod-1."
-  policy      = data.aws_iam_policy_document.ci_terraform_tailscale_secrets.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_tailscale_secrets" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_tailscale_secrets.arn
+# Inline policy (not a managed policy + attachment): CITerraformRole is already
+# at AWS's managed PoliciesPerRole=10 quota, and inline policies don't count
+# against it. (If the other per-secret managed policies in secrets.tf keep
+# growing, they'll want the same treatment / consolidation.)
+resource "aws_iam_role_policy" "ci_terraform_tailscale_secrets" {
+  name   = "AllowCITerraformManageProd1TailscaleSecrets"
+  role   = aws_iam_role.ci_terraform.id
+  policy = data.aws_iam_policy_document.ci_terraform_tailscale_secrets.json
 }
