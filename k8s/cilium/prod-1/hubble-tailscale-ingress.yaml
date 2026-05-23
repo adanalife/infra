@@ -1,0 +1,23 @@
+# Tailnet-native exposure of the Hubble UI via the Tailscale operator.
+# Additive — the cilium-chart-templated traefik Ingress (hubble.prod.whereisdana.today,
+# on-LAN, see k8s/cilium/values.yml's hubble.ui.ingress) stays. Gives
+# https://hubble-prod.<tailnet>.ts.net, reachable from ANY network (a 100.x/CGNAT
+# name that never collides with a 192.168.1.x LAN). Auto HTTPS via the tailnet cert.
+#
+# Applied by `task k8s:prod:platform:up` (kubectl apply -f) after the Cilium helm
+# install — not a kustomize target, since Cilium itself is helm-managed.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hubble-ui-tailscale
+  namespace: kube-system
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: hubble-ui
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - hubble-prod

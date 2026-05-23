@@ -879,6 +879,12 @@ tasks:
       # the Route53 record; DNS + cert reconcile once external-dns/cert-manager
       # come up below.
       - kubectl apply -f k8s/traefik/prod-1/dashboard-ingress.yaml
+      # Tailnet-native exposure of the two platform UIs (hubble + traefik),
+      # additive to the on-LAN traefik Ingresses above. Reachable at
+      # https://{hubble,traefik}-prod.<tailnet>.ts.net via the tailscale
+      # operator — collision-proof from any client network.
+      - kubectl apply -f k8s/traefik/prod-1/dashboard-tailscale-ingress.yaml
+      - kubectl apply -f k8s/cilium/prod-1/hubble-tailscale-ingress.yaml
       # external-dns runs in the prod-1-platform namespace (not kube-system)
       # so the prod-1 app namespace stays pod-clean. The kustomize apply
       # creates the namespace + its namespaced aws-secretsmanager SecretStore
