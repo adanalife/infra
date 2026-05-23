@@ -1,0 +1,18 @@
+# Tailnet-native exposure of the stage vlc-server UI via the Tailscale operator.
+# Additive — the traefik Ingress (vlc.stage.whereisdana.today, on-LAN) stays.
+# Gives https://vlc-stage.<tailnet>.ts.net, reachable from ANY network.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vlc-server-ts
+  namespace: stage-1
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: vlc-server
+      port:
+        number: 8080
+  tls:
+    - hosts:
+        - vlc-stage

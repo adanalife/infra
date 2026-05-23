@@ -12,6 +12,7 @@ kind: Kustomization
 resources:
   - ../../base
   - ingress.yaml
+  - tailscale-ingress.yaml
 
 # LOW quality for stage (prod runs `high`). OBS_STREAM_ENCODER opts into
 # VAAPI hardware encode via the iGPU — OBS exposes the VAAPI H.264 encoder

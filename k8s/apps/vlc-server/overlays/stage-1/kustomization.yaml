@@ -16,6 +16,7 @@ resources:
   - ../../base
   - dashcam-nfs.local.yaml
   - ingress.yaml
+  - tailscale-ingress.yaml
 
 configMapGenerator:
   - name: vlc-server-config
