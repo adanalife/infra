@@ -13,6 +13,7 @@ resources:
   - ../../base
   - dashcam-nfs.local.yaml
   - ingress.yaml
+  - tailscale-ingress.yaml
 
 # Prod-1 env vars merged onto base's vlc-server-config ConfigMap.
 # The binary's config-package validator only accepts ENV ∈

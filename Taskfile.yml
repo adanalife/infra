@@ -915,6 +915,20 @@ tasks:
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/cluster-store
       - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
+      # Tailscale operator — kubectl over the tailnet (API server proxy) + app-UI
+      # exposure as tailnet services. Needs ESO up (the operator-oauth Secret is
+      # materialized from SM via the cluster store). prod-1 only — the tailnet is
+      # global, managed once (see terraform/prod-1/tailscale.tf).
+      - kubectl apply -f k8s/tailscale-operator/operator-oauth.yml
+      - for i in $(seq 1 30); do kubectl get secret operator-oauth -n tailscale >/dev/null 2>&1 && break; sleep 2; done
+      - helm repo add tailscale https://pkgs.tailscale.com/helmcharts
+      - helm repo update tailscale
+      - helm upgrade --install tailscale-operator tailscale/tailscale-operator
+          --version 1.98.3
+          -n tailscale
+          -f k8s/tailscale-operator/values.yml
+      - kubectl wait --for=condition=Available --timeout=120s deployment --all -n tailscale
+      - 'echo "Tailscale operator up. kubectl over tailnet: tailscale configure kubeconfig tailscale-operator"'
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -928,6 +942,12 @@ tasks:
       # the Route53 record; DNS + cert reconcile once external-dns/cert-manager
       # come up below.
       - kubectl apply -f k8s/traefik/prod-1/dashboard-ingress.yaml
+      # Tailnet-native exposure of the two platform UIs (hubble + traefik),
+      # additive to the on-LAN traefik Ingresses above. Reachable at
+      # https://{hubble,traefik}-prod.<tailnet>.ts.net via the tailscale
+      # operator — collision-proof from any client network.
+      - kubectl apply -f k8s/traefik/prod-1/dashboard-tailscale-ingress.yaml
+      - kubectl apply -f k8s/cilium/prod-1/hubble-tailscale-ingress.yaml
       # external-dns runs in the prod-1-platform namespace (not kube-system)
       # so the prod-1 app namespace stays pod-clean. The kustomize apply
       # creates the namespace + its namespaced aws-secretsmanager SecretStore

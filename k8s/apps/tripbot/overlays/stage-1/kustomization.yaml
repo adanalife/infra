@@ -17,6 +17,7 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - tailscale-ingress.yaml
 
 configMapGenerator:
   - name: tripbot-config

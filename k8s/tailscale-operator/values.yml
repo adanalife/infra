@@ -1,0 +1,32 @@
+# Tailscale Kubernetes operator — helm values (prod-1 / adanalife-minipc).
+# Installed by `task k8s:prod:platform:up`. prod-1 only (the tailnet is global;
+# the operator + its OAuth client are managed once — see terraform/prod-1/
+# tailscale.tf).
+#
+# oauth.clientId / oauth.clientSecret are intentionally UNSET: the chart uses a
+# pre-created Secret named `operator-oauth` when they're empty, and ESO creates
+# that Secret from SM (see operator-oauth.yml). Keeps the OAuth secret on the
+# same ESO path as every other in-cluster credential.
+
+# API server proxy — lets kubectl reach kube-apiserver by the operator's tailnet
+# name (tailscale-operator.<tailnet>.ts.net), which is stable and collision-proof
+# (a 100.x/CGNAT name, unlike the 192.168.1.200 LAN IP). Supersedes the
+# cert-SAN + per-wipe-IP-churn workaround on ~/.kube/adanalife-minipc-ts.
+#
+# mode "true" (auth mode): the proxy maps your tailnet identity to a Kubernetes
+# user and applies RBAC. The RBAC grant lives in the TF-managed ACL via the
+# tailscale.com/cap/kubernetes capability — autogroup:admin → impersonate
+# system:masters (cluster-admin) when reaching tag:k8s-operator. So no client
+# cert: `tailscale configure kubeconfig tailscale-operator` + kubectl works from
+# any tailnet device, gated by that ACL grant. (noauth was tried first but
+# pairs the proxy with a bearer token the apiserver rejects → 401.) See
+# vault/infra/kube-contexts.md.
+apiServerProxyConfig:
+  mode: "true"
+
+# Proxy devices the operator creates for exposed Services/Ingresses are tagged
+# tag:k8s (owned by tag:k8s-operator in the ACL, so the operator may assign it).
+# Explicit even though it matches the chart default — the manifest tells the
+# full story.
+proxyConfig:
+  defaultTags: "tag:k8s"

@@ -1,0 +1,34 @@
+# Namespace + ESO-materialized OAuth credentials for the Tailscale Kubernetes
+# operator. Applied (before the helm install) by `task k8s:prod:platform:up`.
+#
+# The operator's OAuth client is minted by terraform (terraform/prod-1/
+# tailscale.tf) and stored in SM at k8s/tailscale/operator-oauth. ESO reads it
+# via the cluster store and writes the `operator-oauth` Secret the chart expects
+# (keys client_id / client_secret). The helm values leave oauth.* UNSET so the
+# chart uses this pre-created Secret instead of creating its own.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tailscale
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: operator-oauth
+  namespace: tailscale
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secretsmanager-cluster
+    kind: ClusterSecretStore
+  target:
+    name: operator-oauth
+  data:
+    - secretKey: client_id
+      remoteRef:
+        key: k8s/tailscale/operator-oauth
+        property: client_id
+    - secretKey: client_secret
+      remoteRef:
+        key: k8s/tailscale/operator-oauth
+        property: client_secret
