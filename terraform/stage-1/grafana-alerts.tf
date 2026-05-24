@@ -1,11 +1,9 @@
 // Grafana Cloud alert rules for the vlc-server → OBS broadcast chain.
 //
 // Provisioned via terraform: the rules show up in Grafana's Alerting → Alert
-// rules UI under the "TripBot" folder + "stream-health" rule group. Without
-// a configured notification policy + contact point they fire to Grafana
-// Cloud's default contact point (grafana-default-email) — typically a
-// no-op for this stack. Wire a real contact point + notification policy
-// when alerts should actually page someone.
+// rules UI under the "TripBot" folder + "stream-health" rule group. The root
+// notification policy (defined below) routes every rule to the discord-alerts
+// contact point — same Discord channel tripbot's reportCmd posts to.
 //
 // Each rule follows the standard three-step shape:
 //   A) prometheus query (instant), returns the metric
@@ -14,6 +12,36 @@
 
 locals {
   alert_eval_interval_seconds = 60
+}
+
+// Discord contact point + root notification policy. Wires every alert in this
+// file (plus anything else terraform adds to the org) to the same Discord
+// channel tripbot's reportCmd posts to.
+//
+// grafana_notification_policy is a singleton — there's exactly one root policy
+// per Grafana Cloud org, and applying this makes terraform own it. Edits in
+// the UI will drift and be reverted on the next apply; add sub-policies here,
+// not in the UI.
+resource "grafana_contact_point" "discord_alerts" {
+  name = "discord-alerts"
+
+  discord {
+    url                     = data.aws_secretsmanager_secret_version.discord_alerts_webhook.secret_string
+    use_discord_username    = false // use the webhook's configured username
+    disable_resolve_message = false
+  }
+}
+
+resource "grafana_notification_policy" "root" {
+  contact_point = grafana_contact_point.discord_alerts.name
+
+  // Sane defaults from Grafana's UI: group by folder + alertname so related
+  // firings batch, wait briefly before sending so a noisy burst collapses,
+  // re-notify hourly for things that stay broken.
+  group_by        = ["grafana_folder", "alertname"]
+  group_wait      = "30s"
+  group_interval  = "5m"
+  repeat_interval = "1h"
 }
 
 // Go-runtime alert rules — catches the two leak shapes most likely to
