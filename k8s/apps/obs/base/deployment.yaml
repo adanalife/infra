@@ -43,6 +43,11 @@ spec:
             # Ingress in the prod-1 overlay.
             - name: novnc
               containerPort: 6080
+            # obs-server — small Flask app exposing /health/ready,
+            # /version, POST /admin/shutdown so the admin panel can
+            # treat OBS like vlc-server / onscreens-server.
+            - name: obs-server
+              containerPort: 8080
           envFrom:
             - configMapRef:
                 name: obs-config
