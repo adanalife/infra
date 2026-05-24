@@ -297,6 +297,36 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
 }
 
 # ============================================================================
+# Discord alerts webhook
+# ============================================================================
+
+# Discord webhook URL consumed terraform-side by the grafana_contact_point in
+# grafana-alerts.tf, so Grafana Cloud's notification policy can route alerts to
+# Discord. Lives at stage-1/* (terraform-only consumer) — the same URL is also
+# stored in prod-1/secrets.tf at k8s/tripbot/discord-alerts-webhook for ESO
+# consumption by tripbot's reportCmd; populate both with the same value.
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/discord-alerts-webhook \
+#     --secret-string '<webhook URL>'
+resource "aws_secretsmanager_secret" "discord_alerts_webhook" {
+  name = "stage-1/discord-alerts-webhook"
+}
+
+resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
+  secret_id     = aws_secretsmanager_secret.discord_alerts_webhook.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
+  secret_id  = aws_secretsmanager_secret.discord_alerts_webhook.id
+  depends_on = [aws_secretsmanager_secret_version.discord_alerts_webhook]
+}
+
+# ============================================================================
 # CI lifecycle grants
 # ============================================================================
 
@@ -327,6 +357,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
+      aws_secretsmanager_secret.discord_alerts_webhook.arn,
     ]
   }
 }

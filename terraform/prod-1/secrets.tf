@@ -216,6 +216,30 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
 }
 
 # ============================================================================
+# Discord alerts webhook
+# ============================================================================
+
+# Discord webhook URL consumed at runtime by tripbot (reportCmd POST) via the
+# discord-alerts-webhook ExternalSecret in k8s/apps/tripbot/base/. Same URL
+# is also stored in stage-1/secrets.tf for the terraform-side Grafana Cloud
+# contact point — populate both with the same value.
+# Bootstrap:
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/discord-alerts-webhook \
+#     --secret-string '<webhook URL>'
+resource "aws_secretsmanager_secret" "discord_alerts_webhook" {
+  name = "k8s/tripbot/discord-alerts-webhook"
+}
+
+resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
+  secret_id     = aws_secretsmanager_secret.discord_alerts_webhook.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
 # CI lifecycle grants
 # ============================================================================
 
@@ -238,6 +262,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.postgres_backup_s3.arn,
+      aws_secretsmanager_secret.discord_alerts_webhook.arn,
     ]
   }
 }
