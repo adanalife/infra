@@ -16,3 +16,10 @@ spec:
     - name: novnc
       port: 6080
       targetPort: novnc
+    # obs-server: Flask app exposing /health/ready, /version, and
+    # POST /admin/shutdown so the admin panel can treat OBS like the
+    # other backend services (matching the vlc-server / onscreens-server
+    # naming + the HTTP port 8080 convention).
+    - name: obs-server
+      port: 8080
+      targetPort: obs-server
