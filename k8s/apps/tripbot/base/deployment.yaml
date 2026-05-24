@@ -75,6 +75,8 @@ spec:
                 name: tripbot-twitch-creds
             - secretRef:
                 name: tripbot-google-maps-api-key
+            - secretRef:
+                name: tripbot-discord-alerts-webhook
           livenessProbe:
             httpGet:
               path: /health/live
