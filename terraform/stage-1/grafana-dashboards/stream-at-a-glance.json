@@ -244,7 +244,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 16, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=~\"tripbot|vlc-server\"} | detected_level=~\"error|warn\"" }
+        { "refId": "A", "expr": "{service_name=~\"tripbot|vlc-server\", deployment_environment=~\"$deployment_environment\"} | detected_level=~\"error|warn\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "sortOrder": "Descending" }
     },

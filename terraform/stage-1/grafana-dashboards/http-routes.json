@@ -9,6 +9,17 @@
   "templating": {
     "list": [
       {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(target_info, deployment_environment)",
+        "current": { "text": "prod-1", "value": "prod-1" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
         "name": "service",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
@@ -55,10 +66,10 @@
         }
       ],
       "targets": [
-        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\"}[5m]))" },
-        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_request_duration_seconds_bucket{service_name=\"$service\"}[5m])))" },
-        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, http_request_method) (rate(http_server_request_duration_seconds_bucket{service_name=\"$service\"}[5m])))" },
-        { "refId": "D", "format": "table", "instant": true, "expr": "(sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", http_response_status_code=~\"5..\"}[5m])) or sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\"}[5m]) * 0)) / clamp_min(sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\"}[5m])), 0.001)" }
+        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
+        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_request_duration_seconds_bucket{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, http_request_method) (rate(http_server_request_duration_seconds_bucket{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "D", "format": "table", "instant": true, "expr": "(sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", deployment_environment=~\"$deployment_environment\", http_response_status_code=~\"5..\"}[5m])) or sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[5m]) * 0)) / clamp_min(sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[5m])), 0.001)" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "short" },
@@ -77,7 +88,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 12, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{service_name=\"$service\"}[$__rate_interval]))", "legendFormat": "{{http_response_status_code}}" }
+        { "refId": "A", "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{http_response_status_code}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -88,7 +99,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 12, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\"}[$__rate_interval]))", "legendFormat": "{{http_request_method}}" }
+        { "refId": "A", "expr": "sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{http_request_method}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -99,7 +110,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 21, "w": 24, "h": 10 },
       "targets": [
-        { "refId": "A", "format": "heatmap", "expr": "sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"$service\"}[$__rate_interval]))", "legendFormat": "{{le}}" }
+        { "refId": "A", "format": "heatmap", "expr": "sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{le}}" }
       ],
       "options": {
         "calculate": false,
@@ -114,7 +125,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 31, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_request_body_size_bytes_bucket{service_name=\"$service\"}[$__rate_interval])))", "legendFormat": "{{http_request_method}}" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_request_body_size_bytes_bucket{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{http_request_method}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -125,7 +136,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 31, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_response_body_size_bytes_bucket{service_name=\"$service\"}[$__rate_interval])))", "legendFormat": "{{http_request_method}}" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_response_body_size_bytes_bucket{service_name=\"$service\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{http_request_method}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     }

@@ -6,7 +6,8 @@
   "timezone": "browser",
   "refresh": "30s",
   "time": { "from": "now-24h", "to": "now" },
-  "panels": [
+
+  "templating": { "list": [ { "name": "deployment_environment", "type": "query", "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" }, "query": "label_values(target_info{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}, deployment_environment)", "current": { "text": "prod-1", "value": "prod-1" }, "includeAll": true, "multi": false, "refresh": 2, "sort": 1 } ] },"panels": [
     {
       "id": 0,
       "type": "text",
@@ -14,7 +15,7 @@
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate, `twitch_helix_errors_total{endpoint,status_code}` for silent-eviction-class incidents (see [tripbot#530](https://github.com/adanalife/tripbot/pull/530) for context). **Chat feed row** (added 2026-05-15): each PRIVMSG arrives as a Loki log record under `{service_name=\"tripbot\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
+        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate, `twitch_helix_errors_total{endpoint,status_code}` for silent-eviction-class incidents (see [tripbot#530](https://github.com/adanalife/tripbot/pull/530) for context). **Chat feed row** (added 2026-05-15): each PRIVMSG arrives as a Loki log record under `{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
       }
     },
     {
@@ -24,7 +25,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 3, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "max(twitch_subscribers_total{service_name=\"tripbot\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -36,7 +37,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 3, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "max(twitch_followers_total{service_name=\"tripbot\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (twitch_followers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -48,7 +49,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 3, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(tripbot_chat_messages_total{service_name=\"tripbot\"}[5m])) * 60" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -60,7 +61,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 3, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(tripbot_chat_commands_total{service_name=\"tripbot\"}[5m])) * 60" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -72,7 +73,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(tripbot_chat_messages_total{service_name=\"tripbot\"}[24h]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[24h]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -84,7 +85,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 8, "w": 12, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(tripbot_chat_commands_total{service_name=\"tripbot\"}[24h]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[24h]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -96,8 +97,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "max(twitch_followers_total{service_name=\"tripbot\"})", "legendFormat": "followers" },
-        { "refId": "B", "expr": "max(twitch_subscribers_total{service_name=\"tripbot\"})", "legendFormat": "subscribers" }
+        { "refId": "A", "expr": "max by (deployment_environment) (twitch_followers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "followers [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment) (twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "subscribers [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true } }, "overrides": [] }
     },
@@ -108,7 +109,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 20, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(tripbot_chat_messages_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "msgs / min" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "msgs / min [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20 } }, "overrides": [] }
     },
@@ -119,7 +120,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 20, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "topk(10, sum by (command) (rate(tripbot_chat_commands_total{service_name=\"tripbot\"}[5m]))) * 60", "legendFormat": "{{command}}" }
+        { "refId": "A", "expr": "topk(10, sum by (command, deployment_environment) (rate(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))) * 60", "legendFormat": "{{command}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -130,7 +131,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 29, "w": 24, "h": 10 },
       "targets": [
-        { "refId": "A", "expr": "topk(15, sum by (command) (increase(tripbot_chat_commands_total{service_name=\"tripbot\"}[1h])))", "legendFormat": "{{command}}" }
+        { "refId": "A", "expr": "topk(15, sum by (command, deployment_environment) (increase(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1h])))", "legendFormat": "{{command}} [{{deployment_environment}}]" }
       ],
       "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -149,7 +150,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 40, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(tripbot_events_total{service_name=\"tripbot\"}[5m])) * 60" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_events_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -161,7 +162,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 40, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\"}[5m])) * 60" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -173,7 +174,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 40, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(twitch_helix_errors_total{service_name=\"tripbot\"}[5m]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(twitch_helix_errors_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -198,7 +199,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 40, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -210,9 +211,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 45, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval])))", "legendFormat": "p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50 [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99 [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -223,7 +224,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 45, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "topk(10, histogram_quantile(0.95, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\"}[$__rate_interval]))))", "legendFormat": "{{command}}" }
+        { "refId": "A", "expr": "topk(10, histogram_quantile(0.95, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))))", "legendFormat": "{{command}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -234,7 +235,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 53, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (event) (rate(tripbot_events_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{event}} / min" }
+        { "refId": "A", "expr": "sum by (event, deployment_environment) (rate(tripbot_events_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{event}} / min [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -245,7 +246,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 53, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (endpoint, status_code) (rate(twitch_helix_errors_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status_code}})" }
+        { "refId": "A", "expr": "sum by (endpoint, status_code, deployment_environment) (rate(twitch_helix_errors_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status_code}}) [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -256,7 +257,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 61, "w": 24, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (scoreboard) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\"}[5m])) * 60", "legendFormat": "{{scoreboard}}" }
+        { "refId": "A", "expr": "sum by (scoreboard, deployment_environment) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{scoreboard}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -268,7 +269,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 69, "w": 24, "h": 16 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=\"tripbot\", scope_name=\"twitch-chat\"}" }
+        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}" }
       ],
       "options": {
         "showTime": true,
@@ -352,12 +353,12 @@
         {
           "refId": "A",
           "expr": "min(twitch_helix_rate_limit_remaining)",
-          "legendFormat": "remaining"
+          "legendFormat": "remaining [{{deployment_environment}}]"
         },
         {
           "refId": "B",
           "expr": "max(twitch_helix_rate_limit_total)",
-          "legendFormat": "limit"
+          "legendFormat": "limit [{{deployment_environment}}]"
         }
       ],
       "fieldConfig": {

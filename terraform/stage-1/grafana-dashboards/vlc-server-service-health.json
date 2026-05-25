@@ -147,7 +147,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 20, "w": 24, "h": 10 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=\"vlc-server\"} | detected_level=~\"error|warn\"" }
+        { "refId": "A", "expr": "{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"} | detected_level=~\"error|warn\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
     },
