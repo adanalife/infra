@@ -167,6 +167,31 @@ annotationAutodiscovery:
       action = "labeldrop"
       regex = "pod_template_hash|controller_revision_hash"
     }
+    rule {
+      // Launch-day trim: drop "cool but not essential" series to keep
+      // headroom under the 15K hard cap as live traffic grows. We can
+      // revert these individually post-launch when the cluster has
+      // settled and we know what we'll actually query.
+      //
+      // Cilium: keep policy / network / drop counters; drop the
+      // feature-flag info gauges (~50 static signals about which
+      // Cilium features are enabled), the BPF-map internals, the
+      // FQDN-cache stats, the controller heartbeats, the drift checker.
+      // Plus cilium_endpoint (per-endpoint cardinality grows with pods).
+      //
+      // external-dns: nothing here is alert-relevant — Route53 record
+      // presence is checked via cert-manager + the smoke tests.
+      //
+      // cert-manager: keep only the expiration / ready / renewal
+      // timestamps that ops actually queries. Drop the rest of the
+      // internals (HTTP client, ACME challenge counts, clock).
+      //
+      // CoreDNS: drop histogram buckets (we don't chart p95 DNS latency
+      // today). Keep counts and sums for rate panels.
+      source_labels = ["__name__"]
+      regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
+      action = "drop"
+    }
 
 telemetryServices:
   kube-state-metrics:

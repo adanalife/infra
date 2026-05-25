@@ -204,6 +204,14 @@ annotationAutodiscovery:
       action = "labeldrop"
       regex = "pod_template_hash|controller_revision_hash"
     }
+    rule {
+      // Launch-day trim: drop "cool but not essential" series to keep
+      // headroom under the 15K hard cap as live traffic grows. See the
+      // matching rule in prod-1/values.yml for the rationale per family.
+      source_labels = ["__name__"]
+      regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
+      action = "drop"
+    }
 
 # kube-state-metrics is off by default in v4.x; deploying it here, then
 # clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's
