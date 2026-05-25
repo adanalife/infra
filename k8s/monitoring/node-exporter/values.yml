@@ -33,3 +33,21 @@ podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "9101"
   prometheus.io/path: "/metrics"
+
+# Cardinality controls. node-exporter is ~45% of all active series in
+# Grafana Cloud — most of that from per-interface metrics (one veth per
+# pod, plus Cilium tunnel devices) and per-filesystem metrics on tmpfs/
+# overlay/fuse mounts that grow with container count.
+#
+# Devices we KEEP: physical NICs (enp*, eno*, bond*), tailscale0, lo.
+# Devices we DROP: lxc* (Cilium pod veths), cilium_* (vxlan/host/net),
+# lxc_health, ip-tunnel devices (tunl0/sit0/ip6tnl0/teql0), kubespan,
+# dummy*, veth*. Roughly 7 real interfaces vs. ~45 ephemeral on prod.
+#
+# Filesystems we DROP: tmpfs/overlay/fuse/cgroup/proc/sys and friends —
+# they grow with container count and don't represent real storage.
+extraArgs:
+  - --collector.netclass.ignored-devices=^(lxc[0-9a-f]+|cilium_.+|lxc_health|tunl0|sit0|ip6tnl0|teql0|kubespan|dummy.+|veth.+|ip6_vti.+|ip_vti.+)$
+  - --collector.netdev.device-exclude=^(lxc[0-9a-f]+|cilium_.+|lxc_health|tunl0|sit0|ip6tnl0|teql0|kubespan|dummy.+|veth.+|ip6_vti.+|ip_vti.+)$
+  - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|fuse\.lxcfs|tmpfs|ramfs)$
+  - --no-collector.arp
