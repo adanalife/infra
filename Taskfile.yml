@@ -1132,7 +1132,7 @@ tasks:
   # ExternalSecret, wait for ESO to materialize the Secret, then roll obs.
   # No aws-vault — ESO reads the adanalife-prod account itself.
   obs:prod:stream:on:
-    desc: "resume prod OBS streaming (re-applies the obs-stream-key ExternalSecret; ESO pulls STREAM_KEY from the adanalife-prod SM account → adanalife_, or adanalife_staging while the key is a placeholder)"
+    desc: "resume prod OBS streaming (re-applies the obs-stream-key ExternalSecret; ESO pulls STREAM_KEY from the adanalife-prod SM account → adanalife_)"
     vars:
       NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
     preconditions:
