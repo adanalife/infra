@@ -90,5 +90,11 @@ operator:
   replicas: 1
   prometheus:
     enabled: true
+# LAUNCH-DAY TRIM: cilium-agent scrape disabled to free ~600 active
+# series under Mimir's 15K hard cap. Lose network-policy / drop /
+# forward counters and per-node hubble flow stats — if launch traffic
+# causes weird connectivity issues we'd be debugging blind on the
+# datapath. Operator metrics (above) stay on; they're tiny and cover
+# control-plane health. Re-enable by flipping this back to true.
 prometheus:
-  enabled: true
+  enabled: false
