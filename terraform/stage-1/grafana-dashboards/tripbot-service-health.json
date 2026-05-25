@@ -193,7 +193,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 30, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[1m])" }
+        { "refId": "A", "expr": "8 * max by (deployment_environment) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] }
