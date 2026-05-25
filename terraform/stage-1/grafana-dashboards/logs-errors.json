@@ -9,6 +9,18 @@
   "templating": {
     "list": [
       {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+        "query": "label_values({service_name=~\".+\"}, deployment_environment)",
+        "current": { "text": "prod-1", "value": "prod-1" },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
         "name": "service",
         "type": "query",
         "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
@@ -36,7 +48,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | detected_level=\"error\" [$__range]))" }
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\", deployment_environment=~\"$deployment_environment\"} | detected_level=\"error\" [$__range]))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -58,7 +70,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"} | detected_level=\"warn\" [$__range]))" }
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\", deployment_environment=~\"$deployment_environment\"} | detected_level=\"warn\" [$__range]))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -80,7 +92,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 5 },
       "targets": [
-        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\"}[$__range]))" }
+        { "refId": "A", "expr": "sum(count_over_time({service_name=~\"$service\", deployment_environment=~\"$deployment_environment\"}[$__range]))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -92,7 +104,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 5, "w": 24, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (detected_level) (rate({service_name=~\"$service\"}[$__auto]))", "legendFormat": "{{detected_level}}" }
+        { "refId": "A", "expr": "sum by (detected_level, deployment_environment) (rate({service_name=~\"$service\", deployment_environment=~\"$deployment_environment\"}[$__auto]))", "legendFormat": "{{detected_level}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "logs/s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -103,7 +115,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 13, "w": 24, "h": 14 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=~\"$service\"} | detected_level=~\"error|warn\" |~ \"$search\"" }
+        { "refId": "A", "expr": "{service_name=~\"$service\", deployment_environment=~\"$deployment_environment\"} | detected_level=~\"error|warn\" |~ \"$search\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
@@ -114,7 +126,7 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 27, "w": 24, "h": 12 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=~\"$service\"} |~ \"$search\"" }
+        { "refId": "A", "expr": "{service_name=~\"$service\", deployment_environment=~\"$deployment_environment\"} |~ \"$search\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
@@ -135,7 +147,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 42, "w": 6, "h": 6 },
       "targets": [
-        { "refId": "A", "expr": "sum by (reason) (increase(sentry_events_dropped_total[$__range]))", "legendFormat": "{{reason}}" }
+        { "refId": "A", "expr": "sum by (reason, deployment_environment) (increase(sentry_events_dropped_total{deployment_environment=~\"$deployment_environment\"}[$__range]))", "legendFormat": "{{reason}} [{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "fieldConfig": {
@@ -157,7 +169,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 42, "w": 18, "h": 6 },
       "targets": [
-        { "refId": "A", "expr": "sum by (reason) (rate(sentry_events_dropped_total[$__rate_interval]))", "legendFormat": "{{reason}}" }
+        { "refId": "A", "expr": "sum by (reason, deployment_environment) (rate(sentry_events_dropped_total{deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{reason}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } } }, "overrides": [] }
     }
