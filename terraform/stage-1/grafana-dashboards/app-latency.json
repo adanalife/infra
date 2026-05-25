@@ -13,7 +13,7 @@
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
         "query": "label_values(target_info{service_name=\"tripbot\"}, deployment_environment)",
-        "current": { "text": "All", "value": "$__all" },
+        "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
         "refresh": 2,
@@ -36,7 +36,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
@@ -48,7 +48,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -60,7 +60,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -82,7 +82,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -104,9 +104,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p99" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -117,7 +117,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{command}}" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} {{command}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -144,10 +144,10 @@
         }
       ],
       "targets": [
-        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (command) (rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
-        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.50, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
-        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
-        { "refId": "D", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, command) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (command, deployment_environment) (rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
+        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.50, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "D", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "short" },
@@ -166,7 +166,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 22, "w": 24, "h": 9 },
       "targets": [
-        { "refId": "A", "format": "heatmap", "expr": "sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{le}}" }
+        { "refId": "A", "format": "heatmap", "expr": "sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{deployment_environment}} {{le}}" }
       ],
       "options": {
         "calculate": false,
@@ -198,7 +198,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
@@ -210,7 +210,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -222,7 +222,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -244,7 +244,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -266,9 +266,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 39, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p99" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -279,7 +279,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 39, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{db_operation_name}}" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, db_operation_name, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} {{db_operation_name}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -306,10 +306,10 @@
         }
       ],
       "targets": [
-        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (db_operation_name) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
-        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.50, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
-        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
-        { "refId": "D", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, db_operation_name) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "format": "table", "instant": true, "expr": "sum by (db_operation_name, deployment_environment) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" },
+        { "refId": "B", "format": "table", "instant": true, "expr": "histogram_quantile(0.50, sum by (le, db_operation_name, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "C", "format": "table", "instant": true, "expr": "histogram_quantile(0.95, sum by (le, db_operation_name, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" },
+        { "refId": "D", "format": "table", "instant": true, "expr": "histogram_quantile(0.99, sum by (le, db_operation_name, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "short" },
@@ -328,7 +328,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 56, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (error_type) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", error_type!=\"\"}[$__rate_interval]))", "legendFormat": "{{error_type}}" }
+        { "refId": "A", "expr": "sum by (error_type, deployment_environment) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", error_type!=\"\"}[$__rate_interval]))", "legendFormat": "{{deployment_environment}} {{error_type}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -339,7 +339,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 56, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "format": "heatmap", "expr": "sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{le}}" }
+        { "refId": "A", "format": "heatmap", "expr": "sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{deployment_environment}} {{le}}" }
       ],
       "options": {
         "calculate": false,

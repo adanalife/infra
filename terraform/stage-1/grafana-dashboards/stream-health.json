@@ -13,7 +13,7 @@
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
         "query": "label_values(target_info{service_name=~\"tripbot|vlc-server\"}, deployment_environment)",
-        "current": { "text": "All", "value": "$__all" },
+        "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
         "refresh": 2,
