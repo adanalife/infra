@@ -36,7 +36,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_command_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
@@ -48,7 +48,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -60,7 +60,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -82,7 +82,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -198,7 +198,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(db_client_operation_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
@@ -210,7 +210,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -222,7 +222,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -244,7 +244,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 35, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" }
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {

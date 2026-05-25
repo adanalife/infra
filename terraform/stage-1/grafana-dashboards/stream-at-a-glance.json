@@ -29,20 +29,6 @@
         "multi": false,
         "refresh": 2,
         "sort": 1
-      },
-      {
-        "name": "twitch_channel",
-        "label": "Twitch channel",
-        "type": "custom",
-        "description": "Which Twitch channel the Live-stream panel embeds. Pair with deployment_environment: stage-1 → adanalife_staging, prod-1 → adanalife_.",
-        "query": "stage-1 : adanalife_staging, prod-1 : adanalife_",
-        "current": { "text": "stage-1", "value": "adanalife_staging", "selected": true },
-        "options": [
-          { "text": "stage-1", "value": "adanalife_staging", "selected": true },
-          { "text": "prod-1", "value": "adanalife_", "selected": false }
-        ],
-        "includeAll": false,
-        "multi": false
       }
     ]
   },
@@ -54,7 +40,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -77,7 +63,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 4, "y": 0, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_active_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_active_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
@@ -89,7 +75,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[1m])" }
+        { "refId": "A", "expr": "8 * max by (deployment_environment) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] }
@@ -102,7 +88,7 @@
       "gridPos": { "x": 14, "y": 0, "w": 5, "h": 4 },
       "description": "OBS process CPU. Healthy ~55% post-VAAPI. Climbing into the hundreds means the encoder fell back to x264.",
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_cpu_usage_percent{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_cpu_usage_percent{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -124,7 +110,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 19, "y": 0, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -146,7 +132,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 4, "w": 4, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "(time() - max by (deployment_environment) (timestamp(last_over_time(http_server_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[10m])))) < bool 60" }
+        { "refId": "A", "expr": "(time() - max by (deployment_environment) (timestamp(last_over_time(http_server_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[10m])))) < bool 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -169,7 +155,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 4, "y": 4, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "(sum by (deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"tripbot\", http_response_status_code=~\"5..\", deployment_environment=~\"$deployment_environment\"}[5m])) or vector(0)) / clamp_min(sum by (deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])), 0.001)" }
+        { "refId": "A", "expr": "(sum by (deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"tripbot\", http_response_status_code=~\"5..\", deployment_environment=~\"$deployment_environment\"}[5m])) or vector(0)) / clamp_min(sum by (deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])), 0.001)" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -204,7 +190,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 14, "y": 4, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
@@ -216,7 +202,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 19, "y": 4, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (db_sql_connection_open{service_name=\"tripbot\", status=\"inuse\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (db_sql_connection_open{service_name=\"tripbot\", status=\"inuse\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -261,16 +247,6 @@
         { "refId": "A", "expr": "{service_name=~\"tripbot|vlc-server\"} | detected_level=~\"error|warn\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "sortOrder": "Descending" }
-    },
-    {
-      "id": 40,
-      "type": "text",
-      "title": "Live stream (${twitch_channel})",
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 9 },
-      "options": {
-        "mode": "html",
-        "content": "<iframe src=\"https://player.twitch.tv/?channel=${twitch_channel}&parent=adanalife.grafana.net&muted=true\" width=\"100%\" height=\"100%\" frameborder=\"0\" allowfullscreen=\"true\"></iframe>"
-      }
     }
   ]
 }
