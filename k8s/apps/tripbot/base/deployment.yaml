@@ -71,7 +71,7 @@ spec:
           # All secrets come from ESO (the namespaced aws-secretsmanager
           # SecretStore). The laptop `local` overlay swaps the DB creds for
           # its on-disk secret.env password; everything else stays ESO even
-          # there. All required — a missing Secret fails the pod loudly.
+          # there. Most are required — a missing Secret fails the pod loudly.
           envFrom:
             - configMapRef:
                 name: tripbot-config
@@ -85,8 +85,13 @@ spec:
                 name: tripbot-twitch-creds
             - secretRef:
                 name: tripbot-google-maps-api-key
+            # Optional: tripbot handles a missing DISCORD_ALERTS_WEBHOOK by
+            # silently skipping the Discord post (see pkg/chatbot/commands.go).
+            # Envs that don't provision the SM container — e.g. stage-1 — just
+            # don't get alerts, which is the intent.
             - secretRef:
                 name: tripbot-discord-alerts-webhook
+                optional: true
           livenessProbe:
             httpGet:
               path: /health/live
