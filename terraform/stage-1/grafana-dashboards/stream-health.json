@@ -13,25 +13,11 @@
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
         "query": "label_values(target_info{service_name=~\"tripbot|vlc-server\"}, deployment_environment)",
-        "current": { "text": "All", "value": "$__all" },
+        "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
         "refresh": 2,
         "sort": 1
-      },
-      {
-        "name": "twitch_channel",
-        "label": "Twitch channel",
-        "type": "custom",
-        "description": "Which Twitch channel the Live-stream panel embeds. Pair with deployment_environment: stage-1 → adanalife_staging, prod-1 → adanalife_.",
-        "query": "stage-1 : adanalife_staging, prod-1 : adanalife_",
-        "current": { "text": "stage-1", "value": "adanalife_staging", "selected": true },
-        "options": [
-          { "text": "stage-1", "value": "adanalife_staging", "selected": true },
-          { "text": "prod-1", "value": "adanalife_", "selected": false }
-        ],
-        "includeAll": false,
-        "multi": false
       }
     ]
   },
@@ -41,11 +27,16 @@
       "type": "stat",
       "title": "Stream",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
       ],
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
       "fieldConfig": {
         "defaults": {
           "thresholds": { "mode": "absolute", "steps": [
@@ -60,27 +51,20 @@
       }
     },
     {
-      "id": 2,
-      "type": "stat",
-      "title": "VLC FPS (libvlc)",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 4, "y": 0, "w": 5, "h": 4 },
-      "targets": [
-        { "refId": "A", "expr": "max(vlc_player_displayed_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
-      ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
-    },
-    {
       "id": 3,
       "type": "stat",
       "title": "OBS FPS (encoder)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_active_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_active_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
       ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
     },
     {
@@ -88,11 +72,16 @@
       "type": "stat",
       "title": "Output bitrate",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 14, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[1m])" }
+        { "refId": "A", "expr": "8 * max by (deployment_environment) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "[{{deployment_environment}}]" }
       ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
       "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] }
     },
     {
@@ -100,11 +89,16 @@
       "type": "stat",
       "title": "Congestion",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 19, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_stream_output_congestion{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
       ],
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit", "decimals": 0,
@@ -124,15 +118,15 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "rate(vlc_player_displayed_pictures{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "displayed/s" },
-        { "refId": "B", "expr": "rate(vlc_player_lost_pictures{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "lost/s" },
-        { "refId": "C", "expr": "rate(vlc_player_demux_corrupted{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "demux corrupted/s" }
+        { "refId": "A", "expr": "rate(vlc_player_displayed_pictures{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "displayed/s [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "rate(vlc_player_lost_pictures{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "lost/s [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "rate(vlc_player_demux_corrupted{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "demux corrupted/s [{{deployment_environment}}]" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "lost/s" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
-          { "matcher": { "id": "byName", "options": "demux corrupted/s" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+          { "matcher": { "id": "byRegexp", "options": ".* lost/s$" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".* demux corrupted/s$" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
         ]
       }
     },
@@ -143,9 +137,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "render thread" },
-        { "refId": "B", "expr": "rate(obs_output_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "output thread" },
-        { "refId": "C", "expr": "rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "stream output" }
+        { "refId": "A", "expr": "rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "render thread [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "rate(obs_output_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "output thread [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "stream output [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -156,7 +150,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "stream output" }
+        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "[{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "bps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -167,8 +161,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_stream_output_congestion{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "congestion" },
-        { "refId": "B", "expr": "max(obs_stream_output_reconnecting{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "reconnecting" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "congestion [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment) (obs_stream_output_reconnecting{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "reconnecting [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -179,8 +173,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 20, "w": 8, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "max(vlc_player_input_bitrate{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "input" },
-        { "refId": "B", "expr": "max(vlc_player_demux_bitrate{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "demux" }
+        { "refId": "A", "expr": "max by (deployment_environment) (vlc_player_input_bitrate{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "input [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment) (vlc_player_demux_bitrate{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "demux [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -191,8 +185,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 8, "y": 20, "w": 8, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_cpu_usage_percent{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "cpu %" },
-        { "refId": "B", "expr": "max(obs_memory_usage_mb{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "memory (MB)" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_cpu_usage_percent{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "cpu % [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment) (obs_memory_usage_mb{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "memory (MB) [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -203,19 +197,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 16, "y": 20, "w": 8, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_average_frame_render_time_ms{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame" }
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_average_frame_render_time_ms{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
-    },
-    {
-      "id": 40,
-      "type": "text",
-      "title": "Live stream (${twitch_channel})",
-      "gridPos": { "x": 0, "y": 27, "w": 16, "h": 9 },
-      "options": {
-        "mode": "html",
-        "content": "<iframe src=\"https://player.twitch.tv/?channel=${twitch_channel}&parent=adanalife.grafana.net&muted=true\" width=\"100%\" height=\"100%\" frameborder=\"0\" allowfullscreen=\"true\"></iframe>"
-      }
     }
   ]
 }

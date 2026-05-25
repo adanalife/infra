@@ -6,15 +6,40 @@
   "timezone": "browser",
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(target_info{service_name=~\"tripbot|vlc-server\"}, deployment_environment)",
+        "current": { "text": "prod-1", "value": "prod-1" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
   "panels": [
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent traces (tripbot)",
+      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"tripbot\" && resource.deployment.environment =~ \"$deployment_environment\" }", "limit": 20 }
+      ]
+    },
     {
       "id": 1,
       "type": "timeseries",
       "title": "Client RPS (tripbot → outbound)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(http_client_request_duration_seconds_count{service_name=\"tripbot\"}[5m])) by (server_address)", "legendFormat": "{{server_address}}" }
+        { "refId": "A", "expr": "sum by (server_address, deployment_environment) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{server_address}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -23,9 +48,9 @@
       "type": "timeseries",
       "title": "Server RPS (vlc-server inbound)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\"}[5m])) by (http_request_method)", "legendFormat": "{{http_request_method}}" }
+        { "refId": "A", "expr": "sum by (http_request_method, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{http_request_method}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -34,9 +59,9 @@
       "type": "timeseries",
       "title": "Client p95 latency (tripbot → vlc-server)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_seconds_bucket{service_name=\"tripbot\"}[5m])))", "legendFormat": "client → {{server_address}}" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, server_address, deployment_environment) (rate(http_client_request_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])))", "legendFormat": "client → {{server_address}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -45,9 +70,9 @@
       "type": "timeseries",
       "title": "Server p95 latency (vlc-server)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, http_request_method) (rate(http_server_request_duration_seconds_bucket{service_name=\"vlc-server\"}[$__rate_interval])))", "legendFormat": "server {{http_request_method}}" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, http_request_method, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "server {{http_request_method}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -56,12 +81,12 @@
       "type": "timeseries",
       "title": "Client error rate (tripbot outbound)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 7 },
+      "gridPos": { "x": 0, "y": 26, "w": 12, "h": 7 },
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum by (server_address) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\", http_response_status_code=~\"5..\"}[5m])) or sum by (server_address) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\"}[5m]) * 0)) / clamp_min(sum by (server_address) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\"}[5m])), 0.001)",
-          "legendFormat": "{{server_address}}"
+          "expr": "(sum by (server_address, deployment_environment) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\", http_response_status_code=~\"5..\", deployment_environment=~\"$deployment_environment\"}[5m])) or sum by (server_address, deployment_environment) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]) * 0)) / clamp_min(sum by (server_address, deployment_environment) (rate(http_client_request_duration_seconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])), 0.001)",
+          "legendFormat": "{{server_address}} [{{deployment_environment}}]"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "percentunit", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
@@ -71,25 +96,15 @@
       "type": "timeseries",
       "title": "Server error rate (vlc-server)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 7 },
+      "gridPos": { "x": 12, "y": 26, "w": 12, "h": 7 },
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\", http_response_status_code=~\"5..\"}[5m])) or sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\"}[5m]) * 0)) / clamp_min(sum by (http_request_method) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\"}[5m])), 0.001)",
-          "legendFormat": "{{http_route}}"
+          "expr": "(sum by (http_request_method, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\", http_response_status_code=~\"5..\", deployment_environment=~\"$deployment_environment\"}[5m])) or sum by (http_request_method, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[5m]) * 0)) / clamp_min(sum by (http_request_method, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[5m])), 0.001)",
+          "legendFormat": "{{http_request_method}} [{{deployment_environment}}]"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "percentunit", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
-    },
-    {
-      "id": 7,
-      "type": "table",
-      "title": "Recent traces (tripbot)",
-      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
-      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 10 },
-      "targets": [
-        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"tripbot\" }", "limit": 20 }
-      ]
     }
   ]
 }

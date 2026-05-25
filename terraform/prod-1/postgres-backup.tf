@@ -3,9 +3,12 @@
 #
 # Shape:
 #   - Bucket `adanalife-prod-1-postgres-backups` holds the dumps.
-#     Versioning on; public access blocked; SSE-S3; lifecycle moves
-#     to Glacier IR at 30 days, expires at 365 days; noncurrent
-#     versions cleaned up at 30 days.
+#     Versioning on; public access blocked; SSE-S3. Lifecycle is
+#     tiered by prefix written by the CronJob:
+#       hourly/  → expire at 2 days
+#       daily/   → expire at 30 days
+#       weekly/  → transition to Glacier IR at 30 days, kept forever
+#       archive/ → no rule; lives forever (genesis / pinned backups)
 #   - Dedicated IAM user `PostgresBackupUser` under /bots/ (matching
 #     the ExternalDNSUser shape from iam.tf) with PutObject scoped
 #     to the bucket. No console access; access key only.
@@ -60,18 +63,50 @@ resource "aws_s3_bucket_lifecycle_configuration" "postgres_backups" {
   bucket = aws_s3_bucket.postgres_backups.id
 
   rule {
-    id     = "transition-and-expire"
+    id     = "hourly-expire-2-days"
     status = "Enabled"
 
-    filter {}
+    filter {
+      prefix = "hourly/"
+    }
+
+    expiration {
+      days = 2
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  rule {
+    id     = "daily-expire-30-days"
+    status = "Enabled"
+
+    filter {
+      prefix = "daily/"
+    }
+
+    expiration {
+      days = 30
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  rule {
+    id     = "weekly-glacier-keep-forever"
+    status = "Enabled"
+
+    filter {
+      prefix = "weekly/"
+    }
 
     transition {
       days          = 30
       storage_class = "GLACIER_IR"
-    }
-
-    expiration {
-      days = 365
     }
 
     noncurrent_version_expiration {

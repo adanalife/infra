@@ -13,11 +13,6 @@
 # off with `task obs:prod:stream:off` (deletes the ExternalSecret +
 # Secret); back on with `task obs:prod:stream:on` (re-applies the
 # ExternalSecret) — see Taskfile.
-#
-# While the prod k8s/obs/twitch-stream-key holds a placeholder copy of
-# the stage key, this still streams to adanalife_staging — the cutover to
-# the live adanalife_ channel is a `put-secret-value` of the real key, no
-# manifest change.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
