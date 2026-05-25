@@ -152,18 +152,6 @@
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
     },
     {
-      "id": 20,
-      "type": "stat",
-      "title": "libvlc FPS",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 30, "w": 6, "h": 4 },
-      "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (vlc_player_displayed_fps{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
-      ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
-    },
-    {
       "id": 21,
       "type": "stat",
       "title": "Lost frames /s",
