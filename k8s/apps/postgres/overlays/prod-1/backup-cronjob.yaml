@@ -1,11 +1,9 @@
-# Postgres backup CronJob — suspended by default.
+# Postgres backup CronJob — runs daily at 04:00 UTC.
 #
-# Today: manually triggered with
+# Manual trigger (e.g. for an ad-hoc dump):
 #   kubectl create job postgres-backup-manual-$(date +%Y%m%d-%H%M%S) \
 #     --from=cronjob/postgres-backup
 # Logs: kubectl logs -f job/<job-name>
-#
-# Later: flip `suspend: false` to enable the daily schedule.
 #
 # Mechanics:
 #   - `postgres:16-alpine` matches the server image (PG16 pg_dump).
@@ -18,8 +16,7 @@
 #   - Two envFroms: postgres-secret (USER/PASSWORD/DB from the
 #     server's ESO) and postgres-backup-s3 (S3 creds + bucket).
 #   - concurrencyPolicy: Forbid so an overrunning backup doesn't
-#     stack on the next schedule (won't matter while suspended, but
-#     this is the right setting for when we un-suspend).
+#     stack on the next schedule.
 #   - backoffLimit: 1 keeps failed-job retry cheap.
 apiVersion: batch/v1
 kind: CronJob
@@ -27,7 +24,7 @@ metadata:
   name: postgres-backup
 spec:
   schedule: "0 4 * * *"
-  suspend: true
+  suspend: false
   timeZone: Etc/UTC
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
