@@ -1,6 +1,6 @@
-# Postgres backup CronJob — suspended by default.
+# Postgres backup CronJob — runs daily at 04:00 UTC.
 #
-# Today: manually triggered with
+# Manual trigger (e.g. for an ad-hoc dump):
 #   kubectl create job postgres-backup-manual-$(date +%Y%m%d-%H%M%S) \
 #     --from=cronjob/postgres-backup
 # Logs: kubectl logs -f job/<job-name>
@@ -31,7 +31,7 @@ metadata:
   name: postgres-backup
 spec:
   schedule: "0 * * * *"
-  suspend: true
+  suspend: false
   timeZone: Etc/UTC
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
