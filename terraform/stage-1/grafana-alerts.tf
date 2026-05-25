@@ -164,6 +164,76 @@ resource "grafana_rule_group" "go_runtime" {
   }
 }
 
+// Metrics-budget alert — fires when Grafana Cloud's tenant-side count of
+// active series climbs toward the free-tier hard cap (15000). Routes to the
+// shared discord-alerts contact point.
+//
+// History: on 2026-05-25 we crossed the 15000 cap and started getting
+// err-mimir-max-active-series rejections, which lost samples permanently
+// (Alloy retries → err-mimir-too-far-in-past). Cardinality cut in
+// [infra#575](https://github.com/adanalife/infra/pull/575/changes) brought us
+// back under, but the only signal was a billing email. This alert closes
+// that gap — fires at 12000 with 3000-series of headroom, enough time to
+// either ship more cuts or upgrade the plan before ingestion breaks.
+resource "grafana_rule_group" "metrics_budget" {
+  name             = "metrics-budget"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Grafana Cloud: approaching free-tier active-series cap"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Active series > 12000 for 15m (free-tier hard cap is 15000)"
+      description = "Grafana Cloud free tier ingests up to 15000 active series; beyond that, samples are rejected (err-mimir-max-active-series). At 12000+ for 15m, schedule a cardinality cut before ingestion starts failing. Check `topk(30, count by (__name__) ({__name__=~\".+\"}))` for the top contributors."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.usage.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(grafanacloud_instance_active_series)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [12000] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 resource "grafana_rule_group" "stream_health" {
   name             = "stream-health"
   folder_uid       = grafana_folder.tripbot.uid

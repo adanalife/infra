@@ -42,6 +42,13 @@ data "grafana_data_source" "tempo" {
   name = "grafanacloud-${lookup(local.grafana_creds, "GRAFANA_CLOUD_STACK_SLUG", "placeholder")}-traces"
 }
 
+# Stack-billing datasource. Exposes the grafanacloud_* metrics (active series,
+# log volume, billable users, etc.) that Grafana Cloud emits about the stack
+# itself — used for the metrics-budget alert.
+data "grafana_data_source" "usage" {
+  name = "grafanacloud-usage"
+}
+
 resource "grafana_folder" "tripbot" {
   title = "TripBot"
 }
