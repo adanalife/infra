@@ -58,6 +58,16 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # USER must be set so OTel SDK's default resource detector
+          # (user.Current() in detect-process) doesn't crash telemetry
+          # initialization. tripbot is a static CGO_ENABLED=0 binary running
+          # as uid 65532 with no /etc/passwd entry — without $USER the
+          # detector returns "error detecting resource: user: Current
+          # requires cgo or $USER set in environment" and OTel disables
+          # itself entirely (no metrics, no traces).
+          env:
+            - name: USER
+              value: "tripbot"
           # All secrets come from ESO (the namespaced aws-secretsmanager
           # SecretStore). The laptop `local` overlay swaps the DB creds for
           # its on-disk secret.env password; everything else stays ESO even
