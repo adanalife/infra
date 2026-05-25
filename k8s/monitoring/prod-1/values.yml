@@ -192,6 +192,20 @@ annotationAutodiscovery:
       regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
       action = "drop"
     }
+    rule {
+      // intel/xpumanager v1.3.6 emits xpum_per_engine_ratio (12x per
+      // scrape — one per GPU engine: compute/render/copy/video-encode/...)
+      // and xpum_frequency_mhz (2x) with identical label sets — the
+      // exporter is missing an `engine` label to differentiate. Alloy
+      // logs each duplicate as "Error on ingesting samples with different
+      // value but same timestamp" and drops the dupes anyway, so this
+      // rule both saves the cardinality and silences the warning spam.
+      // Other xpum_* metrics (memory, power, temperature, utilization)
+      // are unaffected and continue to feed the iGPU dashboard.
+      source_labels = ["__name__"]
+      regex = "xpum_per_engine_ratio|xpum_frequency_mhz"
+      action = "drop"
+    }
 
 telemetryServices:
   kube-state-metrics:
