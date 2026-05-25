@@ -65,6 +65,15 @@ clusterMetrics:
         - container_oom_events_total
         - container_network_receive_errors_total
         - container_network_transmit_errors_total
+    # Drop high-cardinality identifier labels that change on every container
+    # restart (container_id) or are duplicates of pod/container (id, image_id).
+    # Mimir merges series that differ only by dropped labels — saves the
+    # restart-churn cardinality.
+    extraMetricProcessingRules: |-
+      rule {
+        action = "labeldrop"
+        regex = "id|container_id|image_id"
+      }
   kube-state-metrics:
     metricsTuning:
       includeMetrics:
@@ -78,6 +87,13 @@ clusterMetrics:
       excludeMetrics:
         - kube_pod_status_reason
         - kube_deployment_status_condition
+    # Drop pod UID — changes on every pod rebuild and creates a fresh series
+    # set each rollout. Dashboards query by pod name, not uid.
+    extraMetricProcessingRules: |-
+      rule {
+        action = "labeldrop"
+        regex = "uid"
+      }
 
 hostMetrics:
   enabled: true
@@ -143,6 +159,13 @@ annotationAutodiscovery:
       source_labels = ["__name__"]
       regex = "controller_runtime_reconcile_time_seconds_bucket|workqueue_(queue|work|unfinished_work|longest_running_processor)_duration_seconds_bucket"
       action = "drop"
+    }
+    rule {
+      // Drop rollout-churn labels from annotation-scraped series. Both
+      // change on every Deployment/DaemonSet rev, so without this each
+      // rollout doubles the active series for ~20min (Mimir lookback).
+      action = "labeldrop"
+      regex = "pod_template_hash|controller_revision_hash"
     }
 
 telemetryServices:
