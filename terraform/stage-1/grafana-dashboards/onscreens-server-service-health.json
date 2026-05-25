@@ -111,9 +111,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 7, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50 [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99 [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -124,7 +124,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 7, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (http_response_status_code, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{deployment_environment}} {{http_response_status_code}}" }
+        { "refId": "A", "expr": "sum by (http_response_status_code, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{http_response_status_code}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
@@ -136,7 +136,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (http_route, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{deployment_environment}} {{http_route}}" }
+        { "refId": "A", "expr": "sum by (http_route, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{http_route}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -147,7 +147,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(http_server_response_body_size_bytes_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "{{deployment_environment}} p95 response" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(http_server_response_body_size_bytes_bucket{service_name=\"onscreens-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 response [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
