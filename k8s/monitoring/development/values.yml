@@ -85,6 +85,13 @@ clusterMetrics:
         # "by namespace" panel queries to ensure namespaces with no
         # pods still appear.
         - kube_namespace_created
+      # Both overlap with cheaper metrics already in the default allowlist:
+      # kube_pod_status_reason (~210 series) overlaps with kube_pod_status_phase;
+      # kube_deployment_status_condition (~144 series) is rarely queried directly
+      # vs. the cluster-overview dashboards that use kube_deployment_status_replicas_*.
+      excludeMetrics:
+        - kube_pod_status_reason
+        - kube_deployment_status_condition
 
 # hostMetrics scrapes node-exporter — which is installed separately
 # in the `monitoring-host` namespace (see Taskfile k8s:dev:platform:up
@@ -152,6 +159,28 @@ annotationAutodiscovery:
     metricsPath: "prometheus.io/path"
     metricsPortNumber: "prometheus.io/port"
     metricsScheme: "prometheus.io/scheme"
+  # Cardinality controls (Alloy River syntax). Applied to every series
+  # scraped via annotation-autodiscovery — covers Cilium, traefik, ESO,
+  # cert-manager, external-dns, node-exporter, and any future prometheus.io-
+  # annotated pod. Rules execute top-to-bottom; first matching action wins.
+  extraMetricProcessingRules: |-
+    rule {
+      // Drop Cilium's internal scheduler / k8s-client histograms — high
+      // cardinality (~700 series combined), zero operational signal for
+      // adanalife. Network/policy/endpoint counters are preserved.
+      source_labels = ["__name__"]
+      regex = "cilium_hive_jobs_.+|cilium_identity_updater_timer_.+|cilium_k8s_workqueue_.+_bucket|cilium_k8s_client_api_latency_.+_bucket|cilium_act_processing_time_seconds_bucket"
+      action = "drop"
+    }
+    rule {
+      // Drop _bucket suffix on controller_runtime + workqueue histograms
+      // (cert-manager / ESO / external-dns reconcile loops). We don't
+      // chart p99 latency on these — _count and _sum are kept so rate
+      // and average panels still work. ~500 series.
+      source_labels = ["__name__"]
+      regex = "controller_runtime_reconcile_time_seconds_bucket|workqueue_(queue|work|unfinished_work|longest_running_processor)_duration_seconds_bucket"
+      action = "drop"
+    }
 
 # kube-state-metrics is off by default in v4.x; deploying it here, then
 # clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's
