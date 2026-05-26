@@ -2819,8 +2819,8 @@
       {
         "current": {
           "selected": false,
-          "text": "monitoring",
-          "value": "monitoring"
+          "text": "prod-1",
+          "value": "prod-1"
         },
         "datasource": {
           "type": "prometheus",
