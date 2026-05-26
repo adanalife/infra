@@ -265,18 +265,21 @@
       "id": 21,
       "type": "logs",
       "title": "Chat feed (live)",
-      "description": "Twitch chat messages as they arrive. Emitted by pkg/chatbot/log/log.go as OTel log records under scope_name=\"twitch-chat\"; twitch.user and twitch.channel land as attributes (expand a row to see them).",
+      "description": "Twitch chat messages as they arrive, rendered as `username: message` for live-chat scannability. Emitted by pkg/chatbot/log/log.go as OTel log records under scope_name=\"twitch-chat\"; twitch.user and twitch.channel arrive as structured metadata.",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 69, "w": 24, "h": 16 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}" }
+        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"} | line_format \"{{ .twitch_user }}: {{ __line__ }}\"" }
       ],
       "options": {
         "showTime": true,
         "wrapLogMessage": true,
         "sortOrder": "Descending",
         "dedupStrategy": "none",
-        "enableLogDetails": true
+        "enableLogDetails": false,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "showLogContextToggle": false
       }
     },
     {
