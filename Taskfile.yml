@@ -1474,12 +1474,25 @@ tasks:
   # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
   # most recent S3 dump written by the postgres-backup CronJob (pg_dump -Fc).
   # See vault/infra/adanalife-minipc-bootstrap.md "Wipe-and-rebuild loop".
+  #
+  # The CronJob (k8s/apps/postgres/overlays/prod-1/backup-cronjob.yaml) writes
+  # to tiered prefixes under the bucket — see #584. Lifecycle rules vary by tier:
+  #   hourly/   every hour,            expires at 2 days
+  #   daily/    04:00 UTC,             expires at 30 days
+  #   weekly/   04:00 UTC Sunday,      Glacier IR @ 30d, kept forever
+  #   archive/  manual pin point,      no rule — lives forever
   tripbot:prod:db:backups:
-    desc: list available prod-1 Postgres dumps in S3 (newest last)
+    desc: list available prod-1 Postgres dumps in S3 across all tiers (newest last per tier)
     vars:
       BUCKET: adanalife-prod-1-postgres-backups
     cmds:
-      - aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/tripbot/" | sort
+      - |
+        set -euo pipefail
+        for tier in hourly daily weekly archive; do
+          echo "=== ${tier}/ ==="
+          aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/${tier}/" 2>/dev/null | sort || true
+          echo
+        done
 
   # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
   # env creds (no credential handling here). Then clears a stale
