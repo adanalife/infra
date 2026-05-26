@@ -174,11 +174,11 @@
     {
       "id": 9,
       "type": "stat",
-      "title": "Messages / min",
+      "title": "Messages / hour",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 14, "y": 4, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 3600" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
