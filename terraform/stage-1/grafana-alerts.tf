@@ -450,4 +450,57 @@ resource "grafana_rule_group" "stream_health" {
       })
     }
   }
+
+  rule {
+    name           = "Tripbot: disconnected from Twitch chat"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Tripbot has been disconnected from Twitch chat (IRC) for 5m"
+      description = "tripbot_twitch_connected has been 0 for 5m — the bot is not in chat. Readiness no longer gates on the Twitch connection, so the pod is healthy but silent. Check tripbot logs for IRC reconnect errors, verify the bot OAuth token is still valid, and confirm Twitch IRC ingest isn't degraded."
+    }
+    labels = {
+      severity = "critical"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(tripbot_twitch_connected{service_name=\"tripbot\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
