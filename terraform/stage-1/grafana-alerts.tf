@@ -173,8 +173,10 @@ resource "grafana_rule_group" "go_runtime" {
 // (Alloy retries → err-mimir-too-far-in-past). Cardinality cut in
 // [infra#575](https://github.com/adanalife/infra/pull/575/changes) brought us
 // back under, but the only signal was a billing email. This alert closes
-// that gap — fires at 12000 with 3000-series of headroom, enough time to
-// either ship more cuts or upgrade the plan before ingestion breaks.
+// that gap. Threshold was originally 12000 (3000 headroom) but the
+// post-launch steady-state baseline settled around 12-13K and paged
+// continuously — raised to 14000 (1000 headroom) on 2026-05-26 so the
+// alert signals genuine drift toward the cap rather than the normal load.
 resource "grafana_rule_group" "metrics_budget" {
   name             = "metrics-budget"
   folder_uid       = grafana_folder.tripbot.uid
@@ -188,8 +190,8 @@ resource "grafana_rule_group" "metrics_budget" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Active series > 12000 for 15m (free-tier hard cap is 15000)"
-      description = "Grafana Cloud free tier ingests up to 15000 active series; beyond that, samples are rejected (err-mimir-max-active-series). At 12000+ for 15m, schedule a cardinality cut before ingestion starts failing. Check `topk(30, count by (__name__) ({__name__=~\".+\"}))` for the top contributors."
+      summary     = "Active series > 14000 for 15m (free-tier hard cap is 15000)"
+      description = "Grafana Cloud free tier ingests up to 15000 active series; beyond that, samples are rejected (err-mimir-max-active-series). At 14000+ for 15m there's ~1000-series of headroom — schedule a cardinality cut before ingestion starts failing. Check `topk(30, count by (__name__) ({__name__=~\".+\"}))` for the top contributors."
     }
     labels = {
       severity = "warning"
@@ -224,7 +226,7 @@ resource "grafana_rule_group" "metrics_budget" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [12000] }
+          evaluator = { type = "gt", params = [14000] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
