@@ -505,4 +505,66 @@ resource "grafana_rule_group" "stream_health" {
       })
     }
   }
+
+  // Catches the failure mode the "disconnected from Twitch chat" rule above
+  // can't see: the IRC connection stays alive (gauge = 1) but the user-access-
+  // token has expired or been blanked. Twitch only validates the token on
+  // initial PASS, so IRC won't drop; meanwhile Helix calls 401 and the admin
+  // panel surfaces a "Sign in as X" banner that needs a human click.
+  //
+  // The gauge emits 0 for "missing / blanked" — that subtraction yields
+  // time(), which is huge-positive, so missing accounts fire the same alert.
+  // for=1m debounces normal refresh blips.
+  rule {
+    name           = "Tripbot: Twitch token expired"
+    for            = "1m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Tripbot's {{ $labels.account }} Twitch token is expired or missing"
+      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot will need re-auth — open the admin panel and click the 'Sign in as ...' link, or run `task tripbot:auth:bootstrap:{{ $labels.account }}`."
+    }
+    labels = {
+      severity = "critical"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "time() - max by (account) (tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
