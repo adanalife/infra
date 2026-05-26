@@ -25,7 +25,7 @@ configMapGenerator:
       # Binary's config validator accepts ENV ∈ {staging, production,
       # development}; "staging" is the stage-1 value.
       - ENV=staging
-      - OTEL_SDK_DISABLED=false
+      - OTEL_SDK_DISABLED=true
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
