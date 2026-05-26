@@ -17,12 +17,16 @@
 # Credentials come from the grafana-cloud-metrics-write Secret in this
 # namespace, materialized by the ExternalSecret in external-secret.yaml.
 #
-# Only delta from development's values.yml is `cluster.name` — the shared
-# Grafana Cloud stack uses this label to separate clusters in dashboard
-# filters. It names the physical CLUSTER (adanalife-minipc), not an env:
-# stage-1 and prod-1 co-tenant this one mini-PC cluster and are separated
-# by the `namespace` label (which the chart attaches to every series) plus
-# each workload's deployment.environment OTEL attribute — NOT by cluster.
+# Deltas from development/values.yml:
+#   - cluster.name — labels the physical cluster (adanalife-minipc) in
+#     Grafana Cloud dashboard filters. stage-1 and prod-1 co-tenant this
+#     one mini-PC cluster and are separated by the `namespace` label
+#     (which the chart attaches to every series) plus each workload's
+#     deployment.environment OTEL attribute — NOT by cluster.
+#   - clusterMetrics / hostMetrics / annotationAutodiscovery are off in
+#     development (logs + cluster events only). Here they're on for
+#     prod-1, with a top-of-list `namespace=stage-1(-platform)?` drop
+#     rule on each metric source so stage-1 series don't ship.
 
 cluster:
   name: adanalife-minipc
@@ -71,6 +75,14 @@ clusterMetrics:
     # restart-churn cardinality.
     extraMetricProcessingRules: |-
       rule {
+        // Drop stage-1 namespaces — only prod-1 metrics ship from this
+        // shared cluster. Logs + events from stage-1 still ship via
+        // podLogsViaKubernetesApi / clusterEvents (Loki, not Mimir).
+        source_labels = ["namespace"]
+        regex = "stage-1(-platform)?"
+        action = "drop"
+      }
+      rule {
         action = "labeldrop"
         regex = "id|container_id|image_id"
       }
@@ -90,6 +102,12 @@ clusterMetrics:
     # Drop pod UID — changes on every pod rebuild and creates a fresh series
     # set each rollout. Dashboards query by pod name, not uid.
     extraMetricProcessingRules: |-
+      rule {
+        // Drop stage-1 namespaces — see the matching rule in cadvisor above.
+        source_labels = ["namespace"]
+        regex = "stage-1(-platform)?"
+        action = "drop"
+      }
       rule {
         action = "labeldrop"
         regex = "uid"
@@ -143,6 +161,14 @@ annotationAutodiscovery:
   # cert-manager, external-dns, node-exporter, and any future prometheus.io-
   # annotated pod. Rules execute top-to-bottom; first matching action wins.
   extraMetricProcessingRules: |-
+    rule {
+      // Drop stage-1 namespaces — only prod-1 metrics ship from this
+      // shared cluster. Logs + events from stage-1 still ship via
+      // podLogsViaKubernetesApi / clusterEvents (Loki, not Mimir).
+      source_labels = ["namespace"]
+      regex = "stage-1(-platform)?"
+      action = "drop"
+    }
     rule {
       // Drop Cilium's internal scheduler / k8s-client histograms — high
       // cardinality (~700 series combined), zero operational signal for
