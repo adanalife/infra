@@ -56,3 +56,11 @@ patches:
           - hosts:
               - tripbot.stage.whereisdana.today
             secretName: tripbot-tls
+
+# Stage rolls forward continuously off the develop branch — every push to
+# tripbot's develop branch republishes adanalife/tripbot:develop (multi-arch
+# manifest at tripbot's .github/workflows/release-development.yml). Prod
+# stays on the base's :latest, which only moves on release-tag pushes.
+images:
+  - name: adanalife/tripbot
+    newTag: develop
