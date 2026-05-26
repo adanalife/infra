@@ -52,8 +52,12 @@ destinations:
       name: grafana-cloud-metrics-write
       namespace: monitoring
 
+# Metrics shipping disabled in development — only logs (podLogsViaKubernetesApi)
+# and cluster events (clusterEvents, log-shaped → Loki) ship to Grafana Cloud.
+# Mimir/Prometheus metrics from the dev cluster aren't useful enough to justify
+# the series count. Flip these back to `enabled: true` if dev metrics are needed.
 clusterMetrics:
-  enabled: true
+  enabled: false
   collector: alloy-metrics
   # The chart's default cAdvisor + KSM allow lists are conservative —
   # enough for the basic Grafana Cloud Kubernetes views but missing
@@ -122,7 +126,7 @@ clusterMetrics:
 # `linuxHosts.enabled: true` is the per-source switch in the feature-
 # host-metrics subchart (parent chart aliases it under `hostMetrics:`).
 hostMetrics:
-  enabled: true
+  enabled: false
   collector: alloy-metrics
   linuxHosts:
     enabled: true
@@ -163,7 +167,7 @@ podLogsViaKubernetesApi:
 # externally-deployed node-exporter in the monitoring-host namespace.
 # Avoids needing kube-prometheus-stack CRDs + ServiceMonitor.
 annotationAutodiscovery:
-  enabled: true
+  enabled: false
   collector: alloy-metrics
   # Override the chart's default annotation keys (k8s.grafana.com/*)
   # to the standard prometheus.io/* convention used by upstream charts
@@ -231,9 +235,11 @@ annotationAutodiscovery:
 # prometheus-community/prometheus-node-exporter into the
 # monitoring-host namespace (labeled `privileged`), so the rest of
 # `monitoring` stays under baseline.
+# kube-state-metrics is off — clusterMetrics (its only consumer) is disabled
+# in dev, so deploying KSM would just emit unscraped metrics.
 telemetryServices:
   kube-state-metrics:
-    deploy: true
+    deploy: false
   node-exporter:
     deploy: false
 

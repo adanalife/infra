@@ -35,7 +35,7 @@ configMapGenerator:
       - TWILIO_AUTH_TOKEN=stub
       - TWILIO_FROM_NUM=+15555550100
       - TWILIO_TO_NUM=+15555550101
-      - OTEL_SDK_DISABLED=false
+      - OTEL_SDK_DISABLED=true
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=development,service.namespace=tripbot
