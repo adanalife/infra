@@ -10,4 +10,9 @@ data:
   # it, URLs render as relative ("/onscreens/...") and CEF can't
   # resolve them, so onscreens never appear on the OBS canvas.
   ONSCREENS_URL_BASE: http://vlc-server:8081
+  # Base URL for the next-frame cover layer that vlc-server serves at
+  # /next-frame.html. Same envsubst pathway as ONSCREENS_URL_BASE — the
+  # entrypoint expands the placeholder in Tripbot.json.tmpl so the
+  # browser_source has a fully qualified URL.
+  VLC_URL_BASE: http://vlc-server:8080
   OBS_WEBSOCKET_PASSWD: adanalife
