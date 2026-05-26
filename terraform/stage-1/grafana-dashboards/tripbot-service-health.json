@@ -577,6 +577,76 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "Bot token · time remaining",
+      "description": "Seconds until tripbot_twitch_token_expires_at_seconds{account=\"bot\"}. Renders as duration. Red when expired (negative) or 0 (missing); yellow under 30m; green over 1h. Drives the TripbotTokenExpired alert.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 54, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\", account=\"bot\", deployment_environment=~\"$deployment_environment\"}) - time()", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 1800 },
+            { "color": "green", "value": 3600 }
+          ]},
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "Broadcaster token · time remaining",
+      "description": "Seconds until tripbot_twitch_token_expires_at_seconds{account=\"broadcaster\"}. Renders as duration. Red when expired (negative) or 0 (missing); yellow under 30m; green over 1h. Drives the TripbotTokenExpired alert.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 54, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\", account=\"broadcaster\", deployment_environment=~\"$deployment_environment\"}) - time()", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 1800 },
+            { "color": "green", "value": 3600 }
+          ]},
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Twitch token · time until expiry by account",
+      "description": "Seconds-remaining per account over time. Sawtooths down toward 0 between refreshes, snaps back to ~4h on each refresh. A line trending below 0 = the refresh cron is missing its window — the failure mode the TripbotTokenExpired alert catches.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} - time()", "legendFormat": "{{account}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
     }
   ]
 }
