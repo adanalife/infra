@@ -997,7 +997,10 @@ tasks:
       # Dashboard Ingress (traefik.prod.whereisdana.today, LAN-only). Plain
       # Ingress rather than the chart's IngressRoute so external-dns publishes
       # the Route53 record; DNS + cert reconcile once external-dns/cert-manager
-      # come up below.
+      # come up below. The companion Middleware rewrites bare `/` → `/dashboard/`
+      # so the host root serves the dashboard without a visible 301 redirect;
+      # apply it first so the Ingress's middleware annotation resolves.
+      - kubectl apply -f k8s/traefik/prod-1/dashboard-middleware.yaml
       - kubectl apply -f k8s/traefik/prod-1/dashboard-ingress.yaml
       # Tailnet-native exposure of the two platform UIs (hubble + traefik),
       # additive to the on-LAN traefik Ingresses above. Reachable at
