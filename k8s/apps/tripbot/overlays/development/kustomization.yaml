@@ -33,7 +33,7 @@ configMapGenerator:
       # Twitch app's dev console.
       - EXTERNAL_URL=https://tripbot.dev.whereisdana.today:9443
       - GOOGLE_APPS_PROJECT_ID=tripbot-stage
-      - OTEL_SDK_DISABLED=false
+      - OTEL_SDK_DISABLED=true
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=development,service.namespace=tripbot

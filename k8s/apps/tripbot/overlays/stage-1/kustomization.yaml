@@ -28,7 +28,7 @@ configMapGenerator:
       - BOT_USERNAME=tripbot4000
       - EXTERNAL_URL=https://tripbot.stage.whereisdana.today
       - GOOGLE_APPS_PROJECT_ID=tripbot-stage
-      - OTEL_SDK_DISABLED=false
+      - OTEL_SDK_DISABLED=true
       - OTEL_TRACES_SAMPLER=parentbased_traceidratio
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
