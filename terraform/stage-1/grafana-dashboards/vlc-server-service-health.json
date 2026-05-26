@@ -261,6 +261,89 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Decoded video frames",
+      "description": "Rate of decoded video blocks from libvlc. Pairs with displayed/lost — `decoded - displayed` exposes decode-but-don't-display loss.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 46, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(vlc_player_decoded_video_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "decoded/s [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "rate(vlc_player_displayed_pictures{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "displayed/s [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "rate(vlc_player_decoded_video_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]) - rate(vlc_player_displayed_pictures{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "decoded - displayed [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "OBS render skip ratio",
+      "description": "Fraction of render-thread frames OBS skipped. Climbing means the render thread is falling behind compositing — check OBS CPU / scene complexity.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 46, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]) / clamp_min(rate(obs_render_total_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]), 0.001)", "legendFormat": "render skip ratio [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.01 },
+            { "color": "red", "value": 0.05 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "OBS output skip ratio",
+      "description": "Fraction of output frames OBS dropped before encode. Climbing means the encoder pipeline is falling behind — check encoder preset / CPU.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 54, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(obs_output_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]) / clamp_min(rate(obs_output_total_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]), 0.001)", "legendFormat": "output skip ratio [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.01 },
+            { "color": "red", "value": 0.05 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "OBS stream skip ratio",
+      "description": "Fraction of stream-output frames OBS dropped due to network/encoder congestion. Climbing means upstream bandwidth or Twitch ingest is constrained.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 54, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]) / clamp_min(rate(obs_stream_output_total_frames{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]), 0.001)", "legendFormat": "stream skip ratio [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.01 },
+            { "color": "red", "value": 0.05 }
+          ]}
+        },
+        "overrides": []
+      }
     }
   ]
 }

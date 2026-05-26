@@ -259,6 +259,43 @@
         { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | scope_name=\"twitch-chat\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none", "enableLogDetails": true }
+    },
+    {
+      "id": 50,
+      "type": "stat",
+      "title": "Twitch Chat Connected",
+      "description": "Whether the bot is connected to Twitch chat (IRC). 1=connected, 0=disconnected.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 25, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_connected{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Disconnected", "color": "red" }, "1": { "text": "Connected", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 51,
+      "type": "stat",
+      "title": "Stream uptime",
+      "description": "Current stream output duration (only meaningful while LIVE). Formatted as hours/minutes/seconds.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 25, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_duration_ms{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}) / 1000", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
     }
   ]
 }
