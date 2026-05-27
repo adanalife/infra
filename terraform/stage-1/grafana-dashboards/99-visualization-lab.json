@@ -1,0 +1,368 @@
+{
+  "title": "99 — Visualization Lab",
+  "uid": "visualization-lab",
+  "tags": ["tripbot", "experimental", "tufte"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "editable": true,
+  "annotations": {
+    "list": [
+      {
+        "name": "Stream started",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "enable": true,
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "target": {
+          "expr": "(max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}) - max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"} offset 5m)) > 0",
+          "step": "1m"
+        },
+        "titleFormat": "Stream started",
+        "tagKeys": "deployment_environment"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(target_info{service_name=~\"tripbot|vlc-server\"}, deployment_environment)",
+        "current": { "text": "prod-1", "value": "prod-1" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "command",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}, command)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "sort": 1,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 0,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/vlc data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. See [[../sessions/visualization-lab]] for the lineage. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
+      }
+    },
+    {
+      "id": 1,
+      "type": "heatmap",
+      "title": "Command latency distribution",
+      "description": "Heatmap of tripbot_command_duration_seconds_bucket. Y = latency bucket, X = time, color = rate. Compare with the p50/p95/p99 lines on dashboard 11 — the heatmap reveals bimodal latency (fast path vs. DB-bound path) that the quantile lines smooth over.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 3, "w": 12, "h": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (le) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": { "mode": "scheme", "scheme": "Spectral", "steps": 64, "reverse": false, "exponent": 0.5, "fill": "dark-blue" },
+        "yAxis": { "axisPlacement": "left", "unit": "s", "decimals": 2 },
+        "legend": { "show": true },
+        "tooltip": { "show": true, "yHistogram": true }
+      },
+      "fieldConfig": { "defaults": { "custom": { "scaleDistribution": { "type": "linear" } } }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "state-timeline",
+      "title": "Stream status timeline (LIVE / DARK)",
+      "description": "Horizontal band of obs_streaming_active over the dashboard time range. Each gap is a stream-down window — read the duration directly off the band instead of guessing from a point-in-time stat. The canonical 'Stream' stat on dashboard 00 only tells you the current state.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 3, "w": 12, "h": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})",
+          "legendFormat": "[{{deployment_environment}}]"
+        }
+      ],
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DARK", "color": "red", "index": 0 }, "1": { "text": "LIVE", "color": "green", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Top commands (Pareto, 1h)",
+      "description": "Sorted bars of the top 15 commands by 1h usage. A real Pareto includes a cumulative-% line on a secondary axis answering 'how much of total traffic do the top N explain?' — Grafana's barchart panel doesn't render dual-axis cleanly. Sorted bars alone still surface the long tail vs. the heavy hitters more clearly than an unsorted bargauge.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(15, sum by (command) (increase(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1h])))",
+          "legendFormat": "{{command}}",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": { "fields": {}, "sort": [{ "field": "Value", "desc": true }] }
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "xTickLabelRotation": 0,
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "continuous-GrYlRd" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Helix errors — legend to the right (direct-label approximation)",
+      "description": "Same data as the canonical 'Helix errors by endpoint and status' on dashboard 05, but with the legend placed at the right edge so series names sit close to where their lines end. Grafana doesn't natively render Tufte-style end-of-line labels — this is the closest pragmatic approximation. Lines thickened slightly to read at a glance.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint, status_code) (rate(twitch_helix_errors_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
+          "legendFormat": "{{endpoint}} ({{status_code}})"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "spanNulls": true }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Subscribers — current and Δ 24h",
+      "description": "Current subscribers (primary) plus the 24h delta (secondary). Stat panel reduces two queries: `max(twitch_subscribers_total)` and the same metric minus its value at `offset 24h`. The delta colors green when ≥ 0, red when < 0.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 20, "w": 6, "h": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})",
+          "legendFormat": "Now",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "max(twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}) - max(twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} offset 24h)",
+          "legendFormat": "Δ 24h",
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "displayName", "value": "Δ 24h" },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 0 }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byFrameRefID", "options": "A" },
+            "properties": [
+              { "id": "displayName", "value": "Now" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Daily stream uptime — last 7 days (hours/day)",
+      "description": "Seven daily bars showing hours the stream was LIVE per day. `avg_over_time(obs_streaming_active[1d]) * 24` evaluated at 1-day steps. Tufte's sparkline-strip move — dense data, no chrome — applied to weekly uptime instead of a single LIVE/DARK indicator.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 20, "w": 18, "h": 6 },
+      "timeFrom": "7d",
+      "interval": "1d",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg_over_time(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[1d]) * 24",
+          "legendFormat": "hours/day"
+        }
+      ],
+      "options": {
+        "orientation": "vertical",
+        "showValue": "always",
+        "xTickLabelRotation": 0,
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "min": 0,
+          "max": 24,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 6 }, { "color": "green", "value": 12 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Helix errors — colored by HTTP status class",
+      "description": "Same Helix errors data, with explicit color overrides by status_code class: 4xx muted gray, 429 loud yellow (rate-limited), 5xx loud red (server fault). Tufte: color carries meaning, not decoration. Compare to dashboard 05's panel where color is assigned by Grafana's classic palette and series end up indistinguishable.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 26, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint, status_code) (rate(twitch_helix_errors_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
+          "legendFormat": "{{endpoint}} ({{status_code}})"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal", "group": "A" }, "spanNulls": true }
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*\\(429\\)$" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*\\(5[0-9][0-9]\\)$" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*\\(4[0-9][0-9]\\)$" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5a5a5a" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*\\(2[0-9][0-9]\\)$" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5a8aa8" } }] }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Output bitrate — with stream-start annotations",
+      "description": "Output bitrate over time, with vertical annotations marking each moment `obs_streaming_active` transitioned from 0 → 1 (defined as a dashboard-level annotation query — see the dashboard JSON's `.annotations.list`). Deploy annotations would also live here once a `deploy_event` metric ships.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 26, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])",
+          "legendFormat": "bitrate [{{deployment_environment}}]"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "spanNulls": false }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "text",
+      "title": "Message-length histogram (placeholder — metric not yet emitted)",
+      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 4 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Not yet implemented — needs a new metric.**\n\nTo land this panel, add `tripbot_chat_message_length_chars` as a histogram in `tripbot/pkg/instrumentation/tripbot.go`, with buckets along the lines of `[8, 16, 32, 64, 128, 256, 512]`. Increment it from the chat-message handler in `pkg/chatbot/handlers.go` on every PRIVMSG, using `len(msg)` (or rune count, depending on what we care about).\n\nOnce data lands, replace this text panel with either a `histogram` panel type (snapshot distribution) or a `heatmap` panel type (distribution-over-time) reading `tripbot_chat_message_length_chars_bucket`. The heatmap is the more interesting variant — it shows whether the channel mood is short reactions (`!miles`, `!hi`, GG) vs. multi-sentence stories."
+      }
+    },
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Small multiples — per-command rate (panel repeats over $command)",
+      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "$command",
+      "description": "One panel per command, identical y-axis, minimal chrome. Tufte's small multiples: pre-attentive comparison across series, no legend lookup. The panel repeats horizontally over the $command variable; pick a subset in the template chooser at the top of the dashboard.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 39, "w": 6, "h": 6 },
+      "repeat": "command",
+      "repeatDirection": "h",
+      "maxPerRow": 4,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tripbot_chat_commands_total{service_name=\"tripbot\", command=\"$command\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
+          "legendFormat": "$command"
+        }
+      ],
+      "options": {
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "spanNulls": true, "axisLabel": "", "showPoints": "never" }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

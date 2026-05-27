@@ -53,6 +53,15 @@ resource "grafana_folder" "tripbot" {
   title = "TripBot"
 }
 
+# Experimental dashboards that demo visualization techniques — heatmaps,
+# state timelines, Paretos, direct labeling, small multiples — on real
+# tripbot/vlc data. Once a technique earns its keep the panel is
+# promoted into one of the canonical dashboards in the TripBot folder
+# and the experiment retired.
+resource "grafana_folder" "lab" {
+  title = "Lab"
+}
+
 # Each dashboard JSON file uses sentinel datasource UIDs that the
 # `dashboard()` helper below swaps for the real per-stack UIDs at apply
 # time. Sentinels (not Grafana's own ${DS_FOO} __inputs syntax) so
@@ -101,6 +110,27 @@ resource "grafana_dashboard" "tripbot" {
   # of the full JSON diff — the dashboards are dashboards-as-code from the
   # files in ./grafana-dashboards/, and the noisy multi-thousand-line diffs
   # drown out everything else in the plan.
+  config_json = sensitive(replace(
+    replace(
+      replace(
+        file("${path.module}/grafana-dashboards/${each.key}.json"),
+        "__DS_PROMETHEUS__", local.dashboard_substitutions["__DS_PROMETHEUS__"]
+      ),
+      "__DS_LOKI__", local.dashboard_substitutions["__DS_LOKI__"]
+    ),
+    "__DS_TEMPO__", local.dashboard_substitutions["__DS_TEMPO__"]
+  ))
+}
+
+locals {
+  lab_dashboard_files = toset([
+    "99-visualization-lab",
+  ])
+}
+
+resource "grafana_dashboard" "lab" {
+  for_each = local.lab_dashboard_files
+  folder   = grafana_folder.lab.uid
   config_json = sensitive(replace(
     replace(
       replace(
