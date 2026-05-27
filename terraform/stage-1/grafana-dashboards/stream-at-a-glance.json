@@ -69,18 +69,6 @@
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
     },
     {
-      "id": 3,
-      "type": "stat",
-      "title": "Output bitrate",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
-      "targets": [
-        { "refId": "A", "expr": "8 * max by (deployment_environment) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))" }
-      ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] }
-    },
-    {
       "id": 4,
       "type": "stat",
       "title": "OBS CPU",
@@ -161,6 +149,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit", "decimals": 1,
+          "noValue": "No errors",
           "thresholds": { "mode": "absolute", "steps": [
             { "color": "green", "value": null },
             { "color": "yellow", "value": 0.01 },
@@ -186,26 +175,14 @@
     {
       "id": 9,
       "type": "stat",
-      "title": "Messages / min",
+      "title": "Messages / hour",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 14, "y": 4, "w": 5, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 3600" , "legendFormat": "[{{deployment_environment}}]" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] }
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "DB pool in-use",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 19, "y": 4, "w": 5, "h": 4 },
-      "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (db_sql_connection_open{service_name=\"tripbot\", status=\"inuse\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
-      ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
     },
     {
       "id": 20,
@@ -266,7 +243,7 @@
       "title": "Twitch Chat Connected",
       "description": "Whether the bot is connected to Twitch chat (IRC). 1=connected, 0=disconnected.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 25, "w": 6, "h": 4 },
+      "gridPos": { "x": 19, "y": 4, "w": 5, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_connected{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -290,7 +267,7 @@
       "title": "Stream uptime",
       "description": "Current stream output duration (only meaningful while LIVE). Formatted as hours/minutes/seconds.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 25, "w": 6, "h": 4 },
+      "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_duration_ms{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}) / 1000", "legendFormat": "[{{deployment_environment}}]" }
       ],
