@@ -92,6 +92,13 @@ spec:
             - secretRef:
                 name: tripbot-discord-alerts-webhook
                 optional: true
+            # Optional: pkg/discord.ShouldStart skips Discord init when the
+            # token is the SM placeholder OR DISCORD_GUILD_ID is unset, so
+            # missing/placeholder values just keep the bot gated off rather
+            # than blocking pod startup.
+            - secretRef:
+                name: tripbot-discord-bot-token
+                optional: true
           livenessProbe:
             httpGet:
               path: /health/live

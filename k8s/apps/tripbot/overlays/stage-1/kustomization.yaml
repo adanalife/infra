@@ -33,6 +33,10 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=stage-1
+      # ADanaLife guild snowflake. Stage's bot is locked to a private
+      # channel via Server Settings → Integrations after invite; see
+      # vault/tripbot/discord-bot-setup.md for the click path.
+      - DISCORD_GUILD_ID=607964164220125258
 
 patches:
   # Internal-IP Ingress for tripbot's web UI at tripbot.stage.whereisdana.today
