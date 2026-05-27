@@ -96,10 +96,9 @@ resource "aws_route53_record" "secondary_naked" {
   name    = var.secondary_domain
   type    = "A"
 
-  # https://docs.aws.amazon.com/general/latest/gr/s3.html#s3_website_region_endpoints
   alias {
-    name                   = "s3-website-us-east-1.amazonaws.com."
-    zone_id                = "Z3AQBSTGFYJSTF" # us-east-1
+    name                   = aws_cloudfront_distribution.secondary_naked_redirect.domain_name
+    zone_id                = aws_cloudfront_distribution.secondary_naked_redirect.hosted_zone_id
     evaluate_target_health = false
   }
 }
