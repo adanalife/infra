@@ -62,7 +62,7 @@ clusterMetrics:
   # The chart's default cAdvisor + KSM allow lists are conservative —
   # enough for the basic Grafana Cloud Kubernetes views but missing
   # several metrics queried by the modern community dashboards we
-  # vendored (k8s-cluster-overview, k8s-pods). Extra series listed
+  # vendored (kubernetes-views-global, kubernetes-views-pods). Extra series listed
   # below; checked against the dashboard JSON queries.
   cadvisor:
     metricsTuning:
