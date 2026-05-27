@@ -95,7 +95,7 @@
       "type": "timeseries",
       "title": "Subscribers & followers over time",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (twitch_followers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "followers [{{deployment_environment}}]" },
         { "refId": "B", "expr": "max by (deployment_environment) (twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "subscribers [{{deployment_environment}}]" }
@@ -129,7 +129,7 @@
       "type": "bargauge",
       "title": "Top commands (1h)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "topk(15, sum by (command, deployment_environment) (increase(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1h])))", "legendFormat": "{{command}} [{{deployment_environment}}]" }
       ],
