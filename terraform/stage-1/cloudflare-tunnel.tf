@@ -135,6 +135,19 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_ip_allow" {
       }
     }
   ]
+
+  # Provider shows a perpetual in-place `~ include = (sensitive value)`
+  # diff on every plan — the API doesn't roundtrip this attribute
+  # cleanly against the data-source-derived sensitive list. Ignored to
+  # keep plans clean; trade-off is `task stage:allowlist:add-current-ip`
+  # no longer pushes allowlist edits via apply (Cloudflare-side
+  # allowlist freezes at whatever was last applied). Acceptable
+  # because the tunnel is post-launch superseded by Tailscale and
+  # slated for removal — see the "Rip the Cloudflare Tunnel
+  # infrastructure" highpri TODO in vault/infra/TODO.md.
+  lifecycle {
+    ignore_changes = [include]
+  }
 }
 
 # Orange-cloud CNAME for vlc.whalecore.com → in-cluster vlc-server
