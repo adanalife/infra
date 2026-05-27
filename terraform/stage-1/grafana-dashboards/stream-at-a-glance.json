@@ -258,7 +258,7 @@
       "targets": [
         { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | scope_name=\"twitch-chat\" | line_format \"{{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
       ],
-      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none", "enableLogDetails": false, "showLabels": false, "showCommonLabels": false, "showLogContextToggle": false }
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Ascending", "dedupStrategy": "none", "enableLogDetails": false, "showLabels": false, "showCommonLabels": false, "showLogContextToggle": false }
     },
     {
       "id": 50,

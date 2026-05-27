@@ -274,7 +274,7 @@
       "options": {
         "showTime": true,
         "wrapLogMessage": true,
-        "sortOrder": "Descending",
+        "sortOrder": "Ascending",
         "dedupStrategy": "none",
         "enableLogDetails": false,
         "showLabels": false,
