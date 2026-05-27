@@ -245,6 +245,25 @@ resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
   }
 }
 
+# Discord bot token for the production tripbot Discord session (pkg/discord).
+# Consumed at runtime via the tripbot-discord-bot-token ExternalSecret in
+# k8s/apps/tripbot/base/. pkg/discord skips startup cleanly while this is
+# the placeholder string, so the bot stays gated off after this resource
+# lands and only flips on after `aws secretsmanager put-secret-value` and
+# setting DISCORD_GUILD_ID in the prod ConfigMap.
+resource "aws_secretsmanager_secret" "tripbot_discord_bot_token" {
+  name        = "k8s/tripbot/discord-bot-token"
+  description = "Discord bot token for the production tripbot Discord session."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_discord_bot_token" {
+  secret_id     = aws_secretsmanager_secret.tripbot_discord_bot_token.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # ============================================================================
 # CI lifecycle grants
 # ============================================================================
@@ -269,6 +288,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.postgres_backup_s3.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
+      aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
     ]
   }
 }
