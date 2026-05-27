@@ -95,7 +95,7 @@
       "type": "timeseries",
       "title": "Subscribers & followers over time",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (twitch_followers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "followers [{{deployment_environment}}]" },
         { "refId": "B", "expr": "max by (deployment_environment) (twitch_subscribers_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "subscribers [{{deployment_environment}}]" }
@@ -267,7 +267,7 @@
       "title": "Chat feed (live)",
       "description": "Twitch chat messages as they arrive, rendered as `username: message` for live-chat scannability. Emitted by pkg/chatbot/log/log.go as OTel log records under scope_name=\"twitch-chat\"; twitch.user and twitch.channel arrive as structured metadata.",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
-      "gridPos": { "x": 0, "y": 69, "w": 24, "h": 16 },
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | scope_name=\"twitch-chat\" | line_format \"{{ __timestamp__ | date \\\"15:04:05\\\" }} {{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
       ],
