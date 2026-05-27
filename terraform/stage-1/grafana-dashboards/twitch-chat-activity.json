@@ -269,10 +269,10 @@
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 69, "w": 24, "h": 16 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | scope_name=\"twitch-chat\" | line_format \"{{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
+        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | scope_name=\"twitch-chat\" | line_format \"{{ __timestamp__ | date \\\"15:04:05\\\" }} {{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
       ],
       "options": {
-        "showTime": true,
+        "showTime": false,
         "wrapLogMessage": true,
         "sortOrder": "Ascending",
         "dedupStrategy": "none",
