@@ -64,28 +64,28 @@ resource "grafana_folder" "tripbot" {
 #   __DS_TEMPO__       →  tempo DS uid
 locals {
   dashboard_files = toset([
-    "stream-at-a-glance",
-    "tripbot-service-health",
-    "vlc-server-service-health",
-    "onscreens-server-service-health",
-    "stream-health",
-    "tripbot-vlc-traffic",
-    "postgres-pool",
-    "twitch-chat-activity",
-    "go-runtime",
-    "http-routes",
-    "logs-errors",
-    "app-latency",
-    "platform-services",
-    "intel-gpu", # iGPU performance — hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "00-launch-stream-at-a-glance",
+    "01-stream-health-vlc-server-to-obs",
+    "02-service-health-tripbot",
+    "03-service-health-vlc-server",
+    "04-service-health-onscreens-server",
+    "05-twitch-chat-activity",
+    "06-logs-and-errors",
+    "07-go-runtime",
+    "08-postgres-pool",
+    "09-tripbot-to-vlc-traffic",
+    "10-http-routes",
+    "11-application-latency-commands-and-db",
+    "12-platform-services",
+    "13-igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}
     # swapped for the project's __DS_PROMETHEUS__ sentinel, .id removed,
     # .uid set to a stable slug.
-    "k8s-cluster-overview", # grafana.com/dashboards/15757 — modern cluster view
-    "k8s-pods",             # grafana.com/dashboards/15760 — modern pods view
-    "node-exporter-full",   # grafana.com/dashboards/1860
+    "kubernetes-views-global", # grafana.com/dashboards/15757 — modern cluster view
+    "kubernetes-views-pods",   # grafana.com/dashboards/15760 — modern pods view
+    "node-exporter-full",      # grafana.com/dashboards/1860
   ])
   dashboard_substitutions = {
     "__DS_PROMETHEUS__" = data.grafana_data_source.prometheus.uid
@@ -111,4 +111,75 @@ resource "grafana_dashboard" "tripbot" {
     ),
     "__DS_TEMPO__", local.dashboard_substitutions["__DS_TEMPO__"]
   ))
+}
+
+# Filenames renamed 2026-05-27 to match each dashboard's Grafana title, with
+# the leading sort-order numbers preserved. UIDs inside the JSON are
+# unchanged so existing dashboard URLs keep working. These moved blocks
+# turn what would otherwise be a destroy+create into a state-key rename;
+# safe to delete after the first apply on every env that uses this
+# workspace.
+moved {
+  from = grafana_dashboard.tripbot["stream-at-a-glance"]
+  to   = grafana_dashboard.tripbot["00-launch-stream-at-a-glance"]
+}
+moved {
+  from = grafana_dashboard.tripbot["stream-health"]
+  to   = grafana_dashboard.tripbot["01-stream-health-vlc-server-to-obs"]
+}
+moved {
+  from = grafana_dashboard.tripbot["tripbot-service-health"]
+  to   = grafana_dashboard.tripbot["02-service-health-tripbot"]
+}
+moved {
+  from = grafana_dashboard.tripbot["vlc-server-service-health"]
+  to   = grafana_dashboard.tripbot["03-service-health-vlc-server"]
+}
+moved {
+  from = grafana_dashboard.tripbot["onscreens-server-service-health"]
+  to   = grafana_dashboard.tripbot["04-service-health-onscreens-server"]
+}
+moved {
+  from = grafana_dashboard.tripbot["twitch-chat-activity"]
+  to   = grafana_dashboard.tripbot["05-twitch-chat-activity"]
+}
+moved {
+  from = grafana_dashboard.tripbot["logs-errors"]
+  to   = grafana_dashboard.tripbot["06-logs-and-errors"]
+}
+moved {
+  from = grafana_dashboard.tripbot["go-runtime"]
+  to   = grafana_dashboard.tripbot["07-go-runtime"]
+}
+moved {
+  from = grafana_dashboard.tripbot["postgres-pool"]
+  to   = grafana_dashboard.tripbot["08-postgres-pool"]
+}
+moved {
+  from = grafana_dashboard.tripbot["tripbot-vlc-traffic"]
+  to   = grafana_dashboard.tripbot["09-tripbot-to-vlc-traffic"]
+}
+moved {
+  from = grafana_dashboard.tripbot["http-routes"]
+  to   = grafana_dashboard.tripbot["10-http-routes"]
+}
+moved {
+  from = grafana_dashboard.tripbot["app-latency"]
+  to   = grafana_dashboard.tripbot["11-application-latency-commands-and-db"]
+}
+moved {
+  from = grafana_dashboard.tripbot["platform-services"]
+  to   = grafana_dashboard.tripbot["12-platform-services"]
+}
+moved {
+  from = grafana_dashboard.tripbot["intel-gpu"]
+  to   = grafana_dashboard.tripbot["13-igpu-performance"]
+}
+moved {
+  from = grafana_dashboard.tripbot["k8s-cluster-overview"]
+  to   = grafana_dashboard.tripbot["kubernetes-views-global"]
+}
+moved {
+  from = grafana_dashboard.tripbot["k8s-pods"]
+  to   = grafana_dashboard.tripbot["kubernetes-views-pods"]
 }
