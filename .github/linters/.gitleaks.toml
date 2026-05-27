@@ -27,4 +27,12 @@ paths = [
   # access-key-id is public (visible in the AWS console); the secret
   # half is not present in this file.
   '''terraform/core/user_data\.yml''',
+
+  # Contains DISCORD_GUILD_ID=607964164220125258, the ADanaLife Discord
+  # server snowflake. Public ID (visible on invite previews, documented
+  # in vault/general/social/discord.md); gitleaks' generic-api-key rule
+  # false-positives on the 18-digit numeric value. The bot token itself
+  # is in AWS SM (k8s/tripbot/discord-bot-token) and never in this repo.
+  '''k8s/apps/tripbot/overlays/stage-1/kustomization\.yaml''',
+  '''k8s/apps/tripbot/overlays/prod-1/kustomization\.yaml''',
 ]
