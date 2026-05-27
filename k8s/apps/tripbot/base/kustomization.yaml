@@ -14,6 +14,7 @@ resources:
   - google-maps-external-secret.yaml
   - database-external-secret.yaml
   - discord-alerts-external-secret.yaml
+  - discord-bot-token-external-secret.yaml
 
 # tripbot-config holds non-secret env defaults that mirror
 # tripbot/infra/docker/env.docker, with service hosts swapped from
