@@ -122,7 +122,7 @@
       "targets": [
         { "refId": "A", "expr": "topk(10, sum by (command, deployment_environment) (rate(tripbot_chat_commands_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))) * 60", "legendFormat": "{{command}} [{{deployment_environment}}]" }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 50, "stacking": { "mode": "normal" } } }, "overrides": [] }
     },
     {
       "id": 7,
