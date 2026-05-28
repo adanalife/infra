@@ -449,6 +449,23 @@ tasks:
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns-stage -n stage-1-platform
       - 'echo "stage external-dns up in stage-1-platform. *.stage.whereisdana.today records now publish to the adanalife-stage zone."'
+      # NATS — phase 0 pubsub substrate per
+      # vault/tripbot/TODO.md "Adopt NATS as the inter-component message
+      # bus". Stage gets its OWN NATS install in stage-1-platform —
+      # namespace isolation from prod-1-platform's instance (rather than
+      # cross-env topic-name discipline). Same chart, same values shape;
+      # k8s/nats/stage-1/values.yml carries the (currently identical)
+      # per-env sizing. Helm release name `nats` is namespace-scoped, so
+      # no collision with prod's release of the same name.
+      - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+      - helm repo update nats
+      - helm upgrade --install nats nats/nats
+          --version 2.14.0
+          -n stage-1-platform --create-namespace
+          -f k8s/nats/values.yml
+          -f k8s/nats/stage-1/values.yml
+      - kubectl rollout status statefulset/nats -n stage-1-platform --timeout=120s
+      - 'echo "NATS up in stage-1-platform. Connect via nats://nats.stage-1-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n stage-1-platform -- nats pub foo bar"'
 
   # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
   # nor `k8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
@@ -850,6 +867,7 @@ tasks:
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
       - helm repo add jetstack https://charts.jetstack.io
       - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -917,6 +935,19 @@ tasks:
           -n monitoring
           -f k8s/monitoring/development/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+      # NATS — phase 0 pubsub substrate per
+      # vault/tripbot/TODO.md "Adopt NATS as the inter-component message
+      # bus". Single-node, no JetStream, prom-exporter sidecar scraped by
+      # alloy-metrics via prometheus.io/* pod annotations. Lives in its
+      # own development-platform namespace mirroring stage-1-platform /
+      # prod-1-platform (see k8s/nats/values.yml for the phase-0 framing).
+      - helm upgrade --install nats nats/nats
+          --version 2.14.0
+          -n development-platform --create-namespace
+          -f k8s/nats/values.yml
+          -f k8s/nats/development/values.yml
+      - kubectl rollout status statefulset/nats -n development-platform --timeout=120s
+      - 'echo "NATS up in development-platform. Connect via nats://nats.development-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n development-platform -- nats pub foo bar"'
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
@@ -961,6 +992,7 @@ tasks:
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
       - helm repo add jetstack https://charts.jetstack.io
       - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -1062,6 +1094,20 @@ tasks:
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+      # NATS — phase 0 pubsub substrate per
+      # vault/tripbot/TODO.md "Adopt NATS as the inter-component message
+      # bus". Single-node, no JetStream, prom-exporter sidecar scraped by
+      # alloy-metrics via prometheus.io/* pod annotations. Lives in
+      # prod-1-platform (the env-platform namespace external-dns created
+      # above) so prod-1 stays app-only. Stage runs its own NATS in
+      # stage-1-platform via k8s:stage:apply — namespaces isolate the two.
+      - helm upgrade --install nats nats/nats
+          --version 2.14.0
+          -n prod-1-platform --create-namespace
+          -f k8s/nats/values.yml
+          -f k8s/nats/prod-1/values.yml
+      - kubectl rollout status statefulset/nats -n prod-1-platform --timeout=120s
+      - 'echo "NATS up in prod-1-platform. Connect via nats://nats.prod-1-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n prod-1-platform -- nats pub foo bar"'
       # Intel GPU device plugin + XPU Manager. Plugin registers
       # gpu.intel.com/i915 (+ i915_monitoring) so OBS/vlc-server pods
       # can claim the iGPU as an extended resource without hostPath.
