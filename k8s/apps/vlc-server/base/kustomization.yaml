@@ -16,6 +16,14 @@ configMapGenerator:
       # vlc-server binary self-references this — same value as tripbot's
       # VLC_SERVER_HOST so cross-pod and self-references match.
       - VLC_SERVER_HOST=vlc-server:8080
+      # Workaround for tripbot v2.17.0: pkg/obs (imported by vlc-server's
+      # main for control + streaming helpers) now transitively imports
+      # pkg/config/tripbot via pkg/obs/silent_disconnect_watchdog.go, and
+      # that config package's init() runs envconfig.Process which fails
+      # if CHANNEL_NAME is unset — even though the watchdog never runs
+      # inside vlc-server. Remove this line once the import is detangled
+      # on tripbot's side.
+      - CHANNEL_NAME=unused-by-vlc-server
 
 labels:
   - includeSelectors: false
