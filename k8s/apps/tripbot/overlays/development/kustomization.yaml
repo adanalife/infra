@@ -38,6 +38,10 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=development,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=development
+      # NATS pubsub endpoint (phase 1 — fire-and-forget alongside HTTP).
+      # development-platform is the k3d-side mirror of stage/prod's
+      # env-platform namespace pattern.
+      - NATS_URL=nats://nats.development-platform.svc.cluster.local:4222
 
 patches:
   # Internal-IP Ingress for tripbot's web UI at tripbot.dev.whereisdana.today
