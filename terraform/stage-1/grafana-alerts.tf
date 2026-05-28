@@ -453,6 +453,132 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // The #1 stream-health alert: catches the silent half-open RTMP state
+  // where OBS reports outputActive=true but Twitch's API shows the channel
+  // offline. OBS's built-in reconnect only fires on a detected drop;
+  // when Twitch's ingest goes away without the FIN/RST making it back, OBS
+  // keeps streaming into the void. First seen in prod on 2026-05-27 ~30h
+  // into a session — manual recovery was StopStream+StartStream via OBS
+  // WebSocket; tripbot's watchdog automates that (3-miss debounce, 10m
+  // cooldown). This alert fires regardless of the watchdog so we know
+  // immediately, not after 3 minutes of detection lag + restart sequence.
+  //
+  // Expression: max() drops all labels so we can subtract across services
+  // (obs_streaming_active is on vlc-server, tripbot_twitch_channel_live is
+  // on tripbot). 1 = silent disconnect; 0 = aligned; -1 = harmless inverse
+  // (OBS=0/Twitch=1; impossible to reach steady-state).
+  rule {
+    name           = "OBS: silent disconnect (Twitch sees us offline)"
+    for            = "3m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Stream offline on Twitch while OBS thinks it's streaming"
+      description = "obs_streaming_active=1 but tripbot_twitch_channel_live=0 for 3m. RTMP socket is silently half-open — Twitch dropped its end and OBS didn't notice. Tripbot's watchdog should StopStream+StartStream within ~3-4m of detection; if it doesn't, run the manual recovery via OBS WebSocket: StopStream then 3s then StartStream. See tripbot pkg/obs/silent_disconnect_watchdog.go."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(obs_streaming_active{service_name=\"vlc-server\"}) - max(tripbot_twitch_channel_live{service_name=\"tripbot\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Notification rule paired with the silent-disconnect alert: fires when
+  // the watchdog actually forced a restart. Even a single increment is
+  // meaningful — the watchdog only fires after the 3-minute debounce,
+  // so any counter increase means we genuinely saw the silent half-open
+  // state in prod. Warning (not critical) because the stream is back by
+  // the time this fires; the critical alert above is the page-worthy one.
+  rule {
+    name           = "OBS: silent-disconnect watchdog forced a restart"
+    for            = "1m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS silent-disconnect watchdog auto-recovered a stream"
+      description = "tripbot_obs_silent_disconnect_restarts_total incremented in the last 5m — the watchdog detected OBS thinking it was streaming while Twitch reported offline, and forced a StopStream+StartStream. The stream is back up; check tripbot logs for the restart sequence and Loki for any pattern across recurrences."
+    }
+    labels = {
+      severity = "warning"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\"}[5m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   rule {
     name           = "Tripbot: disconnected from Twitch chat"
     for            = "5m"
