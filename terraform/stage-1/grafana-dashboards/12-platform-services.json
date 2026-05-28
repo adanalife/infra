@@ -1,7 +1,7 @@
 {
   "title": "12 — Platform Services",
   "uid": "platform-services",
-  "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium"],
+  "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium", "nats"],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "1m",
@@ -477,6 +477,103 @@
         { "refId": "A", "expr": "max by (map_name) (cilium_bpf_map_pressure{cluster=~\"$cluster\"})", "legendFormat": "{{map_name}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 500,
+      "type": "row",
+      "title": "nats (message bus)",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 49, "w": 24, "h": 1 }
+    },
+    {
+      "id": 501,
+      "type": "stat",
+      "title": "Servers reporting",
+      "description": "Count of NATS server instances currently emitting metrics. One per env namespace (stage-1-platform, prod-1-platform).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(nats_varz_connections{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 502,
+      "type": "stat",
+      "title": "Active connections",
+      "description": "Open client connections aggregated across all NATS instances in the cluster.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(nats_varz_connections{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 503,
+      "type": "stat",
+      "title": "Active subscriptions",
+      "description": "Live subscriptions across all instances. Climbs as subscribers connect, drops on disconnect.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(nats_subsz_num_subscriptions{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 504,
+      "type": "stat",
+      "title": "Slow consumers (last 1h)",
+      "description": "Increase in slow-consumer count over the last hour. Non-zero means a subscriber couldn't keep up and got dropped — investigate the client.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(nats_varz_slow_consumers{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 505,
+      "type": "timeseries",
+      "title": "Message rate (in / out)",
+      "description": "Per-second message throughput across all instances. Phase 0 is fire-and-forget pubsub; in == publishes received, out == subscriber deliveries.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 54, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(nats_varz_in_msgs{cluster=~\"$cluster\"}[5m]))", "legendFormat": "in" },
+        { "refId": "B", "expr": "sum(rate(nats_varz_out_msgs{cluster=~\"$cluster\"}[5m]))", "legendFormat": "out" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "mps" }, "overrides": [] }
+    },
+    {
+      "id": 506,
+      "type": "timeseries",
+      "title": "Byte rate (in / out)",
+      "description": "Per-second byte throughput across all instances. Useful for sizing once real traffic lands.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 54, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(nats_varz_in_bytes{cluster=~\"$cluster\"}[5m]))", "legendFormat": "in" },
+        { "refId": "B", "expr": "sum(rate(nats_varz_out_bytes{cluster=~\"$cluster\"}[5m]))", "legendFormat": "out" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] }
     }
   ]
 }
