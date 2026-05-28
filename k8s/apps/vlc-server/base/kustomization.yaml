@@ -19,11 +19,18 @@ configMapGenerator:
       # Workaround for tripbot v2.17.0: pkg/obs (imported by vlc-server's
       # main for control + streaming helpers) now transitively imports
       # pkg/config/tripbot via pkg/obs/silent_disconnect_watchdog.go, and
-      # that config package's init() runs envconfig.Process which fails
-      # if CHANNEL_NAME is unset — even though the watchdog never runs
-      # inside vlc-server. Remove this line once the import is detangled
-      # on tripbot's side.
+      # that config package's init() runs envconfig.Process which fatals
+      # on the first missing required key — even though the watchdog
+      # never runs inside vlc-server. Stamp placeholders for every
+      # required key in pkg/config/tripbot/type.go so the validator
+      # passes without binding vlc-server to env-specific tripbot values.
+      # (VLC_SERVER_HOST above also satisfies one of the required keys.)
+      # Remove this whole block once the import is detangled on tripbot's
+      # side.
       - CHANNEL_NAME=unused-by-vlc-server
+      - BOT_USERNAME=unused-by-vlc-server
+      - EXTERNAL_URL=unused-by-vlc-server
+      - ONSCREENS_SERVER_HOST=unused-by-vlc-server
 
 labels:
   - includeSelectors: false
