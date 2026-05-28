@@ -1,0 +1,13 @@
+# stage-1 NATS overrides. Layers on top of k8s/nats/values.yml.
+#
+# Phase 0: tiny footprint, same shape as prod (stage and prod are
+# co-tenant on the mini-PC — see vault/decisions/stage-prod-cotenancy.md
+# — and should differ only by config values).
+
+container:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

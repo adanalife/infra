@@ -1,0 +1,48 @@
+# NATS chart values shared across all envs. Per-env overlays at
+# k8s/nats/<env>/values.yml layer resource sizing + namespace context on top.
+#
+# Phase 0 (per vault/tripbot/TODO.md "Adopt NATS as the inter-component
+# message bus" bullet, captured 2026-05-28): single-node, no JetStream,
+# no PVC. The substrate to start migrating fire-and-forget HTTP calls
+# (`pkg/onscreens-client.ShowMiddleText` is the proof) onto a pubsub
+# fabric. JetStream lands in phase 3 once we have an event that needs
+# durability/replay (rollup worker, audit log).
+#
+# Topic convention (producer-side, not enforced here):
+#   tripbot.<env>.<domain>.<event>
+# e.g. tripbot.prod.onscreens.middle.show
+
+config:
+  # Single binary — chart default, made explicit as a tripwire if
+  # someone ever flips it without thinking through the cluster mode
+  # implications (cluster needs replicas >= 2 + JetStream for HA).
+  cluster:
+    enabled: false
+  jetstream:
+    enabled: false
+  # Monitor endpoint on :8222 backs the prom exporter sidecar below.
+  monitor:
+    enabled: true
+
+# Sidecar prom exporter on :7777 scraping the :8222 monitor endpoint.
+# Annotation auto-discovery below routes alloy-metrics to it.
+promExporter:
+  enabled: true
+  port: 7777
+
+# Surface the scrape endpoint to alloy-metrics annotation auto-discovery.
+# Matches the prometheus.io/* keys configured in
+# annotationAutodiscovery.annotations in k8s/monitoring/<env>/values.yml.
+podTemplate:
+  merge:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "7777"
+        prometheus.io/path: "/metrics"
+
+# nats-box deploys a small pod carrying the `nats` CLI for in-cluster
+# smoke tests: `kubectl exec -ti deploy/nats-box -n <ns> -- nats pub foo bar`
+# Kept on so the per-env smoke-test step in the Taskfile can reach it.
+natsBox:
+  enabled: true
