@@ -15,7 +15,7 @@ phases peel off the rest of the onscreens-client surface, then
 
 ## Layout
 
-```
+```text
 k8s/nats/
 ├── values.yml              # shared chart values (JetStream off, prom-exporter on)
 ├── development/values.yml  # per-env resource sizing
@@ -41,7 +41,7 @@ isolated structurally by namespace, not by topic-name discipline.
 
 ## Connection URL (in-cluster)
 
-```
+```text
 nats://nats.<env-platform-ns>.svc.cluster.local:4222
 ```
 
@@ -56,7 +56,7 @@ kubectl exec -ti deploy/nats-box -n prod-1-platform -- nats sub foo
 
 Producer-side, not enforced by the broker:
 
-```
+```text
 tripbot.<env>.<domain>.<event>
 ```
 
