@@ -36,6 +36,8 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=prod-1
+      # NATS pubsub endpoint (phase 1 — fire-and-forget alongside HTTP).
+      - NATS_URL=nats://nats.prod-1-platform.svc.cluster.local:4222
       # DISCORD_GUILD_ID intentionally unset until launch — pkg/discord.ShouldStart
       # skips Discord init when this is empty, keeping the prod bot gated off
       # while the staging bot iterates. Flip on at launch by adding:

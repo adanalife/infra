@@ -37,6 +37,10 @@ configMapGenerator:
       # channel via Server Settings → Integrations after invite; see
       # vault/tripbot/discord-bot-setup.md for the click path.
       - DISCORD_GUILD_ID=607964164220125258
+      # NATS pubsub endpoint (phase 1 — fire-and-forget alongside HTTP).
+      # Stage's NATS lives in stage-1-platform, isolated from prod's
+      # instance in prod-1-platform by namespace boundary.
+      - NATS_URL=nats://nats.stage-1-platform.svc.cluster.local:4222
 
 patches:
   # Internal-IP Ingress for tripbot's web UI at tripbot.stage.whereisdana.today

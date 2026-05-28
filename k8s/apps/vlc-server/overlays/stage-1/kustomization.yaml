@@ -30,6 +30,10 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=stage-1
+      # NATS pubsub endpoint — read by the onscreens-server binary (same
+      # pod as vlc-server, supervisord-managed) to subscribe to
+      # tripbot.staging.onscreens.* events (phase 1).
+      - NATS_URL=nats://nats.stage-1-platform.svc.cluster.local:4222
 
 patches:
   # Mount the dashcam NFS PVC at the corpus path (read-only).
