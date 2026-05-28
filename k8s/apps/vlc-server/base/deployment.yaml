@@ -5,11 +5,23 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Recreate so an in-flight RTSP stream / VNC session isn't briefly
-    # served by two replicas at once during rollout. vlc-server is a
-    # single-replica workload by design (RTSP + libvlc state are local
-    # to the process).
-    type: Recreate
+    # RollingUpdate with maxSurge=1 / maxUnavailable=0: the new pod must
+    # pass its readiness probe before the old pod terminates. Trade-off
+    # vs. the previous Recreate strategy: during the rollout window,
+    # both pods are briefly Running. The dashcam PVC is mounted
+    # readOnly (NFS supports many-readers); the Intel GPU plugin runs
+    # with -shared-dev-num=4 so both pods can claim concurrently; ports
+    # are container-local (not hostPort). OBS holds its RTSP connection
+    # to the old pod until that pod terminates, then reconnects via the
+    # Service to the new pod — same drop-and-reconnect path as before,
+    # but only fires once the new pod is proven healthy. A failed
+    # rollout (like the v2.17.0 CHANNEL_NAME-validator regression on
+    # 2026-05-28) now leaves the old pod serving instead of yielding a
+    # full outage.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: vlc-server
