@@ -9,7 +9,7 @@ data:
   # browser_source's `url` field becomes fully qualified. Without
   # it, URLs render as relative ("/onscreens/...") and CEF can't
   # resolve them, so onscreens never appear on the OBS canvas.
-  ONSCREENS_URL_BASE: http://vlc-server:8081
+  ONSCREENS_URL_BASE: http://onscreens-server:8081
   # Base URL for the next-frame cover layer that vlc-server serves at
   # /next-frame.html. Same envsubst pathway as ONSCREENS_URL_BASE — the
   # entrypoint expands the placeholder in Tripbot.json.tmpl so the
