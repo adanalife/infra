@@ -32,10 +32,9 @@ configMapGenerator:
       # Override the local overlay's development tag — see that overlay for
       # why this exists.
       - SENTRY_ENVIRONMENT=prod-1
-      # NATS pubsub endpoint — read by the onscreens-server binary (same
-      # pod as vlc-server, supervisord-managed) to subscribe to
-      # tripbot.production.onscreens.* events (phase 1).
-      - NATS_URL=nats://nats.prod-1-platform.svc.cluster.local:4222
+      # NATS_URL moved to apps/onscreens-server/overlays/prod-1 — the
+      # onscreens-server binary (now its own Deployment) is the only NATS
+      # consumer; vlc-server itself doesn't use it.
 
 patches:
   # Mount the dashcam NFS PVC at the corpus path.
