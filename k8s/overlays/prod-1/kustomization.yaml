@@ -32,5 +32,6 @@ resources:
   - ../../cert-manager/app-issuer/prod-1
   - ../../apps/postgres/overlays/prod-1
   - ../../apps/vlc-server/overlays/prod-1
+  - ../../apps/onscreens-server/overlays/prod-1
   - ../../apps/tripbot/overlays/prod-1
   - ../../apps/obs/overlays/prod-1

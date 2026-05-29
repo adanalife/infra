@@ -1,0 +1,24 @@
+# onscreens-server stage-1 overlay. Extends base directly (no local stubs
+# needed — onscreens-server's config only requires ENV). Mirrors prod-1 with
+# staging telemetry tags + the stage NATS endpoint, and pins :develop so stage
+# rolls forward off tripbot's develop branch.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: onscreens-server-config
+    behavior: merge
+    literals:
+      - ENV=staging
+      - OTEL_SDK_DISABLED=true
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=stage-1,service.namespace=tripbot
+      - SENTRY_ENVIRONMENT=stage-1
+      # NATS pubsub endpoint — subscribes to tripbot.staging.onscreens.middle.show.
+      - NATS_URL=nats://nats.stage-1-platform.svc.cluster.local:4222
+
+images:
+  - name: adanalife/onscreens-server
+    newTag: develop
