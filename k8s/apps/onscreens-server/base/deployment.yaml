@@ -39,8 +39,8 @@ spec:
             capabilities:
               drop: ["ALL"]
           ports:
-            - name: onscreens
-              containerPort: 8081
+            - name: http
+              containerPort: 8080
           # ENV + telemetry tags via the configmap; SENTRY_DSN + OTLP
           # endpoint/headers via the shared observability ExternalSecrets
           # (applied by the env umbrella). onscreens-server reuses the
@@ -58,14 +58,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health/live
-              port: onscreens
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 30
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /health/ready
-              port: onscreens
+              port: http
             initialDelaySeconds: 3
             periodSeconds: 10
           resources:
