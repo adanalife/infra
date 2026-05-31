@@ -1,0 +1,14 @@
+# Persistent cache for the SigLIP2 checkpoint. The dashcam-cv image is built
+# lean (BAKE_MODEL=0), so the ~4.4 GB so400m weights download from the HF hub on
+# the first run into this PVC (mounted at HF_HOME=/opt/models) and are reused by
+# every subsequent CronJob run — no re-download, no network dep after run 1.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dashcam-cv-models
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 8Gi
