@@ -26,15 +26,31 @@ spec:
         spec:
           restartPolicy: Never
           priorityClassName: dashcam-cv-low
+          # stage-1 enforces the restricted Pod Security Standard.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532                        # lets UID 65532 write the model-cache PVC
+            seccompProfile:
+              type: RuntimeDefault
           initContainers:
             - name: wait-for-postgres
               image: busybox:1.36
               command: ["sh", "-c", "until nc -z postgres 5432; do echo waiting; sleep 2; done"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
           containers:
             - name: embed
               image: adanalife/dashcam-cv:develop
               imagePullPolicy: Always
               args: ["embed", "--random", "3", "--interval", "5", "--apply"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               envFrom:
                 - configMapRef:
                     name: tripbot-config          # DATABASE_HOST, etc.
@@ -43,6 +59,10 @@ spec:
               env:
                 - name: DASHCAM_CV_CORPUS_DIR
                   value: /opt/data/Dashcam/_all
+                - name: HOME
+                  value: /tmp                      # UID 65532 has no home dir
+                - name: USER
+                  value: dashcam                   # torch getpass.getuser() needs $USER set
               resources:
                 requests: { cpu: "1", memory: 5Gi }
                 limits:   { cpu: "4", memory: 6Gi }   # hard CPU cap so prod keeps its cores
