@@ -124,7 +124,7 @@ resource "aws_route53_record" "primary_staging" {
   name    = "staging.${var.domain}"
   type    = "CNAME"
   ttl     = "300"
-  records = ["dana-lol-staging.pages.dev"]
+  records = ["dana-lol-stage-1.pages.dev"]
 }
 
 resource "aws_route53_record" "secondary_staging" {
