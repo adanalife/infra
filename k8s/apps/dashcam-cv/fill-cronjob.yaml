@@ -20,6 +20,12 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # 2 pods per run embed --random 10 each (~20 videos/tick) — ~2x throughput.
+      # Independent random picks may overlap; ON CONFLICT DO NOTHING dedupes.
+      # Safe on the 32 GB node (each requests 5Gi; scheduler + priority -10 guard
+      # prod). Bump both to go faster if there's headroom.
+      parallelism: 2
+      completions: 2
       backoffLimit: 0
       ttlSecondsAfterFinished: 3600
       template:
