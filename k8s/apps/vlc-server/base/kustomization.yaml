@@ -16,32 +16,6 @@ configMapGenerator:
       # vlc-server binary self-references this — same value as tripbot's
       # VLC_SERVER_HOST so cross-pod and self-references match.
       - VLC_SERVER_HOST=vlc-server:8080
-      # Workaround for tripbot v2.17.0: pkg/obs (imported by vlc-server's
-      # main for control + streaming helpers) now transitively imports
-      # pkg/config/tripbot via pkg/obs/silent_disconnect_watchdog.go, and
-      # that config package's init() runs envconfig.Process which fatals
-      # on the first missing required key — even though the watchdog
-      # never runs inside vlc-server. Stamp placeholders for every
-      # required key in pkg/config/tripbot/type.go so the validator
-      # passes without binding vlc-server to env-specific tripbot values.
-      # (VLC_SERVER_HOST above also satisfies one of the required keys.)
-      # Remove this whole block once the import is detangled on tripbot's
-      # side.
-      - CHANNEL_NAME=unused-by-vlc-server
-      - BOT_USERNAME=unused-by-vlc-server
-      - EXTERNAL_URL=unused-by-vlc-server
-      - ONSCREENS_SERVER_HOST=unused-by-vlc-server
-      # pkg/database/database.go's init() also fires in the vlc-server
-      # process via the same import chain (silent_disconnect_watchdog
-      # → pkg/twitch → pkg/oauthtokens → pkg/database). It checks for
-      # DATABASE_USER / DATABASE_DB / DATABASE_HOST via os.LookupEnv
-      # and log.Fatalf's if any are unset. vlc-server never opens a DB
-      # connection — connectToDB() is only called from query paths it
-      # doesn't take — so placeholder values pass the env check
-      # without binding to a real database.
-      - DATABASE_USER=unused-by-vlc-server
-      - DATABASE_DB=unused-by-vlc-server
-      - DATABASE_HOST=unused-by-vlc-server
 
 labels:
   - includeSelectors: false
