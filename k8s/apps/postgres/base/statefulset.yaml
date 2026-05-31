@@ -15,7 +15,7 @@ spec:
     spec:
       # Partial PodSecurity-restricted hardening: seccomp + no-privesc.
       # capabilities.drop:[ALL] and runAsNonRoot are deferred together:
-      # the postgres:16-alpine entrypoint starts as root and chowns a fresh
+      # the postgres entrypoint starts as root and chowns a fresh
       # PGDATA to the postgres user (needs CAP_CHOWN), so dropping caps
       # without also setting runAsUser:70 + fsGroup would break first-boot
       # on an empty PVC. Do those as one verified follow-up change.
@@ -25,8 +25,12 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
+        # pgvector/pgvector:pg16 is a drop-in for postgres:16-alpine that adds
+        # the `vector` extension (dashcam-cv frame_embeddings; migration 015
+        # runs CREATE EXTENSION vector). Proven on stage-1 before promoting to
+        # base, so every env (dev/stage/prod) shares one image.
         - name: postgres
-          image: postgres:16-alpine
+          image: pgvector/pgvector:pg16
           securityContext:
             allowPrivilegeEscalation: false
           ports:
