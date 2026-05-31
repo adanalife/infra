@@ -12,7 +12,7 @@ kind: CronJob
 metadata:
   name: dashcam-cv-fill
 spec:
-  schedule: "*/30 * * * *"        # tighten to quiet hours if needed, e.g. "*/30 4-7 * * *"
+  schedule: "*/20 * * * *"        # ~10 videos/run; with Forbid this runs near-continuously
   suspend: true                   # safety: enable only after the manual ramp
   concurrencyPolicy: Forbid       # never overlap runs
   startingDeadlineSeconds: 120
@@ -46,7 +46,7 @@ spec:
             - name: embed
               image: adanalife/dashcam-cv:develop
               imagePullPolicy: Always
-              args: ["embed", "--random", "3", "--interval", "5", "--apply"]
+              args: ["embed", "--random", "10", "--interval", "5", "--apply"]
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
