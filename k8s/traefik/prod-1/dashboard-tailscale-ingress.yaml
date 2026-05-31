@@ -8,6 +8,12 @@
 # now gated by the tailnet ACL rather than LAN-only. Add a traefik basic-auth
 # middleware before sharing the URL beyond your own tailnet devices.
 #
+# Unlike the LAN sibling, this Ingress is handled by the tailscale operator
+# (ingressClassName: tailscale) — traefik's Middleware CRDs don't apply here
+# because requests reach the api/dashboard endpoint bypassing traefik's own
+# kubernetesIngress router. The bare `/` → `/dashboard/` 301 is still visible
+# here; a tailnet-side rewrite would be the follow-up if it matters.
+#
 # Applied by `task k8s:prod:platform:up` (kubectl apply -f) right after the
 # sibling dashboard-ingress.yaml.
 apiVersion: networking.k8s.io/v1
