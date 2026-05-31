@@ -1,0 +1,61 @@
+# Incremental corpus fill: every run embeds a few random not-yet-embedded videos
+# into the (stage) frame_embeddings table. Idempotent + self-converging — runs
+# never redo a treated video, so this gradually fills the corpus and sprinkles
+# variety into !find, then no-ops once coverage is complete.
+#
+# Applied with `-n stage-1`; NOT in any umbrella overlay (one-shot/background, by
+# the same convention as tripbot/jobs/*). Ships SUSPENDED — do the manual
+# fill-job ramp first (see README), then unsuspend:
+#   kubectl -n stage-1 patch cronjob dashcam-cv-fill -p '{"spec":{"suspend":false}}'
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dashcam-cv-fill
+spec:
+  schedule: "*/30 * * * *"        # tighten to quiet hours if needed, e.g. "*/30 4-7 * * *"
+  suspend: true                   # safety: enable only after the manual ramp
+  concurrencyPolicy: Forbid       # never overlap runs
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          priorityClassName: dashcam-cv-low
+          initContainers:
+            - name: wait-for-postgres
+              image: busybox:1.36
+              command: ["sh", "-c", "until nc -z postgres 5432; do echo waiting; sleep 2; done"]
+          containers:
+            - name: embed
+              image: adanalife/dashcam-cv:develop
+              imagePullPolicy: Always
+              args: ["embed", "--random", "3", "--interval", "5", "--apply"]
+              envFrom:
+                - configMapRef:
+                    name: tripbot-config          # DATABASE_HOST, etc.
+                - secretRef:
+                    name: tripbot-database-creds  # DATABASE_USER/PASS/DB (→ stage DB)
+              env:
+                - name: DASHCAM_CV_CORPUS_DIR
+                  value: /opt/data/Dashcam/_all
+              resources:
+                requests: { cpu: "1", memory: 5Gi }
+                limits:   { cpu: "4", memory: 6Gi }   # hard CPU cap so prod keeps its cores
+              volumeMounts:
+                - name: dashcam
+                  mountPath: /opt/data/Dashcam/_all
+                  readOnly: true
+                - name: models
+                  mountPath: /opt/models             # HF_HOME (baked in the image)
+          volumes:
+            - name: dashcam
+              persistentVolumeClaim:
+                claimName: vlc-dashcam               # stage NFS corpus, ro
+            - name: models
+              persistentVolumeClaim:
+                claimName: dashcam-cv-models

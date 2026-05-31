@@ -1,0 +1,49 @@
+# One-shot manual fill — the same pod as the CronJob, for the safe ramp: run it
+# by hand with a small N while watching mini-PC CPU/RAM, before unsuspending the
+# CronJob. Re-apply with `--force` to re-run (Jobs are immutable):
+#   kubectl -n stage-1 delete job dashcam-cv-fill-once --ignore-not-found
+#   kubectl -n stage-1 apply -f k8s/apps/dashcam-cv/fill-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dashcam-cv-fill-once
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      priorityClassName: dashcam-cv-low
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z postgres 5432; do echo waiting; sleep 2; done"]
+      containers:
+        - name: embed
+          image: adanalife/dashcam-cv:develop
+          imagePullPolicy: Always
+          args: ["embed", "--random", "1", "--interval", "5", "--apply"]   # start tiny
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+          env:
+            - name: DASHCAM_CV_CORPUS_DIR
+              value: /opt/data/Dashcam/_all
+          resources:
+            requests: { cpu: "1", memory: 5Gi }
+            limits:   { cpu: "4", memory: 6Gi }
+          volumeMounts:
+            - name: dashcam
+              mountPath: /opt/data/Dashcam/_all
+              readOnly: true
+            - name: models
+              mountPath: /opt/models
+      volumes:
+        - name: dashcam
+          persistentVolumeClaim:
+            claimName: vlc-dashcam
+        - name: models
+          persistentVolumeClaim:
+            claimName: dashcam-cv-models
