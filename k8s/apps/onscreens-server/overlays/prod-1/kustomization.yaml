@@ -1,0 +1,22 @@
+# onscreens-server prod-1 overlay. Extends base directly. The binary's config
+# validator accepts ENV ∈ {staging,production,development} — "prod-1" is the
+# infra/k8s env name, "production" is what the binary expects;
+# OTEL_RESOURCE_ATTRIBUTES preserves "prod-1" as the telemetry identifier.
+# Uses the base's :latest image (only moves on release-tag pushes), unlike
+# dev/stage which pin :develop.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: onscreens-server-config
+    behavior: merge
+    literals:
+      - ENV=production
+      - OTEL_SDK_DISABLED=false
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
+      - SENTRY_ENVIRONMENT=prod-1
+      # NATS pubsub endpoint — subscribes to tripbot.production.onscreens.middle.show.
+      - NATS_URL=nats://nats.prod-1-platform.svc.cluster.local:4222

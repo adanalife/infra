@@ -29,6 +29,7 @@ resources:
   - ../../apps/postgres/overlays/development
   - ../../apps/tripbot/overlays/development
   - ../../apps/vlc-server/overlays/development
+  - ../../apps/onscreens-server/overlays/development
   - ../../apps/obs/overlays/development
 # Traefik is installed via helm by `task k8s:dev:platform:up` — see
 # k8s/traefik/values.yml. Dashboard is reachable via port-forward

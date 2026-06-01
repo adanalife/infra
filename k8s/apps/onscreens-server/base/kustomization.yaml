@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+# Constant env shared by every env. ENV (required by the binary) and the
+# environment-specific telemetry tags / NATS endpoint are merged in per
+# overlay. The OTLP sampler defaults match the vlc-server/tripbot overlays.
+configMapGenerator:
+  - name: onscreens-server-config
+    literals:
+      - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: onscreens-server
+      app.kubernetes.io/part-of: tripbot

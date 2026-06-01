@@ -18,6 +18,7 @@ resources:
   - ../../apps/postgres/overlays/local
   - ../../apps/tripbot/overlays/development
   - ../../apps/vlc-server/overlays/development-nas
+  - ../../apps/onscreens-server/overlays/development-nas
   - ../../apps/obs/overlays/local
 # The cloudflared Deployment (tunnel client for *.whalecore.com) is
 # opt-in — bring it up with `task k8s:dev:tunnel:up`. It lives in

@@ -1,0 +1,24 @@
+# Development overlay: extends local and adds the dev NATS endpoint so the
+# middle-text subscriber is live. No Ingress — onscreens-server is
+# cluster-internal only (tripbot + OBS reach it by Service DNS).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../local
+
+# NATS pubsub endpoint — the onscreens-server binary subscribes to
+# tripbot.staging.onscreens.middle.show (ENV=staging in dev, see ../local).
+# development-platform is the k3d-side mirror of stage/prod's env-platform ns.
+configMapGenerator:
+  - name: onscreens-server-config
+    behavior: merge
+    literals:
+      - NATS_URL=nats://nats.development-platform.svc.cluster.local:4222
+
+# Development rolls forward continuously off tripbot's develop branch — every
+# push republishes adanalife/onscreens-server:develop (multi-arch manifest at
+# tripbot's .github/workflows/release-development.yml). Prod stays on :latest.
+images:
+  - name: adanalife/onscreens-server
+    newTag: develop

@@ -9,17 +9,9 @@ resources:
   - ../local
   - ingress.yaml
 
-# NATS pubsub endpoint — read by the onscreens-server binary (same pod
-# as vlc-server, supervisord-managed) to subscribe to
-# tripbot.staging.onscreens.* events (phase 1). development-platform is
-# the k3d-side mirror of stage/prod's env-platform namespace pattern.
-# Merged on top of local's vlc-server-config so the laptop / non-cluster
-# variants stay clean (no NATS_URL → graceful no-op).
-configMapGenerator:
-  - name: vlc-server-config
-    behavior: merge
-    literals:
-      - NATS_URL=nats://nats.development-platform.svc.cluster.local:4222
+# NATS_URL moved to apps/onscreens-server/overlays/development — the
+# onscreens-server binary (now its own Deployment) is the only NATS
+# consumer; vlc-server itself doesn't use it.
 
 # Development rolls forward continuously off the develop branch — every push
 # to tripbot's develop branch republishes adanalife/vlc:develop (multi-arch

@@ -1,0 +1,17 @@
+# Cluster-internal service. tripbot reaches the onscreens HTTP API at
+# http://onscreens-server:8080 (ONSCREENS_SERVER_HOST), and OBS browser
+# sources fetch their feeds from the same host (ONSCREENS_URL_BASE). This used
+# to be a second port on vlc-server (:8081, to avoid colliding with vlc's
+# :8080 in the shared pod); as its own Deployment it uses the standard :8080.
+apiVersion: v1
+kind: Service
+metadata:
+  name: onscreens-server
+spec:
+  type: ClusterIP
+  selector:
+    app: onscreens-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

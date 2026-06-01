@@ -8,6 +8,7 @@ resources:
   - ../../apps/postgres/overlays/local
   - ../../apps/tripbot/overlays/local
   - ../../apps/vlc-server/overlays/local
+  - ../../apps/onscreens-server/overlays/local
   - ../../apps/obs/overlays/local
 # Traefik dashboard is enabled via --api.insecure=true in the helm
 # release values (k8s/traefik/values.yml). Reach it with:
