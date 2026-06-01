@@ -32,11 +32,39 @@ configMapGenerator:
       # Override the local overlay's development tag — see that overlay for
       # why this exists.
       - SENTRY_ENVIRONMENT=prod-1
-      # NATS_URL moved to apps/onscreens-server/overlays/prod-1 — the
-      # onscreens-server binary (now its own Deployment) is the only NATS
-      # consumer; vlc-server itself doesn't use it.
+      # TEMPORARY (prod-only): NATS_URL stays here so the in-pod onscreens
+      # process (still serving prod's overlays on :8081 — see the port patch
+      # below) keeps receiving tripbot.production.onscreens.middle.show events.
+      # On dev/stage this moved to apps/onscreens-server/overlays; prod follows
+      # once it cuts over to the standalone onscreens-server. See #621.
+      - NATS_URL=nats://nats.prod-1-platform.svc.cluster.local:4222
 
 patches:
+  # TEMPORARY (prod-only): re-expose the in-pod onscreens process on :8081.
+  # Base dropped this port when onscreens-server split into its own Deployment,
+  # but prod still routes OBS + tripbot at vlc-server:8081 (see those overlays)
+  # until the OBS cutover. Re-add the container port + Service port so the
+  # second supervisord binary stays reachable. Remove when prod cuts over to
+  # the standalone onscreens-server. See #621.
+  - target:
+      kind: Deployment
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value:
+          name: onscreens
+          containerPort: 8081
+  - target:
+      kind: Service
+      name: vlc-server
+    patch: |-
+      - op: add
+        path: /spec/ports/-
+        value:
+          name: onscreens
+          port: 8081
+          targetPort: onscreens
   # Mount the dashcam NFS PVC at the corpus path.
   - target:
       kind: Deployment
