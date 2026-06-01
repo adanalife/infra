@@ -8,15 +8,6 @@ kind: StatefulSet
 metadata:
   name: postgres
 spec:
-  template:
-    spec:
-      containers:
-        # pgvector/pgvector:pg16 is a drop-in for postgres:16-alpine that adds
-        # the `vector` extension (dashcam-cv frame_embeddings; migration 015
-        # runs CREATE EXTENSION vector). Scoped to stage-1 only for now — prod
-        # stays on stock postgres:16-alpine until the CV path is proven on stage.
-        - name: postgres
-          image: pgvector/pgvector:pg16
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
