@@ -36,6 +36,12 @@ configMapGenerator:
       - OTEL_TRACES_SAMPLER_ARG=0.1
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod-1,service.namespace=tripbot
       - SENTRY_ENVIRONMENT=prod-1
+      # TEMPORARY (prod-only): tripbot reaches onscreens via the in-pod process
+      # on vlc-server:8081, not the new standalone onscreens-server:8080 (base
+      # default, already live on dev/stage). Prod stays on the old path until
+      # the OBS cutover happens in a maintenance window — see the obs prod-1
+      # overlay + #621. Remove when prod cuts over.
+      - ONSCREENS_SERVER_HOST=vlc-server:8081
       # NATS pubsub endpoint (phase 1 — fire-and-forget alongside HTTP).
       - NATS_URL=nats://nats.prod-1-platform.svc.cluster.local:4222
       # DISCORD_GUILD_ID intentionally unset until launch — pkg/discord.ShouldStart

@@ -33,6 +33,15 @@ configMapGenerator:
   - name: obs-config
     behavior: merge
     literals:
+      # TEMPORARY (prod-only): keep OBS browser sources pointed at the in-pod
+      # onscreens process on vlc-server:8081 rather than the new standalone
+      # onscreens-server (base default, already live on dev/stage). Cutting
+      # over to onscreens-server:8080 requires an OBS restart to reload
+      # Tripbot.json, which interrupts the live stream — so prod stays on the
+      # old path until a maintenance window. The onscreens-server Deployment
+      # still runs in prod, just unrouted. Remove this (and the vlc-server +
+      # tripbot prod overrides) when prod cuts over. See #621.
+      - ONSCREENS_URL_BASE=http://vlc-server:8081
       - OBS_QUALITY_PRESET=high
       # OBS exposes the VAAPI H.264 encoder as `ffmpeg_vaapi_tex`, not
       # `ffmpeg_vaapi` — verified empirically by reading the Available
