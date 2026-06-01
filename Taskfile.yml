@@ -1,5 +1,14 @@
 version: '3'
 
+env:
+  # Colorize `kubectl diff` output. kubectl shells out to an external differ
+  # (default plain `diff -u -N`, no color); point it at a color-forcing one.
+  # --color=always (not auto) is required: Task captures the command's stdout,
+  # so the differ never sees a TTY and auto-detection would disable color.
+  # Both Apple/FreeBSD diff (macOS) and GNU diff (Linux mini-PC) support these
+  # flags, so this is portable across hosts.
+  KUBECTL_EXTERNAL_DIFF: diff -u -N --color=always
+
 tasks:
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
