@@ -65,3 +65,24 @@ podTemplate:
 # Kept on so the per-env smoke-test step in the Taskfile can reach it.
 natsBox:
   enabled: true
+  # Harden the nats-box utility pod for the restricted Pod Security Standard.
+  # The chart's server pods already satisfy restricted; only the box shipped
+  # without a securityContext, so the apiserver warns today and would *reject*
+  # it once a namespace enforces restricted. Applied via the chart's merge
+  # override (same mechanism as podTemplate.merge above). Pod-level covers
+  # runAsNonRoot + seccomp; container-level covers the two per-container rules.
+  podTemplate:
+    merge:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+  container:
+    merge:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
