@@ -9,5 +9,5 @@ resources:
 labels:
   - includeSelectors: false
     pairs:
-      app.kubernetes.io/name: obs
+      app.kubernetes.io/name: obs-twitch
       app.kubernetes.io/part-of: tripbot

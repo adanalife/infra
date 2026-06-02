@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: obs
+  name: obs-twitch
 spec:
   replicas: 1
   strategy:
@@ -11,11 +11,11 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: obs
+      app: obs-twitch
   template:
     metadata:
       labels:
-        app: obs
+        app: obs-twitch
     spec:
       # Partial PodSecurity-restricted hardening: seccomp + no-privesc +
       # drop all caps. OBS listens only on high ports (5900/4455/6080) and

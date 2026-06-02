@@ -1,4 +1,4 @@
-# Browser noVNC Ingress for dev OBS at obs.dev.whereisdana.today. Same
+# Browser noVNC Ingress for dev OBS at obs-twitch.dev.whereisdana.today. Same
 # dev pattern as vlc-server's dev ingress: external-dns reconciles the
 # hostname into a Route53 record pointing at the dev cluster's target (from
 # external-dns --default-targets / values.local.yml — the dev box's LAN IP,
@@ -7,24 +7,24 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: obs
+  name: obs-twitch
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: obs.dev.whereisdana.today
+    external-dns.alpha.kubernetes.io/hostname: obs-twitch.dev.whereisdana.today
     # cert-manager.io/cluster-issuer: letsencrypt-staging-route53
 spec:
   ingressClassName: traefik
   # tls:
   #   - hosts:
-  #       - obs.dev.whereisdana.today
-  #     secretName: obs-tls
+  #       - obs-twitch.dev.whereisdana.today
+  #     secretName: obs-twitch-tls
   rules:
-    - host: obs.dev.whereisdana.today
+    - host: obs-twitch.dev.whereisdana.today
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: obs
+                name: obs-twitch
                 port:
                   name: novnc

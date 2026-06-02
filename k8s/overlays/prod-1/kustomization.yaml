@@ -33,4 +33,4 @@ resources:
   - ../../apps/postgres/overlays/prod-1
   - ../../apps/vlc-server/overlays/prod-1
   - ../../apps/tripbot/overlays/prod-1
-  - ../../apps/obs/overlays/prod-1
+  - ../../apps/obs-twitch/overlays/prod-1

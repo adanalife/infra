@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: obs
+  name: obs-twitch
 spec:
   type: ClusterIP
   selector:
-    app: obs
+    app: obs-twitch
   ports:
     - name: vnc
       port: 5900

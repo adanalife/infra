@@ -1,19 +1,19 @@
 # Tailnet-native exposure of the stage OBS noVNC UI via the Tailscale operator.
-# Additive — the traefik noVNC Ingress (obs.stage.whereisdana.today, on-LAN)
-# stays. Gives https://obs-stage.<tailnet>.ts.net, reachable from ANY network.
+# Additive — the traefik noVNC Ingress (obs-twitch.stage.whereisdana.today, on-LAN)
+# stays. Gives https://obs-twitch-stage.<tailnet>.ts.net, reachable from ANY network.
 # Backend is the noVNC web port (6080).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: obs-ts
+  name: obs-twitch-ts
   namespace: stage-1
 spec:
   ingressClassName: tailscale
   defaultBackend:
     service:
-      name: obs
+      name: obs-twitch
       port:
         number: 6080
   tls:
     - hosts:
-        - obs-stage
+        - obs-twitch-stage

@@ -26,7 +26,7 @@ task k8s:apply
 kubectl get pods                              # all four Running
 kubectl port-forward svc/tripbot 8080:80 &    # ad-hoc HTTP to tripbot
 curl http://localhost:8080/health/live
-# VNC (optional): kubectl port-forward svc/obs 5902:5902 → vnc://localhost:5902
+# VNC (optional): kubectl port-forward svc/obs-twitch 5902:5902 → vnc://localhost:5902
 #                 kubectl port-forward svc/vlc-server 5903:5903 → vnc://localhost:5903
 # RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
 

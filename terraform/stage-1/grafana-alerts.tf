@@ -480,7 +480,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "critical"
-      service  = "obs"
+      service  = "obs-twitch"
     }
 
     data {
@@ -539,7 +539,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "obs"
+      service  = "obs-twitch"
     }
 
     data {

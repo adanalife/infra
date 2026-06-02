@@ -11,9 +11,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: obs
+  name: obs-twitch
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: obs.prod.whereisdana.today
+    external-dns.alpha.kubernetes.io/hostname: obs-twitch.prod.whereisdana.today
     # Namespaced Issuer in this app namespace (k8s/cert-manager/app-issuer/
     # prod-1) — solves DNS-01 with the prod account, no cross-account.
     cert-manager.io/issuer: letsencrypt-route53
@@ -21,16 +21,16 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - obs.prod.whereisdana.today
-      secretName: obs-tls
+        - obs-twitch.prod.whereisdana.today
+      secretName: obs-twitch-tls
   rules:
-    - host: obs.prod.whereisdana.today
+    - host: obs-twitch.prod.whereisdana.today
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: obs
+                name: obs-twitch
                 port:
                   name: novnc

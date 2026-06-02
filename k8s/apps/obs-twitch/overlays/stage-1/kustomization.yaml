@@ -1,5 +1,5 @@
 # OBS stage-1 overlay. Mirrors prod-1's iGPU + VAAPI encode setup and its
-# internal-IP noVNC Ingress (obs.stage.whereisdana.today, LAN-only), but at
+# internal-IP noVNC Ingress (obs-twitch.stage.whereisdana.today, LAN-only), but at
 # LOW quality.
 #
 # Streaming is OFF by default: like prod, the `obs-stream-key` Secret is
@@ -31,12 +31,12 @@ configMapGenerator:
 patches:
   - target:
       kind: Deployment
-      name: obs
+      name: obs-twitch
     patch: |-
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: obs
+        name: obs-twitch
       spec:
         template:
           spec:

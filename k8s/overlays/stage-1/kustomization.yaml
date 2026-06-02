@@ -38,4 +38,4 @@ resources:
   - ../../apps/postgres/overlays/stage-1
   - ../../apps/tripbot/overlays/stage-1
   - ../../apps/vlc-server/overlays/stage-1
-  - ../../apps/obs/overlays/stage-1
+  - ../../apps/obs-twitch/overlays/stage-1

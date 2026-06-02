@@ -2,7 +2,7 @@
 #
 # OBS's VNC is now reachable in a browser: the image runs websockify +
 # noVNC on :6080, and ingress.yaml fronts the obs Service's novnc port
-# through traefik at obs.prod.whereisdana.today (LAN-only — see ingress.yaml).
+# through traefik at obs-twitch.prod.whereisdana.today (LAN-only — see ingress.yaml).
 # Raw VNC (5900) and the websocket (4455) stay cluster-internal; the
 # websocket is what vlc-server/onscreens-server poll for stream stats.
 #
@@ -51,12 +51,12 @@ configMapGenerator:
 patches:
   - target:
       kind: Deployment
-      name: obs
+      name: obs-twitch
     patch: |-
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: obs
+        name: obs-twitch
       spec:
         template:
           spec:
