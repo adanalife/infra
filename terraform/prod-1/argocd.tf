@@ -30,35 +30,15 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key" {
 }
 
 # CI read grant — `terraform plan` refreshes this container + its placeholder
-# version, so CITerraformRole needs GetSecretValue/DescribeSecret on it (same as
-# the secrets in secrets.tf's bulk ci_terraform_secrets_read). Kept here rather
-# than in that bulk list so the KEEP-IN-SYNC sibling stage-1/secrets.tf doesn't
-# gain a prod-only ARN — same reasoning as tailscale.tf. No lifecycle/manage or
-# PutSecretValue grant: the value is set out-of-band and SM-touching applies run
-# locally (not in CI), per the secrets-manager-for-tf-providers ADR.
+# version, so CITerraformRole needs GetSecretValue/DescribeSecret on it. This
+# secret's ARN is folded into secrets.tf's bulk `ci_terraform_secrets_read`
+# policy rather than getting a standalone policy + attachment: CITerraformRole is
+# at AWS's hard cap of 10 managed policies per role, and this is a read grant
+# with the same action set as that bulk policy. The prod-only ARN is the one
+# intended divergence from the KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has
+# no Argo CD). No lifecycle/manage or PutSecretValue grant: the value is set
+# out-of-band and SM-touching applies run locally (not in CI), per the
+# secrets-manager-for-tf-providers ADR.
 #
 # Runtime read access (the actual GetSecretValue at reconcile time) is ESO's, not
 # CI's — covered by the eso_reader `k8s/*` wildcard in eso.tf.
-data "aws_iam_policy_document" "ci_terraform_argocd_repo_ssh_key_read" {
-  statement {
-    actions = [
-      "secretsmanager:GetSecretValue",
-      "secretsmanager:DescribeSecret",
-      "secretsmanager:ListSecretVersionIds",
-    ]
-    resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/argocd/repo-ssh-key-*",
-    ]
-  }
-}
-
-resource "aws_iam_policy" "ci_terraform_argocd_repo_ssh_key_read" {
-  name        = "AllowCITerraformReadProd1ArgocdRepoSshKey"
-  description = "Read access for CITerraformRole to refresh the k8s/argocd/repo-ssh-key SM secret during plan in prod-1."
-  policy      = data.aws_iam_policy_document.ci_terraform_argocd_repo_ssh_key_read.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_argocd_repo_ssh_key_read" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_argocd_repo_ssh_key_read.arn
-}
