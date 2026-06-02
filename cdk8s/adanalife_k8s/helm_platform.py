@@ -51,11 +51,12 @@ REPOS = {
 }
 
 # --- Version pins (captured 2026-06-02 from the repos above, and CONFIRMED
-# against the live minipc via deployed resources' helm.sh/chart labels:
-# cert-manager v1.20.2, traefik 40.2.0, external-secrets 2.5.0, nats 2.14.0,
-# external-dns 1.21.1, prometheus-node-exporter 4.55.0 all match what's pinned
-# here. cilium / tailscale-operator / k8s-monitoring don't surface the umbrella
-# chart label, but their live subcharts/values are consistent with these.) ---
+# against the live minipc: cert-manager v1.20.2, traefik 40.2.0,
+# external-secrets 2.5.0, nats 2.14.0, external-dns 1.21.1,
+# prometheus-node-exporter 4.55.0 (via helm.sh/chart labels) and
+# k8s-monitoring 4.1.3 (via `helm list`) all match what's pinned here. cilium /
+# tailscale-operator don't surface the umbrella chart label, but their live
+# subcharts/values are consistent with these.) ---
 VERSIONS = {
     "external-secrets": "2.5.0",
     "traefik": "40.2.0",
@@ -148,12 +149,13 @@ class PlatformChart(Chart):
             "prometheus-node-exporter", "monitoring-host",
             value_files=("monitoring/node-exporter/values.yml",)))
 
-        # k8s-monitoring renders against the repo-latest pin (4.1.3) with prod's
-        # values, but dev's values.yml was authored for the older DEPLOYED chart
-        # and trips the chart's collector-validation under 4.1.3. Until the bees
-        # cluster's live version is captured (`helm list -A`) and pinned, dev
-        # monitoring is skipped here rather than guessed — it stays on the legacy
-        # `task k8s:dev:platform:up` helm install. prod is unaffected.
+        # k8s-monitoring 4.1.3 is confirmed live on the minipc (prod renders + the
+        # pin matches `helm list`). But dev's values.yml was authored for the
+        # bees cluster's OLDER deployed chart and trips the chart's
+        # collector-validation under 4.1.3. Until that cluster's live version is
+        # captured (it's on a separate box) and pinned, dev monitoring is skipped
+        # here rather than guessed — it stays on the legacy
+        # `task k8s:dev:platform:up` helm install. prod/stage are unaffected.
         if not skip_monitoring:
             components.append(HelmComponent(
                 "k8s-monitoring", "grafana", "k8s-monitoring", "k8s-monitoring", "monitoring",
