@@ -13,7 +13,13 @@ import os
 
 from cdk8s import App
 
-from adanalife_k8s.charts import AppsChart, DataChart, DashcamCVChart, JobsChart
+from adanalife_k8s.charts import (
+    AppsChart,
+    ArgoCDChart,
+    DataChart,
+    DashcamCVChart,
+    JobsChart,
+)
 from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
 
@@ -31,6 +37,11 @@ for name in targets:
     # dashcam-cv is stage-only today (the only env running the vector fill).
     if name == "stage-1":
         DashcamCVChart(app, "dashcam-cv", env=env)
+
+# Argo CD GitOps config (env-agnostic, offline) — committed deploy unit applied
+# after the Argo install. Skipped when narrowed to a single env via CDK8S_ENV.
+if not only:
+    ArgoCDChart(app, "argocd")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

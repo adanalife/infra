@@ -1,0 +1,31 @@
+# Argo CD — the GitOps controller that reconciles the committed cdk8s/dist app
+# manifests. Installed by the cdk8s platform layer (PlatformChart, minipc only).
+#
+# MONITOR-ONLY by design right now: this install does nothing to your workloads
+# on its own. Argo only watches the live cluster vs git and reports drift
+# (Synced / OutOfSync + a diff). Whether it ever *applies* anything is decided
+# per-Application — and gitops/applicationset.yaml uses MANUAL sync (no
+# automated prune/selfHeal), so no changes happen until you click Sync. Flipping
+# to continuous reconcile is a one-line change in the ApplicationSet, post-cutover.
+#
+# Near-default chart values — keep it minimal. The applicationset controller
+# (which we depend on) is enabled by default; do NOT disable it.
+
+# The tailnet hostname the UI is reachable at (tailscale Ingress below). Used for
+# correct link/redirect generation.
+global:
+  domain: argocd-prod.tail020deb.ts.net
+
+configs:
+  params:
+    # Belt-and-suspenders: refuse to auto-create namespaces. The env namespaces
+    # (prod-1 / stage-1) are owned by the cluster bootstrap, not Argo.
+    application.namespaces: prod-1,stage-1
+    # Run argocd-server without its own TLS/redirect — TLS is terminated at the
+    # tailnet edge by the Tailscale operator Ingress (k8s/argo-cd/tailscale-ingress.yaml),
+    # which forwards plain HTTP to argocd-server:80. Required to sit behind a proxy.
+    server.insecure: true
+
+# UI/API access is via the Tailscale Ingress (argocd-prod.<tailnet>.ts.net) — see
+# tailscale-ingress.yaml. `kubectl -n argocd port-forward svc/argocd-server` also
+# works as a fallback.

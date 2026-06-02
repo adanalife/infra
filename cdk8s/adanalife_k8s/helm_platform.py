@@ -49,6 +49,7 @@ REPOS = {
     "cilium": "https://helm.cilium.io",
     "nats": "https://nats-io.github.io/k8s/helm/charts/",
     "tailscale": "https://pkgs.tailscale.com/helmcharts",
+    "argo": "https://argoproj.github.io/argo-helm",
 }
 
 # --- Version pins (captured 2026-06-02 from the repos above, and CONFIRMED
@@ -68,6 +69,7 @@ VERSIONS = {
     "cilium": "1.19.4",
     "nats": "2.14.0",  # already pinned in the legacy task
     "tailscale-operator": "1.98.3",  # already pinned in the legacy task
+    "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
 }
 
 
@@ -159,6 +161,20 @@ class PlatformChart(Chart):
                     "tailscale-operator",
                     "tailscale",
                     value_files=("tailscale-operator/values.yml",),
+                )
+            )
+            # Argo CD — the GitOps controller that reconciles the committed
+            # cdk8s/dist app manifests. Installing it here makes nothing happen on
+            # its own: it only watches + reports drift; the ApplicationSets are
+            # manual-sync, so no workload changes until you sync. See gitops/README.md.
+            components.append(
+                HelmComponent(
+                    "argocd",
+                    "argo",
+                    "argo-cd",
+                    "argo-cd",
+                    "argocd",
+                    value_files=("argo-cd/values.yml",),
                 )
             )
 
