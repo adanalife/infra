@@ -289,6 +289,13 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.postgres_backup_s3.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
       aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
+      # prod-only — Argo CD repo deploy key (defined in argocd.tf, which exists
+      # only in prod-1). Folded into this bulk read grant rather than a standalone
+      # policy because CITerraformRole is at AWS's hard cap of 10 managed policies
+      # per role; this is a read grant with the same actions as the rest of the
+      # list, so it's a natural fit. This is the one intended divergence from the
+      # KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has no Argo CD).
+      aws_secretsmanager_secret.argocd_repo_ssh_key.arn,
     ]
   }
 }
