@@ -1,0 +1,5 @@
+language: python
+app: uv run python main.py
+output: dist
+imports:
+  - k8s

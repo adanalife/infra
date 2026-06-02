@@ -1,0 +1,9 @@
+.venv/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Generated typed k8s constructs (cdk8s import). Regenerate with `cdk8s import`
+# (pinned to k8s API version in cdk8s.yaml). Gitignored to keep the tree
+# reviewable; CI/setup runs the import.
+imports/

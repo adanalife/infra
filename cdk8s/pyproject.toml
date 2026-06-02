@@ -1,0 +1,24 @@
+[project]
+name = "adanalife-k8s"
+version = "0.1.0"
+description = "cdk8s (Python) authoring layer for the adanalife Kubernetes deployments"
+requires-python = ">=3.12"
+dependencies = [
+    "cdk8s>=2.69",
+    "cdk8s-plus-30>=2.0",
+    "constructs>=10.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "kubernetes>=31",
+    "rich>=13",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
