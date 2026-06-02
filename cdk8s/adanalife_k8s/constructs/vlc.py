@@ -63,8 +63,10 @@ class VlcServer(Construct):
                                         namespace=ns, labels=labels, data=data)
 
         # --- dashcam volume (nfs PVC | hostPath) ---
+        # The NFS PV/PVC are NOT emitted here — they're stateful, so they live in
+        # DataChart (emit_dashcam_volume), separate from this stateless Deployment
+        # so app churn can't disturb them. This just references the PVC by name.
         if env.dashcam_mode == "nfs":
-            self._nfs_pv_pvc(env, ns)
             volume = k8s.Volume(
                 name="dashcam",
                 persistent_volume_claim=k8s.PersistentVolumeClaimVolumeSource(
@@ -148,27 +150,6 @@ class VlcServer(Construct):
             self._tailscale_ingress(env, ns)
 
     # ---- helpers ----
-    def _nfs_pv_pvc(self, env: EnvConfig, ns):
-        # Static NFS PV (cluster-scoped, no namespace) bound 1:1 to the PVC via
-        # volumeName + storageClassName "". Stage shares prod's export read-only
-        # but needs its own PV name (PVs bind 1:1) — env.nfs_pv_name.
-        k8s.KubePersistentVolume(self, "dashcam-pv",
-            metadata=k8s.ObjectMeta(name=env.nfs_pv_name),
-            spec=k8s.PersistentVolumeSpec(
-                capacity={"storage": k8s.Quantity.from_string("1Ti")},
-                access_modes=["ReadOnlyMany"],
-                persistent_volume_reclaim_policy="Retain",
-                storage_class_name="",
-                nfs=k8s.NfsVolumeSource(server=env.nfs_server, path=env.nfs_path, read_only=True)))
-        k8s.KubePersistentVolumeClaim(self, "dashcam-pvc",
-            metadata=k8s.ObjectMeta(name="vlc-dashcam", namespace=ns),
-            spec=k8s.PersistentVolumeClaimSpec(
-                access_modes=["ReadOnlyMany"],
-                storage_class_name="",
-                volume_name=env.nfs_pv_name,
-                resources=k8s.ResourceRequirements(
-                    requests={"storage": k8s.Quantity.from_string("1Ti")})))
-
     def _ingress(self, env: EnvConfig, ns):
         host = f"vlc.{env.dns_base}"
         ann = {"external-dns.alpha.kubernetes.io/hostname": host}
@@ -193,3 +174,33 @@ class VlcServer(Construct):
                 default_backend=k8s.IngressBackend(service=k8s.IngressServiceBackend(
                     name=NAME, port=k8s.ServiceBackendPort(number=8080))),
                 tls=[k8s.IngressTls(hosts=[f"vlc-{short}"])]))
+
+
+def emit_dashcam_volume(scope: Construct, env: EnvConfig) -> None:
+    """The dashcam NFS PV + PVC — a *stateful* pair, emitted into DataChart (not
+    VlcServer) so the stateless vlc Deployment can churn without disturbing them.
+    No-op on hostPath envs (local/dev), where the dashcam volume is an inline
+    hostPath with no separate object. The PV is Retain — the corpus lives on the
+    external NFS server, so even deleting the PVC doesn't lose data."""
+    if env.dashcam_mode != "nfs":
+        return
+    ns = env.namespace or None
+    # Static NFS PV (cluster-scoped) bound 1:1 to the PVC via volumeName +
+    # storageClassName "". Stage shares prod's export read-only but needs its own
+    # PV name (PVs bind 1:1) — env.nfs_pv_name.
+    k8s.KubePersistentVolume(scope, "dashcam-pv",
+        metadata=k8s.ObjectMeta(name=env.nfs_pv_name),
+        spec=k8s.PersistentVolumeSpec(
+            capacity={"storage": k8s.Quantity.from_string("1Ti")},
+            access_modes=["ReadOnlyMany"],
+            persistent_volume_reclaim_policy="Retain",
+            storage_class_name="",
+            nfs=k8s.NfsVolumeSource(server=env.nfs_server, path=env.nfs_path, read_only=True)))
+    k8s.KubePersistentVolumeClaim(scope, "dashcam-pvc",
+        metadata=k8s.ObjectMeta(name="vlc-dashcam", namespace=ns),
+        spec=k8s.PersistentVolumeClaimSpec(
+            access_modes=["ReadOnlyMany"],
+            storage_class_name="",
+            volume_name=env.nfs_pv_name,
+            resources=k8s.ResourceRequirements(
+                requests={"storage": k8s.Quantity.from_string("1Ti")})))

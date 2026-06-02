@@ -55,8 +55,9 @@ it stays a `cdk8s.ApiObject` in `eso.py` — see the note in `cdk8s.yaml`.
 ## Layout
 
 - `adanalife_k8s/config.py` — `EnvConfig` + the per-env matrix (`ENVS`).
-- `adanalife_k8s/charts.py` — `AppsChart` (umbrella app set per env), `JobsChart`
-  (one-shot auth/seed Jobs), `DashcamCVChart` (stage-only vector fill).
+- `adanalife_k8s/charts.py` — `AppsChart` (stateless app set per env), `DataChart`
+  (stateful: postgres + dashcam PV/PVC, isolated so app churn can't disturb them),
+  `JobsChart` (one-shot auth/seed Jobs), `DashcamCVChart` (stage-only vector fill).
 - `adanalife_k8s/constructs/` — the app factories: `ObsInstance` (per-platform),
   `VlcServer`, `OnscreensServer`, `Tripbot` (+ `emit_jobs`), `Postgres`, `DashcamCV`.
 - `adanalife_k8s/{naming,configmap,appconfig,eso,supporting}.py` — shared helpers

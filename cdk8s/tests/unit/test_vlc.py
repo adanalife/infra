@@ -4,7 +4,7 @@ from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.config import load_env
-from adanalife_k8s.constructs.vlc import VlcServer
+from adanalife_k8s.constructs.vlc import VlcServer, emit_dashcam_volume
 
 
 def _synth(env_name):
@@ -14,22 +14,40 @@ def _synth(env_name):
     return K8sTesting.synth(chart)
 
 
+def _synth_volume(env_name):
+    app = K8sTesting.app()
+    chart = Chart(app, "t")
+    emit_dashcam_volume(chart, load_env(env_name))
+    return K8sTesting.synth(chart)
+
+
 def _by(objs, kind, name):
     return [o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name]
 
 
-def test_stage_nfs_pv_pvc_and_mount():
-    import os
-    os.environ.setdefault("NFS_SERVER", "10.0.0.5")
-    os.environ.setdefault("NFS_PATH", "/export/dashcam")
+def test_stage_dashcam_mount_references_pvc_by_name():
+    # The PV/PVC are NOT emitted by VlcServer anymore (they're in DataChart);
+    # the Deployment just references the PVC by name.
     objs = _synth("stage-1")
-    # Stage gets its OWN PV name (PVs bind 1:1) though it shares prod's export.
-    assert _by(objs, "PersistentVolume", "vlc-dashcam-nfs-stage")
-    pvc = _by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]
-    assert pvc["spec"]["volumeName"] == "vlc-dashcam-nfs-stage"
+    assert not _by(objs, "PersistentVolume", "vlc-dashcam-nfs-stage")
+    assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")
     dep = _by(objs, "Deployment", "vlc-server")[0]
     vol = dep["spec"]["template"]["spec"]["volumes"][0]
     assert vol["persistentVolumeClaim"]["claimName"] == "vlc-dashcam"
+
+
+def test_dashcam_volume_pv_pvc_emitted_separately():
+    import os
+    os.environ.setdefault("NFS_SERVER", "10.0.0.5")
+    os.environ.setdefault("NFS_PATH", "/export/dashcam")
+    objs = _synth_volume("stage-1")
+    # Stage gets its OWN PV name (PVs bind 1:1) though it shares prod's export.
+    pv = _by(objs, "PersistentVolume", "vlc-dashcam-nfs-stage")[0]
+    assert pv["spec"]["persistentVolumeReclaimPolicy"] == "Retain"  # data survives deletion
+    pvc = _by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]
+    assert pvc["spec"]["volumeName"] == "vlc-dashcam-nfs-stage"
+    # hostPath envs emit nothing (the volume is inline in the Deployment).
+    assert not _synth_volume("local")
 
 
 def test_local_uses_hostpath_and_host_access_service():

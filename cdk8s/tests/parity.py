@@ -107,6 +107,12 @@ def _key(obj: dict, *, rename: bool = False) -> tuple[str, str]:
 def compare(env: str) -> list[str]:
     """Return a list of human-readable drift messages (empty = parity)."""
     cdk_objs = _load(ROOT / "dist" / f"{env}-apps.k8s.yaml")
+    # The stateful resources (postgres + dashcam PV/PVC) are a separate deploy
+    # unit in cdk8s but lived in the same Kustomize umbrella — union them back in
+    # so the parity comparison sees the whole env.
+    data_file = ROOT / "dist" / f"{env}-data.k8s.yaml"
+    if data_file.exists():
+        cdk_objs += _load(data_file)
     # Local bundles the one-shot Jobs into its umbrella; elsewhere they're a
     # separate deploy unit. Union the jobs file in for local so they line up.
     jobs_file = ROOT / "dist" / f"{env}-jobs.k8s.yaml"
