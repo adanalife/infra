@@ -1,0 +1,75 @@
+name: cdk8s
+
+# Lints + tests the Python cdk8s authoring layer: synth must succeed and the
+# output must stay at render-parity with the legacy Kustomize overlays (the
+# migration safety net). No cluster needed — `cdk8s synth` is offline and the
+# parity oracle is `kubectl kustomize` (pure local rendering, no API server).
+on:
+  pull_request:
+    paths:
+      - 'cdk8s/**'
+      - 'k8s/**'          # a Kustomize change shifts the parity oracle
+      - '.github/workflows/cdk8s.yml'
+
+defaults:
+  run:
+    working-directory: cdk8s
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Toolchain via mise (cdk8s/.mise.toml pins python / node / cdk8s-cli /
+      # helm), per vault/decisions/golang-development-with-mise.md.
+      - uses: jdx/mise-action@v2
+        with:
+          working_directory: cdk8s
+
+      # uv handles project-local Python deps on top of mise's interpreter
+      # (vault/decisions/preferred-tools.md).
+      - uses: astral-sh/setup-uv@v5
+
+      # kubectl provides `kubectl kustomize` for capturing the parity oracle.
+      - uses: azure/setup-kubectl@v4
+
+      - name: Install Python deps
+        run: uv sync
+
+      - name: Generate typed k8s constructs (cdk8s import)
+        run: mise exec -- uv run cdk8s import
+
+      # secret.env + dashcam-nfs.local.yaml are gitignored; stub them from the
+      # .example templates so `kubectl kustomize` can render the parity oracle
+      # (mirrors k8s-lint.yml's stub step).
+      - name: Stub gitignored overlay files
+        run: |
+          for d in postgres tripbot; do
+            cp "../k8s/apps/$d/overlays/local/secret.env.example" \
+               "../k8s/apps/$d/overlays/local/secret.env" 2>/dev/null || true
+          done
+          for e in stage-1 prod-1; do
+            cp "../k8s/apps/vlc-server/overlays/$e/dashcam-nfs.local.yaml.example" \
+               "../k8s/apps/vlc-server/overlays/$e/dashcam-nfs.local.yaml"
+          done
+
+      - name: Capture the Kustomize parity oracle
+        run: |
+          mkdir -p reference
+          for e in local development stage-1 prod-1; do
+            kubectl kustomize "../k8s/overlays/$e" > "reference/$e.kustomize.yaml"
+          done
+
+      # Unit tests + the render-parity gate + the contract test. The parity test
+      # synthesizes with the reference's NFS placeholders so the dashcam PV lines
+      # up (see tests/parity.py for the intended-divergence normalization).
+      - name: Run tests
+        run: mise exec -- uv run pytest -q
+
+      # Belt-and-suspenders: a clean full synth (also proves CDK8S_ENV-less run).
+      - name: Synth all envs
+        env:
+          NFS_SERVER: '<NFS server address>'
+          NFS_PATH: '<export path>'
+        run: mise exec -- uv run cdk8s synth
