@@ -119,7 +119,11 @@ ENVS: dict[str, EnvConfig] = {
         postgres_storage_class="local-path",
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
-        platforms=("twitch", "youtube"),
+        # YouTube OBS is deferred until we're closer to testing the YouTube
+        # streaming path — keeps the manifests/diffs tidy meanwhile. The
+        # ObsInstance factory still supports it (tested directly); re-enable by
+        # restoring: platforms=("twitch", "youtube").
+        platforms=("twitch",),
     ),
     "development": EnvConfig(
         name="development",

@@ -1,10 +1,12 @@
 """ObsInstance factory tests: per-platform naming, streaming toggle, env knobs,
 and the contract anti-drift bridge."""
 
+from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import AppsChart
 from adanalife_k8s.config import load_env
+from adanalife_k8s.constructs.obs import ObsInstance
 from adanalife_k8s.contract import load_contract
 
 
@@ -14,29 +16,41 @@ def _synth(env_name):
     return K8sTesting.synth(chart)
 
 
+def _synth_obs(platform, env_name, **kwargs):
+    app = K8sTesting.app()
+    chart = Chart(app, "t")
+    ObsInstance(chart, platform, env=load_env(env_name), **kwargs)
+    return K8sTesting.synth(chart)
+
+
 def _by(objs, kind, name):
     return [o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name]
 
 
-def test_stage_emits_clean_twitch_and_youtube_instances():
-    objs = _synth("stage-1")
+def test_youtube_factory_emits_clean_instance():
+    # YouTube is deferred from the env matrix (no env emits it yet — see config.py),
+    # but the ObsInstance factory must still produce clean obs-youtube objects so
+    # re-enabling is a one-line config change. Test the factory directly.
+    objs = _synth_obs("youtube", "stage-1", extra_config={"STREAM_PLATFORM": "youtube"})
     # Clean first-class names — NOT the kustomize obs-twitch-youtube double-suffix.
-    assert _by(objs, "Deployment", "obs-twitch"), "obs-twitch deployment missing"
     assert _by(objs, "Deployment", "obs-youtube"), "obs-youtube deployment missing"
     assert not _by(objs, "Deployment", "obs-twitch-youtube"), "double-suffix regression"
     # Selectors are instance-scoped (the label-collision the kustomize patches fixed can't happen).
     yt = _by(objs, "Deployment", "obs-youtube")[0]
     assert yt["spec"]["selector"]["matchLabels"]["app"] == "obs-youtube"
     assert yt["spec"]["template"]["metadata"]["labels"]["app"] == "obs-youtube"
-
-
-def test_youtube_carries_stream_platform_and_is_idle():
-    objs = _synth("stage-1")
     cm = _by(objs, "ConfigMap", "obs-youtube-config")[0]
     assert cm["data"]["STREAM_PLATFORM"] == "youtube"
-    # idle: no ExternalSecret on stage (streaming off by default)
+    # idle: no stream-key ExternalSecret (streaming off)
     assert not _by(objs, "ExternalSecret", "obs-youtube-stream-key")
-    assert not _by(objs, "ExternalSecret", "obs-stream-key")
+
+
+def test_stage_emits_twitch_only_youtube_deferred():
+    objs = _synth("stage-1")
+    assert _by(objs, "Deployment", "obs-twitch"), "obs-twitch deployment missing"
+    assert not _by(objs, "Deployment", "obs-youtube"), (
+        "youtube is deferred from the env matrix — stage should emit twitch only"
+    )
 
 
 def test_prod_twitch_streams_via_eso_and_has_no_youtube():
