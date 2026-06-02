@@ -25,6 +25,7 @@ Helm charts — they stay kustomize-applied as today; see the notes in
 ExternalSecrets, cert-manager CRDs before Issuers) is enforced by applying the
 platform chart before apps, exactly as the legacy task ordering did.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -65,7 +66,7 @@ VERSIONS = {
     "k8s-monitoring": "4.1.3",
     "prometheus-node-exporter": "4.55.0",
     "cilium": "1.19.4",
-    "nats": "2.14.0",            # already pinned in the legacy task
+    "nats": "2.14.0",  # already pinned in the legacy task
     "tailscale-operator": "1.98.3",  # already pinned in the legacy task
 }
 
@@ -73,23 +74,30 @@ VERSIONS = {
 @dataclass(frozen=True)
 class HelmComponent:
     """One Helm release: chart coords + the legacy value files to feed it."""
-    release: str          # helm release name (matches the live release)
-    repo_key: str         # key into REPOS
-    chart: str            # bare chart name (repo is passed separately)
-    version_key: str      # key into VERSIONS
+
+    release: str  # helm release name (matches the live release)
+    repo_key: str  # key into REPOS
+    chart: str  # bare chart name (repo is passed separately)
+    version_key: str  # key into VERSIONS
     namespace: str
-    value_files: tuple[str, ...] = ()   # -f paths under K8S
+    value_files: tuple[str, ...] = ()  # -f paths under K8S
     values: dict = field(default_factory=dict)  # extra inline overrides (e.g. LAN IP)
 
     def emit(self, scope: Construct) -> Helm:
         flags = ["--namespace", self.namespace]
         for vf in self.value_files:
             flags += ["-f", f"{K8S}/{vf}"]
-        return Helm(scope, self.release,
-                    chart=self.chart, repo=REPOS[self.repo_key],
-                    version=VERSIONS[self.version_key],
-                    release_name=self.release, namespace=self.namespace,
-                    helm_flags=flags, values=self.values or {})
+        return Helm(
+            scope,
+            self.release,
+            chart=self.chart,
+            repo=REPOS[self.repo_key],
+            version=VERSIONS[self.version_key],
+            release_name=self.release,
+            namespace=self.namespace,
+            helm_flags=flags,
+            values=self.values or {},
+        )
 
 
 class PlatformChart(Chart):
@@ -104,8 +112,15 @@ class PlatformChart(Chart):
       * cert-manager app-issuers  (emitted per-env by AppsChart already)
     """
 
-    def __init__(self, scope: Construct, id: str, *, cluster: str, env: EnvConfig,
-                 skip_monitoring: bool = False):
+    def __init__(
+        self,
+        scope: Construct,
+        id: str,
+        *,
+        cluster: str,
+        env: EnvConfig,
+        skip_monitoring: bool = False,
+    ):
         super().__init__(scope, id)
         minipc = cluster == "minipc"
 
@@ -113,20 +128,39 @@ class PlatformChart(Chart):
         if minipc:
             # Cilium first — CNI + kube-proxy replacement; nothing schedules
             # until it's up (Talos installs neither).
-            components.append(HelmComponent(
-                "cilium", "cilium", "cilium", "cilium", "kube-system",
-                value_files=("cilium/values.yml",)))
+            components.append(
+                HelmComponent(
+                    "cilium",
+                    "cilium",
+                    "cilium",
+                    "cilium",
+                    "kube-system",
+                    value_files=("cilium/values.yml",),
+                )
+            )
 
-        components.append(HelmComponent(
-            "external-secrets", "external-secrets", "external-secrets",
-            "external-secrets", "external-secrets",
-            value_files=("external-secrets/values.yml",)))
+        components.append(
+            HelmComponent(
+                "external-secrets",
+                "external-secrets",
+                "external-secrets",
+                "external-secrets",
+                "external-secrets",
+                value_files=("external-secrets/values.yml",),
+            )
+        )
 
         if minipc:
-            components.append(HelmComponent(
-                "tailscale-operator", "tailscale", "tailscale-operator",
-                "tailscale-operator", "tailscale",
-                value_files=("tailscale-operator/values.yml",)))
+            components.append(
+                HelmComponent(
+                    "tailscale-operator",
+                    "tailscale",
+                    "tailscale-operator",
+                    "tailscale-operator",
+                    "tailscale",
+                    value_files=("tailscale-operator/values.yml",),
+                )
+            )
 
         # traefik on the mini-PC runs hostNetwork and stamps the LAN IP into
         # Ingress status (replaces values.local.yml's ingressEndpoint.ip).
@@ -134,20 +168,44 @@ class PlatformChart(Chart):
         traefik_values: dict = {}
         if minipc:
             traefik_files.append("traefik/values.prod-1.yml")
-            traefik_values = {"providers": {"kubernetesIngress": {
-                "ingressEndpoint": {"ip": env.lan_ip}}}}
-        components.append(HelmComponent(
-            "traefik", "traefik", "traefik", "traefik", "kube-system",
-            value_files=tuple(traefik_files), values=traefik_values))
+            traefik_values = {
+                "providers": {
+                    "kubernetesIngress": {"ingressEndpoint": {"ip": env.lan_ip}}
+                }
+            }
+        components.append(
+            HelmComponent(
+                "traefik",
+                "traefik",
+                "traefik",
+                "traefik",
+                "kube-system",
+                value_files=tuple(traefik_files),
+                values=traefik_values,
+            )
+        )
 
-        components.append(HelmComponent(
-            "cert-manager", "jetstack", "cert-manager", "cert-manager", "kube-system",
-            value_files=(f"cert-manager/{env.name}/config.yml",)))
+        components.append(
+            HelmComponent(
+                "cert-manager",
+                "jetstack",
+                "cert-manager",
+                "cert-manager",
+                "kube-system",
+                value_files=(f"cert-manager/{env.name}/config.yml",),
+            )
+        )
 
-        components.append(HelmComponent(
-            "node-exporter", "prometheus-community", "prometheus-node-exporter",
-            "prometheus-node-exporter", "monitoring-host",
-            value_files=("monitoring/node-exporter/values.yml",)))
+        components.append(
+            HelmComponent(
+                "node-exporter",
+                "prometheus-community",
+                "prometheus-node-exporter",
+                "prometheus-node-exporter",
+                "monitoring-host",
+                value_files=("monitoring/node-exporter/values.yml",),
+            )
+        )
 
         # k8s-monitoring 4.1.3 is confirmed live on the minipc (prod renders + the
         # pin matches `helm list`). But dev's values.yml was authored for the
@@ -157,9 +215,16 @@ class PlatformChart(Chart):
         # here rather than guessed — it stays on the legacy
         # `task k8s:dev:platform:up` helm install. prod/stage are unaffected.
         if not skip_monitoring:
-            components.append(HelmComponent(
-                "k8s-monitoring", "grafana", "k8s-monitoring", "k8s-monitoring", "monitoring",
-                value_files=(f"monitoring/{env.name}/values.yml",)))
+            components.append(
+                HelmComponent(
+                    "k8s-monitoring",
+                    "grafana",
+                    "k8s-monitoring",
+                    "k8s-monitoring",
+                    "monitoring",
+                    value_files=(f"monitoring/{env.name}/values.yml",),
+                )
+            )
 
         for comp in components:
             comp.emit(self)
@@ -182,7 +247,11 @@ class PlatformEnvChart(Chart):
         edns_release = "external-dns-stage" if env.name == "stage-1" else "external-dns"
 
         HelmComponent(
-            edns_release, "external-dns", "external-dns", "external-dns", edns_ns,
+            edns_release,
+            "external-dns",
+            "external-dns",
+            "external-dns",
+            edns_ns,
             value_files=(f"external-dns/{env.name}/config.yml",),
             # LAN IP as the default record target (replaces values.local.yml's
             # --default-targets), injected from config instead of a gitignored file.
@@ -190,6 +259,10 @@ class PlatformEnvChart(Chart):
         ).emit(self)
 
         HelmComponent(
-            "nats", "nats", "nats", "nats", platform_ns,
+            "nats",
+            "nats",
+            "nats",
+            "nats",
+            platform_ns,
             value_files=("nats/values.yml", f"nats/{env.name}/values.yml"),
         ).emit(self)

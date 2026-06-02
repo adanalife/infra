@@ -3,6 +3,7 @@ shared with tripbot (the anti-drift bridge). Constructs reference these instead
 of hard-coding strings, so a rename/port change is one edit on the tripbot side
 (regenerate + `task contract:sync`) and any mismatch is caught by tests.
 """
+
 from __future__ import annotations
 
 import json

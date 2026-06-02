@@ -1,6 +1,7 @@
 """DashcamCV construct tests: the four flat objects (PriorityClass, models PVC,
 fill CronJob, one-shot Job) and their load-bearing fields (schedule, suspend,
 priority value, PVC size, preemptible pod wiring)."""
+
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
@@ -55,7 +56,9 @@ def test_cronjob_schedule_suspend_and_policy():
 
 
 def test_cronjob_pod_is_preemptible_and_mounts():
-    pod = _by(_synth(), "CronJob", "dashcam-cv-fill")[0]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    pod = _by(_synth(), "CronJob", "dashcam-cv-fill")[0]["spec"]["jobTemplate"]["spec"][
+        "template"
+    ]["spec"]
     assert pod["restartPolicy"] == "Never"
     assert pod["priorityClassName"] == "dashcam-cv-low"
     # wait-for-postgres init container
@@ -64,7 +67,10 @@ def test_cronjob_pod_is_preemptible_and_mounts():
     assert embed["args"] == ["embed", "--random", "3", "--interval", "5", "--apply"]
     assert embed["image"] == "adanalife/dashcam-cv:develop"  # stage image_tag
     assert {m["name"] for m in embed["volumeMounts"]} == {"dashcam", "models"}
-    assert embed["env"][0] == {"name": "DASHCAM_CV_CORPUS_DIR", "value": "/opt/data/Dashcam/_all"}
+    assert embed["env"][0] == {
+        "name": "DASHCAM_CV_CORPUS_DIR",
+        "value": "/opt/data/Dashcam/_all",
+    }
     # envFrom: tripbot-config CM + tripbot-database-creds Secret
     cms = {e["configMapRef"]["name"] for e in embed["envFrom"] if "configMapRef" in e}
     secs = {e["secretRef"]["name"] for e in embed["envFrom"] if "secretRef" in e}
@@ -83,7 +89,9 @@ def test_oneshot_job_uses_random_one():
 
 
 def test_resources_cpu_cap_and_memory():
-    embed = _by(_synth(), "Job", "dashcam-cv-fill-once")[0]["spec"]["template"]["spec"]["containers"][0]
+    embed = _by(_synth(), "Job", "dashcam-cv-fill-once")[0]["spec"]["template"]["spec"][
+        "containers"
+    ][0]
     res = embed["resources"]
     assert res["requests"] == {"cpu": "1", "memory": "5Gi"}
     assert res["limits"] == {"cpu": "4", "memory": "6Gi"}

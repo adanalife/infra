@@ -25,6 +25,7 @@ Per-env shape:
   * prod-1 only (env.postgres_backup): a local-path-retain StorageClass, a
     daily backup CronJob, and the postgres-backup-s3 ExternalSecret.
 """
+
 from __future__ import annotations
 
 import cdk8s
@@ -35,7 +36,7 @@ from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.naming import meta_labels, selector
 
 NAME = "postgres"
-SECRET_NAME = "postgres-secret"          # materialized Secret the StatefulSet envFroms
+SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
 PORT = 5432
 
 # SM container shapes (terraform-owned). See base/external-secret.yaml.
@@ -97,24 +98,34 @@ class Postgres(Construct):
         # The Secret NAME stays stable (postgres-secret) in both cases — the
         # StatefulSet/CronJob envFrom references it by that name.
         if env.secret_source == "local":
-            k8s.KubeSecret(self, "secret",
+            k8s.KubeSecret(
+                self,
+                "secret",
                 metadata=k8s.ObjectMeta(name=SECRET_NAME, namespace=ns),
                 type="Opaque",
-                string_data=dict(_LOCAL_SECRET))
+                string_data=dict(_LOCAL_SECRET),
+            )
         else:
             # ESO maps the SM JSON {user,password,db} onto POSTGRES_* keys via
             # target.template — a shape the eso.external_secret helper doesn't
             # cover, so (like obs.py's stream-key) emit it as a raw ApiObject.
-            self._external_secret("credentials", "postgres-credentials", ns, labels,
+            self._external_secret(
+                "credentials",
+                "postgres-credentials",
+                ns,
+                labels,
                 target=SECRET_NAME,
-                data=[("user", _CREDS_SM, "user"),
-                      ("password", _CREDS_SM, "password"),
-                      ("db", _CREDS_SM, "db")],
+                data=[
+                    ("user", _CREDS_SM, "user"),
+                    ("password", _CREDS_SM, "password"),
+                    ("db", _CREDS_SM, "db"),
+                ],
                 template={
                     "POSTGRES_USER": "{{ .user }}",
                     "POSTGRES_PASSWORD": "{{ .password }}",
                     "POSTGRES_DB": "{{ .db }}",
-                })
+                },
+            )
 
         # --- container ---
         container = k8s.Container(
@@ -122,35 +133,54 @@ class Postgres(Construct):
             image="pgvector/pgvector:pg16",
             security_context=k8s.SecurityContext(allow_privilege_escalation=False),
             ports=[k8s.ContainerPort(name="postgres", container_port=PORT)],
-            env_from=[k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))],
+            env_from=[
+                k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))
+            ],
             # pg_isready answers protocol-level — catches "up but not serving".
             liveness_probe=k8s.Probe(
                 exec=k8s.ExecAction(command=["pg_isready", "-U", "$(POSTGRES_USER)"]),
-                initial_delay_seconds=10, period_seconds=30,
-                timeout_seconds=5, failure_threshold=3),
+                initial_delay_seconds=10,
+                period_seconds=30,
+                timeout_seconds=5,
+                failure_threshold=3,
+            ),
             readiness_probe=k8s.Probe(
-                tcp_socket=k8s.TcpSocketAction(port=k8s.IntOrString.from_string("postgres")),
-                initial_delay_seconds=5, period_seconds=5),
+                tcp_socket=k8s.TcpSocketAction(
+                    port=k8s.IntOrString.from_string("postgres")
+                ),
+                initial_delay_seconds=5,
+                period_seconds=5,
+            ),
             resources=k8s.ResourceRequirements(
-                requests={"cpu": k8s.Quantity.from_string("100m"),
-                          "memory": k8s.Quantity.from_string("256Mi")},
-                limits={"memory": k8s.Quantity.from_string("1Gi")}),
-            volume_mounts=[k8s.VolumeMount(
-                name="postgres-data", mount_path="/var/lib/postgresql/data",
-                sub_path="pgdata")],
+                requests={
+                    "cpu": k8s.Quantity.from_string("100m"),
+                    "memory": k8s.Quantity.from_string("256Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("1Gi")},
+            ),
+            volume_mounts=[
+                k8s.VolumeMount(
+                    name="postgres-data",
+                    mount_path="/var/lib/postgresql/data",
+                    sub_path="pgdata",
+                )
+            ],
         )
 
         # --- volumeClaimTemplate (the SSA-adoption-critical bit) ---
         vct_spec = k8s.PersistentVolumeClaimSpec(
             access_modes=["ReadWriteOnce"],
             resources=k8s.ResourceRequirements(
-                requests={"storage": k8s.Quantity.from_string(env.postgres_size)}),
+                requests={"storage": k8s.Quantity.from_string(env.postgres_size)}
+            ),
             # "" → omit entirely (cluster default), matching the dev/local render.
             storage_class_name=env.postgres_storage_class or None,
         )
 
         # --- StatefulSet ---
-        k8s.KubeStatefulSet(self, "statefulset",
+        k8s.KubeStatefulSet(
+            self,
+            "statefulset",
             metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
             spec=k8s.StatefulSetSpec(
                 service_name=NAME,
@@ -162,20 +192,36 @@ class Postgres(Construct):
                         # seccomp + no-privesc; caps.drop[ALL] + runAsNonRoot
                         # deferred (entrypoint chowns PGDATA as root on first boot).
                         security_context=k8s.PodSecurityContext(
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")),
-                        containers=[container])),
-                volume_claim_templates=[k8s.KubePersistentVolumeClaimProps(
-                    metadata=k8s.ObjectMeta(name="postgres-data"),
-                    spec=vct_spec)]))
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
+                        ),
+                        containers=[container],
+                    ),
+                ),
+                volume_claim_templates=[
+                    k8s.KubePersistentVolumeClaimProps(
+                        metadata=k8s.ObjectMeta(name="postgres-data"), spec=vct_spec
+                    )
+                ],
+            ),
+        )
 
         # --- headless Service (clusterIP: None) — the StatefulSet's serviceName ---
-        k8s.KubeService(self, "service",
+        k8s.KubeService(
+            self,
+            "service",
             metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
             spec=k8s.ServiceSpec(
-                cluster_ip="None", selector=sel,
-                ports=[k8s.ServicePort(
-                    name="postgres", port=PORT,
-                    target_port=k8s.IntOrString.from_string("postgres"))]))
+                cluster_ip="None",
+                selector=sel,
+                ports=[
+                    k8s.ServicePort(
+                        name="postgres",
+                        port=PORT,
+                        target_port=k8s.IntOrString.from_string("postgres"),
+                    )
+                ],
+            ),
+        )
 
         # --- prod-only: backup StorageClass + CronJob + S3 ExternalSecret ---
         if env.postgres_backup:
@@ -187,28 +233,38 @@ class Postgres(Construct):
     def _storage_class(self):
         # Retain reclaim policy: the safety lever so `kubectl delete pvc` (or a
         # re-deploy that recreates the PVC) leaves the underlying disk intact.
-        k8s.KubeStorageClass(self, "storageclass",
+        k8s.KubeStorageClass(
+            self,
+            "storageclass",
             metadata=k8s.ObjectMeta(name="local-path-retain"),
             provisioner="rancher.io/local-path",
             reclaim_policy="Retain",
             volume_binding_mode="WaitForFirstConsumer",
-            allow_volume_expansion=False)
+            allow_volume_expansion=False,
+        )
 
     def _backup_external_secret(self, ns):
         # No metadata labels — this overlay-only resource isn't covered by the
         # base kustomization's `labels:` directive (matches the render).
-        self._external_secret("backup-credentials", "postgres-backup-s3-credentials",
-            ns, None, target="postgres-backup-s3",
-            data=[("AWS_ACCESS_KEY_ID", _BACKUP_SM, "AWS_ACCESS_KEY_ID"),
-                  ("AWS_SECRET_ACCESS_KEY", _BACKUP_SM, "AWS_SECRET_ACCESS_KEY"),
-                  ("AWS_DEFAULT_REGION", _BACKUP_SM, "AWS_DEFAULT_REGION"),
-                  ("S3_BUCKET", _BACKUP_SM, "S3_BUCKET")],
+        self._external_secret(
+            "backup-credentials",
+            "postgres-backup-s3-credentials",
+            ns,
+            None,
+            target="postgres-backup-s3",
+            data=[
+                ("AWS_ACCESS_KEY_ID", _BACKUP_SM, "AWS_ACCESS_KEY_ID"),
+                ("AWS_SECRET_ACCESS_KEY", _BACKUP_SM, "AWS_SECRET_ACCESS_KEY"),
+                ("AWS_DEFAULT_REGION", _BACKUP_SM, "AWS_DEFAULT_REGION"),
+                ("S3_BUCKET", _BACKUP_SM, "S3_BUCKET"),
+            ],
             template={
                 "AWS_ACCESS_KEY_ID": "{{ .AWS_ACCESS_KEY_ID }}",
                 "AWS_SECRET_ACCESS_KEY": "{{ .AWS_SECRET_ACCESS_KEY }}",
                 "AWS_DEFAULT_REGION": "{{ .AWS_DEFAULT_REGION }}",
                 "S3_BUCKET": "{{ .S3_BUCKET }}",
-            })
+            },
+        )
 
     def _external_secret(self, id, name, ns, labels, *, target, data, template):
         # ExternalSecret with a target.template that remaps SM JSON properties
@@ -219,33 +275,57 @@ class Postgres(Construct):
             meta["namespace"] = ns
         if labels:
             meta["labels"] = labels
-        es = cdk8s.ApiObject(self, id,
-            api_version="external-secrets.io/v1", kind="ExternalSecret",
-            metadata=meta)
-        es.add_json_patch(cdk8s.JsonPatch.add("/spec", {
-            "refreshInterval": "1h",
-            "secretStoreRef": {"name": "aws-secretsmanager", "kind": "SecretStore"},
-            "target": {"name": target, "template": {"type": "Opaque", "data": template}},
-            "data": [{"secretKey": sk, "remoteRef": {"key": k, "property": p}}
-                     for sk, k, p in data],
-        }))
+        es = cdk8s.ApiObject(
+            self,
+            id,
+            api_version="external-secrets.io/v1",
+            kind="ExternalSecret",
+            metadata=meta,
+        )
+        es.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "refreshInterval": "1h",
+                    "secretStoreRef": {
+                        "name": "aws-secretsmanager",
+                        "kind": "SecretStore",
+                    },
+                    "target": {
+                        "name": target,
+                        "template": {"type": "Opaque", "data": template},
+                    },
+                    "data": [
+                        {"secretKey": sk, "remoteRef": {"key": k, "property": p}}
+                        for sk, k, p in data
+                    ],
+                },
+            )
+        )
 
     def _backup_cronjob(self, ns):
         backup = k8s.Container(
             name="backup",
-            image="postgres:16-alpine",   # PG16 pg_dump, matches the server image
+            image="postgres:16-alpine",  # PG16 pg_dump, matches the server image
             command=["/bin/sh", "-c"],
             args=[_BACKUP_SCRIPT],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME)),
-                k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="postgres-backup-s3")),
+                k8s.EnvFromSource(
+                    secret_ref=k8s.SecretEnvSource(name="postgres-backup-s3")
+                ),
             ],
             resources=k8s.ResourceRequirements(
-                requests={"cpu": k8s.Quantity.from_string("100m"),
-                          "memory": k8s.Quantity.from_string("128Mi")},
-                limits={"memory": k8s.Quantity.from_string("512Mi")}),
+                requests={
+                    "cpu": k8s.Quantity.from_string("100m"),
+                    "memory": k8s.Quantity.from_string("128Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("512Mi")},
+            ),
         )
-        k8s.KubeCronJob(self, "backup",
+        k8s.KubeCronJob(
+            self,
+            "backup",
             metadata=k8s.ObjectMeta(name="postgres-backup", namespace=ns),
             spec=k8s.CronJobSpec(
                 schedule="0 * * * *",
@@ -260,5 +340,10 @@ class Postgres(Construct):
                         ttl_seconds_after_finished=604800,
                         template=k8s.PodTemplateSpec(
                             spec=k8s.PodSpec(
-                                restart_policy="Never",
-                                containers=[backup]))))))
+                                restart_policy="Never", containers=[backup]
+                            )
+                        ),
+                    )
+                ),
+            ),
+        )

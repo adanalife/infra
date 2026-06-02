@@ -1,5 +1,6 @@
 """ObsInstance factory tests: per-platform naming, streaming toggle, env knobs,
 and the contract anti-drift bridge."""
+
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import AppsChart
@@ -43,7 +44,10 @@ def test_prod_twitch_streams_via_eso_and_has_no_youtube():
     es = _by(objs, "ExternalSecret", "obs-stream-key")
     assert es, "prod twitch should create the stream-key ExternalSecret"
     assert es[0]["spec"]["data"][0]["remoteRef"]["key"] == "k8s/obs/twitch-stream-key"
-    assert _by(objs, "ConfigMap", "obs-twitch-config")[0]["data"]["OBS_QUALITY_PRESET"] == "high"
+    assert (
+        _by(objs, "ConfigMap", "obs-twitch-config")[0]["data"]["OBS_QUALITY_PRESET"]
+        == "high"
+    )
     assert not _by(objs, "Deployment", "obs-youtube"), "youtube is stage-only for now"
 
 
@@ -54,7 +58,12 @@ def test_gpu_and_encoder_track_env():
     local = _by(_synth("local"), "Deployment", "obs-twitch")[0]
     lreqs = local["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]
     assert "gpu.intel.com/i915" not in lreqs
-    assert _by(_synth("local"), "ConfigMap", "obs-twitch-config")[0]["data"]["OBS_STREAM_ENCODER"] == "obs_x264"
+    assert (
+        _by(_synth("local"), "ConfigMap", "obs-twitch-config")[0]["data"][
+            "OBS_STREAM_ENCODER"
+        ]
+        == "obs_x264"
+    )
 
 
 def test_contract_drives_names_ports_and_urls():
@@ -75,6 +84,9 @@ def test_contract_drives_names_ports_and_urls():
 def test_local_obs_has_no_ingress():
     # OBS is VNC-port-forward-only on local; other apps (tripbot) may carry one.
     objs = _synth("local")
-    obs_ingresses = [o for o in objs if o["kind"] == "Ingress"
-                     and o["metadata"]["name"].startswith("obs-")]
+    obs_ingresses = [
+        o
+        for o in objs
+        if o["kind"] == "Ingress" and o["metadata"]["name"].startswith("obs-")
+    ]
     assert not obs_ingresses

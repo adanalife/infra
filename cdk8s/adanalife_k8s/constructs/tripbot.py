@@ -28,6 +28,7 @@ config change via the `adanalife.dev/config-hash` annotation (configmap.py).
 The Jobs are NOT auto-emitted by the construct — they're module-level functions
 the deploy tasks call on demand, so a routine `apply` never runs a one-shot.
 """
+
 from __future__ import annotations
 
 import cdk8s
@@ -41,8 +42,8 @@ from adanalife_k8s.naming import meta_labels, selector
 
 NAME = "tripbot"
 IMAGE = "adanalife/tripbot"
-DB_SECRET_NAME = "tripbot-database-creds"   # ESO-materialized DB creds (eso envs)
-LOCAL_DB_SECRET = "tripbot-secret"          # secret.env-built DB creds (laptop)
+DB_SECRET_NAME = "tripbot-database-creds"  # ESO-materialized DB creds (eso envs)
+LOCAL_DB_SECRET = "tripbot-secret"  # secret.env-built DB creds (laptop)
 
 # Stable, non-hashed ConfigMap name — the bootstrap/seed Jobs envFrom it by name.
 CONFIG_NAME = "tripbot-config"
@@ -131,14 +132,19 @@ class Tripbot(Construct):
 
         # --- ConfigMap (stable name + content-hash annotation) ---
         data = config_data(env)
-        cfg_hash = configmap.config_map(self, "config", name=CONFIG_NAME,
-                                        namespace=ns, labels=labels, data=data)
+        cfg_hash = configmap.config_map(
+            self, "config", name=CONFIG_NAME, namespace=ns, labels=labels, data=data
+        )
 
         # --- DB creds: ESO ExternalSecret (eso envs) | on-disk Secret (laptop) ---
         if local:
-            k8s.KubeSecret(self, "secret",
+            k8s.KubeSecret(
+                self,
+                "secret",
                 metadata=k8s.ObjectMeta(name=LOCAL_DB_SECRET, namespace=ns),
-                type="Opaque", string_data=dict(_LOCAL_SECRET))
+                type="Opaque",
+                string_data=dict(_LOCAL_SECRET),
+            )
         else:
             self._db_external_secret(ns, labels)
 
@@ -152,19 +158,32 @@ class Tripbot(Construct):
         env_from = [
             k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)),
             k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
-            k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="grafana-cloud-otlp")),
+            k8s.EnvFromSource(
+                secret_ref=k8s.SecretEnvSource(name="grafana-cloud-otlp")
+            ),
             k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="sentry-tripbot")),
-            k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="tripbot-twitch-creds")),
-            k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="tripbot-google-maps-api-key")),
-            k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(
-                name="tripbot-discord-alerts-webhook", optional=True)),
-            k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(
-                name="tripbot-discord-bot-token", optional=True)),
+            k8s.EnvFromSource(
+                secret_ref=k8s.SecretEnvSource(name="tripbot-twitch-creds")
+            ),
+            k8s.EnvFromSource(
+                secret_ref=k8s.SecretEnvSource(name="tripbot-google-maps-api-key")
+            ),
+            k8s.EnvFromSource(
+                secret_ref=k8s.SecretEnvSource(
+                    name="tripbot-discord-alerts-webhook", optional=True
+                )
+            ),
+            k8s.EnvFromSource(
+                secret_ref=k8s.SecretEnvSource(
+                    name="tripbot-discord-bot-token", optional=True
+                )
+            ),
         ]
 
         hardened = k8s.SecurityContext(
             allow_privilege_escalation=False,
-            capabilities=k8s.Capabilities(drop=["ALL"]))
+            capabilities=k8s.Capabilities(drop=["ALL"]),
+        )
 
         # migrate initContainer: `migrate up` to head before tripbot starts.
         # Idempotent (a no-op when already at head); on a fresh cluster it
@@ -175,11 +194,17 @@ class Tripbot(Construct):
             image_pull_policy="Always",
             security_context=hardened,
             command=["migrate"],
-            args=["-path", "/migrations", "-database",
-                  "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable",
-                  "up"],
+            args=[
+                "-path",
+                "/migrations",
+                "-database",
+                "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable",
+                "up",
+            ],
             env_from=[
-                k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)),
+                k8s.EnvFromSource(
+                    config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)
+                ),
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
             ],
         )
@@ -195,38 +220,71 @@ class Tripbot(Construct):
             env=[k8s.EnvVar(name="USER", value="tripbot")],
             env_from=env_from,
             liveness_probe=k8s.Probe(
-                http_get=k8s.HttpGetAction(path="/health/live", port=k8s.IntOrString.from_string("http")),
-                initial_delay_seconds=15, period_seconds=30, timeout_seconds=5),
+                http_get=k8s.HttpGetAction(
+                    path="/health/live", port=k8s.IntOrString.from_string("http")
+                ),
+                initial_delay_seconds=15,
+                period_seconds=30,
+                timeout_seconds=5,
+            ),
             readiness_probe=k8s.Probe(
-                http_get=k8s.HttpGetAction(path="/health/ready", port=k8s.IntOrString.from_string("http")),
-                initial_delay_seconds=5, period_seconds=10),
+                http_get=k8s.HttpGetAction(
+                    path="/health/ready", port=k8s.IntOrString.from_string("http")
+                ),
+                initial_delay_seconds=5,
+                period_seconds=10,
+            ),
             resources=k8s.ResourceRequirements(
-                requests={"cpu": k8s.Quantity.from_string("100m"),
-                          "memory": k8s.Quantity.from_string("256Mi")},
-                limits={"memory": k8s.Quantity.from_string("1Gi")}),
+                requests={
+                    "cpu": k8s.Quantity.from_string("100m"),
+                    "memory": k8s.Quantity.from_string("256Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("1Gi")},
+            ),
         )
 
-        k8s.KubeDeployment(self, "deployment",
+        k8s.KubeDeployment(
+            self,
+            "deployment",
             metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
             spec=k8s.DeploymentSpec(
                 replicas=1,
                 selector=k8s.LabelSelector(match_labels=sel),
                 template=k8s.PodTemplateSpec(
-                    metadata=k8s.ObjectMeta(labels=sel, annotations=configmap.pod_annotations(cfg_hash)),
+                    metadata=k8s.ObjectMeta(
+                        labels=sel, annotations=configmap.pod_annotations(cfg_hash)
+                    ),
                     spec=k8s.PodSpec(
                         security_context=k8s.PodSecurityContext(
-                            run_as_non_root=True, run_as_user=65532, run_as_group=65532,
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")),
+                            run_as_non_root=True,
+                            run_as_user=65532,
+                            run_as_group=65532,
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
+                        ),
                         init_containers=[migrate],
-                        containers=[container]))))
+                        containers=[container],
+                    ),
+                ),
+            ),
+        )
 
         # --- Service ---
-        k8s.KubeService(self, "service",
+        k8s.KubeService(
+            self,
+            "service",
             metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
             spec=k8s.ServiceSpec(
-                type="ClusterIP", selector=sel,
-                ports=[k8s.ServicePort(name="http", port=8080,
-                                       target_port=k8s.IntOrString.from_string("http"))]))
+                type="ClusterIP",
+                selector=sel,
+                ports=[
+                    k8s.ServicePort(
+                        name="http",
+                        port=8080,
+                        target_port=k8s.IntOrString.from_string("http"),
+                    )
+                ],
+            ),
+        )
 
         # --- Ingress (dashboard / OAuth) — published in every env ---
         self._ingress(env, ns, labels)
@@ -244,71 +302,169 @@ class Tripbot(Construct):
             meta["namespace"] = ns
         if labels:
             meta["labels"] = labels
-        es = cdk8s.ApiObject(self, "database-external-secret",
-            api_version="external-secrets.io/v1", kind="ExternalSecret", metadata=meta)
-        es.add_json_patch(cdk8s.JsonPatch.add("/spec", {
-            "refreshInterval": "1h",
-            "secretStoreRef": {"name": "aws-secretsmanager", "kind": "SecretStore"},
-            "target": {"name": DB_SECRET_NAME, "template": {"type": "Opaque", "data": {
-                "DATABASE_USER": "{{ .user }}",
-                "DATABASE_PASS": "{{ .password }}",
-                "DATABASE_DB": "{{ .db }}",
-            }}},
-            "data": [
-                {"secretKey": "user", "remoteRef": {"key": "k8s/postgres/credentials", "property": "user"}},
-                {"secretKey": "password", "remoteRef": {"key": "k8s/postgres/credentials", "property": "password"}},
-                {"secretKey": "db", "remoteRef": {"key": "k8s/postgres/credentials", "property": "db"}},
-            ],
-        }))
+        es = cdk8s.ApiObject(
+            self,
+            "database-external-secret",
+            api_version="external-secrets.io/v1",
+            kind="ExternalSecret",
+            metadata=meta,
+        )
+        es.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "refreshInterval": "1h",
+                    "secretStoreRef": {
+                        "name": "aws-secretsmanager",
+                        "kind": "SecretStore",
+                    },
+                    "target": {
+                        "name": DB_SECRET_NAME,
+                        "template": {
+                            "type": "Opaque",
+                            "data": {
+                                "DATABASE_USER": "{{ .user }}",
+                                "DATABASE_PASS": "{{ .password }}",
+                                "DATABASE_DB": "{{ .db }}",
+                            },
+                        },
+                    },
+                    "data": [
+                        {
+                            "secretKey": "user",
+                            "remoteRef": {
+                                "key": "k8s/postgres/credentials",
+                                "property": "user",
+                            },
+                        },
+                        {
+                            "secretKey": "password",
+                            "remoteRef": {
+                                "key": "k8s/postgres/credentials",
+                                "property": "password",
+                            },
+                        },
+                        {
+                            "secretKey": "db",
+                            "remoteRef": {
+                                "key": "k8s/postgres/credentials",
+                                "property": "db",
+                            },
+                        },
+                    ],
+                },
+            )
+        )
 
     def _external_secrets(self, ns, labels):
         # twitch + google-maps: extract every top-level key of the SM JSON blob.
         for id_, name, sm in [
-            ("twitch-external-secret", "tripbot-twitch-creds", "k8s/tripbot/twitch-creds"),
-            ("google-maps-external-secret", "tripbot-google-maps-api-key", "k8s/tripbot/google-maps-api-key"),
+            (
+                "twitch-external-secret",
+                "tripbot-twitch-creds",
+                "k8s/tripbot/twitch-creds",
+            ),
+            (
+                "google-maps-external-secret",
+                "tripbot-google-maps-api-key",
+                "k8s/tripbot/google-maps-api-key",
+            ),
         ]:
-            eso.external_secret(self, id_, name=name, namespace=ns, labels=labels,
-                                creation_policy="Owner", extract=sm)
+            eso.external_secret(
+                self,
+                id_,
+                name=name,
+                namespace=ns,
+                labels=labels,
+                creation_policy="Owner",
+                extract=sm,
+            )
         # discord alerts + bot-token: one SM container → one materialized key.
         for id_, name, sm, key in [
-            ("discord-alerts-external-secret", "tripbot-discord-alerts-webhook",
-             "k8s/tripbot/discord-alerts-webhook", "DISCORD_ALERTS_WEBHOOK"),
-            ("discord-bot-token-external-secret", "tripbot-discord-bot-token",
-             "k8s/tripbot/discord-bot-token", "DISCORD_BOT_TOKEN"),
+            (
+                "discord-alerts-external-secret",
+                "tripbot-discord-alerts-webhook",
+                "k8s/tripbot/discord-alerts-webhook",
+                "DISCORD_ALERTS_WEBHOOK",
+            ),
+            (
+                "discord-bot-token-external-secret",
+                "tripbot-discord-bot-token",
+                "k8s/tripbot/discord-bot-token",
+                "DISCORD_BOT_TOKEN",
+            ),
         ]:
-            eso.external_secret(self, id_, name=name, namespace=ns, labels=labels,
-                                creation_policy="Owner", data=[ESData(key, sm)])
+            eso.external_secret(
+                self,
+                id_,
+                name=name,
+                namespace=ns,
+                labels=labels,
+                creation_policy="Owner",
+                data=[ESData(key, sm)],
+            )
 
     # ---- Ingress helpers ----
     def _ingress(self, env: EnvConfig, ns, labels):
         # local uses the .localhost TLD (no DNS/TLS); every other env publishes a
         # real host with external-dns + cert-manager TLS (DNS-01 Route53).
         host = "tripbot.localhost" if not env.dns_base else f"tripbot.{env.dns_base}"
-        ann = {} if not env.dns_base else {
-            "external-dns.alpha.kubernetes.io/hostname": host,
-            "cert-manager.io/issuer": "letsencrypt-route53",
-        }
-        tls = bool(env.dns_base)   # every DNS-publishing env issues a cert
-        backend = k8s.IngressBackend(service=k8s.IngressServiceBackend(
-            name=NAME, port=k8s.ServiceBackendPort(name="http")))
-        k8s.KubeIngress(self, "ingress",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels,
-                                    annotations=ann or None),
+        ann = (
+            {}
+            if not env.dns_base
+            else {
+                "external-dns.alpha.kubernetes.io/hostname": host,
+                "cert-manager.io/issuer": "letsencrypt-route53",
+            }
+        )
+        tls = bool(env.dns_base)  # every DNS-publishing env issues a cert
+        backend = k8s.IngressBackend(
+            service=k8s.IngressServiceBackend(
+                name=NAME, port=k8s.ServiceBackendPort(name="http")
+            )
+        )
+        k8s.KubeIngress(
+            self,
+            "ingress",
+            metadata=k8s.ObjectMeta(
+                name=NAME, namespace=ns, labels=labels, annotations=ann or None
+            ),
             spec=k8s.IngressSpec(
                 ingress_class_name="traefik",
-                tls=[k8s.IngressTls(hosts=[host], secret_name="tripbot-tls")] if tls else None,
-                rules=[k8s.IngressRule(host=host, http=k8s.HttpIngressRuleValue(
-                    paths=[k8s.HttpIngressPath(path="/", path_type="Prefix", backend=backend)]))]))
+                tls=[k8s.IngressTls(hosts=[host], secret_name="tripbot-tls")]
+                if tls
+                else None,
+                rules=[
+                    k8s.IngressRule(
+                        host=host,
+                        http=k8s.HttpIngressRuleValue(
+                            paths=[
+                                k8s.HttpIngressPath(
+                                    path="/", path_type="Prefix", backend=backend
+                                )
+                            ]
+                        ),
+                    )
+                ],
+            ),
+        )
 
     def _tailscale_ingress(self, env: EnvConfig, ns, labels):
-        short = env.dns_base.split(".")[0]   # prod / stage
-        k8s.KubeIngress(self, "ts-ingress",
+        short = env.dns_base.split(".")[0]  # prod / stage
+        k8s.KubeIngress(
+            self,
+            "ts-ingress",
             metadata=k8s.ObjectMeta(name=f"{NAME}-ts", namespace=ns),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
-                default_backend=k8s.IngressBackend(service=k8s.IngressServiceBackend(
-                    name=NAME, port=k8s.ServiceBackendPort(number=8080))),
-                tls=[k8s.IngressTls(hosts=[f"{NAME}-{short}"])]))
+                default_backend=k8s.IngressBackend(
+                    service=k8s.IngressServiceBackend(
+                        name=NAME, port=k8s.ServiceBackendPort(number=8080)
+                    )
+                ),
+                tls=[k8s.IngressTls(hosts=[f"{NAME}-{short}"])],
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +477,7 @@ class Tripbot(Construct):
 # is a single combined Job; on eso envs the DB Secret is `tripbot-database-creds`
 # and the bootstrap splits into bot + broadcaster legs.
 # ---------------------------------------------------------------------------
+
 
 def emit_jobs(scope: Construct, env: EnvConfig) -> None:
     """Emit the env's one-shot Jobs. local gets the combined auth-bootstrap +
@@ -335,21 +492,37 @@ def emit_jobs(scope: Construct, env: EnvConfig) -> None:
         seed(scope, env)
 
 
-def _auth_bootstrap(scope: Construct, id: str, name: str, env: EnvConfig,
-                    *, account: str | None, db_secret: str, twitch_optional: bool) -> None:
+def _auth_bootstrap(
+    scope: Construct,
+    id: str,
+    name: str,
+    env: EnvConfig,
+    *,
+    account: str | None,
+    db_secret: str,
+    twitch_optional: bool,
+) -> None:
     ns = env.namespace or None
     args = [f"--account={account}"] if account else None
     env_from = [
         k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)),
         k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
-        k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(
-            name="tripbot-twitch-creds", optional=twitch_optional)),
+        k8s.EnvFromSource(
+            secret_ref=k8s.SecretEnvSource(
+                name="tripbot-twitch-creds", optional=twitch_optional
+            )
+        ),
     ]
     # The eso bootstrap legs also pull maps creds; the local combined Job
     # (account=None) stops at twitch (matches overlays/local/auth-job.yaml).
     if account is not None:
-        env_from.append(k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(
-            name="tripbot-google-maps-api-key", optional=False)))
+        env_from.append(
+            k8s.EnvFromSource(
+                secret_ref=k8s.SecretEnvSource(
+                    name="tripbot-google-maps-api-key", optional=False
+                )
+            )
+        )
     container = k8s.Container(
         name="auth-bootstrap",
         image=f"{IMAGE}:{env.image_tag}",
@@ -362,31 +535,57 @@ def _auth_bootstrap(scope: Construct, id: str, name: str, env: EnvConfig,
         env=[k8s.EnvVar(name="EXTERNAL_URL", value="http://localhost:8080")],
         env_from=env_from,
     )
-    k8s.KubeJob(scope, id,
+    k8s.KubeJob(
+        scope,
+        id,
         metadata=k8s.ObjectMeta(name=name, namespace=ns),
         spec=k8s.JobSpec(
             backoff_limit=0,
             ttl_seconds_after_finished=600,
-            template=k8s.PodTemplateSpec(spec=k8s.PodSpec(
-                restart_policy="Never", containers=[container]))))
+            template=k8s.PodTemplateSpec(
+                spec=k8s.PodSpec(restart_policy="Never", containers=[container])
+            ),
+        ),
+    )
 
 
 def auth_bootstrap_bot(scope: Construct, env: EnvConfig) -> None:
     """ESO-wired bot-account auth-bootstrap (credentialed envs)."""
-    _auth_bootstrap(scope, "auth-bootstrap-bot", "tripbot-auth-bootstrap-bot", env,
-                    account="bot", db_secret=DB_SECRET_NAME, twitch_optional=False)
+    _auth_bootstrap(
+        scope,
+        "auth-bootstrap-bot",
+        "tripbot-auth-bootstrap-bot",
+        env,
+        account="bot",
+        db_secret=DB_SECRET_NAME,
+        twitch_optional=False,
+    )
 
 
 def auth_bootstrap_broadcaster(scope: Construct, env: EnvConfig) -> None:
     """ESO-wired broadcaster-account auth-bootstrap (credentialed envs)."""
-    _auth_bootstrap(scope, "auth-bootstrap-broadcaster", "tripbot-auth-bootstrap-broadcaster",
-                    env, account="broadcaster", db_secret=DB_SECRET_NAME, twitch_optional=False)
+    _auth_bootstrap(
+        scope,
+        "auth-bootstrap-broadcaster",
+        "tripbot-auth-bootstrap-broadcaster",
+        env,
+        account="broadcaster",
+        db_secret=DB_SECRET_NAME,
+        twitch_optional=False,
+    )
 
 
 def local_auth_bootstrap(scope: Construct, env: EnvConfig) -> None:
     """Laptop combined auth-bootstrap (secret.env-wired, no --account split)."""
-    _auth_bootstrap(scope, "auth-bootstrap", "tripbot-auth-bootstrap", env,
-                    account=None, db_secret=LOCAL_DB_SECRET, twitch_optional=True)
+    _auth_bootstrap(
+        scope,
+        "auth-bootstrap",
+        "tripbot-auth-bootstrap",
+        env,
+        account=None,
+        db_secret=LOCAL_DB_SECRET,
+        twitch_optional=True,
+    )
 
 
 def seed(scope: Construct, env: EnvConfig) -> None:
@@ -405,31 +604,49 @@ def seed(scope: Construct, env: EnvConfig) -> None:
     wait = k8s.Container(
         name="wait-for-postgres",
         image="busybox:1.36",
-        command=["sh", "-c",
-                 'until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done'])
+        command=[
+            "sh",
+            "-c",
+            'until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done',
+        ],
+    )
     migrate = k8s.Container(
         name="migrate",
         image=image,
         image_pull_policy="Always",
         command=["migrate"],
-        args=["-path", "/migrations", "-database",
-              "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable",
-              "up"],
-        env_from=db_env)
+        args=[
+            "-path",
+            "/migrations",
+            "-database",
+            "postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable",
+            "up",
+        ],
+        env_from=db_env,
+    )
     seed_c = k8s.Container(
         name="seed",
         image=image,
         image_pull_policy="Always",
         command=["/usr/local/bin/seed-db"],
-        env_from=db_env)
+        env_from=db_env,
+    )
 
     spec = k8s.JobSpec(
         backoff_limit=3,
         # eso seed cleans up after itself; the laptop variant lingers (no ttl).
         ttl_seconds_after_finished=None if local else 600,
-        template=k8s.PodTemplateSpec(spec=k8s.PodSpec(
-            restart_policy="Never",
-            init_containers=[wait, migrate],
-            containers=[seed_c])))
-    k8s.KubeJob(scope, "seed",
-        metadata=k8s.ObjectMeta(name="tripbot-seed", namespace=ns), spec=spec)
+        template=k8s.PodTemplateSpec(
+            spec=k8s.PodSpec(
+                restart_policy="Never",
+                init_containers=[wait, migrate],
+                containers=[seed_c],
+            )
+        ),
+    )
+    k8s.KubeJob(
+        scope,
+        "seed",
+        metadata=k8s.ObjectMeta(name="tripbot-seed", namespace=ns),
+        spec=spec,
+    )

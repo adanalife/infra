@@ -18,6 +18,7 @@ The expected-workload matrix is derived from adanalife_k8s.config.load_env (the 
 EnvConfig the charts synth from) and adanalife_k8s.contract.load_contract (canonical
 service names/ports), so it can't drift from what was actually deployed.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -154,7 +155,11 @@ def expected(env_config, contract):
     svc = contract.svc
     obs_deployments = [f"obs-{p}" for p in env_config.platforms]
 
-    deployments = ["tripbot", svc("vlc_server"), svc("onscreens_server")] + obs_deployments
+    deployments = [
+        "tripbot",
+        svc("vlc_server"),
+        svc("onscreens_server"),
+    ] + obs_deployments
 
     # Services that should exist AND have ready endpoints.
     services = [

@@ -10,6 +10,7 @@ derived `expected` matrix). Run::
 
     mise exec -- uv run pytest tests/integration --env stage-1
 """
+
 from __future__ import annotations
 
 import socket
@@ -119,8 +120,8 @@ def test_services_exist_with_endpoints(core_v1, namespace, expected):
                 f"{name} ({'no Endpoints object' if ready < 0 else 'zero ready addresses'})"
             )
 
-    assert not missing_svc, (
-        f"Service(s) absent from {namespace!r}: " + ", ".join(missing_svc)
+    assert not missing_svc, f"Service(s) absent from {namespace!r}: " + ", ".join(
+        missing_svc
     )
     assert not no_endpoints, (
         f"Service(s) with no ready endpoints in {namespace!r}: "

@@ -6,6 +6,7 @@ irreplaceable data, so the VCT (50Gi / local-path-retain), the StatefulSet
 name, serviceName, and selector/matchLabels must match the live spec exactly —
 a drift would risk a StatefulSet replacement and data loss.
 """
+
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
@@ -29,6 +30,7 @@ def _sts(objs):
 
 
 # --- the SSA-adoption guard: prod VCT must be EXACTLY 50Gi / local-path-retain ---
+
 
 def test_prod_volume_claim_template_is_50gi_retain():
     sts = _sts(_synth("prod-1"))
@@ -64,13 +66,18 @@ def test_headless_service_matches_render():
 
 # --- container fidelity (image, probes, envFrom, mount) ---
 
+
 def test_container_spec_matches_render():
     c = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["containers"][0]
     assert c["image"] == "pgvector/pgvector:pg16"
     assert c["securityContext"]["allowPrivilegeEscalation"] is False
     assert c["ports"][0] == {"name": "postgres", "containerPort": 5432}
     assert c["envFrom"][0]["secretRef"]["name"] == "postgres-secret"
-    assert c["livenessProbe"]["exec"]["command"] == ["pg_isready", "-U", "$(POSTGRES_USER)"]
+    assert c["livenessProbe"]["exec"]["command"] == [
+        "pg_isready",
+        "-U",
+        "$(POSTGRES_USER)",
+    ]
     assert c["readinessProbe"]["tcpSocket"]["port"] == "postgres"
     mount = c["volumeMounts"][0]
     assert mount["mountPath"] == "/var/lib/postgresql/data"
@@ -82,6 +89,7 @@ def test_container_spec_matches_render():
 
 # --- per-env volumeClaimTemplate sizing / storage class ---
 
+
 def test_dev_vct_default_size_no_storage_class():
     sts = _sts(_synth("development"))
     vct = sts["spec"]["volumeClaimTemplates"][0]
@@ -91,6 +99,7 @@ def test_dev_vct_default_size_no_storage_class():
 
 
 # --- backup CronJob: prod only ---
+
 
 def test_backup_cronjob_prod_only():
     prod = _synth("prod-1")
@@ -113,6 +122,7 @@ def test_backup_cronjob_prod_only():
 
 # --- StorageClass: prod only ---
 
+
 def test_storage_class_prod_only():
     sc = _by(_synth("prod-1"), "StorageClass", "local-path-retain")[0]
     assert sc["provisioner"] == "rancher.io/local-path"
@@ -125,12 +135,15 @@ def test_storage_class_prod_only():
 
 # --- ExternalSecret on eso envs; local Secret on the laptop overlay ---
 
+
 def test_external_secret_on_eso_envs():
     for e in ("prod-1", "stage-1", "development"):
         objs = _synth(e)
         es = _by(objs, "ExternalSecret", "postgres-credentials")[0]
         assert es["spec"]["target"]["name"] == "postgres-secret"
-        assert es["spec"]["target"]["template"]["data"]["POSTGRES_USER"] == "{{ .user }}"
+        assert (
+            es["spec"]["target"]["template"]["data"]["POSTGRES_USER"] == "{{ .user }}"
+        )
         assert es["spec"]["secretStoreRef"]["name"] == "aws-secretsmanager"
         props = {d["remoteRef"]["property"] for d in es["spec"]["data"]}
         assert props == {"user", "password", "db"}
@@ -142,8 +155,12 @@ def test_backup_external_secret_prod_only():
     es = _by(_synth("prod-1"), "ExternalSecret", "postgres-backup-s3-credentials")[0]
     assert es["spec"]["target"]["name"] == "postgres-backup-s3"
     props = {d["remoteRef"]["property"] for d in es["spec"]["data"]}
-    assert props == {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-                     "AWS_DEFAULT_REGION", "S3_BUCKET"}
+    assert props == {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_DEFAULT_REGION",
+        "S3_BUCKET",
+    }
     for e in ("stage-1", "development", "local"):
         assert not _by(_synth(e), "ExternalSecret", "postgres-backup-s3-credentials")
 

@@ -6,6 +6,7 @@ These are emitted by `AppsChart` so a single `kubectl apply` of the env file
 stands up the same set the Kustomize umbrella did. They are skipped for the
 `local` env (no ESO / no cert-manager there).
 """
+
 from __future__ import annotations
 
 from constructs import Construct
@@ -33,8 +34,14 @@ def emit_supporting(scope: Construct, env: EnvConfig) -> None:
     secret_store(scope, "secret-store", namespace=ns)
 
     for name, sm_key in _SHARED_SECRETS:
-        external_secret(scope, f"shared-{name}", name=name, namespace=ns,
-                        extract=sm_key, creation_policy="Owner")
+        external_secret(
+            scope,
+            f"shared-{name}",
+            name=name,
+            namespace=ns,
+            extract=sm_key,
+            creation_policy="Owner",
+        )
 
     _app_issuers(scope, env, ns)
 
@@ -45,35 +52,56 @@ def _app_issuers(scope: Construct, env: EnvConfig, ns: str | None) -> None:
     # Route53 solver creds — discrete keys (cert-manager wants them split, not
     # external-dns's INI blob), so per-key remoteRef + property (ESO pattern 2).
     external_secret(
-        scope, "cert-manager-aws-credentials",
-        name="cert-manager-aws-credentials", namespace=ns,
+        scope,
+        "cert-manager-aws-credentials",
+        name="cert-manager-aws-credentials",
+        namespace=ns,
         data=[
             ESData("access-key-id", "k8s/external-dns/aws-credentials", "access-key"),
-            ESData("secret-access-key", "k8s/external-dns/aws-credentials", "secret-key"),
+            ESData(
+                "secret-access-key", "k8s/external-dns/aws-credentials", "secret-key"
+            ),
         ],
     )
 
     for issuer_name, acme_server, account_key in (
-        ("letsencrypt-staging-route53",
-         "https://acme-staging-v02.api.letsencrypt.org/directory",
-         "letsencrypt-staging-route53-account"),
-        ("letsencrypt-route53",
-         "https://acme-v02.api.letsencrypt.org/directory",
-         "letsencrypt-route53-account"),
+        (
+            "letsencrypt-staging-route53",
+            "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "letsencrypt-staging-route53-account",
+        ),
+        (
+            "letsencrypt-route53",
+            "https://acme-v02.api.letsencrypt.org/directory",
+            "letsencrypt-route53-account",
+        ),
     ):
         route53 = cm.IssuerSpecAcmeSolversDns01Route53(
             region="us-east-1",
             access_key_id_secret_ref=cm.IssuerSpecAcmeSolversDns01Route53AccessKeyIdSecretRef(
-                name="cert-manager-aws-credentials", key="access-key-id"),
+                name="cert-manager-aws-credentials", key="access-key-id"
+            ),
             secret_access_key_secret_ref=cm.IssuerSpecAcmeSolversDns01Route53SecretAccessKeySecretRef(
-                name="cert-manager-aws-credentials", key="secret-access-key"),
-            role=env.external_dns_role_arn)
+                name="cert-manager-aws-credentials", key="secret-access-key"
+            ),
+            role=env.external_dns_role_arn,
+        )
         cm.Issuer(
-            scope, issuer_name,
+            scope,
+            issuer_name,
             metadata={"name": issuer_name, **({"namespace": ns} if ns else {})},
-            spec=cm.IssuerSpec(acme=cm.IssuerSpecAcme(
-                server=acme_server,
-                email="danadotlol@gmail.com",
-                private_key_secret_ref=cm.IssuerSpecAcmePrivateKeySecretRef(name=account_key),
-                solvers=[cm.IssuerSpecAcmeSolvers(
-                    dns01=cm.IssuerSpecAcmeSolversDns01(route53=route53))])))
+            spec=cm.IssuerSpec(
+                acme=cm.IssuerSpecAcme(
+                    server=acme_server,
+                    email="danadotlol@gmail.com",
+                    private_key_secret_ref=cm.IssuerSpecAcmePrivateKeySecretRef(
+                        name=account_key
+                    ),
+                    solvers=[
+                        cm.IssuerSpecAcmeSolvers(
+                            dns01=cm.IssuerSpecAcmeSolversDns01(route53=route53)
+                        )
+                    ],
+                )
+            ),
+        )

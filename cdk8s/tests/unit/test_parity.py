@@ -5,6 +5,7 @@ Synthesizes fresh into dist/ with the reference's NFS placeholders so the dashca
 PV/PVC line up, then asserts zero drift per env. This is the migration's safety
 net — if a construct change diverges from what Kustomize deployed, it fails here.
 """
+
 import os
 import subprocess
 import sys
@@ -21,11 +22,21 @@ def synthed():
     """Synth all envs with the reference NFS placeholders (so PV/PVC match)."""
     if not (ROOT / "reference").exists():
         pytest.skip("reference/ renders absent (run the kustomize capture first)")
-    env = {**os.environ, "NFS_SERVER": "<NFS server address>", "NFS_PATH": "<export path>"}
-    subprocess.run(["uv", "run", "cdk8s", "synth"], cwd=ROOT, env=env, check=True,
-                   capture_output=True)
+    env = {
+        **os.environ,
+        "NFS_SERVER": "<NFS server address>",
+        "NFS_PATH": "<export path>",
+    }
+    subprocess.run(
+        ["uv", "run", "cdk8s", "synth"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
     sys.path.insert(0, str(ROOT))
     from tests.parity import compare
+
     return compare
 
 

@@ -15,6 +15,7 @@ Run:  uv run python tests/parity.py [env ...]
 Exits non-zero if any non-intended difference is found. Used by the parity
 pytest and runnable standalone during migration.
 """
+
 from __future__ import annotations
 
 import base64
@@ -26,13 +27,17 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 HASH_KINDS = {"ConfigMap", "Secret"}
-_HASH_SUFFIX = re.compile(r"-[bcdfghjklmnpqrstvwxz2456789]{8,10}$")  # kustomize base32hash
+_HASH_SUFFIX = re.compile(
+    r"-[bcdfghjklmnpqrstvwxz2456789]{8,10}$"
+)  # kustomize base32hash
 
 # The pilot's intended rename: the single legacy `obs` becomes the per-platform
 # `obs-twitch`. Applied to REFERENCE names so they line up with cdk8s output.
 _OBS_RENAME = {
-    "obs": "obs-twitch", "obs-host": "obs-twitch-host",
-    "obs-config": "obs-twitch-config", "obs-ts": "obs-twitch-ts",
+    "obs": "obs-twitch",
+    "obs-host": "obs-twitch-host",
+    "obs-config": "obs-twitch-config",
+    "obs-ts": "obs-twitch-ts",
 }
 
 # Net-new in cdk8s with no legacy counterpart — allowed EXTRAs (intended):
@@ -92,8 +97,11 @@ def _normalize(obj: dict) -> dict:
     # De-hash references to ConfigMaps/Secrets in pod specs (envFrom / volumes),
     # and apply the obs rename to any name reference on the reference side.
     blob = yaml.safe_dump(obj)
-    blob = re.sub(r"(name:\s*)([\w-]+-[bcdfghjklmnpqrstvwxz2456789]{8,10})\b",
-                  lambda m: m.group(1) + _strip_hash(m.group(2)), blob)
+    blob = re.sub(
+        r"(name:\s*)([\w-]+-[bcdfghjklmnpqrstvwxz2456789]{8,10})\b",
+        lambda m: m.group(1) + _strip_hash(m.group(2)),
+        blob,
+    )
     return yaml.safe_load(blob)
 
 
@@ -120,8 +128,10 @@ def compare(env: str) -> list[str]:
         cdk_objs += _load(jobs_file)
 
     cdk = {_key(_normalize(o)): _normalize(o) for o in cdk_objs}
-    ref = {_key(_normalize(o), rename=True): _normalize(o)
-           for o in _load(ROOT / "reference" / f"{env}.kustomize.yaml")}
+    ref = {
+        _key(_normalize(o), rename=True): _normalize(o)
+        for o in _load(ROOT / "reference" / f"{env}.kustomize.yaml")
+    }
 
     problems: list[str] = []
     for k in sorted(ref.keys() - cdk.keys()):
@@ -132,7 +142,10 @@ def compare(env: str) -> list[str]:
     for k in sorted(cdk.keys() & ref.keys()):
         if _INTENDED_DIFF.match(k[1]):
             continue  # per-platform OBS rename — intended, verified in Phase 1
-        a, b = yaml.safe_dump(cdk[k], sort_keys=True), yaml.safe_dump(ref[k], sort_keys=True)
+        a, b = (
+            yaml.safe_dump(cdk[k], sort_keys=True),
+            yaml.safe_dump(ref[k], sort_keys=True),
+        )
         if a != b:
             problems.append(f"DIFF {k[0]}/{k[1]}")
     return problems

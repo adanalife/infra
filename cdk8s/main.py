@@ -8,6 +8,7 @@ stage:    dashcam-cv    — the vector-fill batch workload (its own task)
 Synth all envs by default; CDK8S_ENV=<name> narrows to one (handy for diffing a
 single env's output against the legacy Kustomize render during migration).
 """
+
 import os
 
 from cdk8s import App
@@ -39,8 +40,13 @@ if os.environ.get("CDK8S_PLATFORM"):
     PlatformChart(app, "platform-minipc", cluster="minipc", env=load_env("prod-1"))
     # bees k8s-monitoring needs its live chart version pinned first (see
     # PlatformChart) — skip it here so the synth stays green until captured.
-    PlatformChart(app, "platform-bees", cluster="bees", env=load_env("development"),
-                  skip_monitoring=True)
+    PlatformChart(
+        app,
+        "platform-bees",
+        cluster="bees",
+        env=load_env("development"),
+        skip_monitoring=True,
+    )
     for name in ("prod-1", "stage-1", "development"):
         PlatformEnvChart(app, f"{name}-platform", env=load_env(name))
 

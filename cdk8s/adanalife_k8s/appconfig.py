@@ -2,6 +2,7 @@
 one config package, so they share env-var surface). Kept here so the two
 constructs assemble identical telemetry/stub blocks instead of drifting.
 """
+
 from __future__ import annotations
 
 from adanalife_k8s.config import EnvConfig

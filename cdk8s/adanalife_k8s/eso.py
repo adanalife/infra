@@ -20,6 +20,7 @@ untyped path costs little — see cdk8s.yaml's import note.
 The keybase `eso-aws-credentials` bootstrap is unchanged — cdk8s never creates
 it; the SecretStore just references it, exactly as the legacy SecretStore did.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,29 +50,52 @@ _CREATION_POLICY = {
 @dataclass(frozen=True)
 class ESData:
     """One entry in an ExternalSecret `spec.data[]`."""
-    secret_key: str           # key in the materialized Secret
-    key: str                  # SM container path
+
+    secret_key: str  # key in the materialized Secret
+    key: str  # SM container path
     property: str | None = None  # JSON property within the SM value (pattern 2)
 
 
-def secret_store(scope: Construct, id: str = "secret-store", *, namespace: str | None = None):
+def secret_store(
+    scope: Construct, id: str = "secret-store", *, namespace: str | None = None
+):
     """Per-namespace `aws-secretsmanager` SecretStore. Byte-identical across
     envs (the in-namespace eso-aws-credentials routes to the right account)."""
     store = cdk8s.ApiObject(
-        scope, id,
-        api_version="external-secrets.io/v1", kind="SecretStore",
-        metadata={"name": "aws-secretsmanager", **({"namespace": namespace} if namespace else {})},
+        scope,
+        id,
+        api_version="external-secrets.io/v1",
+        kind="SecretStore",
+        metadata={
+            "name": "aws-secretsmanager",
+            **({"namespace": namespace} if namespace else {}),
+        },
     )
-    store.add_json_patch(cdk8s.JsonPatch.add("/spec", {
-        "provider": {"aws": {
-            "service": "SecretsManager",
-            "region": "us-east-1",
-            "auth": {"secretRef": {
-                "accessKeyIDSecretRef": {"name": "eso-aws-credentials", "key": "AWS_ACCESS_KEY_ID"},
-                "secretAccessKeySecretRef": {"name": "eso-aws-credentials", "key": "AWS_SECRET_ACCESS_KEY"},
-            }},
-        }},
-    }))
+    store.add_json_patch(
+        cdk8s.JsonPatch.add(
+            "/spec",
+            {
+                "provider": {
+                    "aws": {
+                        "service": "SecretsManager",
+                        "region": "us-east-1",
+                        "auth": {
+                            "secretRef": {
+                                "accessKeyIDSecretRef": {
+                                    "name": "eso-aws-credentials",
+                                    "key": "AWS_ACCESS_KEY_ID",
+                                },
+                                "secretAccessKeySecretRef": {
+                                    "name": "eso-aws-credentials",
+                                    "key": "AWS_SECRET_ACCESS_KEY",
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+        )
+    )
     return store
 
 
@@ -102,19 +126,36 @@ def external_secret(
 
     target = esx.ExternalSecretSpecTarget(
         name=target_name or name,
-        creation_policy=_CREATION_POLICY[creation_policy] if creation_policy else None)
+        creation_policy=_CREATION_POLICY[creation_policy] if creation_policy else None,
+    )
 
     spec = esx.ExternalSecretSpec(
         refresh_interval=refresh,
         secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-            name=store[0], kind=_STORE_KIND[store[1]]),
+            name=store[0], kind=_STORE_KIND[store[1]]
+        ),
         target=target,
-        data_from=([esx.ExternalSecretSpecDataFrom(
-            extract=esx.ExternalSecretSpecDataFromExtract(key=extract))]
-            if extract is not None else None),
-        data=([esx.ExternalSecretSpecData(
-            secret_key=d.secret_key,
-            remote_ref=esx.ExternalSecretSpecDataRemoteRef(key=d.key, property=d.property))
-            for d in data] if data is not None else None),
+        data_from=(
+            [
+                esx.ExternalSecretSpecDataFrom(
+                    extract=esx.ExternalSecretSpecDataFromExtract(key=extract)
+                )
+            ]
+            if extract is not None
+            else None
+        ),
+        data=(
+            [
+                esx.ExternalSecretSpecData(
+                    secret_key=d.secret_key,
+                    remote_ref=esx.ExternalSecretSpecDataRemoteRef(
+                        key=d.key, property=d.property
+                    ),
+                )
+                for d in data
+            ]
+            if data is not None
+            else None
+        ),
     )
     return esx.ExternalSecret(scope, id, metadata=meta, spec=spec)

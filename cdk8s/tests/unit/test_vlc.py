@@ -1,5 +1,6 @@
 """VlcServer construct tests: dashcam modes, GPU, ingress/TLS, the prod-only
 in-pod onscreens :8081 re-exposure, and config block per env."""
+
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
@@ -38,12 +39,15 @@ def test_stage_dashcam_mount_references_pvc_by_name():
 
 def test_dashcam_volume_pv_pvc_emitted_separately():
     import os
+
     os.environ.setdefault("NFS_SERVER", "10.0.0.5")
     os.environ.setdefault("NFS_PATH", "/export/dashcam")
     objs = _synth_volume("stage-1")
     # Stage gets its OWN PV name (PVs bind 1:1) though it shares prod's export.
     pv = _by(objs, "PersistentVolume", "vlc-dashcam-nfs-stage")[0]
-    assert pv["spec"]["persistentVolumeReclaimPolicy"] == "Retain"  # data survives deletion
+    assert (
+        pv["spec"]["persistentVolumeReclaimPolicy"] == "Retain"
+    )  # data survives deletion
     pvc = _by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]
     assert pvc["spec"]["volumeName"] == "vlc-dashcam-nfs-stage"
     # hostPath envs emit nothing (the volume is inline in the Deployment).
@@ -72,23 +76,38 @@ def test_gpu_only_on_gpu_envs():
 def test_prod_inpod_onscreens_port_and_nats():
     objs = _synth("prod-1")
     dep = _by(objs, "Deployment", "vlc-server")[0]
-    port_names = {p["name"] for p in dep["spec"]["template"]["spec"]["containers"][0]["ports"]}
+    port_names = {
+        p["name"] for p in dep["spec"]["template"]["spec"]["containers"][0]["ports"]
+    }
     assert "onscreens" in port_names, "prod re-exposes the in-pod onscreens on :8081"
-    svc_ports = {p["name"] for p in _by(objs, "Service", "vlc-server")[0]["spec"]["ports"]}
+    svc_ports = {
+        p["name"] for p in _by(objs, "Service", "vlc-server")[0]["spec"]["ports"]
+    }
     assert "onscreens" in svc_ports
     cm = _by(objs, "ConfigMap", "vlc-server-config")[0]["data"]
     assert cm["NATS_URL"].startswith("nats://")
     # stage does NOT carry the in-pod onscreens port
     stage = _by(_synth("stage-1"), "Deployment", "vlc-server")[0]
-    snames = {p["name"] for p in stage["spec"]["template"]["spec"]["containers"][0]["ports"]}
+    snames = {
+        p["name"] for p in stage["spec"]["template"]["spec"]["containers"][0]["ports"]
+    }
     assert "onscreens" not in snames
 
 
 def test_config_blocks_per_env():
     # local + dev carry the stub block; stage + prod don't.
-    assert "DATABASE_USER" in _by(_synth("local"), "ConfigMap", "vlc-server-config")[0]["data"]
-    assert "DATABASE_USER" in _by(_synth("development"), "ConfigMap", "vlc-server-config")[0]["data"]
-    assert "DATABASE_USER" not in _by(_synth("stage-1"), "ConfigMap", "vlc-server-config")[0]["data"]
+    assert (
+        "DATABASE_USER"
+        in _by(_synth("local"), "ConfigMap", "vlc-server-config")[0]["data"]
+    )
+    assert (
+        "DATABASE_USER"
+        in _by(_synth("development"), "ConfigMap", "vlc-server-config")[0]["data"]
+    )
+    assert (
+        "DATABASE_USER"
+        not in _by(_synth("stage-1"), "ConfigMap", "vlc-server-config")[0]["data"]
+    )
     prod_cm = _by(_synth("prod-1"), "ConfigMap", "vlc-server-config")[0]["data"]
     assert prod_cm["ENV"] == "production"
     assert prod_cm["OTEL_SDK_DISABLED"] == "false"
@@ -97,7 +116,10 @@ def test_config_blocks_per_env():
 def test_ingress_tls_on_minipc_only():
     stage_ing = _by(_synth("stage-1"), "Ingress", "vlc-server")[0]
     assert stage_ing["spec"]["tls"][0]["secretName"] == "vlc-tls"
-    assert stage_ing["metadata"]["annotations"]["cert-manager.io/issuer"] == "letsencrypt-route53"
+    assert (
+        stage_ing["metadata"]["annotations"]["cert-manager.io/issuer"]
+        == "letsencrypt-route53"
+    )
     dev_ing = _by(_synth("development"), "Ingress", "vlc-server")[0]
     assert "tls" not in dev_ing["spec"] or not dev_ing["spec"]["tls"]
     assert not _by(_synth("local"), "Ingress", "vlc-server")

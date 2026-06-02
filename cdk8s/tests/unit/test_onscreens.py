@@ -1,5 +1,6 @@
 """OnscreensServer construct tests: per-env NATS_URL presence, image tag,
 labels/selector correctness, and Deployment+Service across envs."""
+
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
@@ -23,9 +24,13 @@ def test_deployment_and_service_in_every_env():
         objs = _synth(env)
         assert _by(objs, "Deployment", "onscreens-server"), f"{env} missing Deployment"
         assert _by(objs, "Service", "onscreens-server"), f"{env} missing Service"
-        assert _by(objs, "ConfigMap", "onscreens-server-config"), f"{env} missing ConfigMap"
+        assert _by(objs, "ConfigMap", "onscreens-server-config"), (
+            f"{env} missing ConfigMap"
+        )
         # No Ingress anywhere — cluster-internal only.
-        assert not [o for o in objs if o["kind"] == "Ingress"], f"{env} should have no Ingress"
+        assert not [o for o in objs if o["kind"] == "Ingress"], (
+            f"{env} should have no Ingress"
+        )
 
 
 def test_nats_url_present_on_platform_envs_absent_on_local():
@@ -46,6 +51,7 @@ def test_image_tag_per_env():
     def image(env):
         dep = _by(_synth(env), "Deployment", "onscreens-server")[0]
         return dep["spec"]["template"]["spec"]["containers"][0]["image"]
+
     assert image("prod-1") == "adanalife/onscreens-server:latest"
     assert image("local") == "adanalife/onscreens-server:latest"
     assert image("stage-1") == "adanalife/onscreens-server:develop"
@@ -90,8 +96,12 @@ def test_service_and_probe_shape():
     svc = _by(objs, "Service", "onscreens-server")[0]["spec"]
     assert svc["type"] == "ClusterIP"
     port = svc["ports"][0]
-    assert port["name"] == "http" and port["port"] == 8080 and port["targetPort"] == "http"
-    container = _by(objs, "Deployment", "onscreens-server")[0]["spec"]["template"]["spec"]["containers"][0]
+    assert (
+        port["name"] == "http" and port["port"] == 8080 and port["targetPort"] == "http"
+    )
+    container = _by(objs, "Deployment", "onscreens-server")[0]["spec"]["template"][
+        "spec"
+    ]["containers"][0]
     assert container["livenessProbe"]["httpGet"]["path"] == "/health/live"
     assert container["readinessProbe"]["httpGet"]["path"] == "/health/ready"
     # envFrom: stable config + the two shared observability secrets.

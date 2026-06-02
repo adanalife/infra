@@ -1,5 +1,8 @@
 """Phase 0 smoke tests: the harness synths and the env table loads."""
-from cdk8s import Testing as K8sTesting  # aliased so pytest doesn't collect it as a test class
+
+from cdk8s import (
+    Testing as K8sTesting,
+)  # aliased so pytest doesn't collect it as a test class
 
 from adanalife_k8s.charts import AppsChart
 from adanalife_k8s.config import ENVS, load_env

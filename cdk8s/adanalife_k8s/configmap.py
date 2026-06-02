@@ -8,6 +8,7 @@ a short content hash as `adanalife.dev/config-hash` on the pod template, so the
 Deployment still rolls on config change but jobs/`envFrom` references that target
 the name (e.g. the stable `tripbot-config`) never break.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,13 +33,23 @@ def content_hash(data: dict[str, str]) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:10]
 
 
-def config_map(scope: Construct, id: str, *, name: str, namespace: str | None,
-               labels: dict[str, str], data: dict[str, str]) -> str:
+def config_map(
+    scope: Construct,
+    id: str,
+    *,
+    name: str,
+    namespace: str | None,
+    labels: dict[str, str],
+    data: dict[str, str],
+) -> str:
     """Emit a stable-named ConfigMap; return its content hash so the caller can
     annotate the pod template (`pod_annotations(hash)`)."""
-    k8s.KubeConfigMap(scope, id,
+    k8s.KubeConfigMap(
+        scope,
+        id,
         metadata=k8s.ObjectMeta(name=name, namespace=namespace, labels=labels),
-        data=data)
+        data=data,
+    )
     return content_hash(data)
 
 

@@ -15,6 +15,7 @@ volume, no GPU, no stubs (the binary's config only requires ENV), no Ingress
 maxSurge=1/maxUnavailable=0: state is in-memory and rebuilt on boot, so a brief
 overlap is harmless and a failed rollout leaves the old pod serving.
 """
+
 from __future__ import annotations
 
 import imports.k8s as k8s
@@ -42,8 +43,14 @@ class OnscreensServer(Construct):
         data = dict(appconfig.telemetry_config(env))
         if env.nats_url:
             data["NATS_URL"] = env.nats_url
-        cfg_hash = configmap.config_map(self, "config", name=f"{NAME}-config",
-                                        namespace=ns, labels=labels, data=data)
+        cfg_hash = configmap.config_map(
+            self,
+            "config",
+            name=f"{NAME}-config",
+            namespace=ns,
+            labels=labels,
+            data=data,
+        )
 
         container = k8s.Container(
             name=NAME,
@@ -51,29 +58,54 @@ class OnscreensServer(Construct):
             image_pull_policy="Always",
             security_context=k8s.SecurityContext(
                 allow_privilege_escalation=False,
-                capabilities=k8s.Capabilities(drop=["ALL"])),
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+            ),
             ports=[k8s.ContainerPort(name="http", container_port=8080)],
             env_from=[
-                k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=f"{NAME}-config")),
+                k8s.EnvFromSource(
+                    config_map_ref=k8s.ConfigMapEnvSource(name=f"{NAME}-config")
+                ),
                 # onscreens-server reuses the vlc-server Sentry DSN for now.
-                k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="sentry-vlc-server", optional=False)),
-                k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name="grafana-cloud-otlp", optional=False)),
+                k8s.EnvFromSource(
+                    secret_ref=k8s.SecretEnvSource(
+                        name="sentry-vlc-server", optional=False
+                    )
+                ),
+                k8s.EnvFromSource(
+                    secret_ref=k8s.SecretEnvSource(
+                        name="grafana-cloud-otlp", optional=False
+                    )
+                ),
             ],
             liveness_probe=k8s.Probe(
-                http_get=k8s.HttpGetAction(path="/health/live", port=k8s.IntOrString.from_string("http")),
-                initial_delay_seconds=5, period_seconds=30, timeout_seconds=5),
+                http_get=k8s.HttpGetAction(
+                    path="/health/live", port=k8s.IntOrString.from_string("http")
+                ),
+                initial_delay_seconds=5,
+                period_seconds=30,
+                timeout_seconds=5,
+            ),
             readiness_probe=k8s.Probe(
-                http_get=k8s.HttpGetAction(path="/health/ready", port=k8s.IntOrString.from_string("http")),
-                initial_delay_seconds=3, period_seconds=10),
+                http_get=k8s.HttpGetAction(
+                    path="/health/ready", port=k8s.IntOrString.from_string("http")
+                ),
+                initial_delay_seconds=3,
+                period_seconds=10,
+            ),
             resources=k8s.ResourceRequirements(
-                requests={"cpu": k8s.Quantity.from_string("25m"),
-                          "memory": k8s.Quantity.from_string("32Mi")},
-                limits={"memory": k8s.Quantity.from_string("128Mi")}),
+                requests={
+                    "cpu": k8s.Quantity.from_string("25m"),
+                    "memory": k8s.Quantity.from_string("32Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("128Mi")},
+            ),
             # Writable tmpfs scratch for the RUN_DIR pidfile — nothing durable.
             volume_mounts=[k8s.VolumeMount(name="run", mount_path=RUN_DIR)],
         )
 
-        k8s.KubeDeployment(self, "deployment",
+        k8s.KubeDeployment(
+            self,
+            "deployment",
             metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
             spec=k8s.DeploymentSpec(
                 replicas=1,
@@ -81,20 +113,41 @@ class OnscreensServer(Construct):
                     type="RollingUpdate",
                     rolling_update=k8s.RollingUpdateDeployment(
                         max_surge=k8s.IntOrString.from_number(1),
-                        max_unavailable=k8s.IntOrString.from_number(0))),
+                        max_unavailable=k8s.IntOrString.from_number(0),
+                    ),
+                ),
                 selector=k8s.LabelSelector(match_labels=sel),
                 template=k8s.PodTemplateSpec(
-                    metadata=k8s.ObjectMeta(labels=sel, annotations=configmap.pod_annotations(cfg_hash)),
+                    metadata=k8s.ObjectMeta(
+                        labels=sel, annotations=configmap.pod_annotations(cfg_hash)
+                    ),
                     spec=k8s.PodSpec(
                         security_context=k8s.PodSecurityContext(
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")),
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
+                        ),
                         containers=[container],
-                        volumes=[k8s.Volume(name="run", empty_dir=k8s.EmptyDirVolumeSource())]))))
+                        volumes=[
+                            k8s.Volume(name="run", empty_dir=k8s.EmptyDirVolumeSource())
+                        ],
+                    ),
+                ),
+            ),
+        )
 
         # --- Service (cluster-internal; tripbot + OBS reach :8080 by DNS) ---
-        k8s.KubeService(self, "service",
+        k8s.KubeService(
+            self,
+            "service",
             metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
             spec=k8s.ServiceSpec(
-                type="ClusterIP", selector=sel,
-                ports=[k8s.ServicePort(name="http", port=8080,
-                                       target_port=k8s.IntOrString.from_string("http"))]))
+                type="ClusterIP",
+                selector=sel,
+                ports=[
+                    k8s.ServicePort(
+                        name="http",
+                        port=8080,
+                        target_port=k8s.IntOrString.from_string("http"),
+                    )
+                ],
+            ),
+        )

@@ -2,6 +2,7 @@
 independently — `AppsChart` per env, `PlatformChart` per cluster (later) — so
 the platform stack stays decoupled from any app env.
 """
+
 from __future__ import annotations
 
 from cdk8s import Chart
@@ -54,10 +55,14 @@ class AppsChart(Chart):
             # boots idle until toggled on. youtube carries STREAM_PLATFORM=youtube.
             streaming = platform == "twitch" and env.name == "prod-1"
             ObsInstance(
-                self, platform, env=env,
+                self,
+                platform,
+                env=env,
                 streaming=streaming,
                 stream_key_sm=f"k8s/obs/{platform}-stream-key" if streaming else None,
-                extra_config={"STREAM_PLATFORM": "youtube"} if platform == "youtube" else None,
+                extra_config={"STREAM_PLATFORM": "youtube"}
+                if platform == "youtube"
+                else None,
             )
 
 
@@ -105,4 +110,5 @@ class JobsChart(Chart):
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
         from adanalife_k8s.constructs.tripbot import emit_jobs
+
         emit_jobs(self, env)

@@ -1,6 +1,7 @@
 """Tripbot construct + Jobs tests: stable tripbot-config, the 5 ExternalSecrets,
 per-env identity config, outbound-only ingress shape, image tag, local DB Secret,
 and the one-shot Jobs (which envFrom the stable config and are NOT auto-emitted)."""
+
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
@@ -29,6 +30,7 @@ def _by(objs, kind, name):
 
 # ---- ConfigMap: stable name + content hash ----
 
+
 def test_config_map_is_stable_named_with_hash_annotation():
     objs = _synth("stage-1")
     cm = _by(objs, "ConfigMap", "tripbot-config")
@@ -54,24 +56,33 @@ def test_deployment_and_jobs_reference_stable_config():
             cs = pod.get("containers", []) + pod.get("initContainers", [])
             assert any(
                 e.get("configMapRef", {}).get("name") == "tripbot-config"
-                for c in cs for e in c.get("envFrom", []))
+                for c in cs
+                for e in c.get("envFrom", [])
+            )
 
 
 # ---- ExternalSecrets ----
+
 
 def test_five_external_secrets_on_eso_envs_with_remote_keys():
     objs = _synth("stage-1")
     names = {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
     assert names == {
-        "tripbot-database-creds", "tripbot-twitch-creds",
-        "tripbot-google-maps-api-key", "tripbot-discord-alerts-webhook",
+        "tripbot-database-creds",
+        "tripbot-twitch-creds",
+        "tripbot-google-maps-api-key",
+        "tripbot-discord-alerts-webhook",
         "tripbot-discord-bot-token",
     }
     # database: target.template remaps the shared postgres SM JSON onto DATABASE_*
     db = _by(objs, "ExternalSecret", "tripbot-database-creds")[0]["spec"]
     assert db["target"]["template"]["data"]["DATABASE_USER"] == "{{ .user }}"
     assert {d["remoteRef"]["key"] for d in db["data"]} == {"k8s/postgres/credentials"}
-    assert {d["remoteRef"]["property"] for d in db["data"]} == {"user", "password", "db"}
+    assert {d["remoteRef"]["property"] for d in db["data"]} == {
+        "user",
+        "password",
+        "db",
+    }
     # twitch + maps use dataFrom.extract
     tw = _by(objs, "ExternalSecret", "tripbot-twitch-creds")[0]["spec"]
     assert tw["dataFrom"][0]["extract"]["key"] == "k8s/tripbot/twitch-creds"
@@ -91,20 +102,27 @@ def test_local_drops_db_external_secret_and_builds_secret():
     assert not _by(objs, "ExternalSecret", "tripbot-database-creds")
     # ...but the other four ExternalSecrets still come from ESO.
     es = {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
-    assert es == {"tripbot-twitch-creds", "tripbot-google-maps-api-key",
-                  "tripbot-discord-alerts-webhook", "tripbot-discord-bot-token"}
+    assert es == {
+        "tripbot-twitch-creds",
+        "tripbot-google-maps-api-key",
+        "tripbot-discord-alerts-webhook",
+        "tripbot-discord-bot-token",
+    }
     # A stable-named on-disk Secret carries the DB creds, and the Deployment
     # envFroms it (not tripbot-database-creds).
     sec = _by(objs, "Secret", "tripbot-secret")[0]
     assert sec["stringData"]["DATABASE_USER"] == "tripbot_docker"
     dep = _by(objs, "Deployment", "tripbot")[0]
-    names = [e.get("secretRef", {}).get("name")
-             for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]]
+    names = [
+        e.get("secretRef", {}).get("name")
+        for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]
+    ]
     assert "tripbot-secret" in names
     assert "tripbot-database-creds" not in names
 
 
 # ---- per-env identity config ----
+
 
 def test_channel_and_bot_identity_per_env():
     prod = _by(_synth("prod-1"), "ConfigMap", "tripbot-config")[0]["data"]
@@ -118,7 +136,10 @@ def test_channel_and_bot_identity_per_env():
         assert cm["BOT_USERNAME"] == "tripbot4000"
         assert cm["ONSCREENS_SERVER_HOST"] == "onscreens-server:8080"
     # DISCORD_GUILD_ID is stage-only
-    assert "DISCORD_GUILD_ID" in _by(_synth("stage-1"), "ConfigMap", "tripbot-config")[0]["data"]
+    assert (
+        "DISCORD_GUILD_ID"
+        in _by(_synth("stage-1"), "ConfigMap", "tripbot-config")[0]["data"]
+    )
     assert "DISCORD_GUILD_ID" not in prod
 
 
@@ -139,17 +160,23 @@ def test_nats_url_present_except_local():
     for env in ("prod-1", "stage-1", "development"):
         cm = _by(_synth(env), "ConfigMap", "tripbot-config")[0]["data"]
         assert cm["NATS_URL"].startswith("nats://")
-    assert "NATS_URL" not in _by(_synth("local"), "ConfigMap", "tripbot-config")[0]["data"]
+    assert (
+        "NATS_URL" not in _by(_synth("local"), "ConfigMap", "tripbot-config")[0]["data"]
+    )
 
 
 # ---- ingress shape per env ----
+
 
 def test_ingress_minipc_has_tls_and_tailscale():
     objs = _synth("prod-1")
     ing = _by(objs, "Ingress", "tripbot")[0]
     assert ing["spec"]["rules"][0]["host"] == "tripbot.prod.whereisdana.today"
     assert ing["spec"]["tls"][0]["secretName"] == "tripbot-tls"
-    assert ing["metadata"]["annotations"]["cert-manager.io/issuer"] == "letsencrypt-route53"
+    assert (
+        ing["metadata"]["annotations"]["cert-manager.io/issuer"]
+        == "letsencrypt-route53"
+    )
     # Tailscale Ingress (off-LAN dashboard) on minipc envs
     ts = _by(objs, "Ingress", "tripbot-ts")[0]
     assert ts["spec"]["ingressClassName"] == "tailscale"
@@ -176,9 +203,14 @@ def test_local_ingress_is_plain_http_localhost():
 
 # ---- image tag per env ----
 
+
 def test_image_tag_per_env():
-    for env, tag in [("prod-1", "latest"), ("local", "latest"),
-                     ("stage-1", "develop"), ("development", "develop")]:
+    for env, tag in [
+        ("prod-1", "latest"),
+        ("local", "latest"),
+        ("stage-1", "develop"),
+        ("development", "develop"),
+    ]:
         dep = _by(_synth(env), "Deployment", "tripbot")[0]
         spec = dep["spec"]["template"]["spec"]
         assert spec["containers"][0]["image"] == f"adanalife/tripbot:{tag}"
@@ -187,11 +219,15 @@ def test_image_tag_per_env():
 
 # ---- one-shot Jobs ----
 
+
 def test_eso_env_emits_three_jobs_with_account_legs():
     objs = _synth_jobs("stage-1")
     jobs = {o["metadata"]["name"] for o in objs if o["kind"] == "Job"}
-    assert jobs == {"tripbot-auth-bootstrap-bot",
-                    "tripbot-auth-bootstrap-broadcaster", "tripbot-seed"}
+    assert jobs == {
+        "tripbot-auth-bootstrap-bot",
+        "tripbot-auth-bootstrap-broadcaster",
+        "tripbot-seed",
+    }
     bot = _by(objs, "Job", "tripbot-auth-bootstrap-bot")[0]
     c = bot["spec"]["template"]["spec"]["containers"][0]
     assert c["args"] == ["--account=bot"]
@@ -208,9 +244,9 @@ def test_local_env_emits_combined_bootstrap_and_seed():
     assert jobs == {"tripbot-auth-bootstrap", "tripbot-seed"}
     auth = _by(objs, "Job", "tripbot-auth-bootstrap")[0]
     c = auth["spec"]["template"]["spec"]["containers"][0]
-    assert "args" not in c or not c["args"]   # no --account
+    assert "args" not in c or not c["args"]  # no --account
     refs = [e.get("secretRef", {}).get("name") for e in c["envFrom"]]
-    assert "tripbot-secret" in refs           # secret.env DB creds, not ESO
+    assert "tripbot-secret" in refs  # secret.env DB creds, not ESO
 
 
 def test_seed_job_shape():
