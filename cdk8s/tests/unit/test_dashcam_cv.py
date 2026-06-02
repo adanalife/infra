@@ -1,6 +1,7 @@
-"""DashcamCV construct tests: the four flat objects (PriorityClass, models PVC,
-fill CronJob, one-shot Job) and their load-bearing fields (schedule, suspend,
-priority value, PVC size, preemptible pod wiring)."""
+"""DashcamCV construct tests: the flat objects (PriorityClass, models PVC, fill
+CronJob, one-shot fill Job, find/stats ops Jobs) and their load-bearing fields
+(schedule, suspend, parallelism, priority value, PVC size, restricted-PSS
+hardening, preemptible pod wiring)."""
 
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
@@ -20,12 +21,14 @@ def _by(objs, kind, name):
     return [o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name]
 
 
-def test_emits_four_objects():
+def test_emits_objects():
     objs = _synth()
     assert _by(objs, "PriorityClass", "dashcam-cv-low")
     assert _by(objs, "PersistentVolumeClaim", "dashcam-cv-models")
     assert _by(objs, "CronJob", "dashcam-cv-fill")
     assert _by(objs, "Job", "dashcam-cv-fill-once")
+    assert _by(objs, "Job", "dashcam-cv-find")
+    assert _by(objs, "Job", "dashcam-cv-stats")
 
 
 def test_priorityclass_value_and_not_global_default():
@@ -44,7 +47,7 @@ def test_models_pvc_size_and_storageclass():
 
 def test_cronjob_schedule_suspend_and_policy():
     cj = _by(_synth(), "CronJob", "dashcam-cv-fill")[0]["spec"]
-    assert cj["schedule"] == "*/30 * * * *"
+    assert cj["schedule"] == "*/20 * * * *"
     assert cj["suspend"] is True
     assert cj["concurrencyPolicy"] == "Forbid"
     assert cj["startingDeadlineSeconds"] == 120
@@ -53,6 +56,9 @@ def test_cronjob_schedule_suspend_and_policy():
     jobspec = cj["jobTemplate"]["spec"]
     assert jobspec["backoffLimit"] == 0
     assert jobspec["ttlSecondsAfterFinished"] == 3600
+    # 2 pods per tick (~20 videos), Forbid keeps them non-overlapping
+    assert jobspec["parallelism"] == 2
+    assert jobspec["completions"] == 2
 
 
 def test_cronjob_pod_is_preemptible_and_mounts():
@@ -64,7 +70,7 @@ def test_cronjob_pod_is_preemptible_and_mounts():
     # wait-for-postgres init container
     assert pod["initContainers"][0]["name"] == "wait-for-postgres"
     embed = pod["containers"][0]
-    assert embed["args"] == ["embed", "--random", "3", "--interval", "5", "--apply"]
+    assert embed["args"] == ["embed", "--random", "10", "--interval", "5", "--apply"]
     assert embed["image"] == "adanalife/dashcam-cv:develop"  # stage image_tag
     assert {m["name"] for m in embed["volumeMounts"]} == {"dashcam", "models"}
     assert embed["env"][0] == {
@@ -95,6 +101,53 @@ def test_resources_cpu_cap_and_memory():
     res = embed["resources"]
     assert res["requests"] == {"cpu": "1", "memory": "5Gi"}
     assert res["limits"] == {"cpu": "4", "memory": "6Gi"}
+
+
+def test_pods_satisfy_restricted_pod_security():
+    # stage-1 enforces the restricted PSS; every dashcam-cv pod must carry the
+    # nonroot/seccomp pod context + drop-ALL container context, or it's rejected.
+    objs = _synth()
+    pods = [
+        _by(objs, "CronJob", "dashcam-cv-fill")[0]["spec"]["jobTemplate"]["spec"][
+            "template"
+        ]["spec"],
+        _by(objs, "Job", "dashcam-cv-fill-once")[0]["spec"]["template"]["spec"],
+        _by(objs, "Job", "dashcam-cv-find")[0]["spec"]["template"]["spec"],
+        _by(objs, "Job", "dashcam-cv-stats")[0]["spec"]["template"]["spec"],
+    ]
+    for pod in pods:
+        sc = pod["securityContext"]
+        assert sc["runAsNonRoot"] is True
+        assert sc["runAsUser"] == 65532
+        assert sc["fsGroup"] == 65532
+        assert sc["seccompProfile"]["type"] == "RuntimeDefault"
+        # every container (incl. any init) drops all caps + no priv-escalation
+        containers = pod["containers"] + pod.get("initContainers", [])
+        for c in containers:
+            assert c["securityContext"]["allowPrivilegeEscalation"] is False
+            assert c["securityContext"]["capabilities"]["drop"] == ["ALL"]
+        # HOME/USER set so torch's getpass.getuser() doesn't raise under UID 65532
+        app = pod["containers"][0]
+        envs = {e["name"]: e["value"] for e in app["env"]}
+        assert envs["HOME"] == "/tmp"
+        assert envs["USER"] == "dashcam"
+
+
+def test_find_and_stats_are_query_pods_without_corpus():
+    # find/stats are read-only ops one-offs: no wait-for-postgres init, no dashcam
+    # corpus mount — just the models cache. Same hardened pod otherwise.
+    objs = _synth()
+    for name, args in (
+        ("dashcam-cv-find", ["find", "a road with trees", "-k", "5"]),
+        ("dashcam-cv-stats", ["stats", "--concepts"]),
+    ):
+        pod = _by(objs, "Job", name)[0]["spec"]["template"]["spec"]
+        assert "initContainers" not in pod
+        claims = {v["persistentVolumeClaim"]["claimName"] for v in pod["volumes"]}
+        assert claims == {"dashcam-cv-models"}  # no vlc-dashcam corpus
+        c = pod["containers"][0]
+        assert c["args"] == args
+        assert {m["name"] for m in c["volumeMounts"]} == {"models"}
 
 
 def test_namespace_threaded_from_env():
