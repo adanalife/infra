@@ -40,11 +40,13 @@ every other ESO-backed secret).
 
 ## Bootstrap (one-time, on the mini-PC)
 
-1. **Install Argo CD** — it's part of the cdk8s platform stack now (pinned argo-cd
-   `9.5.17`), so it comes up with the platform apply; no manual `helm install`.
-   It installs idle: a controller watching nothing until the Applications below
-   exist. The UI comes up at `https://argocd-prod.<tailnet>.ts.net` via the
-   tailscale Ingress (or `kubectl -n argocd port-forward svc/argocd-server 8080:443`).
+1. **Install Argo CD** — `task k8s:prod:platform:up` installs it as part of the
+   platform bring-up (pinned argo-cd `9.5.17`, values `k8s/argo-cd/values.yml`); no
+   manual `helm repo add` / `helm install`. (It's also a component of the cdk8s
+   `PlatformChart` for when the platform itself cuts over to cdk8s.) It installs
+   idle: a controller watching nothing until the Applications below exist. The UI
+   comes up at `https://argocd-prod.<tailnet>.ts.net` via the tailscale Ingress
+   (applied in step 2) — or `kubectl -n argocd port-forward svc/argocd-server 8080:443`.
 
 2. **Register the infra repo — declaratively (IaC).** Argo auto-discovers repos
    from Secrets labeled `argocd.argoproj.io/secret-type: repository`, and the repo
