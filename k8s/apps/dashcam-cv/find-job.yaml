@@ -1,0 +1,53 @@
+# One-off search against the stage frame_embeddings (verification / debugging).
+# Same hardened pod as fill-job, but runs `find` and needs no corpus mount.
+# Edit the query in args, then:
+#   kubectl -n stage-1 delete job dashcam-cv-find --ignore-not-found
+#   kubectl -n stage-1 apply --validate=false -f k8s/apps/dashcam-cv/find-job.yaml
+#   kubectl -n stage-1 logs -f job/dashcam-cv-find
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dashcam-cv-find
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      priorityClassName: dashcam-cv-low
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: find
+          image: adanalife/dashcam-cv:develop
+          imagePullPolicy: Always
+          args: ["find", "a road with trees", "-k", "5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+          env:
+            - name: HOME
+              value: /tmp
+            - name: USER
+              value: dashcam
+          resources:
+            requests: { cpu: "1", memory: 5Gi }
+            limits:   { cpu: "4", memory: 6Gi }
+          volumeMounts:
+            - name: models
+              mountPath: /opt/models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: dashcam-cv-models
