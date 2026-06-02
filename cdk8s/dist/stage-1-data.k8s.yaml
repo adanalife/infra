@@ -120,23 +120,6 @@ spec:
     app: postgres
 ---
 apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: vlc-dashcam-nfs-stage
-  namespace: stage-1
-spec:
-  accessModes:
-    - ReadOnlyMany
-  capacity:
-    storage: 1Ti
-  nfs:
-    path: <export path>
-    readOnly: true
-    server: <NFS server address>
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: ""
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: vlc-dashcam

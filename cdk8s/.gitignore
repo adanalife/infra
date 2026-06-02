@@ -18,3 +18,7 @@ reference/
 # (pinned to k8s API version in cdk8s.yaml). Gitignored to keep the tree
 # reviewable; CI/setup runs the import.
 imports/
+# Per-machine host-specific config injected at synth time — the real dashcam NFS
+# coords for `task k8s:<env>:dashcam-pv`. Host-specific, kept out of git (the
+# committed dist/ carries placeholders). Copy dashcam-nfs.local.env.example.
+dashcam-nfs.local.env

@@ -16,14 +16,18 @@ from cdk8s import App
 from adanalife_k8s.charts import (
     AppsChart,
     ArgoCDChart,
-    DataChart,
     DashcamCVChart,
+    DashcamPVChart,
+    DataChart,
     JobsChart,
 )
 from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
 
-app = App()
+# outdir honors CDK8S_OUTDIR so a caller can synth to a throwaway dir without
+# touching the committed dist/ — used by `task k8s:<env>:dashcam-pv`, which synths
+# the PV with real (gitignored) NFS coords and applies it out of band.
+app = App(outdir=os.environ.get("CDK8S_OUTDIR", "dist"))
 
 only = os.environ.get("CDK8S_ENV")
 targets = [only] if only else list(ENVS)
@@ -34,6 +38,12 @@ for name in targets:
     # Argo Application — isolated from the app churn, synced before the apps.
     DataChart(app, f"{name}-data", env=env)
     JobsChart(app, f"{name}-jobs", env=env)
+    # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
+    # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
+    # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist
+    # carries NFS placeholders; the task injects real coords at synth time.
+    if env.dashcam_mode == "nfs":
+        DashcamPVChart(app, f"{name}-dashcam-pv", env=env)
     # dashcam-cv is stage-only today (the only env running the vector fill).
     if name == "stage-1":
         DashcamCVChart(app, "dashcam-cv", env=env)

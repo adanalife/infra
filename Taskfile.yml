@@ -43,6 +43,45 @@ tasks:
     cmds:
       - mise exec -- uv run cdk8s synth
 
+  # The dashcam NFS PersistentVolume is host-specific bootstrap infra kept OUT of
+  # Argo (its own DashcamPVChart -> dist/<env>-dashcam-pv.k8s.yaml, not globbed by
+  # the apps/data ApplicationSets). These tasks synth it with the real NFS coords
+  # from the gitignored cdk8s/dashcam-nfs.local.env and apply just the PV — a
+  # once-per-cluster bootstrap, like seeding secrets. The matching PVC is Argo's
+  # (in the data unit) and binds to this PV by name.
+  k8s:stage:dashcam-pv:
+    desc: provision the stage-1 dashcam NFS PV (cluster-scoped, outside Argo) from cdk8s with real coords
+    cmds:
+      - task: k8s:_dashcam-pv:apply
+        vars: { ENV: stage-1 }
+
+  k8s:prod:dashcam-pv:
+    desc: provision the prod-1 dashcam NFS PV (cluster-scoped, outside Argo) from cdk8s with real coords
+    cmds:
+      - task: k8s:_dashcam-pv:apply
+        vars: { ENV: prod-1 }
+
+  k8s:_dashcam-pv:apply:
+    internal: true
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    preconditions:
+      - sh: test -f dashcam-nfs.local.env
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH"
+    cmds:
+      - |
+        set -euo pipefail
+        set -a; . ./dashcam-nfs.local.env; set +a
+        : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
+        : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+        # Synth via main.py directly (NOT `cdk8s synth`, which forces output=dist
+        # from cdk8s.yaml) so the real coords land in a throwaway dir, never the
+        # committed golden. Apply only the cluster-scoped PV.
+        CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
+        echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
+        kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
+
   cdk8s:test:
     desc: Run the cdk8s unit + render-parity + contract tests
     dir: cdk8s

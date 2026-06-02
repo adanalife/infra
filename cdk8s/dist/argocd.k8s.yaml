@@ -87,12 +87,6 @@ spec:
           - CreateNamespace=false
           - ServerSideApply=true
           - Prune=false
-      ignoreDifferences:
-        - group: ""
-          kind: PersistentVolume
-          jsonPointers:
-            - /spec/nfs/server
-            - /spec/nfs/path
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
