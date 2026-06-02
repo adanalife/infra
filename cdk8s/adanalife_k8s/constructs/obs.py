@@ -124,20 +124,31 @@ class ObsInstance(Construct):
                                        target_port=k8s.IntOrString.from_string(n))
                        for n, p in _PORTS]))
 
-        # --- Ingress (noVNC) — only where the env publishes DNS ---
+        # --- host-access LoadBalancer (k3d-only convenience: local + dev). The
+        # legacy obs-host VNC Service, now per-platform (obs-twitch-host). ---
+        if env.cluster in ("local", "bees"):
+            k8s.KubeService(self, "host-access",
+                metadata=k8s.ObjectMeta(name=f"{name}-host", namespace=ns),
+                spec=k8s.ServiceSpec(
+                    type="LoadBalancer", selector={"app": name},
+                    ports=[k8s.ServicePort(name="vnc", port=5902,
+                                           target_port=k8s.IntOrString.from_string("vnc"))]))
+
+        # --- Ingress (noVNC) — only where the env publishes DNS. Overlay-added,
+        # so no metadata labels (matches the kustomize render). ---
         if env.dns_base:
-            self._ingress(name, env, ns, labels)
+            self._ingress(name, env, ns)
         if env.tailscale and env.dns_base:
-            self._tailscale_ingress(name, env, ns, labels)
+            self._tailscale_ingress(name, env, ns)
 
     # ---- helpers ----
     def _external_secret(self, secret_name, sm_path, ns, labels):
         import cdk8s
         # ESO CRD isn't in imports/k8s; emit via ApiObject + a /spec JSON patch.
-        # (Typed ESO constructs via `cdk8s import` are a Phase-2 follow-up.)
+        # Overlay-added (prod stream-key), so no metadata labels (matches render).
         es = cdk8s.ApiObject(self, "stream-key",
             api_version="external-secrets.io/v1", kind="ExternalSecret",
-            metadata={"name": secret_name, "namespace": ns, "labels": labels})
+            metadata={"name": secret_name, "namespace": ns})
         es.add_json_patch(cdk8s.JsonPatch.add("/spec", {
             "refreshInterval": "1h",
             "secretStoreRef": {"name": "aws-secretsmanager", "kind": "SecretStore"},
@@ -145,7 +156,7 @@ class ObsInstance(Construct):
             "data": [{"secretKey": "STREAM_KEY", "remoteRef": {"key": sm_path}}],
         }))
 
-    def _ingress(self, name, env: EnvConfig, ns, labels):
+    def _ingress(self, name, env: EnvConfig, ns):
         host = f"{name}.{env.dns_base}"
         ann = {"external-dns.alpha.kubernetes.io/hostname": host}
         # minipc envs (prod/stage) get real TLS via the namespaced Route53 issuer;
@@ -156,17 +167,17 @@ class ObsInstance(Construct):
         backend = k8s.IngressBackend(service=k8s.IngressServiceBackend(
             name=name, port=k8s.ServiceBackendPort(name="novnc")))
         k8s.KubeIngress(self, "ingress",
-            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels, annotations=ann),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, annotations=ann),
             spec=k8s.IngressSpec(
                 ingress_class_name="traefik",
                 tls=[k8s.IngressTls(hosts=[host], secret_name=f"{name}-tls")] if tls else None,
                 rules=[k8s.IngressRule(host=host, http=k8s.HttpIngressRuleValue(
                     paths=[k8s.HttpIngressPath(path="/", path_type="Prefix", backend=backend)]))]))
 
-    def _tailscale_ingress(self, name, env: EnvConfig, ns, labels):
+    def _tailscale_ingress(self, name, env: EnvConfig, ns):
         short = env.dns_base.split(".")[0]   # prod / stage / dev
         k8s.KubeIngress(self, "ts-ingress",
-            metadata=k8s.ObjectMeta(name=f"{name}-ts", namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=f"{name}-ts", namespace=ns),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
                 default_backend=k8s.IngressBackend(service=k8s.IngressServiceBackend(

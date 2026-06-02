@@ -72,6 +72,9 @@ def test_contract_drives_names_ports_and_urls():
     assert cm["DASHCAM_RTSP_URL"] == c.dashcam_rtsp_url
 
 
-def test_local_has_no_ingress():
+def test_local_obs_has_no_ingress():
+    # OBS is VNC-port-forward-only on local; other apps (tripbot) may carry one.
     objs = _synth("local")
-    assert not [o for o in objs if o["kind"] == "Ingress"]
+    obs_ingresses = [o for o in objs if o["kind"] == "Ingress"
+                     and o["metadata"]["name"].startswith("obs-")]
+    assert not obs_ingresses
