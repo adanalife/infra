@@ -67,9 +67,16 @@ jobs:
       - name: Run tests
         run: mise exec -- uv run pytest -q
 
-      # Belt-and-suspenders: a clean full synth (also proves CDK8S_ENV-less run).
-      - name: Synth all envs
+      # Golden-file gate: the committed dist/ deploy units (the GitOps source)
+      # must match a fresh synth. Uses the same NFS placeholders the committed
+      # files were generated with. Fails if dist/ is stale (forgot to re-synth).
+      - name: Assert committed dist/ is up to date
         env:
           NFS_SERVER: '<NFS server address>'
           NFS_PATH: '<export path>'
-        run: mise exec -- uv run cdk8s synth
+        run: |
+          mise exec -- uv run cdk8s synth
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::dist/ is stale — run 'task cdk8s:synth' and commit the result."
+            exit 1
+          fi

@@ -1,0 +1,986 @@
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: aws-secretsmanager
+  namespace: development
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: us-east-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:
+            name: eso-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKeySecretRef:
+            name: eso-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-cloud-otlp
+  namespace: development
+spec:
+  dataFrom:
+    - extract:
+        key: k8s/grafana-cloud-otlp
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: grafana-cloud-otlp
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sentry-tripbot
+  namespace: development
+spec:
+  dataFrom:
+    - extract:
+        key: k8s/sentry-tripbot
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: sentry-tripbot
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sentry-vlc-server
+  namespace: development
+spec:
+  dataFrom:
+    - extract:
+        key: k8s/sentry-vlc-server
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: sentry-vlc-server
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cert-manager-aws-credentials
+  namespace: development
+spec:
+  data:
+    - remoteRef:
+        key: k8s/external-dns/aws-credentials
+        property: access-key
+      secretKey: access-key-id
+    - remoteRef:
+        key: k8s/external-dns/aws-credentials
+        property: secret-key
+      secretKey: secret-access-key
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    name: cert-manager-aws-credentials
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-staging-route53
+  namespace: development
+spec:
+  acme:
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-route53-account
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    solvers:
+      - dns01:
+          route53:
+            accessKeyIDSecretRef:
+              key: access-key-id
+              name: cert-manager-aws-credentials
+            region: us-east-1
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
+            secretAccessKeySecretRef:
+              key: secret-access-key
+              name: cert-manager-aws-credentials
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-route53
+  namespace: development
+spec:
+  acme:
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-route53-account
+    server: https://acme-v02.api.letsencrypt.org/directory
+    solvers:
+      - dns01:
+          route53:
+            accessKeyIDSecretRef:
+              key: access-key-id
+              name: cert-manager-aws-credentials
+            region: us-east-1
+            role: arn:aws:iam::413585268653:role/ExternalDNSRole
+            secretAccessKeySecretRef:
+              key: secret-access-key
+              name: cert-manager-aws-credentials
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: tripbot
+  name: postgres-credentials
+  namespace: development
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secretsmanager
+    kind: SecretStore
+  target:
+    name: postgres-secret
+    template:
+      type: Opaque
+      data:
+        POSTGRES_USER: "{{ .user }}"
+        POSTGRES_PASSWORD: "{{ .password }}"
+        POSTGRES_DB: "{{ .db }}"
+  data:
+    - secretKey: user
+      remoteRef:
+        key: k8s/postgres/credentials
+        property: user
+    - secretKey: password
+      remoteRef:
+        key: k8s/postgres/credentials
+        property: password
+    - secretKey: db
+      remoteRef:
+        key: k8s/postgres/credentials
+        property: db
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: tripbot
+  name: postgres
+  namespace: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  serviceName: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - envFrom:
+            - secretRef:
+                name: postgres-secret
+          image: pgvector/pgvector:pg16
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          name: postgres
+          ports:
+            - containerPort: 5432
+              name: postgres
+          readinessProbe:
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            tcpSocket:
+              port: postgres
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres-data
+              subPath: pgdata
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: tripbot
+  name: postgres
+  namespace: development
+spec:
+  clusterIP: None
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+  selector:
+    app: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot-config
+  namespace: development
+data:
+  BOT_USERNAME: tripbot4000
+  CHANNEL_NAME: adanalife_staging
+  DATABASE_HOST: postgres
+  ENV: staging
+  EXTERNAL_URL: https://tripbot.dev.whereisdana.today:9443
+  GOOGLE_APPS_PROJECT_ID: tripbot-stage
+  MAPS_OUTPUT_DIR: /opt/data/maps
+  NATS_URL: nats://nats.development-platform.svc.cluster.local:4222
+  OBS_SERVER_HOST: obs:8080
+  ONSCREENS_SERVER_HOST: onscreens-server:8080
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=development,service.namespace=tripbot
+  OTEL_SDK_DISABLED: "true"
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  READ_ONLY: "false"
+  SENTRY_ENVIRONMENT: development
+  TRIPBOT_SERVER_PORT: "8080"
+  VERBOSE: "false"
+  VLC_SERVER_HOST: vlc-server:8080
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot-database-creds
+  namespace: development
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secretsmanager
+    kind: SecretStore
+  target:
+    name: tripbot-database-creds
+    template:
+      type: Opaque
+      data:
+        DATABASE_USER: "{{ .user }}"
+        DATABASE_PASS: "{{ .password }}"
+        DATABASE_DB: "{{ .db }}"
+  data:
+    - secretKey: user
+      remoteRef:
+        key: k8s/postgres/credentials
+        property: user
+    - secretKey: password
+      remoteRef:
+        key: k8s/postgres/credentials
+        property: password
+    - secretKey: db
+      remoteRef:
+        key: k8s/postgres/credentials
+        property: db
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot-twitch-creds
+  namespace: development
+spec:
+  dataFrom:
+    - extract:
+        key: k8s/tripbot/twitch-creds
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: tripbot-twitch-creds
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot-google-maps-api-key
+  namespace: development
+spec:
+  dataFrom:
+    - extract:
+        key: k8s/tripbot/google-maps-api-key
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: tripbot-google-maps-api-key
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot-discord-alerts-webhook
+  namespace: development
+spec:
+  data:
+    - remoteRef:
+        key: k8s/tripbot/discord-alerts-webhook
+      secretKey: DISCORD_ALERTS_WEBHOOK
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: tripbot-discord-alerts-webhook
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot-discord-bot-token
+  namespace: development
+spec:
+  data:
+    - remoteRef:
+        key: k8s/tripbot/discord-bot-token
+      secretKey: DISCORD_BOT_TOKEN
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: tripbot-discord-bot-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot
+  namespace: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tripbot
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: 849c74de9c
+      labels:
+        app: tripbot
+    spec:
+      containers:
+        - env:
+            - name: USER
+              value: tripbot
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+            - secretRef:
+                name: grafana-cloud-otlp
+            - secretRef:
+                name: sentry-tripbot
+            - secretRef:
+                name: tripbot-twitch-creds
+            - secretRef:
+                name: tripbot-google-maps-api-key
+            - secretRef:
+                name: tripbot-discord-alerts-webhook
+                optional: true
+            - secretRef:
+                name: tripbot-discord-bot-token
+                optional: true
+          image: adanalife/tripbot:develop
+          imagePullPolicy: Always
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          name: tripbot
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      initContainers:
+        - args:
+            - -path
+            - /migrations
+            - -database
+            - postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable
+            - up
+          command:
+            - migrate
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+          image: adanalife/tripbot:develop
+          imagePullPolicy: Always
+          name: migrate
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      securityContext:
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot
+  namespace: development
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app: tripbot
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: tripbot.dev.whereisdana.today
+  labels:
+    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/part-of: tripbot
+  name: tripbot
+  namespace: development
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tripbot.dev.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: tripbot
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - tripbot.dev.whereisdana.today
+      secretName: tripbot-tls
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: vlc-server
+    app.kubernetes.io/part-of: tripbot
+  name: vlc-server-config
+  namespace: development
+data:
+  BOT_USERNAME: adanalife_bot
+  CHANNEL_NAME: adanalife
+  DATABASE_DB: tripbot_docker
+  DATABASE_HOST: postgres
+  DATABASE_PASS: hunter2
+  DATABASE_USER: tripbot_docker
+  DISPLAY: :0.0
+  ENV: staging
+  FONTCONFIG_PATH: /etc/fonts
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=development,service.namespace=tripbot
+  OTEL_SDK_DISABLED: "true"
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  SENTRY_ENVIRONMENT: development
+  TWILIO_ACCT_SID: stub
+  TWILIO_AUTH_TOKEN: stub
+  TWILIO_FROM_NUM: "+15555550100"
+  TWILIO_TO_NUM: "+15555550101"
+  TWITCH_AUTH_TOKEN: oauth:stub
+  TWITCH_CLIENT_ID: stub
+  TWITCH_CLIENT_SECRET: stub
+  VLC_SERVER_HOST: vlc-server:8080
+  XDG_RUNTIME_DIR: /root/.cache/xdgr
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: vlc-server
+    app.kubernetes.io/part-of: tripbot
+  name: vlc-server
+  namespace: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vlc-server
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: 0990350df2
+      labels:
+        app: vlc-server
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: vlc-server-config
+            - secretRef:
+                name: sentry-vlc-server
+                optional: false
+            - secretRef:
+                name: grafana-cloud-otlp
+                optional: false
+          image: adanalife/vlc:develop
+          imagePullPolicy: Always
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          name: vlc-server
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 5900
+              name: vnc
+            - containerPort: 8554
+              name: rtsp
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              memory: 2Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /opt/data/Dashcam/_all
+              name: dashcam
+              readOnly: true
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - hostPath:
+            path: /host/dashcam
+            type: Directory
+          name: dashcam
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: vlc-server
+    app.kubernetes.io/part-of: tripbot
+  name: vlc-server
+  namespace: development
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: rtsp
+      port: 8554
+      targetPort: rtsp
+    - name: vnc
+      port: 5900
+      targetPort: vnc
+  selector:
+    app: vlc-server
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vlc-server-host
+  namespace: development
+spec:
+  ports:
+    - name: vnc
+      port: 5903
+      targetPort: vnc
+    - name: rtsp
+      port: 8554
+      targetPort: rtsp
+  selector:
+    app: vlc-server
+  type: LoadBalancer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: vlc.dev.whereisdana.today
+  name: vlc-server
+  namespace: development
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: vlc.dev.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: vlc-server
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: onscreens-server
+    app.kubernetes.io/part-of: tripbot
+  name: onscreens-server-config
+  namespace: development
+data:
+  ENV: staging
+  NATS_URL: nats://nats.development-platform.svc.cluster.local:4222
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=development,service.namespace=tripbot
+  OTEL_SDK_DISABLED: "true"
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  SENTRY_ENVIRONMENT: development
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: onscreens-server
+    app.kubernetes.io/part-of: tripbot
+  name: onscreens-server
+  namespace: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: onscreens-server
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: a95aa735da
+      labels:
+        app: onscreens-server
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: onscreens-server-config
+            - secretRef:
+                name: sentry-vlc-server
+                optional: false
+            - secretRef:
+                name: grafana-cloud-otlp
+                optional: false
+          image: adanalife/onscreens-server:develop
+          imagePullPolicy: Always
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 5
+          name: onscreens-server
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 25m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /opt/data/run
+              name: run
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - emptyDir: {}
+          name: run
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: onscreens-server
+    app.kubernetes.io/part-of: tripbot
+  name: onscreens-server
+  namespace: development
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app: onscreens-server
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: obs-twitch
+    app.kubernetes.io/instance: obs-twitch
+    app.kubernetes.io/name: obs
+    app.kubernetes.io/part-of: tripbot
+  name: obs-twitch-config
+  namespace: development
+data:
+  DASHCAM_RTSP_URL: rtsp://vlc-server:8554/dashcam
+  OBS_QUALITY_PRESET: low
+  OBS_STREAM_ENCODER: obs_x264
+  OBS_WEBSOCKET_PASSWD: adanalife
+  ONSCREENS_URL_BASE: http://onscreens-server:8080
+  VLC_URL_BASE: http://vlc-server:8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: obs-twitch
+    app.kubernetes.io/instance: obs-twitch
+    app.kubernetes.io/name: obs
+    app.kubernetes.io/part-of: tripbot
+  name: obs-twitch
+  namespace: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obs-twitch
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: 6f5a83a84f
+      labels:
+        app: obs-twitch
+        app.kubernetes.io/instance: obs-twitch
+        app.kubernetes.io/name: obs
+        app.kubernetes.io/part-of: tripbot
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: obs-twitch-config
+            - secretRef:
+                name: obs-stream-key
+                optional: true
+          image: adanalife/obs:develop
+          imagePullPolicy: Always
+          livenessProbe:
+            exec:
+              command:
+                - /opt/obs/healthcheck.sh
+            failureThreshold: 3
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+          name: obs
+          ports:
+            - containerPort: 5900
+              name: vnc
+            - containerPort: 4455
+              name: websocket
+            - containerPort: 6080
+              name: novnc
+            - containerPort: 8080
+              name: obs-server
+          resources:
+            limits:
+              memory: 3Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: obs-twitch
+    app.kubernetes.io/instance: obs-twitch
+    app.kubernetes.io/name: obs
+    app.kubernetes.io/part-of: tripbot
+  name: obs-twitch
+  namespace: development
+spec:
+  ports:
+    - name: vnc
+      port: 5900
+      targetPort: vnc
+    - name: websocket
+      port: 4455
+      targetPort: websocket
+    - name: novnc
+      port: 6080
+      targetPort: novnc
+    - name: obs-server
+      port: 8080
+      targetPort: obs-server
+  selector:
+    app: obs-twitch
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-twitch-host
+  namespace: development
+spec:
+  ports:
+    - name: vnc
+      port: 5902
+      targetPort: vnc
+  selector:
+    app: obs-twitch
+  type: LoadBalancer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: obs-twitch.dev.whereisdana.today
+  name: obs-twitch
+  namespace: development
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: obs-twitch.dev.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: obs-twitch
+                port:
+                  name: novnc
+            path: /
+            pathType: Prefix

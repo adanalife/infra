@@ -50,7 +50,12 @@ REPOS = {
     "tailscale": "https://pkgs.tailscale.com/helmcharts",
 }
 
-# --- Version pins (captured 2026-06-02 from the repos above) ---
+# --- Version pins (captured 2026-06-02 from the repos above, and CONFIRMED
+# against the live minipc via deployed resources' helm.sh/chart labels:
+# cert-manager v1.20.2, traefik 40.2.0, external-secrets 2.5.0, nats 2.14.0,
+# external-dns 1.21.1, prometheus-node-exporter 4.55.0 all match what's pinned
+# here. cilium / tailscale-operator / k8s-monitoring don't surface the umbrella
+# chart label, but their live subcharts/values are consistent with these.) ---
 VERSIONS = {
     "external-secrets": "2.5.0",
     "traefik": "40.2.0",

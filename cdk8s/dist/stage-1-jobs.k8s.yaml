@@ -1,0 +1,117 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-auth-bootstrap-bot
+  namespace: stage-1
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      containers:
+        - args:
+            - --account=bot
+          command:
+            - /usr/local/bin/auth-bootstrap
+          env:
+            - name: EXTERNAL_URL
+              value: http://localhost:8080
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+            - secretRef:
+                name: tripbot-twitch-creds
+                optional: false
+            - secretRef:
+                name: tripbot-google-maps-api-key
+                optional: false
+          image: adanalife/tripbot:develop
+          imagePullPolicy: Always
+          name: auth-bootstrap
+          ports:
+            - containerPort: 8080
+      restartPolicy: Never
+  ttlSecondsAfterFinished: 600
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-auth-bootstrap-broadcaster
+  namespace: stage-1
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      containers:
+        - args:
+            - --account=broadcaster
+          command:
+            - /usr/local/bin/auth-bootstrap
+          env:
+            - name: EXTERNAL_URL
+              value: http://localhost:8080
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+            - secretRef:
+                name: tripbot-twitch-creds
+                optional: false
+            - secretRef:
+                name: tripbot-google-maps-api-key
+                optional: false
+          image: adanalife/tripbot:develop
+          imagePullPolicy: Always
+          name: auth-bootstrap
+          ports:
+            - containerPort: 8080
+      restartPolicy: Never
+  ttlSecondsAfterFinished: 600
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tripbot-seed
+  namespace: stage-1
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      containers:
+        - command:
+            - /usr/local/bin/seed-db
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+          image: adanalife/tripbot:develop
+          imagePullPolicy: Always
+          name: seed
+      initContainers:
+        - command:
+            - sh
+            - -c
+            - until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done
+          image: busybox:1.36
+          name: wait-for-postgres
+        - args:
+            - -path
+            - /migrations
+            - -database
+            - postgres://$(DATABASE_USER):$(DATABASE_PASS)@$(DATABASE_HOST):5432/$(DATABASE_DB)?sslmode=disable
+            - up
+          command:
+            - migrate
+          envFrom:
+            - configMapRef:
+                name: tripbot-config
+            - secretRef:
+                name: tripbot-database-creds
+          image: adanalife/tripbot:develop
+          imagePullPolicy: Always
+          name: migrate
+      restartPolicy: Never
+  ttlSecondsAfterFinished: 600

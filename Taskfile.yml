@@ -36,6 +36,16 @@ tasks:
     cmds:
       - mise exec -- uv run pytest -q
 
+  cdk8s:check:
+    desc: Assert the committed dist/ deploy units match a fresh synth (golden-file gate)
+    dir: cdk8s
+    env:
+      NFS_SERVER: '<NFS server address>'
+      NFS_PATH: '<export path>'
+    cmds:
+      - mise exec -- uv run cdk8s synth
+      - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
+
   cdk8s:reference:
     desc: Capture the legacy Kustomize render as the parity oracle (cdk8s/reference/)
     dir: cdk8s
