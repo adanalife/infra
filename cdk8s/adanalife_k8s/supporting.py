@@ -1,10 +1,10 @@
 """Namespace-scoped supporting resources the env umbrella pulls in alongside the
-apps: the per-ns ESO SecretStore, the cross-cutting observability ExternalSecrets
-(shared-secrets), and the namespaced cert-manager Issuers (+ their Route53 creds).
+apps: the cross-cutting observability ExternalSecrets (shared-secrets) and the
+namespaced cert-manager Issuers (+ their Route53 creds).
 
-These are emitted by `AppsChart` so a single `kubectl apply` of the env file
-stands up the same set the Kustomize umbrella did. They are skipped for the
-`local` env (no ESO / no cert-manager there).
+These are emitted by `AppsChart`. The ESO SecretStore they reference is emitted
+by `DataChart` (the synced-first unit) so the data unit is self-sufficient — see
+DataChart. Skipped for the `local` env (no ESO / no cert-manager there).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from constructs import Construct
 
 import imports.io.cert_manager as cm
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.eso import ESData, external_secret, secret_store
+from adanalife_k8s.eso import ESData, external_secret
 
 # Cross-cutting observability secrets (k8s/shared-secrets/base) — all
 # dataFrom.extract from SM, materialized into the env namespace, envFrom'd by
@@ -26,12 +26,12 @@ _SHARED_SECRETS = [
 
 
 def emit_supporting(scope: Construct, env: EnvConfig) -> None:
-    """SecretStore + shared-secrets + cert-manager app-issuers for an eso env."""
+    """shared-secrets + cert-manager app-issuers for an eso env. The ESO
+    SecretStore these reference is emitted by DataChart, not here."""
     if env.secret_source != "eso":
         return  # local env: no ESO, no cert-manager
 
     ns = env.namespace or None
-    secret_store(scope, "secret-store", namespace=ns)
 
     for name, sm_key in _SHARED_SECRETS:
         external_secret(
