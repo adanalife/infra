@@ -1,0 +1,138 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: adanalife-apps
+  namespace: argocd
+spec:
+  description: adanalife app workloads synthesized by cdk8s
+  sourceRepos:
+    - git@github.com:adanalife/infra.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist:
+    - group: ""
+      kind: PersistentVolume
+    - group: storage.k8s.io
+      kind: StorageClass
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: adanalife-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+          - env: stage-1
+  template:
+    metadata:
+      name: "{{.env}}-apps"
+    spec:
+      project: adanalife-apps
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: master
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-apps.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: adanalife-data
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+          - env: stage-1
+  template:
+    metadata:
+      name: "{{.env}}-data"
+    spec:
+      project: adanalife-apps
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: master
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-data.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+          - Prune=false
+      ignoreDifferences:
+        - group: ""
+          kind: PersistentVolume
+          jsonPointers:
+            - /spec/nfs/server
+            - /spec/nfs/path
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server-tailscale
+  namespace: argocd
+spec:
+  defaultBackend:
+    service:
+      name: argocd-server
+      port:
+        name: http
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - argocd-prod
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-repo-infra
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: k8s/argocd/repo-ssh-key
+      secretKey: sshPrivateKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secretsmanager-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-repo-infra
+    template:
+      data:
+        sshPrivateKey: "{{ .sshPrivateKey }}"
+        type: git
+        url: git@github.com:adanalife/infra.git
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository

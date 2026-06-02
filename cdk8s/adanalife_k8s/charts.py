@@ -112,3 +112,17 @@ class JobsChart(Chart):
         from adanalife_k8s.constructs.tripbot import emit_jobs
 
         emit_jobs(self, env)
+
+
+class ArgoCDChart(Chart):
+    """Argo CD GitOps config (AppProject + ApplicationSets + UI Ingress + repo
+    ExternalSecret) — the objects that drive the controller. Applied after the
+    Argo install (the Helm chart in PlatformChart). Offline + deterministic, so
+    it's committed to dist/ + golden-gated like the app units. Cluster-level
+    (env-agnostic — it lists the envs internally)."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        from adanalife_k8s.constructs.argocd import ArgoCD
+
+        ArgoCD(self)

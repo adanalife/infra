@@ -109,6 +109,11 @@ tasks:
     cmds:
       - kubectl diff -f dist/prod-1-apps.k8s.yaml || true
 
+  gitops:apply:
+    desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)
+    cmds:
+      - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
+
   contract:sync:
     desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
     dir: cdk8s
