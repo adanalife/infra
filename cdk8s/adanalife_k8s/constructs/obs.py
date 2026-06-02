@@ -1,0 +1,174 @@
+"""ObsInstance — one OBS deployment for a single streaming platform.
+
+Replaces the Kustomize obs/base + nameSuffix(-twitch/-youtube) + label-patch
+idiom with a first-class factory. `ObsInstance(platform="youtube", ...)` emits
+cleanly-named `obs-youtube` objects (no `obs-twitch-youtube` double-suffix), with
+`app: obs-youtube` selector derived from the instance name, so a Service can only
+ever select its own pods. Faithfully reproduces k8s/apps/obs/base + the per-env
+overlays (GPU, encoder, quality, stream-key toggle, ingress).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+
+import imports.k8s as k8s
+from constructs import Construct
+
+from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.contract import load_contract
+
+# (port-name, port-number) — order/names match k8s/apps/obs/base/{deployment,service}.yaml
+_PORTS = [("vnc", "obs_vnc"), ("websocket", "obs_websocket"),
+          ("novnc", "obs_novnc"), ("obs-server", "obs_server")]
+
+
+class ObsInstance(Construct):
+    def __init__(
+        self,
+        scope: Construct,
+        platform: str,                     # "twitch" | "youtube"
+        *,
+        env: EnvConfig,
+        streaming: bool = False,           # create the stream-key ExternalSecret
+        stream_key_sm: str | None = None,  # SM path, e.g. k8s/obs/twitch-stream-key
+        extra_config: dict[str, str] | None = None,
+    ):
+        c = load_contract()
+        name = c.svc(f"obs_{platform}")    # obs-twitch / obs-youtube
+        super().__init__(scope, name)
+
+        labels = {
+            "app": name,
+            "app.kubernetes.io/name": "obs",
+            "app.kubernetes.io/instance": name,
+            "app.kubernetes.io/part-of": "tripbot",
+        }
+        ns = env.namespace or None
+
+        # --- ConfigMap (obs-config-<platform>) ---
+        data = {
+            "DASHCAM_RTSP_URL": c.dashcam_rtsp_url,
+            "ONSCREENS_URL_BASE": c.onscreens_url_base,
+            "VLC_URL_BASE": c.vlc_url_base,
+            "OBS_WEBSOCKET_PASSWD": "adanalife",
+            "OBS_QUALITY_PRESET": env.obs_quality,
+            "OBS_STREAM_ENCODER": env.obs_encoder,
+            **(extra_config or {}),
+        }
+        cm_name = f"{name}-config"
+        k8s.KubeConfigMap(self, "config",
+            metadata=k8s.ObjectMeta(name=cm_name, namespace=ns, labels=labels),
+            data=data)
+        cfg_hash = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:10]
+
+        # --- stream-key Secret/ExternalSecret (streaming toggle) ---
+        # twitch keeps the shared base name `obs-stream-key`; youtube gets a
+        # distinct name so a twitch stream:on can't leak its key into youtube.
+        secret_name = "obs-stream-key" if platform == "twitch" else f"{name}-stream-key"
+        if streaming and stream_key_sm:
+            self._external_secret(secret_name, stream_key_sm, ns, labels)
+
+        env_from = [
+            k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=cm_name)),
+            # optional so the pod boots idle (VNC-only) when the Secret is absent.
+            k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=secret_name, optional=True)),
+        ]
+
+        # --- resources (+ iGPU on GPU envs) ---
+        requests = {"cpu": k8s.Quantity.from_string("200m"),
+                    "memory": k8s.Quantity.from_string("512Mi")}
+        limits = {"memory": k8s.Quantity.from_string("3Gi")}
+        if env.gpu:
+            requests["gpu.intel.com/i915"] = k8s.Quantity.from_string("1")
+            limits["gpu.intel.com/i915"] = k8s.Quantity.from_string("1")
+
+        container = k8s.Container(
+            name="obs",
+            image=f"adanalife/obs:{env.image_tag}",
+            image_pull_policy="Always",
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"])),
+            ports=[k8s.ContainerPort(name=n, container_port=c.port(p)) for n, p in _PORTS],
+            env_from=env_from,
+            liveness_probe=k8s.Probe(
+                exec=k8s.ExecAction(command=["/opt/obs/healthcheck.sh"]),
+                initial_delay_seconds=15, period_seconds=30,
+                timeout_seconds=10, failure_threshold=3),
+            resources=k8s.ResourceRequirements(requests=requests, limits=limits),
+        )
+
+        k8s.KubeDeployment(self, "deployment",
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
+            spec=k8s.DeploymentSpec(
+                replicas=1,
+                # Recreate: one Xvfb/VNC owner, no overlapping handoff.
+                strategy=k8s.DeploymentStrategy(type="Recreate"),
+                selector=k8s.LabelSelector(match_labels={"app": name}),
+                template=k8s.PodTemplateSpec(
+                    metadata=k8s.ObjectMeta(
+                        labels=labels,
+                        annotations={"adanalife.dev/config-hash": cfg_hash}),
+                    spec=k8s.PodSpec(
+                        security_context=k8s.PodSecurityContext(
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")),
+                        containers=[container]))))
+
+        # --- Service ---
+        k8s.KubeService(self, "service",
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
+            spec=k8s.ServiceSpec(
+                type="ClusterIP", selector={"app": name},
+                ports=[k8s.ServicePort(name=n, port=c.port(p),
+                                       target_port=k8s.IntOrString.from_string(n))
+                       for n, p in _PORTS]))
+
+        # --- Ingress (noVNC) — only where the env publishes DNS ---
+        if env.dns_base:
+            self._ingress(name, env, ns, labels)
+        if env.tailscale and env.dns_base:
+            self._tailscale_ingress(name, env, ns, labels)
+
+    # ---- helpers ----
+    def _external_secret(self, secret_name, sm_path, ns, labels):
+        import cdk8s
+        # ESO CRD isn't in imports/k8s; emit via ApiObject + a /spec JSON patch.
+        # (Typed ESO constructs via `cdk8s import` are a Phase-2 follow-up.)
+        es = cdk8s.ApiObject(self, "stream-key",
+            api_version="external-secrets.io/v1", kind="ExternalSecret",
+            metadata={"name": secret_name, "namespace": ns, "labels": labels})
+        es.add_json_patch(cdk8s.JsonPatch.add("/spec", {
+            "refreshInterval": "1h",
+            "secretStoreRef": {"name": "aws-secretsmanager", "kind": "SecretStore"},
+            "target": {"name": secret_name, "creationPolicy": "Owner"},
+            "data": [{"secretKey": "STREAM_KEY", "remoteRef": {"key": sm_path}}],
+        }))
+
+    def _ingress(self, name, env: EnvConfig, ns, labels):
+        host = f"{name}.{env.dns_base}"
+        ann = {"external-dns.alpha.kubernetes.io/hostname": host}
+        # minipc envs (prod/stage) get real TLS via the namespaced Route53 issuer;
+        # dev is HTTP-only (matches the legacy dev overlay).
+        tls = env.cluster == "minipc"
+        if tls:
+            ann["cert-manager.io/issuer"] = "letsencrypt-route53"
+        backend = k8s.IngressBackend(service=k8s.IngressServiceBackend(
+            name=name, port=k8s.ServiceBackendPort(name="novnc")))
+        k8s.KubeIngress(self, "ingress",
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels, annotations=ann),
+            spec=k8s.IngressSpec(
+                ingress_class_name="traefik",
+                tls=[k8s.IngressTls(hosts=[host], secret_name=f"{name}-tls")] if tls else None,
+                rules=[k8s.IngressRule(host=host, http=k8s.HttpIngressRuleValue(
+                    paths=[k8s.HttpIngressPath(path="/", path_type="Prefix", backend=backend)]))]))
+
+    def _tailscale_ingress(self, name, env: EnvConfig, ns, labels):
+        short = env.dns_base.split(".")[0]   # prod / stage / dev
+        k8s.KubeIngress(self, "ts-ingress",
+            metadata=k8s.ObjectMeta(name=f"{name}-ts", namespace=ns, labels=labels),
+            spec=k8s.IngressSpec(
+                ingress_class_name="tailscale",
+                default_backend=k8s.IngressBackend(service=k8s.IngressServiceBackend(
+                    name=name, port=k8s.ServiceBackendPort(number=load_contract().port("obs_novnc")))),
+                tls=[k8s.IngressTls(hosts=[f"{name}-{short}"])]))
