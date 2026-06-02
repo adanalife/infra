@@ -8,9 +8,9 @@ stands up the same set the Kustomize umbrella did. They are skipped for the
 """
 from __future__ import annotations
 
-import cdk8s
 from constructs import Construct
 
+import imports.io.cert_manager as cm
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.eso import ESData, external_secret, secret_store
 
@@ -61,21 +61,19 @@ def _app_issuers(scope: Construct, env: EnvConfig, ns: str | None) -> None:
          "https://acme-v02.api.letsencrypt.org/directory",
          "letsencrypt-route53-account"),
     ):
-        issuer = cdk8s.ApiObject(
+        route53 = cm.IssuerSpecAcmeSolversDns01Route53(
+            region="us-east-1",
+            access_key_id_secret_ref=cm.IssuerSpecAcmeSolversDns01Route53AccessKeyIdSecretRef(
+                name="cert-manager-aws-credentials", key="access-key-id"),
+            secret_access_key_secret_ref=cm.IssuerSpecAcmeSolversDns01Route53SecretAccessKeySecretRef(
+                name="cert-manager-aws-credentials", key="secret-access-key"),
+            role=env.external_dns_role_arn)
+        cm.Issuer(
             scope, issuer_name,
-            api_version="cert-manager.io/v1", kind="Issuer",
             metadata={"name": issuer_name, **({"namespace": ns} if ns else {})},
-        )
-        issuer.add_json_patch(cdk8s.JsonPatch.add("/spec", {
-            "acme": {
-                "server": acme_server,
-                "email": "danadotlol@gmail.com",
-                "privateKeySecretRef": {"name": account_key},
-                "solvers": [{"dns01": {"route53": {
-                    "region": "us-east-1",
-                    "accessKeyIDSecretRef": {"name": "cert-manager-aws-credentials", "key": "access-key-id"},
-                    "secretAccessKeySecretRef": {"name": "cert-manager-aws-credentials", "key": "secret-access-key"},
-                    "role": env.external_dns_role_arn,
-                }}}],
-            },
-        }))
+            spec=cm.IssuerSpec(acme=cm.IssuerSpecAcme(
+                server=acme_server,
+                email="danadotlol@gmail.com",
+                private_key_secret_ref=cm.IssuerSpecAcmePrivateKeySecretRef(name=account_key),
+                solvers=[cm.IssuerSpecAcmeSolvers(
+                    dns01=cm.IssuerSpecAcmeSolversDns01(route53=route53))])))

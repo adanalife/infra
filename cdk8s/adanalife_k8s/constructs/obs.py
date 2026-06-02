@@ -143,18 +143,11 @@ class ObsInstance(Construct):
 
     # ---- helpers ----
     def _external_secret(self, secret_name, sm_path, ns, labels):
-        import cdk8s
-        # ESO CRD isn't in imports/k8s; emit via ApiObject + a /spec JSON patch.
-        # Overlay-added (prod stream-key), so no metadata labels (matches render).
-        es = cdk8s.ApiObject(self, "stream-key",
-            api_version="external-secrets.io/v1", kind="ExternalSecret",
-            metadata={"name": secret_name, "namespace": ns})
-        es.add_json_patch(cdk8s.JsonPatch.add("/spec", {
-            "refreshInterval": "1h",
-            "secretStoreRef": {"name": "aws-secretsmanager", "kind": "SecretStore"},
-            "target": {"name": secret_name, "creationPolicy": "Owner"},
-            "data": [{"secretKey": "STREAM_KEY", "remoteRef": {"key": sm_path}}],
-        }))
+        # Stream-key ExternalSecret via the shared typed builder. Overlay-added
+        # (prod stream-key), so no metadata labels (matches the render).
+        from adanalife_k8s.eso import ESData, external_secret
+        external_secret(self, "stream-key", name=secret_name, namespace=ns,
+                        creation_policy="Owner", data=[ESData("STREAM_KEY", sm_path)])
 
     def _ingress(self, name, env: EnvConfig, ns):
         host = f"{name}.{env.dns_base}"

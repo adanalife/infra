@@ -3,3 +3,15 @@ app: uv run python main.py
 output: dist
 imports:
   - k8s
+  # Typed constructs for the CRDs the app/supporting charts emit, generated from
+  # the schemas vendored in crds/ (captured from the live cluster). Regenerated
+  # by `cdk8s import` into imports/ (gitignored). Replaces the untyped
+  # ApiObject + JsonPatch path in eso.py / supporting.py / obs.py.
+  #
+  # NB: the SecretStore CRD is deliberately NOT imported — its multi-provider
+  # schema includes a `keepersecurity.getByTitleFallback` field that jsii rejects
+  # (JSII5000: getXxx names conflict with Java getters), failing the whole
+  # import. We only use the AWS provider and emit a single SecretStore, so it
+  # stays an ApiObject in eso.py — see secret_store() there.
+  - crds/externalsecrets.external-secrets.io.yaml
+  - crds/issuers.cert-manager.io.yaml
