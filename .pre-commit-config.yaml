@@ -41,6 +41,15 @@ repos:
         args: [--config, .github/linters/.ruff.toml]
         files: ^cdk8s/.*\.py$
 
+  # Markdown lint. Mirrors super-linter's MARKDOWN pass (same
+  # .github/linters/.markdown-lint.yml config) so doc nits like MD031
+  # (blanks-around-fences) are caught locally before push, not in CI.
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        args: [--config, .github/linters/.markdown-lint.yml]
+
   # Secrets: broad scan layered on top of the narrow detect-aws-credentials
   # / detect-private-key checks above. Sub-second. Uses the same allowlist as
   # super-linter's GITLEAKS pass (.github/linters/.gitleaks.toml) so the two
