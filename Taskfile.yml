@@ -1240,6 +1240,21 @@ tasks:
       - kubectl apply -k k8s/intel-xpu-manager/prod-1
       - kubectl rollout status -n kube-system daemonset/intel-xpumanager --timeout=180s
       - 'echo "Intel GPU plugin + XPU Manager up. gpu.intel.com/i915 schedulable; xpum_* metrics scraping at <pod-ip>:29999."'
+      # Argo CD — the GitOps controller for the cdk8s app manifests. Installed as
+      # part of the platform bring-up so there's no manual `helm repo add`. Comes
+      # up idle (monitor-only); the ApplicationSets + repo cred + UI Ingress are
+      # applied separately via `task gitops:apply` (cdk8s/dist/argocd.k8s.yaml).
+      # Version pinned to match cdk8s/adanalife_k8s/helm_platform.py. See
+      # gitops/README.md. (When the platform itself cuts over to cdk8s, this
+      # step is superseded by PlatformChart's argo-cd component.)
+      - helm repo add argo https://argoproj.github.io/argo-helm
+      - helm repo update argo
+      - helm upgrade --install argocd argo/argo-cd
+          --version 9.5.17
+          -n argocd --create-namespace
+          -f k8s/argo-cd/values.yml
+      - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd
+      - 'echo "Argo CD up in the argocd namespace (idle, monitor-only). Next: task gitops:apply to create the ApplicationSets + repo cred + UI Ingress, then browse argocd-prod.<tailnet>.ts.net. See gitops/README.md."'
 
   # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
   # obs-stream-key is `optional: true`, so the existence + content of that
