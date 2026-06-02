@@ -55,9 +55,11 @@ every other ESO-backed secret).
    `k8s/argocd/repo-ssh-key` in prod's SM). It's applied with the config below.
 
 3. **Apply the Argo config** (project + appset + ingress + repo secret):
+
    ```sh
    kubectl apply -f cdk8s/dist/argocd.k8s.yaml
    ```
+
    Argo creates `prod-1-apps` + `stage-1-apps`, both **OutOfSync** (nothing synced
    yet). This is safe — manual sync is on.
 
