@@ -20,5 +20,9 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Default run = synth-time tests only (unit + parity + contract). The
+# integration suite needs a live cluster with the cdk8s manifests applied, so
+# it's opt-in: `uv run pytest tests/integration --env stage-1` (an explicit path
+# arg overrides testpaths). Keeps the default run + CI offline.
+testpaths = ["tests/unit"]
 pythonpath = ["."]
