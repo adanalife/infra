@@ -3,6 +3,10 @@ dist/
 __pycache__/
 *.pyc
 .pytest_cache/
+# Captured kustomize renders — the render-parity oracle. Regenerated from the
+# legacy overlays with `kubectl kustomize ../k8s/overlays/<env>` (see README);
+# machine-local, not reviewed.
+reference/
 # Generated typed k8s constructs (cdk8s import). Regenerate with `cdk8s import`
 # (pinned to k8s API version in cdk8s.yaml). Gitignored to keep the tree
 # reviewable; CI/setup runs the import.
