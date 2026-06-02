@@ -16,15 +16,28 @@ tasks:
   # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
   # the safe read-only way to compare cdk8s output against the live cluster.
   # ---------------------------------------------------------------------------
+  cdk8s:imports:
+    desc: Generate the typed k8s + CRD constructs (cdk8s import) into imports/ — gitignored, needed before synth/test on a fresh checkout
+    dir: cdk8s
+    # Skip if already generated (import is slow). Both dirs must exist: k8s is the
+    # core API, io/ holds the ESO + cert-manager CRD constructs (per cdk8s.yaml).
+    status:
+      - test -d imports/k8s
+      - test -d imports/io
+    cmds:
+      - mise exec -- uv run cdk8s import
+
   cdk8s:synth:
     desc: Synthesize the app manifests (offline) -> cdk8s/dist/<env>-{apps,jobs}.k8s.yaml
     dir: cdk8s
+    deps: [cdk8s:imports]
     cmds:
       - mise exec -- uv run cdk8s synth
 
   cdk8s:synth:platform:
     desc: Synthesize apps + the platform Helm stack (needs helm + network)
     dir: cdk8s
+    deps: [cdk8s:imports]
     env:
       CDK8S_PLATFORM: "1"
     cmds:
@@ -33,12 +46,14 @@ tasks:
   cdk8s:test:
     desc: Run the cdk8s unit + render-parity + contract tests
     dir: cdk8s
+    deps: [cdk8s:imports]
     cmds:
       - mise exec -- uv run pytest -q
 
   cdk8s:check:
     desc: Assert the committed dist/ deploy units match a fresh synth (golden-file gate)
     dir: cdk8s
+    deps: [cdk8s:imports]
     env:
       NFS_SERVER: '<NFS server address>'
       NFS_PATH: '<export path>'
