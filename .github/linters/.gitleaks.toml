@@ -10,6 +10,13 @@ useDefault = true
 
 [allowlist]
 description = "infra repo path allowlists for non-secret strings"
+# The public ADanaLife Discord guild snowflake (607964164220125258). It appears
+# in the tripbot config source AND in the rendered cdk8s/dist manifests; allowlist
+# the value itself so both are covered. Not a secret — it's visible on invite
+# previews; the bot token lives in SM (k8s/tripbot/discord-bot-token).
+regexes = [
+  '''607964164220125258''',
+]
 paths = [
   # Empty/stub values; gitleaks generic-api-key rule false-positives on
   # the variable *name* `GOOGLE_MAPS_API_KEY=` (entropy ~3.78 even with
@@ -35,4 +42,16 @@ paths = [
   # is in AWS SM (k8s/tripbot/discord-bot-token) and never in this repo.
   '''k8s/apps/tripbot/overlays/stage-1/kustomization\.yaml''',
   '''k8s/apps/tripbot/overlays/prod-1/kustomization\.yaml''',
+
+  # cdk8s Tripbot construct — sets the same public DISCORD_GUILD_ID snowflake
+  # (607964164220125258) the kustomize overlays above do, in stage's config
+  # block. Same false-positive (discord-client-id rule on the 18-digit ID); no
+  # actual secret — the bot token lives in SM and is injected via ESO.
+  '''cdk8s/adanalife_k8s/constructs/tripbot\.py''',
+
+  # cdk8s supporting.py — ESO CR *builders*. They reference Secrets Manager keys
+  # by PATH (e.g. extract="k8s/sentry-tripbot") and pass creation_policy="Owner",
+  # which gitleaks' generic-api-key rule false-positives on. No secret values are
+  # present anywhere in this file — it only emits ExternalSecret/SecretStore CRs.
+  '''cdk8s/adanalife_k8s/supporting\.py''',
 ]

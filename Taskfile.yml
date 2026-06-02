@@ -10,6 +10,97 @@ env:
   KUBECTL_EXTERNAL_DIFF: diff -u -N --color=always
 
 tasks:
+  # ---------------------------------------------------------------------------
+  # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/), migrating off
+  # the Kustomize overlays. These are ADDITIVE: the live `k8s:<env>:apply` tasks
+  # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
+  # the safe read-only way to compare cdk8s output against the live cluster.
+  # ---------------------------------------------------------------------------
+  cdk8s:synth:
+    desc: Synthesize the app manifests (offline) -> cdk8s/dist/<env>-{apps,jobs}.k8s.yaml
+    dir: cdk8s
+    cmds:
+      - mise exec -- uv run cdk8s synth
+
+  cdk8s:synth:platform:
+    desc: Synthesize apps + the platform Helm stack (needs helm + network)
+    dir: cdk8s
+    env:
+      CDK8S_PLATFORM: "1"
+    cmds:
+      - mise exec -- uv run cdk8s synth
+
+  cdk8s:test:
+    desc: Run the cdk8s unit + render-parity + contract tests
+    dir: cdk8s
+    cmds:
+      - mise exec -- uv run pytest -q
+
+  cdk8s:check:
+    desc: Assert the committed dist/ deploy units match a fresh synth (golden-file gate)
+    dir: cdk8s
+    env:
+      NFS_SERVER: '<NFS server address>'
+      NFS_PATH: '<export path>'
+    cmds:
+      - mise exec -- uv run cdk8s synth
+      - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
+
+  cdk8s:reference:
+    desc: Capture the legacy Kustomize render as the parity oracle (cdk8s/reference/)
+    dir: cdk8s
+    cmds:
+      - mkdir -p reference
+      - for: [local, development, stage-1, prod-1]
+        cmd: kubectl kustomize ../k8s/overlays/{{.ITEM}} > reference/{{.ITEM}}.kustomize.yaml
+
+  cdk8s:parity:
+    desc: Diff the cdk8s synth against the captured Kustomize reference
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    cmds:
+      - mise exec -- uv run python tests/parity.py
+
+  # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
+  # live cluster (read-only; safe pre-cutover check). Output is colorized via the
+  # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
+  # when a diff exists, so `|| true` keeps Task from treating "there's a diff" as
+  # a failure. Point kubectl at the right context first.
+  cdk8s:local:diff:
+    desc: kubectl diff the synthesized local app manifests against the live cluster (read-only, colorized)
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    cmds:
+      - kubectl diff -f dist/local-apps.k8s.yaml || true
+
+  cdk8s:dev:diff:
+    desc: kubectl diff the synthesized development app manifests against the live cluster (read-only, colorized)
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    cmds:
+      - kubectl diff -f dist/development-apps.k8s.yaml || true
+
+  cdk8s:stage:diff:
+    desc: kubectl diff the synthesized stage app manifests against the live cluster (read-only, colorized)
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    cmds:
+      - kubectl diff -f dist/stage-1-apps.k8s.yaml || true
+
+  cdk8s:prod:diff:
+    desc: kubectl diff the synthesized prod app manifests against the live cluster (read-only, colorized)
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    cmds:
+      - kubectl diff -f dist/prod-1-apps.k8s.yaml || true
+
+  contract:sync:
+    desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
+    dir: cdk8s
+    cmds:
+      - cp ../../tripbot/pkg/contract/contract.json contract.json
+      - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
+
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
   tf:stage:apply:
