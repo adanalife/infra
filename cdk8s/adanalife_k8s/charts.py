@@ -10,6 +10,7 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.constructs.dashcam_cv import DashcamCV
+from adanalife_k8s.eso import secret_store
 from adanalife_k8s.constructs.obs import ObsInstance
 from adanalife_k8s.constructs.onscreens import OnscreensServer
 from adanalife_k8s.constructs.postgres import Postgres
@@ -85,11 +86,21 @@ class DataChart(Chart):
     The dashcam *PV* is NOT here — it's host-specific bootstrap infra kept out of
     Argo entirely (see DashcamPVChart). Only the PVC lives here; it binds to the
     out-of-band PV by name.
+
+    The ESO SecretStore is emitted here (not AppsChart) so this unit is fully
+    self-sufficient: postgres-credentials no longer depends on the apps unit
+    landing the store first. apps' ExternalSecrets reference the same store,
+    synced after data — matching the documented data-before-apps order.
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
         self.env = env
+
+        # --- ESO SecretStore (eso envs only): foundational, every ExternalSecret
+        #     in BOTH units references it, so it lives in the synced-first unit ---
+        if env.secret_source == "eso":
+            secret_store(self, "secret-store", namespace=env.namespace or None)
 
         # --- postgres (StatefulSet; prod adds StorageClass + backup CronJob) ---
         Postgres(self, env=env)

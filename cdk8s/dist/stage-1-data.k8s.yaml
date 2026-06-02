@@ -1,4 +1,23 @@
 apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: aws-secretsmanager
+  namespace: stage-1
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: us-east-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:
+            name: eso-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKeySecretRef:
+            name: eso-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   labels:
