@@ -37,6 +37,12 @@ config:
       pvc:
         enabled: true
         size: 1Gi  # streams are tiny (a few hundred small msgs); 1Gi is headroom
+        # Pin the storage class — this cluster has NO default StorageClass (PVCs
+        # without one stay Pending: "no persistent volumes available … and no
+        # storage class is set"), so every PVC names local-path explicitly, same
+        # as dashcam-cv / postgres. local-path is the provisioner on both the
+        # Talos mini-PC (stage/prod) and k3d (dev).
+        storageClassName: local-path
     memoryStore:
       enabled: false
   # Monitor endpoint on :8222 backs the prom exporter sidecar below.
