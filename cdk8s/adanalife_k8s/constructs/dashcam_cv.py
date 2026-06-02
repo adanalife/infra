@@ -7,16 +7,24 @@ env umbrella — applied via its own task, currently stage-only with `-n stage-1
     default-priority pod so the scheduler preempts THIS job, never the live stream.
   * PersistentVolumeClaim `dashcam-cv-models` (8Gi, local-path): persistent HF_HOME
     cache for the ~4.4 GB so400m checkpoint, reused across runs.
-  * CronJob `dashcam-cv-fill` (*/30, suspended): the incremental fill. Ships
-    SUSPENDED — the manual fill-job ramp comes first, then unsuspend.
-  * Job `dashcam-cv-fill-once`: the one-shot manual ramp pod (same container shape,
-    `--random 1` instead of `--random 3`).
+  * CronJob `dashcam-cv-fill` (*/20, suspended): the incremental fill. Ships
+    SUSPENDED — the manual fill-job ramp comes first, then unsuspend. Each tick
+    runs 2 pods (parallelism/completions 2), each embedding `--random 10`.
+  * Job `dashcam-cv-fill-once`: the one-shot manual ramp pod (same embed container,
+    `--random 1`).
+  * Job `dashcam-cv-find` / `dashcam-cv-stats`: read-only ops one-offs (corpus
+    search / coverage+stats). Same hardened pod, no corpus mount or postgres-wait.
 
-The CronJob/Job pod is identical except for `args`, so a shared `_embed_pod_spec`
-helper builds both. Both wait-for-postgres, run preemptibly under the low
-PriorityClass, mount the (read-only) dashcam corpus PVC + the models cache PVC, and
-read DB config from the stable `tripbot-config` ConfigMap + `tripbot-database-creds`
-Secret.
+All pods run under the restricted Pod Security Standard stage-1 enforces: pod-level
+runAsNonRoot/65532 + fsGroup (so UID 65532 can write the model-cache PVC) + seccomp
+RuntimeDefault, and per-container allowPrivilegeEscalation:false + drop ALL caps.
+`HOME`/`USER` are set because UID 65532 has no /etc/passwd entry and torch's
+getpass.getuser() raises at import without them.
+
+The pod is shared by all four workloads via `_pod_spec` — `with_corpus` toggles the
+wait-for-postgres init + the (read-only) dashcam corpus mount + DASHCAM_CV_CORPUS_DIR
+(embed needs them; find/stats don't). DB config comes from the stable
+`tripbot-config` ConfigMap + `tripbot-database-creds` Secret.
 """
 
 from __future__ import annotations
@@ -32,6 +40,21 @@ IMAGE = "adanalife/dashcam-cv"  # tag from env.image_tag (develop on stage)
 PRIORITY_CLASS = "dashcam-cv-low"
 CORPUS_DIR = "/opt/data/Dashcam/_all"  # DASHCAM_CV_CORPUS_DIR + dashcam mount path
 MODELS_DIR = "/opt/models"  # HF_HOME (baked in the image)
+
+# stage-1 enforces the restricted Pod Security Standard. Pod runs as nonroot UID
+# 65532 with a default seccomp profile; fsGroup 65532 lets that UID write the
+# model-cache PVC. (Ported from k8s/apps/dashcam-cv/*; both must stay in sync.)
+_POD_SECURITY_CONTEXT = k8s.PodSecurityContext(
+    run_as_non_root=True,
+    run_as_user=65532,
+    run_as_group=65532,
+    fs_group=65532,
+    seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
+)
+_CONTAINER_SECURITY_CONTEXT = k8s.SecurityContext(
+    allow_privilege_escalation=False,
+    capabilities=k8s.Capabilities(drop=["ALL"]),
+)
 
 
 class DashcamCV(Construct):
@@ -71,9 +94,11 @@ class DashcamCV(Construct):
             ),
         )
 
-        # --- CronJob: incremental fill (suspended; */30) ---
+        # --- CronJob: incremental fill (suspended; */20, 2 pods/run) ---
         # backoffLimit 0 + restartPolicy Never: a failed run isn't retried (the next
         # tick picks up where it left off). ttl reaps finished pods after an hour.
+        # parallelism/completions 2 → ~20 videos/tick; ON CONFLICT DO NOTHING dedupes
+        # any overlap between the two independent random picks.
         k8s.KubeCronJob(
             self,
             "fill-cronjob",
@@ -81,7 +106,7 @@ class DashcamCV(Construct):
                 name="dashcam-cv-fill", namespace=ns, labels=labels
             ),
             spec=k8s.CronJobSpec(
-                schedule="*/30 * * * *",
+                schedule="*/20 * * * *",
                 suspend=True,  # safety: enable only after the manual ramp
                 concurrency_policy="Forbid",  # never overlap runs
                 starting_deadline_seconds=120,
@@ -89,25 +114,28 @@ class DashcamCV(Construct):
                 failed_jobs_history_limit=3,
                 job_template=k8s.JobTemplateSpec(
                     spec=k8s.JobSpec(
+                        parallelism=2,
+                        completions=2,
                         backoff_limit=0,
                         ttl_seconds_after_finished=3600,
-                        template=self._embed_pod_spec(
-                            labels,
+                        template=self._pod_spec(
+                            container_name="embed",
                             args=[
                                 "embed",
                                 "--random",
-                                "3",
+                                "10",
                                 "--interval",
                                 "5",
                                 "--apply",
                             ],
+                            with_corpus=True,
                         ),
                     )
                 ),
             ),
         )
 
-        # --- Job: one-shot manual ramp (same pod, --random 1) ---
+        # --- Job: one-shot manual ramp (same embed pod, --random 1) ---
         k8s.KubeJob(
             self,
             "fill-job",
@@ -117,39 +145,118 @@ class DashcamCV(Construct):
             spec=k8s.JobSpec(
                 backoff_limit=0,
                 ttl_seconds_after_finished=3600,
-                template=self._embed_pod_spec(
-                    labels,
+                template=self._pod_spec(
+                    container_name="embed",
                     args=["embed", "--random", "1", "--interval", "5", "--apply"],
+                    with_corpus=True,
+                ),
+            ),
+        )
+
+        # --- Job: find (read-only corpus search; no corpus mount / postgres-wait) ---
+        k8s.KubeJob(
+            self,
+            "find-job",
+            metadata=k8s.ObjectMeta(
+                name="dashcam-cv-find", namespace=ns, labels=labels
+            ),
+            spec=k8s.JobSpec(
+                backoff_limit=0,
+                ttl_seconds_after_finished=3600,
+                template=self._pod_spec(
+                    container_name="find",
+                    args=["find", "a road with trees", "-k", "5"],
+                    with_corpus=False,
+                ),
+            ),
+        )
+
+        # --- Job: stats (read-only coverage + concept scan) ---
+        k8s.KubeJob(
+            self,
+            "stats-job",
+            metadata=k8s.ObjectMeta(
+                name="dashcam-cv-stats", namespace=ns, labels=labels
+            ),
+            spec=k8s.JobSpec(
+                backoff_limit=0,
+                ttl_seconds_after_finished=3600,
+                template=self._pod_spec(
+                    container_name="stats",
+                    args=["stats", "--concepts"],
+                    with_corpus=False,
                 ),
             ),
         )
 
     # ---- helpers ----
-    def _embed_pod_spec(self, labels, *, args: list[str]) -> k8s.PodTemplateSpec:
-        """The embed pod, shared by the CronJob and the one-shot Job (differ only
-        in `args`). wait-for-postgres init, preemptible under dashcam-cv-low,
-        dashcam corpus (ro) + models cache mounts."""
+    def _pod_spec(
+        self, *, container_name: str, args: list[str], with_corpus: bool
+    ) -> k8s.PodTemplateSpec:
+        """The hardened dashcam-cv pod, shared by all four workloads. `with_corpus`
+        adds the wait-for-postgres init + the read-only dashcam corpus mount +
+        DASHCAM_CV_CORPUS_DIR (embed needs them; the find/stats query pods don't).
+        Preemptible under dashcam-cv-low; always mounts the models cache PVC."""
+        init_containers = None
+        env = []
+        volume_mounts = []
+        volumes = []
+
+        if with_corpus:
+            init_containers = [
+                k8s.Container(
+                    name="wait-for-postgres",
+                    image="busybox:1.36",
+                    command=[
+                        "sh",
+                        "-c",
+                        "until nc -z postgres 5432; do echo waiting; sleep 2; done",
+                    ],
+                    security_context=_CONTAINER_SECURITY_CONTEXT,
+                )
+            ]
+            env.append(k8s.EnvVar(name="DASHCAM_CV_CORPUS_DIR", value=CORPUS_DIR))
+            volume_mounts.append(
+                k8s.VolumeMount(name="dashcam", mount_path=CORPUS_DIR, read_only=True)
+            )
+            volumes.append(
+                k8s.Volume(
+                    name="dashcam",
+                    persistent_volume_claim=k8s.PersistentVolumeClaimVolumeSource(
+                        claim_name="vlc-dashcam"
+                    ),
+                )  # stage NFS corpus, ro
+            )
+
+        # UID 65532 has no home dir / passwd entry; torch's getpass.getuser() needs
+        # $USER set or it raises at import.
+        env += [
+            k8s.EnvVar(name="HOME", value="/tmp"),
+            k8s.EnvVar(name="USER", value="dashcam"),
+        ]
+        volume_mounts.append(k8s.VolumeMount(name="models", mount_path=MODELS_DIR))
+        volumes.append(
+            k8s.Volume(
+                name="models",
+                persistent_volume_claim=k8s.PersistentVolumeClaimVolumeSource(
+                    claim_name="dashcam-cv-models"
+                ),
+            )
+        )
+
         return k8s.PodTemplateSpec(
             spec=k8s.PodSpec(
                 restart_policy="Never",
                 priority_class_name=PRIORITY_CLASS,
-                init_containers=[
-                    k8s.Container(
-                        name="wait-for-postgres",
-                        image="busybox:1.36",
-                        command=[
-                            "sh",
-                            "-c",
-                            "until nc -z postgres 5432; do echo waiting; sleep 2; done",
-                        ],
-                    )
-                ],
+                security_context=_POD_SECURITY_CONTEXT,
+                init_containers=init_containers,
                 containers=[
                     k8s.Container(
-                        name="embed",
+                        name=container_name,
                         image=self._image,
                         image_pull_policy="Always",
                         args=args,
+                        security_context=_CONTAINER_SECURITY_CONTEXT,
                         env_from=[
                             k8s.EnvFromSource(
                                 config_map_ref=k8s.ConfigMapEnvSource(
@@ -162,9 +269,7 @@ class DashcamCV(Construct):
                                 )
                             ),
                         ],
-                        env=[
-                            k8s.EnvVar(name="DASHCAM_CV_CORPUS_DIR", value=CORPUS_DIR)
-                        ],
+                        env=env,
                         resources=k8s.ResourceRequirements(
                             requests={
                                 "cpu": k8s.Quantity.from_string("1"),
@@ -177,27 +282,9 @@ class DashcamCV(Construct):
                                 "memory": k8s.Quantity.from_string("6Gi"),
                             },
                         ),
-                        volume_mounts=[
-                            k8s.VolumeMount(
-                                name="dashcam", mount_path=CORPUS_DIR, read_only=True
-                            ),
-                            k8s.VolumeMount(name="models", mount_path=MODELS_DIR),
-                        ],
+                        volume_mounts=volume_mounts,
                     )
                 ],
-                volumes=[
-                    k8s.Volume(
-                        name="dashcam",
-                        persistent_volume_claim=k8s.PersistentVolumeClaimVolumeSource(
-                            claim_name="vlc-dashcam"
-                        ),
-                    ),  # stage NFS corpus, ro
-                    k8s.Volume(
-                        name="models",
-                        persistent_volume_claim=k8s.PersistentVolumeClaimVolumeSource(
-                            claim_name="dashcam-cv-models"
-                        ),
-                    ),
-                ],
+                volumes=volumes,
             )
         )
