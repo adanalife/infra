@@ -271,18 +271,45 @@ class VlcServer(Construct):
         )
 
 
-def emit_dashcam_volume(scope: Construct, env: EnvConfig) -> None:
-    """The dashcam NFS PV + PVC — a *stateful* pair, emitted into DataChart (not
-    VlcServer) so the stateless vlc Deployment can churn without disturbing them.
-    No-op on hostPath envs (local/dev), where the dashcam volume is an inline
-    hostPath with no separate object. The PV is Retain — the corpus lives on the
-    external NFS server, so even deleting the PVC doesn't lose data."""
+def emit_dashcam_pvc(scope: Construct, env: EnvConfig) -> None:
+    """The dashcam PVC — Argo-managed, emitted into DataChart (not VlcServer) so
+    the stateless vlc Deployment can churn without disturbing it. Binds 1:1 by
+    name (volumeName + storageClassName "") to the cluster-scoped NFS PV that's
+    provisioned out-of-band — see emit_dashcam_pv / `task k8s:<env>:dashcam-pv`.
+    No host specifics here, so it's safe in the committed dist. No-op on hostPath
+    envs (local/dev), where the dashcam volume is an inline hostPath."""
     if env.dashcam_mode != "nfs":
         return
     ns = env.namespace or None
-    # Static NFS PV (cluster-scoped) bound 1:1 to the PVC via volumeName +
-    # storageClassName "". Stage shares prod's export read-only but needs its own
-    # PV name (PVs bind 1:1) — env.nfs_pv_name.
+    k8s.KubePersistentVolumeClaim(
+        scope,
+        "dashcam-pvc",
+        metadata=k8s.ObjectMeta(name="vlc-dashcam", namespace=ns),
+        spec=k8s.PersistentVolumeClaimSpec(
+            access_modes=["ReadOnlyMany"],
+            storage_class_name="",
+            volume_name=env.nfs_pv_name,
+            resources=k8s.ResourceRequirements(
+                requests={"storage": k8s.Quantity.from_string("1Ti")}
+            ),
+        ),
+    )
+
+
+def emit_dashcam_pv(scope: Construct, env: EnvConfig) -> None:
+    """The dashcam NFS PersistentVolume — cluster-scoped, host-specific bootstrap
+    infrastructure deliberately kept OUTSIDE Argo's reconcile loop. It lives in
+    its own DashcamPVChart -> dist/<env>-dashcam-pv.k8s.yaml, which neither the
+    apps nor data ApplicationSet globs, and is provisioned once per cluster via
+    `task k8s:<env>:dashcam-pv`. That task synths this with the real NFS coords
+    from the gitignored cdk8s/dashcam-nfs.local.env; the committed golden carries
+    the `<NFS server address>` / `<export path>` placeholders, so no host
+    specifics ever land in git. Reclaim policy is Retain — the corpus lives on
+    the external NFS server, untouched by object deletion. Stage shares prod's
+    export read-only but needs its own PV name (PVs bind 1:1) — env.nfs_pv_name.
+    No-op on hostPath envs."""
+    if env.dashcam_mode != "nfs":
+        return
     k8s.KubePersistentVolume(
         scope,
         "dashcam-pv",
@@ -294,19 +321,6 @@ def emit_dashcam_volume(scope: Construct, env: EnvConfig) -> None:
             storage_class_name="",
             nfs=k8s.NfsVolumeSource(
                 server=env.nfs_server, path=env.nfs_path, read_only=True
-            ),
-        ),
-    )
-    k8s.KubePersistentVolumeClaim(
-        scope,
-        "dashcam-pvc",
-        metadata=k8s.ObjectMeta(name="vlc-dashcam", namespace=ns),
-        spec=k8s.PersistentVolumeClaimSpec(
-            access_modes=["ReadOnlyMany"],
-            storage_class_name="",
-            volume_name=env.nfs_pv_name,
-            resources=k8s.ResourceRequirements(
-                requests={"storage": k8s.Quantity.from_string("1Ti")}
             ),
         ),
     )

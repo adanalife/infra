@@ -48,19 +48,18 @@ class ArgoCD(Construct):
         # Two ApplicationSets: the stateless apps and the stateful data. They get
         # different sync policies — that's the whole point of the split. Data
         # never prunes, so an app deploy can't delete the database or volumes.
+        # The host-specific dashcam PV is NOT in either unit (it's its own
+        # out-of-Argo deploy unit — see DashcamPVChart), so neither needs an
+        # ignoreDifferences for it anymore.
         self._application_set(
             unit="apps",
             id="appset-apps",
-            # apps create no cluster-scoped objects now; nothing to ignore.
-            ignore_pv=False,
             prune_disabled=False,
         )
         self._application_set(
             unit="data",
             id="appset-data",
-            # the dashcam PV ships NFS placeholders (host-specific) — ignore them;
-            # and NEVER prune the stateful unit.
-            ignore_pv=True,
+            # NEVER prune the stateful unit.
             prune_disabled=True,
         )
         self._ui_ingress()
@@ -96,9 +95,7 @@ class ArgoCD(Construct):
             )
         )
 
-    def _application_set(
-        self, *, unit: str, id: str, ignore_pv: bool, prune_disabled: bool
-    ):
+    def _application_set(self, *, unit: str, id: str, prune_disabled: bool):
         """Emit one ApplicationSet -> one Application per env reconciling
         `dist/<env>-<unit>.k8s.yaml`. `unit` is "apps" (stateless) or "data"
         (stateful). The data unit disables prune so it can never delete the
@@ -127,17 +124,6 @@ class ArgoCD(Construct):
                 "syncOptions": sync_options,
             },
         }
-        if ignore_pv:
-            # The dashcam PV ships NFS placeholders in git (host-specific, set
-            # out-of-band) — don't flag it as drift.
-            spec["ignoreDifferences"] = [
-                {
-                    "group": "",
-                    "kind": "PersistentVolume",
-                    "jsonPointers": ["/spec/nfs/server", "/spec/nfs/path"],
-                }
-            ]
-
         appset = cdk8s.ApiObject(
             self,
             id,

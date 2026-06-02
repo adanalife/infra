@@ -14,7 +14,11 @@ from adanalife_k8s.constructs.obs import ObsInstance
 from adanalife_k8s.constructs.onscreens import OnscreensServer
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.tripbot import Tripbot
-from adanalife_k8s.constructs.vlc import VlcServer, emit_dashcam_volume
+from adanalife_k8s.constructs.vlc import (
+    VlcServer,
+    emit_dashcam_pv,
+    emit_dashcam_pvc,
+)
 from adanalife_k8s.supporting import emit_supporting
 
 
@@ -69,7 +73,7 @@ class AppsChart(Chart):
 class DataChart(Chart):
     """STATEFUL resources for one environment, isolated from AppsChart so the
     high-churn stateless apps can't affect them: the postgres StatefulSet (+ its
-    PVC/StorageClass, backup CronJob) and the dashcam NFS PV/PVC.
+    PVC/StorageClass, backup CronJob) and the dashcam PVC.
 
     Applied as its own deploy unit / Argo Application with **prune disabled** —
     so even if one of these vanished from the manifests, the controller would
@@ -77,6 +81,10 @@ class DataChart(Chart):
     precious PVs (prod postgres → local-path-retain; dashcam → Retain), so the
     bytes survive object deletion regardless. Sync this BEFORE the apps unit
     (it's a dependency: tripbot/vlc need postgres + the dashcam PVC).
+
+    The dashcam *PV* is NOT here — it's host-specific bootstrap infra kept out of
+    Argo entirely (see DashcamPVChart). Only the PVC lives here; it binds to the
+    out-of-band PV by name.
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
@@ -86,8 +94,24 @@ class DataChart(Chart):
         # --- postgres (StatefulSet; prod adds StorageClass + backup CronJob) ---
         Postgres(self, env=env)
 
-        # --- dashcam NFS PV/PVC (nfs envs only; no-op on hostPath local/dev) ---
-        emit_dashcam_volume(self, env)
+        # --- dashcam PVC (nfs envs only; no-op on hostPath local/dev). The PV it
+        #     binds to is provisioned out-of-band via DashcamPVChart. ---
+        emit_dashcam_pvc(self, env)
+
+
+class DashcamPVChart(Chart):
+    """The dashcam NFS PersistentVolume (cluster-scoped) — host-specific bootstrap
+    infra deliberately kept OUT of Argo. Synthed to its own
+    dist/<env>-dashcam-pv.k8s.yaml, which neither the apps nor data ApplicationSet
+    globs (they match `<env>-{apps,data}.k8s.yaml`), and provisioned once per
+    cluster via `task k8s:<env>:dashcam-pv` with the real NFS coords from the
+    gitignored cdk8s/dashcam-nfs.local.env. The committed golden carries
+    placeholders. The matching PVC lives in DataChart (Argo binds it by name).
+    """
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id)  # cluster-scoped — no namespace
+        emit_dashcam_pv(self, env)
 
 
 class DashcamCVChart(Chart):

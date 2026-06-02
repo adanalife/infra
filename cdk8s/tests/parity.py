@@ -121,6 +121,13 @@ def compare(env: str) -> list[str]:
     data_file = ROOT / "dist" / f"{env}-data.k8s.yaml"
     if data_file.exists():
         cdk_objs += _load(data_file)
+    # The dashcam NFS PV is its own out-of-Argo deploy unit (DashcamPVChart) but
+    # lived in the same Kustomize umbrella — union it in (nfs envs only) so the
+    # full env render is compared. Synthed with placeholder coords (the fixture
+    # sets NFS_SERVER/NFS_PATH to the reference placeholders), so it lines up.
+    pv_file = ROOT / "dist" / f"{env}-dashcam-pv.k8s.yaml"
+    if pv_file.exists():
+        cdk_objs += _load(pv_file)
     # Local bundles the one-shot Jobs into its umbrella; elsewhere they're a
     # separate deploy unit. Union the jobs file in for local so they line up.
     jobs_file = ROOT / "dist" / f"{env}-jobs.k8s.yaml"
