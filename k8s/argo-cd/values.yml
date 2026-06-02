@@ -17,6 +17,17 @@ global:
   domain: argocd-prod.tail020deb.ts.net
 
 configs:
+  # No login on the UI/API. Access is already gated by the Tailscale Ingress
+  # (only this tailnet can reach argocd-prod.<tailnet>.ts.net), so a second auth
+  # layer is friction without benefit for a single-operator tailnet. Anonymous
+  # requests get the default RBAC role below.
+  cm:
+    users.anonymous.enabled: "true"
+  rbac:
+    # Anonymous (and everyone) gets full admin — needed to click Sync. Dial to
+    # role:readonly if you want the monitor-only phase to be click-proof; you'd
+    # then re-enable login to sync.
+    policy.default: role:admin
   params:
     # Belt-and-suspenders: refuse to auto-create namespaces. The env namespaces
     # (prod-1 / stage-1) are owned by the cluster bootstrap, not Argo.
