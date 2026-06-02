@@ -135,7 +135,7 @@ def test_services_exist_with_endpoints(core_v1, namespace, expected):
 # --------------------------------------------------------------------------- #
 def test_ingresses_have_lb_address(networking_v1, namespace, expected, request):
     if not expected["lb_ingresses"]:
-        pytest.skip(f"env has no LB-addressed Ingresses to assert")
+        pytest.skip("env has no LB-addressed Ingresses to assert")
 
     from kubernetes.client.rest import ApiException
 
