@@ -27,7 +27,7 @@ jobs:
 
       # uv handles project-local Python deps on top of mise's interpreter
       # (vault/decisions/preferred-tools.md).
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
 
       - name: Install Python deps
         run: uv sync
