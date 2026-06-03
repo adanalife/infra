@@ -123,6 +123,31 @@ class ArgoCD(Construct):
                 # unit manual + Prune=false forever — that's its safety guarantee.
                 "syncOptions": sync_options,
             },
+            # ESO's ExternalSecret CRD stamps schema defaults our manifests omit
+            # (target.deletionPolicy, and conversionStrategy/decodingStrategy/
+            # metadataPolicy/nullBytePolicy under each data[].remoteRef and
+            # dataFrom[].extract). They're API-server schema defaults with no
+            # field-manager owner, so they can't be waived via managedFieldsManagers
+            # and otherwise leave every ExternalSecret perpetually OutOfSync. Ignore
+            # exactly those paths so they read Synced. Harmless no-op on the data
+            # unit (no ExternalSecrets there).
+            "ignoreDifferences": [
+                {
+                    "group": "external-secrets.io",
+                    "kind": "ExternalSecret",
+                    "jqPathExpressions": [
+                        ".spec.target.deletionPolicy",
+                        ".spec.data[]?.remoteRef.conversionStrategy",
+                        ".spec.data[]?.remoteRef.decodingStrategy",
+                        ".spec.data[]?.remoteRef.metadataPolicy",
+                        ".spec.data[]?.remoteRef.nullBytePolicy",
+                        ".spec.dataFrom[]?.extract.conversionStrategy",
+                        ".spec.dataFrom[]?.extract.decodingStrategy",
+                        ".spec.dataFrom[]?.extract.metadataPolicy",
+                        ".spec.dataFrom[]?.extract.nullBytePolicy",
+                    ],
+                }
+            ],
         }
         appset = cdk8s.ApiObject(
             self,

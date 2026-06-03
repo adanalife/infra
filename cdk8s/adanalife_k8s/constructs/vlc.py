@@ -9,8 +9,6 @@ VlcServer(self, p, env)`. Reproduces k8s/apps/vlc-server/base + overlays:
   * dashcam volume: NFS PVC (prod/stage, env.nfs_*) or hostPath (local/dev).
   * iGPU request on GPU envs; OTEL/Sentry envFrom from shared-secrets.
   * traefik Ingress (TLS on minipc) + optional Tailscale Ingress.
-  * prod-only: the in-pod onscreens process re-exposed on :8081 (container +
-    Service port) until the OBS cutover — env.vlc_inpod_onscreens. See #621.
 """
 
 from __future__ import annotations
@@ -26,8 +24,7 @@ NAME = "vlc-server"
 MOUNT_PATH = "/opt/data/Dashcam/_all"
 
 # Container ports (deployment.yaml order) vs Service ports (service.yaml order)
-# — the legacy base lists them in different orders; reproduce both. onscreens
-# (8081) is appended prod-only via vlc_inpod_onscreens.
+# — the legacy base lists them in different orders; reproduce both.
 _CONTAINER_PORTS = [("http", 8080), ("vnc", 5900), ("rtsp", 8554)]
 _SERVICE_PORTS = [("http", 8080), ("rtsp", 8554), ("vnc", 5900)]
 
@@ -47,18 +44,18 @@ class VlcServer(Construct):
         labels = meta_labels(NAME)
         sel = selector(NAME)
 
-        container_ports = list(_CONTAINER_PORTS)
-        service_ports = list(_SERVICE_PORTS)
-        if env.vlc_inpod_onscreens:
-            container_ports.append(("onscreens", 8081))
-            service_ports.append(("onscreens", 8081))
+        container_ports = _CONTAINER_PORTS
+        service_ports = _SERVICE_PORTS
 
         # --- ConfigMap (stable name + content-hash annotation) ---
         data = dict(_BASE_CONFIG)
         if appconfig.uses_local_stubs(env):
             data.update(appconfig.local_stubs())
         data.update(appconfig.telemetry_config(env))
-        if env.vlc_inpod_onscreens:
+        # vlc-server's own NATS command subscriber needs NATS_URL wherever
+        # there's a platform NATS (dev/stage/prod), omitted on local — same
+        # gate as onscreens.py.
+        if env.nats_url:
             data["NATS_URL"] = env.nats_url
         cfg_hash = configmap.config_map(
             self,

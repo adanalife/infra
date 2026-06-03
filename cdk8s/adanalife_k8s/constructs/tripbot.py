@@ -81,9 +81,6 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
         "BOT_USERNAME": "tripbot4000",
         "EXTERNAL_URL": "https://tripbot.prod.whereisdana.today",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-prod",
-        # prod reaches onscreens via the in-pod process on vlc-server:8081 until
-        # the OBS cutover (see vlc_inpod_onscreens / #621), overriding the base.
-        "ONSCREENS_SERVER_HOST": "vlc-server:8081",
     },
     "stage-1": {
         "CHANNEL_NAME": "adanalife_staging",

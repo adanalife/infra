@@ -440,6 +440,7 @@ data:
   DISPLAY: :0.0
   ENV: staging
   FONTCONFIG_PATH: /etc/fonts
+  NATS_URL: nats://nats.stage-1-platform.svc.cluster.local:4222
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=stage-1,service.namespace=tripbot
   OTEL_SDK_DISABLED: "true"
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
@@ -469,7 +470,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 8a8177ef7c
+        adanalife.dev/config-hash: c430d9b734
       labels:
         app: vlc-server
     spec:

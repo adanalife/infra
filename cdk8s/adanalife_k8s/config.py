@@ -47,9 +47,6 @@ class EnvConfig:
     nfs_pv_name: str = (
         "vlc-dashcam-nfs"  # PVs bind 1:1 — stage needs its own (vlc-dashcam-nfs-stage)
     )
-    vlc_inpod_onscreens: bool = (
-        False  # prod-only: re-expose the in-pod onscreens on :8081 until OBS cutover
-    )
     # Streaming platforms present in this env (obs instances). twitch everywhere;
     # youtube currently stage-only while the bot side is built out.
     platforms: tuple[str, ...] = ("twitch",)
@@ -95,7 +92,6 @@ ENVS: dict[str, EnvConfig] = {
         postgres_backup=True,
         external_dns_role_arn=_PROD_ROLE,
         nfs_pv_name="vlc-dashcam-nfs",
-        vlc_inpod_onscreens=True,
         platforms=("twitch",),
     ),
     "stage-1": EnvConfig(

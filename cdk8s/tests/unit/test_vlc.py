@@ -93,25 +93,21 @@ def test_gpu_only_on_gpu_envs():
     assert "gpu.intel.com/i915" not in lreqs
 
 
-def test_prod_inpod_onscreens_port_and_nats():
+def test_prod_vlc_no_inpod_onscreens_port_but_has_nats():
+    # The in-pod onscreens :8081 is decommissioned — no env re-exposes it; prod
+    # still carries NATS_URL (its own command subscriber, not the old onscreens).
     objs = _synth("prod-1")
     dep = _by(objs, "Deployment", "vlc-server")[0]
     port_names = {
         p["name"] for p in dep["spec"]["template"]["spec"]["containers"][0]["ports"]
     }
-    assert "onscreens" in port_names, "prod re-exposes the in-pod onscreens on :8081"
+    assert "onscreens" not in port_names
     svc_ports = {
         p["name"] for p in _by(objs, "Service", "vlc-server")[0]["spec"]["ports"]
     }
-    assert "onscreens" in svc_ports
+    assert "onscreens" not in svc_ports
     cm = _by(objs, "ConfigMap", "vlc-server-config")[0]["data"]
     assert cm["NATS_URL"].startswith("nats://")
-    # stage does NOT carry the in-pod onscreens port
-    stage = _by(_synth("stage-1"), "Deployment", "vlc-server")[0]
-    snames = {
-        p["name"] for p in stage["spec"]["template"]["spec"]["containers"][0]["ports"]
-    }
-    assert "onscreens" not in snames
 
 
 def test_config_blocks_per_env():

@@ -83,7 +83,7 @@ tasks:
         kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
 
   cdk8s:test:
-    desc: Run the cdk8s unit + render-parity + contract tests
+    desc: Run the cdk8s unit + contract tests
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
@@ -99,21 +99,6 @@ tasks:
     cmds:
       - mise exec -- uv run cdk8s synth
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
-
-  cdk8s:reference:
-    desc: Capture the legacy Kustomize render as the parity oracle (cdk8s/reference/)
-    dir: cdk8s
-    cmds:
-      - mkdir -p reference
-      - for: [local, development, stage-1, prod-1]
-        cmd: kubectl kustomize ../k8s/overlays/{{.ITEM}} > reference/{{.ITEM}}.kustomize.yaml
-
-  cdk8s:parity:
-    desc: Diff the cdk8s synth against the captured Kustomize reference
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    cmds:
-      - mise exec -- uv run python tests/parity.py
 
   # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
   # live cluster (read-only; safe pre-cutover check). Output is colorized via the
@@ -133,6 +118,20 @@ tasks:
     deps: [cdk8s:synth]
     cmds:
       - kubectl diff -f dist/development-apps.k8s.yaml || true
+
+  # cdk8s:dev:apply — the development (bees) deploy path. dev is NOT Argo-managed
+  # (only prod-1/stage-1 are), so it applies the synthesized manifests directly:
+  # data first (postgres + SecretStore), then apps (migrations need the DB +
+  # store). One-shot Jobs (dist/development-jobs.k8s.yaml) stay out — apply them
+  # deliberately, never on every deploy. Pre-reqs: a running bees cluster and
+  # `task k8s:dev:bootstrap-secrets` for the eso-aws-credentials Secret.
+  cdk8s:dev:apply:
+    desc: apply the synthesized development manifests (data + apps) to the bees cluster — dev is not Argo-managed
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    cmds:
+      - kubectl apply -f dist/development-data.k8s.yaml
+      - kubectl apply -f dist/development-apps.k8s.yaml
 
   cdk8s:stage:diff:
     desc: kubectl diff the synthesized stage app manifests against the live cluster (read-only, colorized)
@@ -360,13 +359,14 @@ tasks:
   #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
   #             deployed" sequence; each step delegates to its canonical task
   k8s:dev:cluster:up:
-    desc: "create the local k3d cluster on bees (development) — example video by default; pass DASHCAM_NAS=<host path> to also mount a real dashcam dir at /host/nas-dashcam for the development-nas overlay"
+    desc: "create the local k3d cluster on bees (development) — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
     cmds:
       # Development plays the committed example video (mounted at
       # /host/dashcam) by default — the 99% case. To stream a real dashcam
       # directory instead, pass its host path as DASHCAM_NAS=<path>; it's
-      # bind-mounted :ro at /host/nas-dashcam for the development-nas
-      # overlay (task k8s:dev:apply-nas). The path is a runtime arg so the
+      # bind-mounted :ro at /host/nas-dashcam. NOTE: the legacy development-nas
+      # overlay that consumed this mount is gone; cdk8s dev does not read it yet
+      # (known gap — wire it into cdk8s dev config). The path is a runtime arg so the
       # real footage location never gets committed. k3d bind-mounts are
       # fixed at create time, so this must be set on cluster:up, not apply.
       - |
@@ -393,11 +393,11 @@ tasks:
       - k3d cluster start adanalife-bees
 
   k8s:dev:cluster:rebuild:
-    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + development app manifests. Each step is the canonical task; failures short-circuit the chain.
+    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + cdk8s development app manifests. Each step is the canonical task; failures short-circuit the chain.
     cmds:
       - task: k8s:dev:cluster:up
       - task: k8s:dev:platform:up
-      - task: k8s:dev:apply
+      - task: cdk8s:dev:apply
 
   # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
   # cluster — its lifecycle is talosctl wipe-and-rebuild (see
@@ -462,12 +462,19 @@ tasks:
       - kubectl rollout restart deploy/obs -n prod-1
       - kubectl rollout status deploy/obs -n prod-1 --timeout=120s
 
+  k8s:prod:rollout:onscreens:
+    desc: restart prod-1 onscreens-server so it re-pulls the image
+    cmds:
+      - kubectl rollout restart deploy/onscreens-server -n prod-1
+      - kubectl rollout status deploy/onscreens-server -n prod-1 --timeout=120s
+
   k8s:prod:rollout:all:
-    desc: restart all three prod-1 app deployments (tripbot + vlc-server + obs)
+    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
     deps:
       - k8s:prod:rollout:tripbot
       - k8s:prod:rollout:vlc-server
       - k8s:prod:rollout:obs
+      - k8s:prod:rollout:onscreens
 
   k8s:stage:rollout:tripbot:
     desc: restart stage-1 tripbot so it re-pulls the image
@@ -487,12 +494,19 @@ tasks:
       - kubectl rollout restart deploy/obs -n stage-1
       - kubectl rollout status deploy/obs -n stage-1 --timeout=120s
 
+  k8s:stage:rollout:onscreens:
+    desc: restart stage-1 onscreens-server so it re-pulls the image
+    cmds:
+      - kubectl rollout restart deploy/onscreens-server -n stage-1
+      - kubectl rollout status deploy/onscreens-server -n stage-1 --timeout=120s
+
   k8s:stage:rollout:all:
-    desc: restart all three stage-1 app deployments (tripbot + vlc-server + obs)
+    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
     deps:
       - k8s:stage:rollout:tripbot
       - k8s:stage:rollout:vlc-server
       - k8s:stage:rollout:obs
+      - k8s:stage:rollout:onscreens
 
   k8s:dev:rollout:tripbot:
     desc: restart development tripbot so it re-pulls the image
@@ -512,86 +526,42 @@ tasks:
       - kubectl rollout restart deploy/obs -n development
       - kubectl rollout status deploy/obs -n development --timeout=120s
 
+  k8s:dev:rollout:onscreens:
+    desc: restart development onscreens-server so it re-pulls the image
+    cmds:
+      - kubectl rollout restart deploy/onscreens-server -n development
+      - kubectl rollout status deploy/onscreens-server -n development --timeout=120s
+
   k8s:dev:rollout:all:
-    desc: restart all three development app deployments (tripbot + vlc-server + obs)
+    desc: restart all four development app deployments (tripbot + vlc-server + obs + onscreens-server)
     deps:
       - k8s:dev:rollout:tripbot
       - k8s:dev:rollout:vlc-server
       - k8s:dev:rollout:obs
+      - k8s:dev:rollout:onscreens
 
-  # The k8s:*:diff tasks below are server-side dry-run previews (read-only) of
-  # what the matching :apply would change. Each :apply runs its diff first so
-  # there's always a preview before the cluster is mutated. The diff is
-  # best-effort — `kubectl diff` exits non-zero when a diff exists (and on a
-  # missing cluster), so it's `|| true`'d to never abort the apply. Deliberately
-  # NOT a blocking confirmation prompt: k8s:dev:apply is called by other tasks
-  # (k8s:dev:cluster:up) and would deadlock a non-interactive run.
+  # The app workloads for prod-1/stage-1 are delivered by Argo CD from
+  # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md) — there is no
+  # `k8s:{prod,stage}:apply` for apps anymore. dev (bees, not Argo-managed) uses
+  # `task cdk8s:dev:apply`. The legacy Kustomize app overlays (k8s/apps,
+  # k8s/overlays) are gone. What remains below is the stage env-PLATFORM install
+  # (external-dns + NATS), which has NOT cut over to cdk8s yet.
 
-  k8s:diff:
-    desc: preview (server-side dry-run) what k8s:apply would change on the local cluster
-    cmds:
-      - kubectl diff -k k8s/overlays/local || true
-
-  k8s:apply:
-    desc: apply the local app manifests to the cluster
-    cmds:
-      - task: k8s:diff
-      - kubectl apply -k k8s/overlays/local
-
-  k8s:dev:diff:
-    desc: preview (server-side dry-run) what k8s:dev:apply would change
-    cmds:
-      - kubectl diff -k k8s/overlays/development || true
-
-  k8s:dev:apply:
-    desc: apply development overlay (apps only — bring up cloudflared separately via k8s:dev:tunnel:up)
-    cmds:
-      - task: k8s:dev:diff
-      - kubectl apply -k k8s/overlays/development
-
-  k8s:dev:apply-nas:
-    desc: "apply development-nas overlay — vlc-server reads dashcam from /host/nas-dashcam (requires the cluster to have been created with DASHCAM_NAS=<host path> set; see k8s:dev:cluster:up)"
-    cmds:
-      - kubectl diff -k k8s/overlays/development-nas || true
-      - kubectl apply -k k8s/overlays/development-nas
-
-  k8s:prod:diff:
-    desc: preview (server-side dry-run) what k8s:prod:apply would change
-    cmds:
-      - kubectl diff -k k8s/overlays/prod-1 || true
-
-  k8s:prod:apply:
-    desc: apply prod-1 overlay (shared-secrets + postgres + vlc-server; tripbot/obs added when their prod-1 overlays land)
-    cmds:
-      - task: k8s:prod:diff
-      - kubectl apply -k k8s/overlays/prod-1
-
-  k8s:stage:diff:
-    desc: preview (server-side dry-run) what k8s:stage:apply would change
-    cmds:
-      - kubectl diff -k k8s/overlays/stage-1 || true
-
-  k8s:stage:apply:
-    desc: apply the stage-1 overlay (shared-secrets + postgres + tripbot + vlc-server + OBS) + stage external-dns into the mini-PC cluster
+  k8s:stage:platform-env:up:
+    desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
     deps: [k8s:stage:bootstrap-secrets]
     preconditions:
       - sh: test -f k8s/external-dns/stage-1/values.local.yml
         msg: "k8s/external-dns/stage-1/values.local.yml missing — run `task k8s:stage:bootstrap-secrets` first"
     cmds:
-      - task: k8s:stage:diff
-      # Pre-reqs: task tf:stage:apply (postgres creds), task
-      # k8s:stage:bootstrap-secrets (stage ESO store + external-dns
-      # values.local), and a populated
-      # k8s/apps/vlc-server/overlays/stage-1/dashcam-nfs.local.yaml.
+      # Pre-req: task k8s:stage:bootstrap-secrets (stage ESO store + external-dns
+      # values.local).
       #
-      # Stage reuses prod's SHARED platform stack (traefik / ESO operator /
-      # cert-manager controller / monitoring) — there is still no
-      # k8s:stage:platform:up. The one env-specific platform piece is
-      # external-dns: stage runs its OWN in stage-1-platform, reading the
-      # adanalife-stage account so it can write the stage.whereisdana.today
-      # zone (no cross-account). The namespaced cert-manager Issuers ship in
-      # the umbrella below.
-      - kubectl apply -k k8s/overlays/stage-1
+      # Stage reuses prod's SHARED cluster platform stack (traefik / ESO operator
+      # / cert-manager controller / monitoring). The env-specific platform pieces
+      # are external-dns + NATS, both in stage-1-platform. external-dns reads the
+      # adanalife-stage account so it can write the stage.whereisdana.today zone
+      # (no cross-account).
       # Stage external-dns (own instance, stage account, stage zone). The
       # kustomize apply creates stage-1-platform + its SecretStore +
       # ExternalSecret; the helm release name differs from prod's
@@ -627,7 +597,7 @@ tasks:
       - 'echo "NATS up in stage-1-platform. Connect via nats://nats.stage-1-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n stage-1-platform -- nats pub foo bar"'
 
   # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
-  # nor `k8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
+  # nor `cdk8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
   # the tunnel-token Secret from terraform output, and applies the
   # Deployment in one gesture.
   #
@@ -975,7 +945,7 @@ tasks:
           - --force-default-targets
         YAML
         if [ -n "$prev" ] && [ "$prev" != "$ip" ]; then
-          echo "rewrote $values_file: default-targets $prev -> $ip (target changed; run \`task k8s:stage:apply\` to roll external-dns)"
+          echo "rewrote $values_file: default-targets $prev -> $ip (target changed; run \`task k8s:stage:platform-env:up\` to roll external-dns)"
         else
           echo "wrote $values_file (default-targets=$ip)"
         fi
@@ -1259,7 +1229,7 @@ tasks:
       # alloy-metrics via prometheus.io/* pod annotations. Lives in
       # prod-1-platform (the env-platform namespace external-dns created
       # above) so prod-1 stays app-only. Stage runs its own NATS in
-      # stage-1-platform via k8s:stage:apply — namespaces isolate the two.
+      # stage-1-platform via k8s:stage:platform-env:up — namespaces isolate the two.
       - helm upgrade --install nats nats/nats
           --version 2.14.0
           -n prod-1-platform --create-namespace
@@ -1302,8 +1272,8 @@ tasks:
   # Secret changes to running pods' env vars.
   #
   # PROD is on-by-default and goes through ESO: the obs-stream-key
-  # ExternalSecret lives in the prod-1 overlay (stream-key-external-secret.yaml),
-  # so `task k8s:prod:apply` materializes the Secret on every bring-up and OBS
+  # ExternalSecret ships in the prod-1 apps unit (cdk8s -> dist/prod-1-apps.k8s.yaml),
+  # so Argo CD materializes the Secret on sync and OBS
   # streams without a manual step. `obs:prod:stream:on` just re-applies that
   # ExternalSecret (e.g. after an `:off`); `obs:prod:stream:off` deletes the
   # ExternalSecret AND the Secret so ESO can't re-materialize it — the pause
@@ -1377,8 +1347,8 @@ tasks:
   # (VNC-only) mode — the container stays up, only the Twitch publish
   # stops. Deleting the ExternalSecret first is what makes the pause
   # durable in prod: otherwise ESO would re-materialize the Secret on its
-  # next refresh. The pause lasts until the next `task k8s:prod:apply` or
-  # cluster wipe re-applies the overlay. Exposed under both env namespaces
+  # next refresh. The pause lasts until the next Argo sync of the prod-1
+  # apps unit (or a cluster wipe re-applies it). Exposed under both env namespaces
   # for symmetry with the `:on` tasks; the work is env-agnostic (no AWS
   # account — it only touches the local cluster), so both delegate to one
   # shared implementation.
@@ -1713,6 +1683,37 @@ tasks:
           aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/${tier}/" 2>/dev/null | sort || true
           echo
         done
+
+  # On-demand prod-1 Postgres dump — runs the postgres-backup CronJob's script
+  # now (instead of waiting for the hourly schedule), for a "just in case before
+  # a risky op" snapshot. The one-shot Job lands in the hourly/ tier (expires at
+  # 2 days). Set ARCHIVE=true to also copy the resulting dump into the permanent
+  # archive/ tier (no lifecycle rule — lives forever), for snapshots worth
+  # keeping past the 2-day window.
+  tripbot:prod:db:backup:
+    desc: "run an on-demand prod-1 Postgres dump (lands in hourly/); ARCHIVE=true also pins it to the permanent archive/ tier"
+    vars:
+      BUCKET: adanalife-prod-1-postgres-backups
+    preconditions:
+      - sh: kubectl get cronjob postgres-backup -n prod-1 >/dev/null 2>&1
+        msg: "postgres-backup CronJob not found in prod-1 — apply the postgres overlay first"
+    cmds:
+      - |
+        set -euo pipefail
+        job="postgres-backup-manual-$(date +%Y%m%d-%H%M%S)"
+        echo "Creating one-shot backup Job ${job} from cronjob/postgres-backup..."
+        kubectl create job --from=cronjob/postgres-backup "${job}" -n prod-1
+        echo "Waiting for ${job} to complete..."
+        kubectl wait --for=condition=complete "job/${job}" -n prod-1 --timeout=300s
+        kubectl logs "job/${job}" -n prod-1 --tail=20 || true
+        echo "Backup complete (written to s3://{{.BUCKET}}/hourly/)."
+        if [ "{{.ARCHIVE}}" = "true" ]; then
+          newest=$(aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/hourly/" | sort | tail -1 | awk '{print $4}')
+          [ -n "$newest" ] || { echo "no dump found in hourly/ to pin"; exit 1; }
+          echo "Pinning hourly/${newest} → archive/${newest}"
+          aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/hourly/${newest}" "s3://{{.BUCKET}}/archive/${newest}"
+          echo "Pinned to archive/ (permanent)."
+        fi
 
   # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
   # env creds (no credential handling here). Then clears a stale

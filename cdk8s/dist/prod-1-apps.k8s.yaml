@@ -135,7 +135,7 @@ data:
   MAPS_OUTPUT_DIR: /opt/data/maps
   NATS_URL: nats://nats.prod-1-platform.svc.cluster.local:4222
   OBS_SERVER_HOST: obs:8080
-  ONSCREENS_SERVER_HOST: vlc-server:8081
+  ONSCREENS_SERVER_HOST: onscreens-server:8080
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod-1,service.namespace=tripbot
   OTEL_SDK_DISABLED: "false"
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
@@ -279,7 +279,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 41f5fe5e06
+        adanalife.dev/config-hash: dfbb6e8756
       labels:
         app: tripbot
     spec:
@@ -500,8 +500,6 @@ spec:
               name: vnc
             - containerPort: 8554
               name: rtsp
-            - containerPort: 8081
-              name: onscreens
           readinessProbe:
             httpGet:
               path: /health/ready
@@ -553,9 +551,6 @@ spec:
     - name: vnc
       port: 5900
       targetPort: vnc
-    - name: onscreens
-      port: 8081
-      targetPort: onscreens
   selector:
     app: vlc-server
   type: ClusterIP
