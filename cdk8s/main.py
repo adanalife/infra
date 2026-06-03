@@ -19,7 +19,7 @@ from adanalife_k8s.charts import (
     DashcamCVJobsChart,
     DashcamPVChart,
     DataChart,
-    JobsChart,
+    emit_job_charts,
     SupportingChart,
     emit_app_charts,
 )
@@ -43,7 +43,7 @@ for name in targets:
     # Stateful resources (postgres + dashcam PV/PVC) as a separate deploy unit /
     # Argo Application — isolated from the app churn, synced before the apps.
     DataChart(app, f"{name}-data", env=env)
-    JobsChart(app, f"{name}-jobs", env=env)
+    emit_job_charts(app, env)
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
     # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
     # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist

@@ -164,16 +164,26 @@ class DashcamCVJobsChart(Chart):
         DashcamCVJobs(self, env=env)
 
 
-class JobsChart(Chart):
-    """tripbot one-shot Jobs (auth-bootstrap bot+broadcaster, seed). Applied
-    per-env via `task tripbot:<env>:auth:bootstrap` / `:seed`, never on a normal
-    apply (running a seed/auth job on every reconcile would be wrong)."""
+def emit_job_charts(scope: Construct, env: EnvConfig) -> None:
+    """tripbot one-shot Jobs — one Chart each, so every Job synthesizes to its own
+    `dist/<env>-job-<name>.k8s.yaml` and a deploy task can `kubectl apply` exactly
+    one. NOT auto-run on a normal apply (running a seed/auth Job on every reconcile
+    would be wrong) — invoked via `task tripbot:<env>:{db:seed,auth:bootstrap:*}`.
+    local gets the combined auth-bootstrap; eso envs get the bot + broadcaster
+    legs; both get seed."""
+    from adanalife_k8s.constructs import tripbot as tb
 
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
-        from adanalife_k8s.constructs.tripbot import emit_jobs
+    ns = env.namespace or None
 
-        emit_jobs(self, env)
+    def _chart(suffix: str) -> Chart:
+        return Chart(scope, f"{env.name}-job-{suffix}", namespace=ns)
+
+    if env.secret_source == "local":
+        tb.local_auth_bootstrap(_chart("auth-bootstrap"), env)
+    else:
+        tb.auth_bootstrap_bot(_chart("auth-bootstrap-bot"), env)
+        tb.auth_bootstrap_broadcaster(_chart("auth-bootstrap-broadcaster"), env)
+    tb.seed(_chart("seed"), env)
 
 
 class ArgoCDChart(Chart):
