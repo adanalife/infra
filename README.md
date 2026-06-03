@@ -1,26 +1,27 @@
 # infra
 
 
-## running kubernetes locally
+## running kubernetes locally (development / bees)
 
-Local app stack (postgres + tripbot + vlc-server + obs) on k3d. Manifests
-live in `k8s/apps/<component>/{base,overlays/local}/`; the umbrella overlay
-at `k8s/overlays/local/` wires them together. The k3d cluster config is at
-`k8s/k3d-config.bees.yaml`.
+Dev app stack (postgres + tripbot + vlc-server + obs + onscreens-server) on a
+local k3d cluster ("bees"). The manifests are authored in cdk8s
+(`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`.
+dev is **not** Argo-managed, so it deploys with a direct `kubectl apply` via
+`task cdk8s:dev:apply`. The k3d cluster config is at `k8s/k3d-config.bees.yaml`.
+
+> prod-1/stage-1 app workloads are delivered by Argo CD from `cdk8s/dist/`
+> instead — see `gitops/README.md`.
 
 ```bash
 brew install k3d kubectl
 
-# 1. Fill in secrets (gitignored)
-for d in k8s/apps/{postgres,tripbot,obs}/overlays/local; do
-  cp $d/secret.env.example $d/secret.env
-  $EDITOR $d/secret.env
-done
-
-# 2. Bring up the cluster, build & import images, apply manifests
+# 1. Bring up the cluster and seed the ESO bootstrap Secret
 task k8s:dev:cluster:up
+task k8s:dev:bootstrap-secrets
+
+# 2. Build & import images, then deploy the synthesized manifests
 task k8s:import-images   # builds via tripbot/infra/docker/docker-compose.yml
-task k8s:apply
+task cdk8s:dev:apply     # data (postgres + SecretStore), then apps
 
 # 3. Verify
 kubectl get pods                              # all four Running
@@ -91,9 +92,9 @@ aws-vault exec adanalife-stage -- sh -c 'cd terraform/stage-1 \
 #    Re-run any time the tunnel or ESO IAM access key is rotated.
 task k8s:dev:bootstrap-secrets
 
-# 7. Apply the development overlay — same four apps as `task k8s:apply`,
-#    plus the cloudflared Deployment.
-task k8s:dev:apply
+# 7. Deploy the dev app stack, then bring up the cloudflared Deployment.
+task cdk8s:dev:apply
+task k8s:dev:tunnel:up
 
 # 8. Verify (after Cloudflare marks the zone Active in step 5).
 curl https://tripbot.whalecore.com/health/live
