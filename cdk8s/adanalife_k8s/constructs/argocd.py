@@ -41,6 +41,12 @@ IN_CLUSTER = "https://kubernetes.default.svc"
 # minipc envs Argo runs in-cluster against (development is on the bees cluster —
 # needs separate registration, a follow-up).
 ENVS = ("prod-1", "stage-1")
+# Envs migrated to the per-component topology. Stage cuts over first; prod stays
+# on its (live, pre-#661) legacy adanalife-* ApplicationSets until its own wipe,
+# then joins here (CUTOVER_ENVS = ENVS) and the legacy sets are retired. Keeping
+# the new sets stage-only avoids colliding with the legacy sets on the shared
+# `{env}-data` Application name.
+CUTOVER_ENVS = ("stage-1",)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
 
@@ -57,7 +63,7 @@ def _app_elements() -> list[dict]:
 
     return [
         {"env": env_name, "app": f"{comp}-{platform}"}
-        for env_name in ENVS
+        for env_name in CUTOVER_ENVS
         for platform in load_env(env_name).platforms
         for comp in COMPONENTS
     ]
@@ -84,7 +90,7 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-supporting",
             name="tripbot-supporting",
-            elements=[{"env": e} for e in ENVS],
+            elements=[{"env": e} for e in CUTOVER_ENVS],
             app_name_tmpl="{{.env}}-supporting",
             include_tmpl="{{.env}}-supporting.k8s.yaml",
             prune_disabled=False,
@@ -92,7 +98,7 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-data",
             name="tripbot-data",
-            elements=[{"env": e} for e in ENVS],
+            elements=[{"env": e} for e in CUTOVER_ENVS],
             app_name_tmpl="{{.env}}-data",
             include_tmpl="{{.env}}-data.k8s.yaml",
             # NEVER prune the stateful unit.
