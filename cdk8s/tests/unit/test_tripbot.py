@@ -130,10 +130,11 @@ def test_channel_and_bot_identity_per_env():
     assert prod["BOT_USERNAME"] == "tripbot4000"
     # prod overrides onscreens host to the in-pod :8081 process
     assert prod["ONSCREENS_SERVER_HOST"] == "vlc-server:8081"
+    # all non-prod envs share the test bot (tripbot4001), off the prod account
     for env in ("stage-1", "development", "local"):
         cm = _by(_synth(env), "ConfigMap", "tripbot-config")[0]["data"]
         assert cm["CHANNEL_NAME"] == "adanalife_staging"
-        assert cm["BOT_USERNAME"] == "tripbot4000"
+        assert cm["BOT_USERNAME"] == "tripbot4001"
         assert cm["ONSCREENS_SERVER_HOST"] == "onscreens-server:8080"
     # DISCORD_GUILD_ID is stage-only
     assert (
