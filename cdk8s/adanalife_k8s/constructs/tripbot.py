@@ -69,8 +69,11 @@ _LOCAL_SECRET = {
 }
 
 # Per-env tripbot identity + config values the overlays vary. Channel identity:
-# prod is the real adanalife_ channel; dev/stage/local share tripbot4000 in
-# adanalife_staging (so dev and stage must not be live at once). NATS_URL/
+# prod is the real adanalife_ channel on tripbot4000. ALL non-prod envs
+# (dev + stage + local) use tripbot4001 in adanalife_staging — reserving
+# tripbot4000 for prod. They share tripbot4001 (all on the tripbot-development
+# Twitch app), so any two can't be live at once and a re-auth rotates the shared
+# token; that clobbering is accepted as low-stakes off-prod. NATS_URL/
 # DISCORD_GUILD_ID/ONSCREENS override are per-env extras layered on the base.
 _ENV_CONFIG: dict[str, dict[str, str]] = {
     "prod-1": {
@@ -81,7 +84,8 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
     },
     "stage-1": {
         "CHANNEL_NAME": "adanalife_staging",
-        "BOT_USERNAME": "tripbot4000",
+        # tripbot4001 (the non-prod test bot), not the prod tripbot4000.
+        "BOT_USERNAME": "tripbot4001",
         "EXTERNAL_URL": "https://tripbot.stage.whereisdana.today",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-stage",
         # ADanaLife guild snowflake — stage's discord bot is gated to it.
@@ -89,7 +93,8 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
     },
     "development": {
         "CHANNEL_NAME": "adanalife_staging",
-        "BOT_USERNAME": "tripbot4000",
+        # tripbot4001 (shared with stage), not the prod tripbot4000.
+        "BOT_USERNAME": "tripbot4001",
         # k3d's traefik is mapped to host :9443 (Colima can't bind :443), so the
         # dev EXTERNAL_URL / Twitch redirect carry the port.
         "EXTERNAL_URL": "https://tripbot.dev.whereisdana.today:9443",
@@ -97,7 +102,8 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
     },
     "local": {
         "CHANNEL_NAME": "adanalife_staging",
-        "BOT_USERNAME": "tripbot4000",
+        # tripbot4001 (the non-prod test bot), not the prod tripbot4000.
+        "BOT_USERNAME": "tripbot4001",
         "EXTERNAL_URL": "http://tripbot.localhost",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-stage",
     },

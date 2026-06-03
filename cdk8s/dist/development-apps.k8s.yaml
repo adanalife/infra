@@ -126,7 +126,7 @@ metadata:
   name: tripbot-config
   namespace: development
 data:
-  BOT_USERNAME: tripbot4000
+  BOT_USERNAME: tripbot4001
   CHANNEL_NAME: adanalife_staging
   DATABASE_HOST: postgres
   ENV: staging
@@ -279,7 +279,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 849c74de9c
+        adanalife.dev/config-hash: 02a60a2945
       labels:
         app: tripbot
     spec:
