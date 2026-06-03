@@ -216,25 +216,26 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
 }
 
 # ============================================================================
-# Discord alerts webhook — SHARED VALUE with stage-1/discord-alerts-webhook
+# Discord alerts webhook — SHARED VALUE with the stage account
 # ============================================================================
 #
-# The same Discord webhook URL is stored in BOTH AWS accounts because the two
-# consumers live in different accounts and can't cross-read:
-#   - prod (this file, k8s/tripbot/discord-alerts-webhook) — consumed at
-#     runtime by tripbot's reportCmd via the tripbot-discord-alerts-webhook
-#     ExternalSecret in k8s/apps/tripbot/base/.
-#   - stage (stage-1/secrets.tf, stage-1/discord-alerts-webhook) — consumed
-#     terraform-side by grafana_contact_point in grafana-alerts.tf.
+# The same Discord webhook URL is stored in BOTH AWS accounts under the same SM
+# name (k8s/tripbot/discord-alerts-webhook) because the consumers live in
+# different accounts and can't cross-read:
+#   - prod (this file) — consumed at runtime by tripbot's reportCmd via the
+#     tripbot-discord-alerts-webhook ExternalSecret in k8s/apps/tripbot/base/.
+#   - stage (stage-1/secrets.tf) — same SM name, consumed by both that
+#     ExternalSecret (tripbot !report) AND grafana_contact_point in
+#     grafana-alerts.tf (terraform-side infra alerts).
 #
 # Populate BOTH with the same URL after `task tf:{stage,prod}:apply`:
 #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id stage-1/discord-alerts-webhook --secret-string '<URL>'
+#     --secret-id k8s/tripbot/discord-alerts-webhook --secret-string '<URL>'
 #   aws-vault exec adanalife-prod  -- aws secretsmanager put-secret-value \
 #     --secret-id k8s/tripbot/discord-alerts-webhook --secret-string '<URL>'
 resource "aws_secretsmanager_secret" "discord_alerts_webhook" {
   name        = "k8s/tripbot/discord-alerts-webhook"
-  description = "Discord webhook for tripbot reportCmd. Same value as stage-1/discord-alerts-webhook in adanalife-stage."
+  description = "Discord webhook for tripbot reportCmd. Same value as k8s/tripbot/discord-alerts-webhook in adanalife-stage."
 }
 
 resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
