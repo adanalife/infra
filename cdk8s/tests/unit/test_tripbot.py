@@ -128,8 +128,8 @@ def test_channel_and_bot_identity_per_env():
     prod = _by(_synth("prod-1"), "ConfigMap", "tripbot-config")[0]["data"]
     assert prod["CHANNEL_NAME"] == "adanalife_"
     assert prod["BOT_USERNAME"] == "tripbot4000"
-    # prod overrides onscreens host to the in-pod :8081 process
-    assert prod["ONSCREENS_SERVER_HOST"] == "vlc-server:8081"
+    # prod uses the standalone onscreens-server (the in-pod :8081 hack is gone)
+    assert prod["ONSCREENS_SERVER_HOST"] == "onscreens-server:8080"
     for env in ("stage-1", "development", "local"):
         cm = _by(_synth(env), "ConfigMap", "tripbot-config")[0]["data"]
         assert cm["CHANNEL_NAME"] == "adanalife_staging"
