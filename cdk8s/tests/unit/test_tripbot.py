@@ -13,7 +13,7 @@ from adanalife_k8s.constructs.tripbot import Tripbot
 def _synth(env_name):
     app = K8sTesting.app()
     chart = Chart(app, "t")
-    Tripbot(chart, env=load_env(env_name))
+    Tripbot(chart, "twitch", env=load_env(env_name))
     return K8sTesting.synth(chart)
 
 
@@ -33,29 +33,29 @@ def _by(objs, kind, name):
 
 def test_config_map_is_stable_named_with_hash_annotation():
     objs = _synth("stage-1")
-    cm = _by(objs, "ConfigMap", "tripbot-config")
+    cm = _by(objs, "ConfigMap", "tripbot-twitch-config")
     assert cm, "tripbot-config must keep its stable (non-hashed) name"
     # the only ConfigMap; no hash-suffixed variant
     assert [o for o in objs if o["kind"] == "ConfigMap"] == cm
-    dep = _by(objs, "Deployment", "tripbot")[0]
+    dep = _by(objs, "Deployment", "tripbot-twitch")[0]
     ann = dep["spec"]["template"]["metadata"]["annotations"]
     assert "adanalife.dev/config-hash" in ann
 
 
 def test_deployment_and_jobs_reference_stable_config():
-    dep = _by(_synth("prod-1"), "Deployment", "tripbot")[0]
+    dep = _by(_synth("prod-1"), "Deployment", "tripbot-twitch")[0]
     spec = dep["spec"]["template"]["spec"]
     # both the migrate initContainer and the main container envFrom tripbot-config
     for c in (spec["initContainers"][0], spec["containers"][0]):
         names = [e.get("configMapRef", {}).get("name") for e in c["envFrom"]]
-        assert "tripbot-config" in names
+        assert "tripbot-twitch-config" in names
     # every Job envFroms the stable name too
     for env in ("prod-1", "local"):
         for job in [o for o in _synth_jobs(env) if o["kind"] == "Job"]:
             pod = job["spec"]["template"]["spec"]
             cs = pod.get("containers", []) + pod.get("initContainers", [])
             assert any(
-                e.get("configMapRef", {}).get("name") == "tripbot-config"
+                e.get("configMapRef", {}).get("name") == "tripbot-twitch-config"
                 for c in cs
                 for e in c.get("envFrom", [])
             )
@@ -112,7 +112,7 @@ def test_local_drops_db_external_secret_and_builds_secret():
     # envFroms it (not tripbot-database-creds).
     sec = _by(objs, "Secret", "tripbot-secret")[0]
     assert sec["stringData"]["DATABASE_USER"] == "tripbot_docker"
-    dep = _by(objs, "Deployment", "tripbot")[0]
+    dep = _by(objs, "Deployment", "tripbot-twitch")[0]
     names = [
         e.get("secretRef", {}).get("name")
         for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]
@@ -125,43 +125,44 @@ def test_local_drops_db_external_secret_and_builds_secret():
 
 
 def test_channel_and_bot_identity_per_env():
-    prod = _by(_synth("prod-1"), "ConfigMap", "tripbot-config")[0]["data"]
+    prod = _by(_synth("prod-1"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
     assert prod["CHANNEL_NAME"] == "adanalife_"
     assert prod["BOT_USERNAME"] == "tripbot4000"
     # prod uses the standalone onscreens-server (the in-pod :8081 hack is gone)
-    assert prod["ONSCREENS_SERVER_HOST"] == "onscreens-server:8080"
+    assert prod["ONSCREENS_SERVER_HOST"] == "onscreens-twitch:8080"
     for env in ("stage-1", "development", "local"):
-        cm = _by(_synth(env), "ConfigMap", "tripbot-config")[0]["data"]
+        cm = _by(_synth(env), "ConfigMap", "tripbot-twitch-config")[0]["data"]
         assert cm["CHANNEL_NAME"] == "adanalife_staging"
         assert cm["BOT_USERNAME"] == "tripbot4001"
-        assert cm["ONSCREENS_SERVER_HOST"] == "onscreens-server:8080"
+        assert cm["ONSCREENS_SERVER_HOST"] == "onscreens-twitch:8080"
     # DISCORD_GUILD_ID is stage-only
     assert (
         "DISCORD_GUILD_ID"
-        in _by(_synth("stage-1"), "ConfigMap", "tripbot-config")[0]["data"]
+        in _by(_synth("stage-1"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
     )
     assert "DISCORD_GUILD_ID" not in prod
 
 
 def test_telemetry_block_and_no_stub_block():
-    prod = _by(_synth("prod-1"), "ConfigMap", "tripbot-config")[0]["data"]
+    prod = _by(_synth("prod-1"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
     assert prod["ENV"] == "production"
     assert prod["OTEL_SDK_DISABLED"] == "false"
     assert prod["SENTRY_ENVIRONMENT"] == "prod-1"
     # tripbot's ConfigMap (unlike vlc's) carries NO DB/Twitch stub block —
     # those come from the Secret. Verify even on local/dev.
     for env in ("local", "development"):
-        cm = _by(_synth(env), "ConfigMap", "tripbot-config")[0]["data"]
+        cm = _by(_synth(env), "ConfigMap", "tripbot-twitch-config")[0]["data"]
         assert "DATABASE_USER" not in cm
         assert "TWITCH_CLIENT_ID" not in cm
 
 
 def test_nats_url_present_except_local():
     for env in ("prod-1", "stage-1", "development"):
-        cm = _by(_synth(env), "ConfigMap", "tripbot-config")[0]["data"]
+        cm = _by(_synth(env), "ConfigMap", "tripbot-twitch-config")[0]["data"]
         assert cm["NATS_URL"].startswith("nats://")
     assert (
-        "NATS_URL" not in _by(_synth("local"), "ConfigMap", "tripbot-config")[0]["data"]
+        "NATS_URL"
+        not in _by(_synth("local"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
     )
 
 
@@ -170,7 +171,7 @@ def test_nats_url_present_except_local():
 
 def test_ingress_minipc_has_tls_and_tailscale():
     objs = _synth("prod-1")
-    ing = _by(objs, "Ingress", "tripbot")[0]
+    ing = _by(objs, "Ingress", "tripbot-twitch")[0]
     assert ing["spec"]["rules"][0]["host"] == "tripbot.prod.whereisdana.today"
     assert ing["spec"]["tls"][0]["secretName"] == "tripbot-tls"
     assert (
@@ -178,27 +179,27 @@ def test_ingress_minipc_has_tls_and_tailscale():
         == "letsencrypt-route53"
     )
     # Tailscale Ingress (off-LAN dashboard) on minipc envs
-    ts = _by(objs, "Ingress", "tripbot-ts")[0]
+    ts = _by(objs, "Ingress", "tripbot-twitch-ts")[0]
     assert ts["spec"]["ingressClassName"] == "tailscale"
-    assert ts["spec"]["tls"][0]["hosts"] == ["tripbot-prod"]
+    assert ts["spec"]["tls"][0]["hosts"] == ["tripbot-twitch-prod"]
     assert ts["spec"]["defaultBackend"]["service"]["port"]["number"] == 8080
 
 
 def test_dev_ingress_has_tls_no_tailscale():
     objs = _synth("development")
-    ing = _by(objs, "Ingress", "tripbot")[0]
+    ing = _by(objs, "Ingress", "tripbot-twitch")[0]
     assert ing["spec"]["rules"][0]["host"] == "tripbot.dev.whereisdana.today"
     assert ing["spec"]["tls"][0]["secretName"] == "tripbot-tls"
-    assert not _by(objs, "Ingress", "tripbot-ts")
+    assert not _by(objs, "Ingress", "tripbot-twitch-ts")
 
 
 def test_local_ingress_is_plain_http_localhost():
     objs = _synth("local")
-    ing = _by(objs, "Ingress", "tripbot")[0]
+    ing = _by(objs, "Ingress", "tripbot-twitch")[0]
     assert ing["spec"]["rules"][0]["host"] == "tripbot.localhost"
     assert "tls" not in ing["spec"] or not ing["spec"]["tls"]
     assert "annotations" not in ing["metadata"] or not ing["metadata"]["annotations"]
-    assert not _by(objs, "Ingress", "tripbot-ts")
+    assert not _by(objs, "Ingress", "tripbot-twitch-ts")
 
 
 # ---- image tag per env ----
@@ -211,7 +212,7 @@ def test_image_tag_per_env():
         ("stage-1", "develop"),
         ("development", "develop"),
     ]:
-        dep = _by(_synth(env), "Deployment", "tripbot")[0]
+        dep = _by(_synth(env), "Deployment", "tripbot-twitch")[0]
         spec = dep["spec"]["template"]["spec"]
         assert spec["containers"][0]["image"] == f"adanalife/tripbot:{tag}"
         assert spec["initContainers"][0]["image"] == f"adanalife/tripbot:{tag}"

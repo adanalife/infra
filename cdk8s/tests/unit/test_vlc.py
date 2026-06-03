@@ -15,7 +15,7 @@ from adanalife_k8s.constructs.vlc import (
 def _synth(env_name):
     app = K8sTesting.app()
     chart = Chart(app, "t")
-    VlcServer(chart, env=load_env(env_name))
+    VlcServer(chart, "twitch", env=load_env(env_name))
     return K8sTesting.synth(chart)
 
 
@@ -36,7 +36,7 @@ def test_stage_dashcam_mount_references_pvc_by_name():
     objs = _synth("stage-1")
     assert not _by(objs, "PersistentVolume", "vlc-dashcam-nfs-stage")
     assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")
-    dep = _by(objs, "Deployment", "vlc-server")[0]
+    dep = _by(objs, "Deployment", "vlc-twitch")[0]
     vol = dep["spec"]["template"]["spec"]["volumes"][0]
     assert vol["persistentVolumeClaim"]["claimName"] == "vlc-dashcam"
 
@@ -76,19 +76,19 @@ def test_dashcam_pv_is_its_own_cluster_scoped_unit():
 
 def test_local_uses_hostpath_and_host_access_service():
     objs = _synth("local")
-    dep = _by(objs, "Deployment", "vlc-server")[0]
+    dep = _by(objs, "Deployment", "vlc-twitch")[0]
     vol = dep["spec"]["template"]["spec"]["volumes"][0]
     assert vol["hostPath"]["path"] == "/host/dashcam"
     assert not _by(objs, "PersistentVolume", "vlc-dashcam-nfs")
     # k3d host-access LoadBalancer only on local.
-    assert _by(objs, "Service", "vlc-server-host")
+    assert _by(objs, "Service", "vlc-twitch-host")
 
 
 def test_gpu_only_on_gpu_envs():
-    prod = _by(_synth("prod-1"), "Deployment", "vlc-server")[0]
+    prod = _by(_synth("prod-1"), "Deployment", "vlc-twitch")[0]
     reqs = prod["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]
     assert reqs.get("gpu.intel.com/i915") == "1"
-    local = _by(_synth("local"), "Deployment", "vlc-server")[0]
+    local = _by(_synth("local"), "Deployment", "vlc-twitch")[0]
     lreqs = local["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]
     assert "gpu.intel.com/i915" not in lreqs
 
@@ -97,16 +97,16 @@ def test_prod_vlc_no_inpod_onscreens_port_but_has_nats():
     # The in-pod onscreens :8081 is decommissioned — no env re-exposes it; prod
     # still carries NATS_URL (its own command subscriber, not the old onscreens).
     objs = _synth("prod-1")
-    dep = _by(objs, "Deployment", "vlc-server")[0]
+    dep = _by(objs, "Deployment", "vlc-twitch")[0]
     port_names = {
         p["name"] for p in dep["spec"]["template"]["spec"]["containers"][0]["ports"]
     }
     assert "onscreens" not in port_names
     svc_ports = {
-        p["name"] for p in _by(objs, "Service", "vlc-server")[0]["spec"]["ports"]
+        p["name"] for p in _by(objs, "Service", "vlc-twitch")[0]["spec"]["ports"]
     }
     assert "onscreens" not in svc_ports
-    cm = _by(objs, "ConfigMap", "vlc-server-config")[0]["data"]
+    cm = _by(objs, "ConfigMap", "vlc-twitch-config")[0]["data"]
     assert cm["NATS_URL"].startswith("nats://")
 
 
@@ -114,28 +114,28 @@ def test_config_blocks_per_env():
     # local + dev carry the stub block; stage + prod don't.
     assert (
         "DATABASE_USER"
-        in _by(_synth("local"), "ConfigMap", "vlc-server-config")[0]["data"]
+        in _by(_synth("local"), "ConfigMap", "vlc-twitch-config")[0]["data"]
     )
     assert (
         "DATABASE_USER"
-        in _by(_synth("development"), "ConfigMap", "vlc-server-config")[0]["data"]
+        in _by(_synth("development"), "ConfigMap", "vlc-twitch-config")[0]["data"]
     )
     assert (
         "DATABASE_USER"
-        not in _by(_synth("stage-1"), "ConfigMap", "vlc-server-config")[0]["data"]
+        not in _by(_synth("stage-1"), "ConfigMap", "vlc-twitch-config")[0]["data"]
     )
-    prod_cm = _by(_synth("prod-1"), "ConfigMap", "vlc-server-config")[0]["data"]
+    prod_cm = _by(_synth("prod-1"), "ConfigMap", "vlc-twitch-config")[0]["data"]
     assert prod_cm["ENV"] == "production"
     assert prod_cm["OTEL_SDK_DISABLED"] == "false"
 
 
 def test_ingress_tls_on_minipc_only():
-    stage_ing = _by(_synth("stage-1"), "Ingress", "vlc-server")[0]
-    assert stage_ing["spec"]["tls"][0]["secretName"] == "vlc-tls"
+    stage_ing = _by(_synth("stage-1"), "Ingress", "vlc-twitch")[0]
+    assert stage_ing["spec"]["tls"][0]["secretName"] == "vlc-twitch-tls"
     assert (
         stage_ing["metadata"]["annotations"]["cert-manager.io/issuer"]
         == "letsencrypt-route53"
     )
-    dev_ing = _by(_synth("development"), "Ingress", "vlc-server")[0]
+    dev_ing = _by(_synth("development"), "Ingress", "vlc-twitch")[0]
     assert "tls" not in dev_ing["spec"] or not dev_ing["spec"]["tls"]
-    assert not _by(_synth("local"), "Ingress", "vlc-server")
+    assert not _by(_synth("local"), "Ingress", "vlc-twitch")

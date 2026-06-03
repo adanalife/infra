@@ -90,9 +90,12 @@ def test_contract_drives_names_ports_and_urls():
     assert ports["obs-server"] == c.port("obs_server")
     # OBS-config URLs are composed from contract names+ports (can't drift from the Services).
     cm = _by(objs, "ConfigMap", "obs-twitch-config")[0]["data"]
-    assert cm["ONSCREENS_URL_BASE"] == c.onscreens_url_base
-    assert cm["VLC_URL_BASE"] == c.vlc_url_base
-    assert cm["DASHCAM_RTSP_URL"] == c.dashcam_rtsp_url
+    assert cm["ONSCREENS_URL_BASE"] == c.onscreens_url_base("twitch")
+    assert cm["VLC_URL_BASE"] == c.vlc_url_base("twitch")
+    assert cm["DASHCAM_RTSP_URL"] == c.dashcam_rtsp_url("twitch")
+    # the twitch obs points at the twitch vlc/onscreens
+    assert cm["VLC_URL_BASE"] == "http://vlc-twitch:8080"
+    assert cm["ONSCREENS_URL_BASE"] == "http://onscreens-twitch:8080"
 
 
 def test_local_obs_has_no_ingress():

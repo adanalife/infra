@@ -121,9 +121,9 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
-  name: tripbot-config
+  name: tripbot-twitch-config
   namespace: prod-1
 data:
   BOT_USERNAME: tripbot4000
@@ -134,8 +134,8 @@ data:
   GOOGLE_APPS_PROJECT_ID: tripbot-prod
   MAPS_OUTPUT_DIR: /opt/data/maps
   NATS_URL: nats://nats.prod-1-platform.svc.cluster.local:4222
-  OBS_SERVER_HOST: obs:8080
-  ONSCREENS_SERVER_HOST: onscreens-server:8080
+  OBS_SERVER_HOST: obs-twitch:8080
+  ONSCREENS_SERVER_HOST: onscreens-twitch:8080
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod-1,service.namespace=tripbot
   OTEL_SDK_DISABLED: "false"
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
@@ -144,13 +144,13 @@ data:
   SENTRY_ENVIRONMENT: prod-1
   TRIPBOT_SERVER_PORT: "8080"
   VERBOSE: "false"
-  VLC_SERVER_HOST: vlc-server:8080
+  VLC_SERVER_HOST: vlc-twitch:8080
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
   name: tripbot-database-creds
   namespace: prod-1
@@ -185,7 +185,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
   name: tripbot-twitch-creds
   namespace: prod-1
@@ -205,7 +205,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
   name: tripbot-google-maps-api-key
   namespace: prod-1
@@ -225,7 +225,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
   name: tripbot-discord-alerts-webhook
   namespace: prod-1
@@ -246,7 +246,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
   name: tripbot-discord-bot-token
   namespace: prod-1
@@ -267,21 +267,21 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
-  name: tripbot
+  name: tripbot-twitch
   namespace: prod-1
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: tripbot
+      app: tripbot-twitch
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: dfbb6e8756
+        adanalife.dev/config-hash: ca10bc6bb1
       labels:
-        app: tripbot
+        app: tripbot-twitch
     spec:
       containers:
         - env:
@@ -289,7 +289,7 @@ spec:
               value: tripbot
           envFrom:
             - configMapRef:
-                name: tripbot-config
+                name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-database-creds
             - secretRef:
@@ -315,7 +315,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 30
             timeoutSeconds: 5
-          name: tripbot
+          name: tripbot-twitch
           ports:
             - containerPort: 8080
               name: http
@@ -347,7 +347,7 @@ spec:
             - migrate
           envFrom:
             - configMapRef:
-                name: tripbot-config
+                name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-database-creds
           image: adanalife/tripbot:latest
@@ -369,9 +369,9 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
-  name: tripbot
+  name: tripbot-twitch
   namespace: prod-1
 spec:
   ports:
@@ -379,7 +379,7 @@ spec:
       port: 8080
       targetPort: http
   selector:
-    app: tripbot
+    app: tripbot-twitch
   type: ClusterIP
 ---
 apiVersion: networking.k8s.io/v1
@@ -389,9 +389,9 @@ metadata:
     cert-manager.io/issuer: letsencrypt-route53
     external-dns.alpha.kubernetes.io/hostname: tripbot.prod.whereisdana.today
   labels:
-    app.kubernetes.io/name: tripbot
+    app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
-  name: tripbot
+  name: tripbot-twitch
   namespace: prod-1
 spec:
   ingressClassName: traefik
@@ -401,7 +401,7 @@ spec:
         paths:
           - backend:
               service:
-                name: tripbot
+                name: tripbot-twitch
                 port:
                   name: http
             path: /
@@ -414,26 +414,26 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: tripbot-ts
+  name: tripbot-twitch-ts
   namespace: prod-1
 spec:
   defaultBackend:
     service:
-      name: tripbot
+      name: tripbot-twitch
       port:
         number: 8080
   ingressClassName: tailscale
   tls:
     - hosts:
-        - tripbot-prod
+        - tripbot-twitch-prod
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/name: vlc-server
+    app.kubernetes.io/name: vlc-twitch
     app.kubernetes.io/part-of: tripbot
-  name: vlc-server-config
+  name: vlc-twitch-config
   namespace: prod-1
 data:
   DISPLAY: :0.0
@@ -445,22 +445,22 @@ data:
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
   OTEL_TRACES_SAMPLER_ARG: "0.1"
   SENTRY_ENVIRONMENT: prod-1
-  VLC_SERVER_HOST: vlc-server:8080
+  VLC_SERVER_HOST: vlc-twitch:8080
   XDG_RUNTIME_DIR: /root/.cache/xdgr
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: vlc-server
+    app.kubernetes.io/name: vlc-twitch
     app.kubernetes.io/part-of: tripbot
-  name: vlc-server
+  name: vlc-twitch
   namespace: prod-1
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: vlc-server
+      app: vlc-twitch
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -469,14 +469,14 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: ce950bb826
+        adanalife.dev/config-hash: db96823929
       labels:
-        app: vlc-server
+        app: vlc-twitch
     spec:
       containers:
         - envFrom:
             - configMapRef:
-                name: vlc-server-config
+                name: vlc-twitch-config
             - secretRef:
                 name: sentry-vlc-server
                 optional: false
@@ -492,7 +492,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 30
             timeoutSeconds: 5
-          name: vlc-server
+          name: vlc-twitch
           ports:
             - containerPort: 8080
               name: http
@@ -536,9 +536,9 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: vlc-server
+    app.kubernetes.io/name: vlc-twitch
     app.kubernetes.io/part-of: tripbot
-  name: vlc-server
+  name: vlc-twitch
   namespace: prod-1
 spec:
   ports:
@@ -552,7 +552,7 @@ spec:
       port: 5900
       targetPort: vnc
   selector:
-    app: vlc-server
+    app: vlc-twitch
   type: ClusterIP
 ---
 apiVersion: networking.k8s.io/v1
@@ -560,50 +560,50 @@ kind: Ingress
 metadata:
   annotations:
     cert-manager.io/issuer: letsencrypt-route53
-    external-dns.alpha.kubernetes.io/hostname: vlc.prod.whereisdana.today
-  name: vlc-server
+    external-dns.alpha.kubernetes.io/hostname: vlc-twitch.prod.whereisdana.today
+  name: vlc-twitch
   namespace: prod-1
 spec:
   ingressClassName: traefik
   rules:
-    - host: vlc.prod.whereisdana.today
+    - host: vlc-twitch.prod.whereisdana.today
       http:
         paths:
           - backend:
               service:
-                name: vlc-server
+                name: vlc-twitch
                 port:
                   name: http
             path: /
             pathType: Prefix
   tls:
     - hosts:
-        - vlc.prod.whereisdana.today
-      secretName: vlc-tls
+        - vlc-twitch.prod.whereisdana.today
+      secretName: vlc-twitch-tls
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: vlc-server-ts
+  name: vlc-twitch-ts
   namespace: prod-1
 spec:
   defaultBackend:
     service:
-      name: vlc-server
+      name: vlc-twitch
       port:
         number: 8080
   ingressClassName: tailscale
   tls:
     - hosts:
-        - vlc-prod
+        - vlc-twitch-prod
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/name: onscreens-server
+    app.kubernetes.io/name: onscreens-twitch
     app.kubernetes.io/part-of: tripbot
-  name: onscreens-server-config
+  name: onscreens-twitch-config
   namespace: prod-1
 data:
   ENV: production
@@ -618,15 +618,15 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: onscreens-server
+    app.kubernetes.io/name: onscreens-twitch
     app.kubernetes.io/part-of: tripbot
-  name: onscreens-server
+  name: onscreens-twitch
   namespace: prod-1
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: onscreens-server
+      app: onscreens-twitch
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -637,12 +637,12 @@ spec:
       annotations:
         adanalife.dev/config-hash: 2d68d8fff8
       labels:
-        app: onscreens-server
+        app: onscreens-twitch
     spec:
       containers:
         - envFrom:
             - configMapRef:
-                name: onscreens-server-config
+                name: onscreens-twitch-config
             - secretRef:
                 name: sentry-vlc-server
                 optional: false
@@ -658,7 +658,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 30
             timeoutSeconds: 5
-          name: onscreens-server
+          name: onscreens-twitch
           ports:
             - containerPort: 8080
               name: http
@@ -693,9 +693,9 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: onscreens-server
+    app.kubernetes.io/name: onscreens-twitch
     app.kubernetes.io/part-of: tripbot
-  name: onscreens-server
+  name: onscreens-twitch
   namespace: prod-1
 spec:
   ports:
@@ -703,7 +703,7 @@ spec:
       port: 8080
       targetPort: http
   selector:
-    app: onscreens-server
+    app: onscreens-twitch
   type: ClusterIP
 ---
 apiVersion: v1
@@ -717,12 +717,12 @@ metadata:
   name: obs-twitch-config
   namespace: prod-1
 data:
-  DASHCAM_RTSP_URL: rtsp://vlc-server:8554/dashcam
+  DASHCAM_RTSP_URL: rtsp://vlc-twitch:8554/dashcam
   OBS_QUALITY_PRESET: high
   OBS_STREAM_ENCODER: ffmpeg_vaapi_tex
   OBS_WEBSOCKET_PASSWD: adanalife
-  ONSCREENS_URL_BASE: http://onscreens-server:8080
-  VLC_URL_BASE: http://vlc-server:8080
+  ONSCREENS_URL_BASE: http://onscreens-twitch:8080
+  VLC_URL_BASE: http://vlc-twitch:8080
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -762,7 +762,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 6adf8c7770
+        adanalife.dev/config-hash: 8d09643251
       labels:
         app: obs-twitch
         app.kubernetes.io/instance: obs-twitch

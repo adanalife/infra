@@ -45,17 +45,21 @@ class AppsChart(Chart):
         # --- supporting: SecretStore + shared-secrets + cert-manager issuers ---
         emit_supporting(self, env)
 
-        # --- tripbot (bot Deployment + Service + Ingress + ExternalSecrets) ---
-        Tripbot(self, env=env)
-
-        # --- vlc-server (shared; per-platform-ready) ---
-        VlcServer(self, env=env)
-
-        # --- onscreens-server (NATS consumer; its own Deployment) ---
-        OnscreensServer(self, env=env)
-
-        # --- OBS, one instance per streaming platform present in this env ---
+        # --- one full stack per streaming platform: tripbot + vlc + onscreens +
+        # obs, each named <app>-<platform> via the contract (naming.app_name). The
+        # identity-level resources (tripbot's DB/app Secrets) are emitted once, by
+        # the primary platform — see Tripbot. ---
         for platform in env.platforms:
+            # --- tripbot (bot Deployment + Service + Ingress + ExternalSecrets) ---
+            Tripbot(self, platform, env=env)
+
+            # --- vlc-server (dashcam video pipeline; shared dashcam PVC) ---
+            VlcServer(self, platform, env=env)
+
+            # --- onscreens-server (NATS consumer; its own Deployment) ---
+            OnscreensServer(self, platform, env=env)
+
+            # --- OBS ---
             # twitch streams by default in prod (ESO stream-key); everything else
             # boots idle until toggled on. youtube carries STREAM_PLATFORM=youtube.
             streaming = platform == "twitch" and env.name == "prod-1"

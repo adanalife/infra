@@ -26,18 +26,19 @@ class Contract:
         return self.ports[key]
 
     # Composed URLs the OBS image consumes (built from canonical names+ports so
-    # they can't drift from the Services they point at).
-    @property
-    def dashcam_rtsp_url(self) -> str:
-        return f"rtsp://{self.svc('vlc_server')}:{self.port('vlc_rtsp')}/dashcam"
+    # they can't drift from the Services they point at). Each OBS instance talks
+    # to the vlc/onscreens of its OWN platform, so these are parameterized by
+    # platform — obs-twitch -> vlc-twitch / onscreens-twitch.
+    def dashcam_rtsp_url(self, platform: str) -> str:
+        return f"rtsp://{self.svc(f'vlc_{platform}')}:{self.port('vlc_rtsp')}/dashcam"
 
-    @property
-    def onscreens_url_base(self) -> str:
-        return f"http://{self.svc('onscreens_server')}:{self.port('onscreens_http')}"
+    def onscreens_url_base(self, platform: str) -> str:
+        return (
+            f"http://{self.svc(f'onscreens_{platform}')}:{self.port('onscreens_http')}"
+        )
 
-    @property
-    def vlc_url_base(self) -> str:
-        return f"http://{self.svc('vlc_server')}:{self.port('vlc_http')}"
+    def vlc_url_base(self, platform: str) -> str:
+        return f"http://{self.svc(f'vlc_{platform}')}:{self.port('vlc_http')}"
 
 
 @cache
