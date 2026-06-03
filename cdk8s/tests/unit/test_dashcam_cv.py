@@ -94,10 +94,10 @@ def test_cronjob_pod_is_preemptible_and_mounts():
         "name": "DASHCAM_CV_CORPUS_DIR",
         "value": "/opt/data/Dashcam/_all",
     }
-    # envFrom: tripbot-config CM + tripbot-database-creds Secret
+    # envFrom: the primary platform's tripbot CM + tripbot-database-creds Secret
     cms = {e["configMapRef"]["name"] for e in embed["envFrom"] if "configMapRef" in e}
     secs = {e["secretRef"]["name"] for e in embed["envFrom"] if "secretRef" in e}
-    assert cms == {"tripbot-config"}
+    assert cms == {"tripbot-twitch-config"}
     assert secs == {"tripbot-database-creds"}
     claims = {v["persistentVolumeClaim"]["claimName"] for v in pod["volumes"]}
     assert claims == {"vlc-dashcam", "dashcam-cv-models"}

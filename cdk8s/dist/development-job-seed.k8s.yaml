@@ -1,39 +1,8 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tripbot-auth-bootstrap
-  namespace: default
-spec:
-  backoffLimit: 0
-  template:
-    spec:
-      containers:
-        - command:
-            - /usr/local/bin/auth-bootstrap
-          env:
-            - name: EXTERNAL_URL
-              value: http://localhost:8080
-          envFrom:
-            - configMapRef:
-                name: tripbot-twitch-config
-            - secretRef:
-                name: tripbot-secret
-            - secretRef:
-                name: tripbot-twitch-creds
-                optional: true
-          image: adanalife/tripbot:latest
-          imagePullPolicy: Always
-          name: auth-bootstrap
-          ports:
-            - containerPort: 8080
-      restartPolicy: Never
-  ttlSecondsAfterFinished: 600
----
-apiVersion: batch/v1
-kind: Job
-metadata:
   name: tripbot-seed
-  namespace: default
+  namespace: development
 spec:
   backoffLimit: 3
   template:
@@ -45,8 +14,8 @@ spec:
             - configMapRef:
                 name: tripbot-twitch-config
             - secretRef:
-                name: tripbot-secret
-          image: adanalife/tripbot:latest
+                name: tripbot-database-creds
+          image: adanalife/tripbot:develop
           imagePullPolicy: Always
           name: seed
       initContainers:
@@ -68,8 +37,9 @@ spec:
             - configMapRef:
                 name: tripbot-twitch-config
             - secretRef:
-                name: tripbot-secret
-          image: adanalife/tripbot:latest
+                name: tripbot-database-creds
+          image: adanalife/tripbot:develop
           imagePullPolicy: Always
           name: migrate
       restartPolicy: Never
+  ttlSecondsAfterFinished: 600

@@ -28,7 +28,8 @@ getpass.getuser() raises at import without them.
 The pod is shared by all four workloads via `_pod_spec` — `with_corpus` toggles the
 wait-for-postgres init + the (read-only) dashcam corpus mount + DASHCAM_CV_CORPUS_DIR
 (embed needs them; find/stats don't). DB config comes from the stable
-`tripbot-config` ConfigMap + `tripbot-database-creds` Secret.
+the primary platform's tripbot ConfigMap (config_map_name(env.platforms[0]),
+e.g. tripbot-twitch-config) + the `tripbot-database-creds` Secret.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.constructs.tripbot import config_map_name
 from adanalife_k8s.naming import meta_labels
 
 NAME = "dashcam-cv"
@@ -128,6 +130,7 @@ class DashcamCV(Construct):
                         ttl_seconds_after_finished=3600,
                         template=_pod_spec(
                             image,
+                            config_map=config_map_name(env.platforms[0]),
                             container_name="embed",
                             args=[
                                 "embed",
@@ -170,6 +173,7 @@ class DashcamCVJobs(Construct):
                 ttl_seconds_after_finished=3600,
                 template=_pod_spec(
                     image,
+                    config_map=config_map_name(env.platforms[0]),
                     container_name="embed",
                     args=["embed", "--random", "1", "--interval", "5", "--apply"],
                     with_corpus=True,
@@ -189,6 +193,7 @@ class DashcamCVJobs(Construct):
                 ttl_seconds_after_finished=3600,
                 template=_pod_spec(
                     image,
+                    config_map=config_map_name(env.platforms[0]),
                     container_name="find",
                     args=["find", "a road with trees", "-k", "5"],
                     with_corpus=False,
@@ -208,6 +213,7 @@ class DashcamCVJobs(Construct):
                 ttl_seconds_after_finished=3600,
                 template=_pod_spec(
                     image,
+                    config_map=config_map_name(env.platforms[0]),
                     container_name="stats",
                     args=["stats", "--concepts"],
                     with_corpus=False,
@@ -217,7 +223,12 @@ class DashcamCVJobs(Construct):
 
 
 def _pod_spec(
-    image: str, *, container_name: str, args: list[str], with_corpus: bool
+    image: str,
+    *,
+    config_map: str,
+    container_name: str,
+    args: list[str],
+    with_corpus: bool,
 ) -> k8s.PodTemplateSpec:
     """The hardened dashcam-cv pod, shared by all four workloads. `with_corpus`
     adds the wait-for-postgres init + the read-only dashcam corpus mount +
@@ -285,7 +296,7 @@ def _pod_spec(
                     security_context=_CONTAINER_SECURITY_CONTEXT,
                     env_from=[
                         k8s.EnvFromSource(
-                            config_map_ref=k8s.ConfigMapEnvSource(name="tripbot-config")
+                            config_map_ref=k8s.ConfigMapEnvSource(name=config_map)
                         ),
                         k8s.EnvFromSource(
                             secret_ref=k8s.SecretEnvSource(

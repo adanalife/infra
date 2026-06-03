@@ -476,26 +476,26 @@ tasks:
   k8s:stage:rollout:tripbot:
     desc: restart stage-1 tripbot so it re-pulls the image
     cmds:
-      - kubectl rollout restart deploy/tripbot -n stage-1
-      - kubectl rollout status deploy/tripbot -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-twitch -n stage-1
+      - kubectl rollout status deploy/tripbot-twitch -n stage-1 --timeout=120s
 
   k8s:stage:rollout:vlc-server:
     desc: restart stage-1 vlc-server so it re-pulls the image
     cmds:
-      - kubectl rollout restart deploy/vlc-server -n stage-1
-      - kubectl rollout status deploy/vlc-server -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-twitch -n stage-1
+      - kubectl rollout status deploy/vlc-twitch -n stage-1 --timeout=120s
 
   k8s:stage:rollout:obs:
     desc: restart stage-1 obs so it re-pulls the image
     cmds:
-      - kubectl rollout restart deploy/obs -n stage-1
-      - kubectl rollout status deploy/obs -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-twitch -n stage-1
+      - kubectl rollout status deploy/obs-twitch -n stage-1 --timeout=120s
 
   k8s:stage:rollout:onscreens:
     desc: restart stage-1 onscreens-server so it re-pulls the image
     cmds:
-      - kubectl rollout restart deploy/onscreens-server -n stage-1
-      - kubectl rollout status deploy/onscreens-server -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/onscreens-twitch -n stage-1
+      - kubectl rollout status deploy/onscreens-twitch -n stage-1 --timeout=120s
 
   k8s:stage:rollout:all:
     desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
@@ -1592,7 +1592,7 @@ tasks:
           psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
           echo "cleared."
         fi
-      - 'echo "Next: kubectl rollout restart deploy/tripbot -n stage-1 — its migrate init re-applies any pending migrations."'
+      - 'echo "Next: kubectl rollout restart deploy/tripbot-twitch -n stage-1 — its migrate init re-applies any pending migrations."'
 
   # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
   # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
@@ -1796,7 +1796,7 @@ tasks:
       # only the -n namespace differs. envFrom the stage-1 tripbot-config +
       # the stage ESO Secrets.
       - kubectl delete job tripbot-auth-bootstrap-bot -n stage-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n stage-1
+      - kubectl apply -f cdk8s/dist/stage-1-job-auth-bootstrap-bot.k8s.yaml -n stage-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1
@@ -1808,19 +1808,19 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token against stage-1; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n stage-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n stage-1
+      - kubectl apply -f cdk8s/dist/stage-1-job-auth-bootstrap-broadcaster.k8s.yaml -n stage-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n stage-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n stage-1\` to bring the bot online with both identities."'
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n stage-1\` to bring the bot online with both identities."'
 
   tripbot:stage:db:seed:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
     cmds:
       - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/seed.yaml -n stage-1
+      - kubectl apply -f cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
