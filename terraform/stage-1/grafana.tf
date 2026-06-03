@@ -72,21 +72,25 @@ resource "grafana_folder" "lab" {
 #   __DS_LOKI__        →  loki DS uid
 #   __DS_TEMPO__       →  tempo DS uid
 locals {
+  # Filenames carry no sort-order number — ordering lives in each dashboard's
+  # title ("NN — Name"), which is what Grafana sorts on. This keeps a reorder
+  # to a one-line title edit instead of a file rename + state move. Listed
+  # here in display order for readability only (a set is unordered).
   dashboard_files = toset([
-    "00-launch-stream-at-a-glance",
-    "01-stream-health-vlc-server-to-obs",
-    "02-service-health-tripbot",
-    "03-service-health-vlc-server",
-    "04-service-health-onscreens-server",
-    "05-twitch-chat-activity",
-    "06-logs-and-errors",
-    "07-go-runtime",
-    "08-postgres-pool",
-    "09-tripbot-to-vlc-traffic",
-    "10-http-routes",
-    "11-application-latency-commands-and-db",
-    "12-platform-services",
-    "13-igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "launch-stream-at-a-glance",
+    "stream-health-vlc-server-to-obs",
+    "service-health-tripbot",
+    "service-health-vlc-server",
+    "service-health-onscreens-server",
+    "igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "twitch-chat-activity",
+    "logs-and-errors",
+    "go-runtime",
+    "postgres-pool",
+    "tripbot-to-vlc-traffic",
+    "http-routes",
+    "application-latency-commands-and-db",
+    "platform-services",
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}
@@ -124,7 +128,7 @@ resource "grafana_dashboard" "tripbot" {
 
 locals {
   lab_dashboard_files = toset([
-    "99-visualization-lab",
+    "visualization-lab",
   ])
 }
 
@@ -143,73 +147,71 @@ resource "grafana_dashboard" "lab" {
   ))
 }
 
-# Filenames renamed 2026-05-27 to match each dashboard's Grafana title, with
-# the leading sort-order numbers preserved. UIDs inside the JSON are
-# unchanged so existing dashboard URLs keep working. These moved blocks
-# turn what would otherwise be a destroy+create into a state-key rename;
-# safe to delete after the first apply on every env that uses this
-# workspace.
+# Filenames de-numbered 2026-06-02 — the sort-order number now lives only in
+# each dashboard's title ("NN — Name", what Grafana sorts on), so reordering
+# is a one-line title edit instead of a file rename. UIDs inside the JSON are
+# unchanged, so existing dashboard URLs keep working. These moved blocks turn
+# the for_each key change (numbered slug → bare slug) into a state-key rename
+# rather than a destroy+create; safe to delete after the first apply on every
+# env that uses this workspace. (The community kubernetes-views-* and
+# node-exporter-full keys were already bare and don't move.)
 moved {
-  from = grafana_dashboard.tripbot["stream-at-a-glance"]
-  to   = grafana_dashboard.tripbot["00-launch-stream-at-a-glance"]
+  from = grafana_dashboard.tripbot["00-launch-stream-at-a-glance"]
+  to   = grafana_dashboard.tripbot["launch-stream-at-a-glance"]
 }
 moved {
-  from = grafana_dashboard.tripbot["stream-health"]
-  to   = grafana_dashboard.tripbot["01-stream-health-vlc-server-to-obs"]
+  from = grafana_dashboard.tripbot["01-stream-health-vlc-server-to-obs"]
+  to   = grafana_dashboard.tripbot["stream-health-vlc-server-to-obs"]
 }
 moved {
-  from = grafana_dashboard.tripbot["tripbot-service-health"]
-  to   = grafana_dashboard.tripbot["02-service-health-tripbot"]
+  from = grafana_dashboard.tripbot["02-service-health-tripbot"]
+  to   = grafana_dashboard.tripbot["service-health-tripbot"]
 }
 moved {
-  from = grafana_dashboard.tripbot["vlc-server-service-health"]
-  to   = grafana_dashboard.tripbot["03-service-health-vlc-server"]
+  from = grafana_dashboard.tripbot["03-service-health-vlc-server"]
+  to   = grafana_dashboard.tripbot["service-health-vlc-server"]
 }
 moved {
-  from = grafana_dashboard.tripbot["onscreens-server-service-health"]
-  to   = grafana_dashboard.tripbot["04-service-health-onscreens-server"]
+  from = grafana_dashboard.tripbot["04-service-health-onscreens-server"]
+  to   = grafana_dashboard.tripbot["service-health-onscreens-server"]
 }
 moved {
-  from = grafana_dashboard.tripbot["twitch-chat-activity"]
-  to   = grafana_dashboard.tripbot["05-twitch-chat-activity"]
+  from = grafana_dashboard.tripbot["05-twitch-chat-activity"]
+  to   = grafana_dashboard.tripbot["twitch-chat-activity"]
 }
 moved {
-  from = grafana_dashboard.tripbot["logs-errors"]
-  to   = grafana_dashboard.tripbot["06-logs-and-errors"]
+  from = grafana_dashboard.tripbot["06-logs-and-errors"]
+  to   = grafana_dashboard.tripbot["logs-and-errors"]
 }
 moved {
-  from = grafana_dashboard.tripbot["go-runtime"]
-  to   = grafana_dashboard.tripbot["07-go-runtime"]
+  from = grafana_dashboard.tripbot["07-go-runtime"]
+  to   = grafana_dashboard.tripbot["go-runtime"]
 }
 moved {
-  from = grafana_dashboard.tripbot["postgres-pool"]
-  to   = grafana_dashboard.tripbot["08-postgres-pool"]
+  from = grafana_dashboard.tripbot["08-postgres-pool"]
+  to   = grafana_dashboard.tripbot["postgres-pool"]
 }
 moved {
-  from = grafana_dashboard.tripbot["tripbot-vlc-traffic"]
-  to   = grafana_dashboard.tripbot["09-tripbot-to-vlc-traffic"]
+  from = grafana_dashboard.tripbot["09-tripbot-to-vlc-traffic"]
+  to   = grafana_dashboard.tripbot["tripbot-to-vlc-traffic"]
 }
 moved {
-  from = grafana_dashboard.tripbot["http-routes"]
-  to   = grafana_dashboard.tripbot["10-http-routes"]
+  from = grafana_dashboard.tripbot["10-http-routes"]
+  to   = grafana_dashboard.tripbot["http-routes"]
 }
 moved {
-  from = grafana_dashboard.tripbot["app-latency"]
-  to   = grafana_dashboard.tripbot["11-application-latency-commands-and-db"]
+  from = grafana_dashboard.tripbot["11-application-latency-commands-and-db"]
+  to   = grafana_dashboard.tripbot["application-latency-commands-and-db"]
 }
 moved {
-  from = grafana_dashboard.tripbot["platform-services"]
-  to   = grafana_dashboard.tripbot["12-platform-services"]
+  from = grafana_dashboard.tripbot["12-platform-services"]
+  to   = grafana_dashboard.tripbot["platform-services"]
 }
 moved {
-  from = grafana_dashboard.tripbot["intel-gpu"]
-  to   = grafana_dashboard.tripbot["13-igpu-performance"]
+  from = grafana_dashboard.tripbot["13-igpu-performance"]
+  to   = grafana_dashboard.tripbot["igpu-performance"]
 }
 moved {
-  from = grafana_dashboard.tripbot["k8s-cluster-overview"]
-  to   = grafana_dashboard.tripbot["kubernetes-views-global"]
-}
-moved {
-  from = grafana_dashboard.tripbot["k8s-pods"]
-  to   = grafana_dashboard.tripbot["kubernetes-views-pods"]
+  from = grafana_dashboard.lab["99-visualization-lab"]
+  to   = grafana_dashboard.lab["visualization-lab"]
 }
