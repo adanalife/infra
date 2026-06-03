@@ -37,70 +37,15 @@ task k8s:dev:cluster:down
 
 The k3d cluster has no host-port bindings (see `k8s/k3d-config.bees.yaml`)
 — anything you want to reach from the laptop goes through
-`kubectl port-forward`, and development mode (next section) handles
-public exposure through a Cloudflare Tunnel.
+`kubectl port-forward`. Off-LAN access to the mini-PC envs is via Tailscale
+(see `vault/decisions/tailscale-access-model`); the dev k3d cluster is
+local-only.
 
 The bundled traefik handles the tripbot Ingress in-cluster; the bundled
-servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services
-declared in the local overlays. Both are k3s-only — on EKS the same
-Ingress works against prod traefik unchanged, and LoadBalancer services
-are fulfilled by AWS ELB.
-
-
-## exposing services publicly (development mode)
-
-Wires the cluster to a Cloudflare Tunnel — TLS and IP allowlisting are
-handled at the Cloudflare edge, no port-forwarding, no in-cluster certs.
-DNS lives on Cloudflare under `whalecore.com`, our dedicated stage-1 /
-experimental domain; nothing about this touches the Route53 zones for
-`whereisdana.today` or `dana.lol`. Cloudflare resources live alongside
-AWS resources in `terraform/stage-1/` (`cloudflare-*.tf`); the Cloudflare
-API token and the home-IP allowlist are stored in AWS Secrets Manager.
-
-```bash
-# 1. First-time only — enable Cloudflare Access (Zero Trust) at
-#    https://dash.cloudflare.com → Zero Trust. Free tier; pick a team
-#    name. Required before Access policies can be created.
-
-# 2. First apply — creates the SM secret containers (with placeholders)
-#    and the AWS resources. Cloudflare resources fail because the
-#    placeholder token can't authenticate. Expected.
-task tf:stage:apply
-
-# 3. Populate the secrets out-of-band. The Cloudflare API token needs
-#    these scopes: Zone:Edit, Tunnel:Edit, Pages:Edit, Access:Apps and
-#    Policies:Edit, DNS:Edit, Zone Settings:Edit.
-aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-  --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
-task stage:allowlist:add-current-ip   # appends your current public IP to stage-1/allowlist-cidrs
-
-# 4. Second apply — creates the whalecore.com zone, tunnel, ingress
-#    config, DNS record, Access app + IP allow policy, and the Pages
-#    project.
-task tf:stage:apply
-
-# 5. First-time only — point whalecore.com's nameservers at Cloudflare.
-#    Get the values from terraform output:
-aws-vault exec adanalife-stage -- sh -c 'cd terraform/stage-1 \
-  && terraform output -json stage_1_zone_name_servers | jq -r ".[]"'
-#    Update the NS records at whalecore.com's registrar to those values.
-#    Cloudflare will mark the zone "Active" once propagation completes
-#    (minutes to hours).
-
-# 6. Write the bootstrap Secrets (ESOSecretsReader access key for ESO,
-#    cloudflared TUNNEL_TOKEN) into the cluster from terraform outputs.
-#    Re-run any time the tunnel or ESO IAM access key is rotated.
-task k8s:dev:bootstrap-secrets
-
-# 7. Deploy the dev app stack, then bring up the cloudflared Deployment.
-task cdk8s:dev:apply
-task k8s:dev:tunnel:up
-
-# 8. Verify (after Cloudflare marks the zone Active in step 5).
-curl https://tripbot.whalecore.com/health/live
-#   from an allowlisted IP → 200 OK
-#   from a non-allowlisted IP → Cloudflare Access challenge page
-```
+servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared
+by the app manifests. Both are k3s-only — on EKS the same Ingress works
+against prod traefik unchanged, and LoadBalancer services are fulfilled by
+AWS ELB.
 
 
 
