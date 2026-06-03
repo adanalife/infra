@@ -83,7 +83,7 @@ tasks:
         kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
 
   cdk8s:test:
-    desc: Run the cdk8s unit + render-parity + contract tests
+    desc: Run the cdk8s unit + contract tests
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
@@ -99,21 +99,6 @@ tasks:
     cmds:
       - mise exec -- uv run cdk8s synth
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
-
-  cdk8s:reference:
-    desc: Capture the legacy Kustomize render as the parity oracle (cdk8s/reference/)
-    dir: cdk8s
-    cmds:
-      - mkdir -p reference
-      - for: [local, development, stage-1, prod-1]
-        cmd: kubectl kustomize ../k8s/overlays/{{.ITEM}} > reference/{{.ITEM}}.kustomize.yaml
-
-  cdk8s:parity:
-    desc: Diff the cdk8s synth against the captured Kustomize reference
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    cmds:
-      - mise exec -- uv run python tests/parity.py
 
   # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
   # live cluster (read-only; safe pre-cutover check). Output is colorized via the
