@@ -33,14 +33,6 @@ spec:
   generators:
     - list:
         elements:
-          - env: prod-1
-            app: tripbot-twitch
-          - env: prod-1
-            app: vlc-twitch
-          - env: prod-1
-            app: onscreens-twitch
-          - env: prod-1
-            app: obs-twitch
           - env: stage-1
             app: tripbot-twitch
           - env: stage-1
@@ -98,7 +90,6 @@ spec:
   generators:
     - list:
         elements:
-          - env: prod-1
           - env: stage-1
   template:
     metadata:
@@ -149,7 +140,6 @@ spec:
   generators:
     - list:
         elements:
-          - env: prod-1
           - env: stage-1
   template:
     metadata:
