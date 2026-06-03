@@ -58,7 +58,12 @@ class VlcServer(Construct):
         if appconfig.uses_local_stubs(env):
             data.update(appconfig.local_stubs())
         data.update(appconfig.telemetry_config(env))
-        if env.vlc_inpod_onscreens:
+        # vlc-server's own NATS command subscriber needs NATS_URL wherever
+        # there's a platform NATS (dev/stage/prod), omitted on local — same
+        # gate as onscreens.py. Previously this was tied to vlc_inpod_onscreens
+        # (set only so the in-pod onscreens-server in prod could reach NATS);
+        # the standalone vlc-server now subscribes too.
+        if env.nats_url:
             data["NATS_URL"] = env.nats_url
         cfg_hash = configmap.config_map(
             self,
