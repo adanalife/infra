@@ -15,7 +15,7 @@ spec:
               value: http://localhost:8080
           envFrom:
             - configMapRef:
-                name: tripbot-config
+                name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-secret
             - secretRef:
@@ -43,7 +43,7 @@ spec:
             - /usr/local/bin/seed-db
           envFrom:
             - configMapRef:
-                name: tripbot-config
+                name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-secret
           image: adanalife/tripbot:latest
@@ -66,7 +66,7 @@ spec:
             - migrate
           envFrom:
             - configMapRef:
-                name: tripbot-config
+                name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-secret
           image: adanalife/tripbot:latest

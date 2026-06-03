@@ -18,6 +18,7 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.contract import load_contract
+from adanalife_k8s.naming import app_name
 
 # (port-name, port-number) — order/names match k8s/apps/obs/base/{deployment,service}.yaml
 _PORTS = [
@@ -40,7 +41,7 @@ class ObsInstance(Construct):
         extra_config: dict[str, str] | None = None,
     ):
         c = load_contract()
-        name = c.svc(f"obs_{platform}")  # obs-twitch / obs-youtube
+        name = app_name("obs", platform)  # obs-twitch / obs-youtube
         super().__init__(scope, name)
 
         labels = {
@@ -53,9 +54,9 @@ class ObsInstance(Construct):
 
         # --- ConfigMap (obs-config-<platform>) ---
         data = {
-            "DASHCAM_RTSP_URL": c.dashcam_rtsp_url,
-            "ONSCREENS_URL_BASE": c.onscreens_url_base,
-            "VLC_URL_BASE": c.vlc_url_base,
+            "DASHCAM_RTSP_URL": c.dashcam_rtsp_url(platform),
+            "ONSCREENS_URL_BASE": c.onscreens_url_base(platform),
+            "VLC_URL_BASE": c.vlc_url_base(platform),
             "OBS_WEBSOCKET_PASSWD": "adanalife",
             "OBS_QUALITY_PRESET": env.obs_quality,
             "OBS_STREAM_ENCODER": env.obs_encoder,

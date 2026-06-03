@@ -1,12 +1,15 @@
 """VlcServer — the dashcam video pipeline (libvlc + RTSP + HTTP API).
 
-Shared today (one instance per env), built against the same naming/config/eso
-helpers as ObsInstance so a future per-platform split is `for p in platforms:
-VlcServer(self, p, env)`. Reproduces k8s/apps/vlc-server/base + overlays:
+A per-platform factory (one instance per streaming platform, like ObsInstance):
+`VlcServer(self, "twitch", env=env)` emits `vlc-twitch` objects, name resolved
+through the contract via naming.app_name. Reproduces k8s/apps/vlc-server/base +
+overlays:
 
   * RollingUpdate (readiness-gated; dashcam PVC is ReadOnlyMany so both pods can
     mount during the surge), seccomp + drop-ALL hardening, /health probes.
-  * dashcam volume: NFS PVC (prod/stage, env.nfs_*) or hostPath (local/dev).
+  * dashcam volume: NFS PVC (prod/stage, env.nfs_*) or hostPath (local/dev). The
+    PVC is shared across platforms (ReadOnlyMany), so every platform's vlc pod
+    mounts the same `vlc-dashcam` claim — it is NOT per-platform.
   * iGPU request on GPU envs; OTEL/Sentry envFrom from shared-secrets.
   * traefik Ingress (TLS on minipc) + optional Tailscale Ingress.
 """
@@ -18,9 +21,8 @@ from constructs import Construct
 
 from adanalife_k8s import appconfig, configmap
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.naming import meta_labels, selector
+from adanalife_k8s.naming import app_name, meta_labels, selector
 
-NAME = "vlc-server"
 MOUNT_PATH = "/opt/data/Dashcam/_all"
 
 # Container ports (deployment.yaml order) vs Service ports (service.yaml order)
@@ -29,26 +31,28 @@ _CONTAINER_PORTS = [("http", 8080), ("vnc", 5900), ("rtsp", 8554)]
 _SERVICE_PORTS = [("http", 8080), ("rtsp", 8554), ("vnc", 5900)]
 
 # Constant base ConfigMap literals (kustomization configMapGenerator base set).
+# VLC_SERVER_HOST is the pod's own name:port, so it's set per-instance in __init__.
 _BASE_CONFIG = {
     "DISPLAY": ":0.0",
     "XDG_RUNTIME_DIR": "/root/.cache/xdgr",
     "FONTCONFIG_PATH": "/etc/fonts",
-    "VLC_SERVER_HOST": "vlc-server:8080",
 }
 
 
 class VlcServer(Construct):
-    def __init__(self, scope: Construct, *, env: EnvConfig):
-        super().__init__(scope, NAME)
+    def __init__(self, scope: Construct, platform: str, *, env: EnvConfig):
+        name = app_name("vlc", platform)  # vlc-twitch / vlc-youtube
+        super().__init__(scope, name)
         ns = env.namespace or None
-        labels = meta_labels(NAME)
-        sel = selector(NAME)
+        labels = meta_labels(name)
+        sel = selector(name)
 
         container_ports = _CONTAINER_PORTS
         service_ports = _SERVICE_PORTS
 
         # --- ConfigMap (stable name + content-hash annotation) ---
         data = dict(_BASE_CONFIG)
+        data["VLC_SERVER_HOST"] = f"{name}:8080"  # self-reference
         if appconfig.uses_local_stubs(env):
             data.update(appconfig.local_stubs())
         data.update(appconfig.telemetry_config(env))
@@ -60,7 +64,7 @@ class VlcServer(Construct):
         cfg_hash = configmap.config_map(
             self,
             "config",
-            name=f"{NAME}-config",
+            name=f"{name}-config",
             namespace=ns,
             labels=labels,
             data=data,
@@ -70,6 +74,7 @@ class VlcServer(Construct):
         # The NFS PV/PVC are NOT emitted here — they're stateful, so they live in
         # DataChart (emit_dashcam_volume), separate from this stateless Deployment
         # so app churn can't disturb them. This just references the PVC by name.
+        # The claim is shared (ReadOnlyMany) across platforms — not per-platform.
         if env.dashcam_mode == "nfs":
             volume = k8s.Volume(
                 name="dashcam",
@@ -96,7 +101,7 @@ class VlcServer(Construct):
             limits["gpu.intel.com/i915"] = k8s.Quantity.from_string("1")
 
         container = k8s.Container(
-            name=NAME,
+            name=name,
             image=f"adanalife/vlc:{env.image_tag}",
             image_pull_policy="Always",
             security_context=k8s.SecurityContext(
@@ -108,7 +113,7 @@ class VlcServer(Construct):
             ],
             env_from=[
                 k8s.EnvFromSource(
-                    config_map_ref=k8s.ConfigMapEnvSource(name=f"{NAME}-config")
+                    config_map_ref=k8s.ConfigMapEnvSource(name=f"{name}-config")
                 ),
                 k8s.EnvFromSource(
                     secret_ref=k8s.SecretEnvSource(
@@ -145,7 +150,7 @@ class VlcServer(Construct):
         k8s.KubeDeployment(
             self,
             "deployment",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.DeploymentSpec(
                 replicas=1,
                 strategy=k8s.DeploymentStrategy(
@@ -179,7 +184,7 @@ class VlcServer(Construct):
         k8s.KubeService(
             self,
             "service",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.ServiceSpec(type="ClusterIP", selector=sel, ports=svc_ports),
         )
 
@@ -189,7 +194,7 @@ class VlcServer(Construct):
             k8s.KubeService(
                 self,
                 "host-access",
-                metadata=k8s.ObjectMeta(name=f"{NAME}-host", namespace=ns),
+                metadata=k8s.ObjectMeta(name=f"{name}-host", namespace=ns),
                 spec=k8s.ServiceSpec(
                     type="LoadBalancer",
                     selector=sel,
@@ -211,28 +216,28 @@ class VlcServer(Construct):
         # --- Ingress(es) — only where the env publishes DNS. Overlay-added, so
         # no metadata labels (the base `labels:` directive never touched them). ---
         if env.dns_base:
-            self._ingress(env, ns)
+            self._ingress(name, env, ns)
         if env.tailscale and env.dns_base:
-            self._tailscale_ingress(env, ns)
+            self._tailscale_ingress(name, env, ns)
 
     # ---- helpers ----
-    def _ingress(self, env: EnvConfig, ns):
-        host = f"vlc.{env.dns_base}"
+    def _ingress(self, name, env: EnvConfig, ns):
+        host = f"{name}.{env.dns_base}"
         ann = {"external-dns.alpha.kubernetes.io/hostname": host}
         if env.tls:
             ann["cert-manager.io/issuer"] = "letsencrypt-route53"
         backend = k8s.IngressBackend(
             service=k8s.IngressServiceBackend(
-                name=NAME, port=k8s.ServiceBackendPort(name="http")
+                name=name, port=k8s.ServiceBackendPort(name="http")
             )
         )
         k8s.KubeIngress(
             self,
             "ingress",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, annotations=ann),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, annotations=ann),
             spec=k8s.IngressSpec(
                 ingress_class_name="traefik",
-                tls=[k8s.IngressTls(hosts=[host], secret_name="vlc-tls")]
+                tls=[k8s.IngressTls(hosts=[host], secret_name=f"{name}-tls")]
                 if env.tls
                 else None,
                 rules=[
@@ -250,20 +255,20 @@ class VlcServer(Construct):
             ),
         )
 
-    def _tailscale_ingress(self, env: EnvConfig, ns):
+    def _tailscale_ingress(self, name, env: EnvConfig, ns):
         short = env.dns_base.split(".")[0]  # prod / stage / dev
         k8s.KubeIngress(
             self,
             "ts-ingress",
-            metadata=k8s.ObjectMeta(name=f"{NAME}-ts", namespace=ns),
+            metadata=k8s.ObjectMeta(name=f"{name}-ts", namespace=ns),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
                 default_backend=k8s.IngressBackend(
                     service=k8s.IngressServiceBackend(
-                        name=NAME, port=k8s.ServiceBackendPort(number=8080)
+                        name=name, port=k8s.ServiceBackendPort(number=8080)
                     )
                 ),
-                tls=[k8s.IngressTls(hosts=[f"vlc-{short}"])],
+                tls=[k8s.IngressTls(hosts=[f"{name}-{short}"])],
             ),
         )
 
@@ -274,7 +279,8 @@ def emit_dashcam_pvc(scope: Construct, env: EnvConfig) -> None:
     name (volumeName + storageClassName "") to the cluster-scoped NFS PV that's
     provisioned out-of-band — see emit_dashcam_pv / `task k8s:<env>:dashcam-pv`.
     No host specifics here, so it's safe in the committed dist. No-op on hostPath
-    envs (local/dev), where the dashcam volume is an inline hostPath."""
+    envs (local/dev), where the dashcam volume is an inline hostPath. Shared
+    across platforms (ReadOnlyMany), so it stays a single non-per-platform PVC."""
     if env.dashcam_mode != "nfs":
         return
     ns = env.namespace or None

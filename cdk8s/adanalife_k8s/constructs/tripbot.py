@@ -38,27 +38,29 @@ from constructs import Construct
 from adanalife_k8s import appconfig, configmap, eso
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.eso import ESData
-from adanalife_k8s.naming import meta_labels, selector
+from adanalife_k8s.naming import app_name, meta_labels, selector
 
-NAME = "tripbot"
 IMAGE = "adanalife/tripbot"
 DB_SECRET_NAME = "tripbot-database-creds"  # ESO-materialized DB creds (eso envs)
 LOCAL_DB_SECRET = "tripbot-secret"  # secret.env-built DB creds (laptop)
 
-# Stable, non-hashed ConfigMap name — the bootstrap/seed Jobs envFrom it by name.
-CONFIG_NAME = "tripbot-config"
-
-# Constant base ConfigMap literals (base kustomization configMapGenerator).
+# Constant base ConfigMap literals (base kustomization configMapGenerator). The
+# sibling-service hosts (VLC/ONSCREENS/OBS_SERVER_HOST) are per-platform, so
+# they're assembled in config_data() from app_name rather than held as literals.
 _BASE_CONFIG = {
     "READ_ONLY": "false",
     "VERBOSE": "false",
     "MAPS_OUTPUT_DIR": "/opt/data/maps",
     "DATABASE_HOST": "postgres",
     "TRIPBOT_SERVER_PORT": "8080",
-    "VLC_SERVER_HOST": "vlc-server:8080",
-    "ONSCREENS_SERVER_HOST": "onscreens-server:8080",
-    "OBS_SERVER_HOST": "obs:8080",
 }
+
+
+def config_map_name(platform: str) -> str:
+    """The per-platform tripbot ConfigMap name (stable, non-hashed) — the
+    bootstrap/seed Jobs envFrom it by name. e.g. tripbot-twitch-config."""
+    return f"{app_name('tripbot', platform)}-config"
+
 
 # Placeholder DB creds for the laptop `local` overlay (gitignored secret.env in
 # Kustomize). DB-only — everything else comes from ESO even locally.
@@ -104,12 +106,16 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
 }
 
 
-def config_data(env: EnvConfig) -> dict[str, str]:
-    """The assembled `tripbot-config` data for an env: base literals + telemetry
-    + the per-env identity/extra block. Shared with the Jobs so a Job applied on
-    its own carries the same config the Deployment runs with. NATS_URL is only
-    present where the env defines one (absent on local)."""
+def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
+    """The assembled tripbot-config data for an env+platform: base literals + the
+    per-platform sibling-service hosts (this platform's vlc/onscreens/obs) +
+    telemetry + the per-env identity/extra block. Shared with the Jobs so a Job
+    applied on its own carries the same config the Deployment runs with. NATS_URL
+    is only present where the env defines one (absent on local)."""
     data = dict(_BASE_CONFIG)
+    data["VLC_SERVER_HOST"] = f"{app_name('vlc', platform)}:8080"
+    data["ONSCREENS_SERVER_HOST"] = f"{app_name('onscreens', platform)}:8080"
+    data["OBS_SERVER_HOST"] = f"{app_name('obs', platform)}:8080"
     data.update(appconfig.telemetry_config(env))
     data.update(_ENV_CONFIG[env.name])
     if env.nats_url:
@@ -118,42 +124,48 @@ def config_data(env: EnvConfig) -> dict[str, str]:
 
 
 class Tripbot(Construct):
-    def __init__(self, scope: Construct, *, env: EnvConfig):
-        super().__init__(scope, NAME)
+    def __init__(self, scope: Construct, platform: str, *, env: EnvConfig):
+        name = app_name("tripbot", platform)  # tripbot-twitch / tripbot-youtube
+        super().__init__(scope, name)
         ns = env.namespace or None
-        labels = meta_labels(NAME)
-        sel = selector(NAME)
+        labels = meta_labels(name)
+        sel = selector(name)
         image = f"{IMAGE}:{env.image_tag}"
+        primary = platform == env.platforms[0]
+        cm_name = config_map_name(platform)
         local = env.secret_source == "local"
         db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
 
-        # --- ConfigMap (stable name + content-hash annotation) ---
-        data = config_data(env)
+        # --- ConfigMap (per-platform stable name + content-hash annotation) ---
+        data = config_data(env, platform)
         cfg_hash = configmap.config_map(
-            self, "config", name=CONFIG_NAME, namespace=ns, labels=labels, data=data
+            self, "config", name=cm_name, namespace=ns, labels=labels, data=data
         )
 
-        # --- DB creds: ESO ExternalSecret (eso envs) | on-disk Secret (laptop) ---
-        if local:
-            k8s.KubeSecret(
-                self,
-                "secret",
-                metadata=k8s.ObjectMeta(name=LOCAL_DB_SECRET, namespace=ns),
-                type="Opaque",
-                string_data=dict(_LOCAL_SECRET),
-            )
-        else:
-            self._db_external_secret(ns, labels)
-
-        # --- the other four ExternalSecrets (every env, even local) ---
-        self._external_secrets(ns, labels)
+        # --- DB creds + app Secrets: identity-level, shared across a namespace's
+        # tripbot instances (one bot identity, one DB), so the PRIMARY platform
+        # owns them — a future second-platform instance reuses the same Secrets by
+        # name rather than re-declaring (and colliding on) them. Names unchanged. ---
+        if primary:
+            if local:
+                k8s.KubeSecret(
+                    self,
+                    "secret",
+                    metadata=k8s.ObjectMeta(name=LOCAL_DB_SECRET, namespace=ns),
+                    type="Opaque",
+                    string_data=dict(_LOCAL_SECRET),
+                )
+            else:
+                self._db_external_secret(ns, labels)
+            # the other four ExternalSecrets (every env, even local)
+            self._external_secrets(ns, labels)
 
         # --- envFrom: config, DB creds, shared OTLP/Sentry, then app Secrets ---
         # Order matches the legacy render exactly (later entries win on key
         # collision). The two discord Secrets are optional so the bot boots
         # without them; everything else is required (a missing Secret fails loud).
         env_from = [
-            k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)),
+            k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=cm_name)),
             k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
             k8s.EnvFromSource(
                 secret_ref=k8s.SecretEnvSource(name="grafana-cloud-otlp")
@@ -199,15 +211,13 @@ class Tripbot(Construct):
                 "up",
             ],
             env_from=[
-                k8s.EnvFromSource(
-                    config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)
-                ),
+                k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=cm_name)),
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
             ],
         )
 
         container = k8s.Container(
-            name=NAME,
+            name=name,
             image=image,
             image_pull_policy="Always",
             security_context=hardened,
@@ -243,7 +253,7 @@ class Tripbot(Construct):
         k8s.KubeDeployment(
             self,
             "deployment",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.DeploymentSpec(
                 replicas=1,
                 selector=k8s.LabelSelector(match_labels=sel),
@@ -269,7 +279,7 @@ class Tripbot(Construct):
         k8s.KubeService(
             self,
             "service",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.ServiceSpec(
                 type="ClusterIP",
                 selector=sel,
@@ -284,9 +294,9 @@ class Tripbot(Construct):
         )
 
         # --- Ingress (dashboard / OAuth) — published in every env ---
-        self._ingress(env, ns, labels)
+        self._ingress(name, primary, env, ns, labels)
         if env.tailscale:
-            self._tailscale_ingress(env, ns, labels)
+            self._tailscale_ingress(name, env, ns, labels)
 
     # ---- ExternalSecret helpers ----
     def _db_external_secret(self, ns, labels):
@@ -402,10 +412,20 @@ class Tripbot(Construct):
             )
 
     # ---- Ingress helpers ----
-    def _ingress(self, env: EnvConfig, ns, labels):
+    def _ingress(self, name, primary, env: EnvConfig, ns, labels):
+        # The public dashboard/OAuth host stays identity-stable ("tripbot.<dns>")
+        # on the primary platform so the registered Twitch OAuth redirect URI /
+        # EXTERNAL_URL don't change with the workload rename; a future non-primary
+        # platform would get its own per-name host. The Ingress object + backend,
+        # though, are per-platform so the route targets THIS platform's Service.
+        host_sub = "tripbot" if primary else name
         # local uses the .localhost TLD (no DNS/TLS); every other env publishes a
         # real host with external-dns + cert-manager TLS (DNS-01 Route53).
-        host = "tripbot.localhost" if not env.dns_base else f"tripbot.{env.dns_base}"
+        host = (
+            f"{host_sub}.localhost"
+            if not env.dns_base
+            else f"{host_sub}.{env.dns_base}"
+        )
         ann = (
             {}
             if not env.dns_base
@@ -417,18 +437,18 @@ class Tripbot(Construct):
         tls = bool(env.dns_base)  # every DNS-publishing env issues a cert
         backend = k8s.IngressBackend(
             service=k8s.IngressServiceBackend(
-                name=NAME, port=k8s.ServiceBackendPort(name="http")
+                name=name, port=k8s.ServiceBackendPort(name="http")
             )
         )
         k8s.KubeIngress(
             self,
             "ingress",
             metadata=k8s.ObjectMeta(
-                name=NAME, namespace=ns, labels=labels, annotations=ann or None
+                name=name, namespace=ns, labels=labels, annotations=ann or None
             ),
             spec=k8s.IngressSpec(
                 ingress_class_name="traefik",
-                tls=[k8s.IngressTls(hosts=[host], secret_name="tripbot-tls")]
+                tls=[k8s.IngressTls(hosts=[host], secret_name=f"{host_sub}-tls")]
                 if tls
                 else None,
                 rules=[
@@ -446,20 +466,20 @@ class Tripbot(Construct):
             ),
         )
 
-    def _tailscale_ingress(self, env: EnvConfig, ns, labels):
+    def _tailscale_ingress(self, name, env: EnvConfig, ns, labels):
         short = env.dns_base.split(".")[0]  # prod / stage
         k8s.KubeIngress(
             self,
             "ts-ingress",
-            metadata=k8s.ObjectMeta(name=f"{NAME}-ts", namespace=ns),
+            metadata=k8s.ObjectMeta(name=f"{name}-ts", namespace=ns),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
                 default_backend=k8s.IngressBackend(
                     service=k8s.IngressServiceBackend(
-                        name=NAME, port=k8s.ServiceBackendPort(number=8080)
+                        name=name, port=k8s.ServiceBackendPort(number=8080)
                     )
                 ),
-                tls=[k8s.IngressTls(hosts=[f"{NAME}-{short}"])],
+                tls=[k8s.IngressTls(hosts=[f"{name}-{short}"])],
             ),
         )
 
@@ -469,7 +489,9 @@ class Tripbot(Construct):
 #
 # They are deliberately separate so AppsChart never fires a one-shot on a routine
 # apply (matches the stage-prod-cotenancy ADR). The deploy tasks emit + apply
-# them on demand. All `envFrom` the stable `tripbot-config` by name. On the
+# them on demand. All `envFrom` the PRIMARY platform's tripbot ConfigMap by name
+# (config_map_name(env.platforms[0]), e.g. tripbot-twitch-config) — the Jobs are
+# identity-level (one bot, one DB), not per-platform. On the
 # laptop the DB Secret is the secret.env-built `tripbot-secret` and the bootstrap
 # is a single combined Job; on eso envs the DB Secret is `tripbot-database-creds`
 # and the bootstrap splits into bot + broadcaster legs.
@@ -502,7 +524,11 @@ def _auth_bootstrap(
     ns = env.namespace or None
     args = [f"--account={account}"] if account else None
     env_from = [
-        k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)),
+        k8s.EnvFromSource(
+            config_map_ref=k8s.ConfigMapEnvSource(
+                name=config_map_name(env.platforms[0])
+            )
+        ),
         k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
         k8s.EnvFromSource(
             secret_ref=k8s.SecretEnvSource(
@@ -594,7 +620,11 @@ def seed(scope: Construct, env: EnvConfig) -> None:
     db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
     image = f"{IMAGE}:{env.image_tag}"
     db_env = [
-        k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=CONFIG_NAME)),
+        k8s.EnvFromSource(
+            config_map_ref=k8s.ConfigMapEnvSource(
+                name=config_map_name(env.platforms[0])
+            )
+        ),
         k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
     ]
 

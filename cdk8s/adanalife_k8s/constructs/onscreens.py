@@ -23,18 +23,18 @@ from constructs import Construct
 
 from adanalife_k8s import appconfig, configmap
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.naming import meta_labels, selector
+from adanalife_k8s.naming import app_name, meta_labels, selector
 
-NAME = "onscreens-server"
 RUN_DIR = "/opt/data/run"
 
 
 class OnscreensServer(Construct):
-    def __init__(self, scope: Construct, *, env: EnvConfig):
-        super().__init__(scope, NAME)
+    def __init__(self, scope: Construct, platform: str, *, env: EnvConfig):
+        name = app_name("onscreens", platform)  # onscreens-twitch / onscreens-youtube
+        super().__init__(scope, name)
         ns = env.namespace or None
-        labels = meta_labels(NAME)
-        sel = selector(NAME)
+        labels = meta_labels(name)
+        sel = selector(name)
 
         # --- ConfigMap (stable name + content-hash annotation) ---
         # Telemetry block (ENV + OTEL_* + SENTRY_ENVIRONMENT) is shared with the
@@ -46,14 +46,14 @@ class OnscreensServer(Construct):
         cfg_hash = configmap.config_map(
             self,
             "config",
-            name=f"{NAME}-config",
+            name=f"{name}-config",
             namespace=ns,
             labels=labels,
             data=data,
         )
 
         container = k8s.Container(
-            name=NAME,
+            name=name,
             image=f"adanalife/onscreens-server:{env.image_tag}",
             image_pull_policy="Always",
             security_context=k8s.SecurityContext(
@@ -63,7 +63,7 @@ class OnscreensServer(Construct):
             ports=[k8s.ContainerPort(name="http", container_port=8080)],
             env_from=[
                 k8s.EnvFromSource(
-                    config_map_ref=k8s.ConfigMapEnvSource(name=f"{NAME}-config")
+                    config_map_ref=k8s.ConfigMapEnvSource(name=f"{name}-config")
                 ),
                 # onscreens-server reuses the vlc-server Sentry DSN for now.
                 k8s.EnvFromSource(
@@ -106,7 +106,7 @@ class OnscreensServer(Construct):
         k8s.KubeDeployment(
             self,
             "deployment",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.DeploymentSpec(
                 replicas=1,
                 strategy=k8s.DeploymentStrategy(
@@ -138,7 +138,7 @@ class OnscreensServer(Construct):
         k8s.KubeService(
             self,
             "service",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.ServiceSpec(
                 type="ClusterIP",
                 selector=sel,

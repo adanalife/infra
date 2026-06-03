@@ -17,6 +17,22 @@ orphan the running pods. Constructs pass `meta_labels(...)` to every
 
 from __future__ import annotations
 
+from adanalife_k8s.contract import load_contract
+
+
+def app_name(app: str, platform: str) -> str:
+    """The per-platform Kubernetes Service/Deployment name for one app, resolved
+    through the contract — e.g. app_name("vlc", "twitch") -> "vlc-twitch".
+
+    `app` is one of "tripbot" / "vlc" / "onscreens" / "obs"; the contract holds
+    the canonical `<app>_<platform>` -> `<app>-<platform>` mapping (tripbot's
+    pkg/contract is the source of truth, synced via `task contract:sync`). This is
+    the single naming entrypoint the app factory routes every workload name
+    through, so a rename is one contract edit rather than a sweep across
+    constructs.
+    """
+    return load_contract().svc(f"{app}_{platform}")
+
 
 def meta_labels(name: str, *, part_of: str = "tripbot") -> dict[str, str]:
     """The `app.kubernetes.io/*` metadata pair kustomize stamped on all objects."""
