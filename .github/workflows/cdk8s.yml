@@ -21,7 +21,7 @@ jobs:
 
       # Toolchain via mise (cdk8s/.mise.toml pins python / node / cdk8s-cli /
       # helm), per vault/decisions/golang-development-with-mise.md.
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v4
         with:
           working_directory: cdk8s
 
