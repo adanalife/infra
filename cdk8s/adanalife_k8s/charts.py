@@ -9,7 +9,7 @@ from cdk8s import Chart
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.dashcam_cv import DashcamCV
+from adanalife_k8s.constructs.dashcam_cv import DashcamCV, DashcamCVJobs
 from adanalife_k8s.eso import secret_store
 from adanalife_k8s.constructs.obs import ObsInstance
 from adanalife_k8s.constructs.onscreens import OnscreensServer
@@ -130,15 +130,27 @@ class DashcamPVChart(Chart):
 
 
 class DashcamCVChart(Chart):
-    """The dashcam-cv vector-fill workload (CronJob/Job/PVC/PriorityClass).
-
-    A separate deploy unit because it was never in the env umbrellas — it's a
-    background batch job staged via its own task, currently stage-only.
+    """The PERSISTENT dashcam-cv vector-fill workload (PriorityClass + models PVC
+    + the suspended fill CronJob). A separate deploy unit because it was never in
+    the env umbrellas — a background batch job staged via its own task,
+    currently stage-only. The one-shot ops Jobs live in DashcamCVJobsChart.
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
         DashcamCV(self, env=env)
+
+
+class DashcamCVJobsChart(Chart):
+    """The on-demand dashcam-cv one-shot Jobs (fill-once / find / stats). Their
+    own deploy unit so a normal `apply` of DashcamCVChart never re-runs them
+    (running a Job on each reconcile would be wrong — same split as JobsChart).
+    Run via the per-job tasks; depends on DashcamCVChart's PVC + PriorityClass.
+    """
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        DashcamCVJobs(self, env=env)
 
 
 class JobsChart(Chart):
