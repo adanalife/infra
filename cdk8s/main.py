@@ -21,6 +21,7 @@ from adanalife_k8s.charts import (
     DashcamPVChart,
     DataChart,
     JobsChart,
+    SupportingChart,
 )
 from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
@@ -35,6 +36,9 @@ targets = [only] if only else list(ENVS)
 for name in targets:
     env = load_env(name)
     AppsChart(app, f"{name}-apps", env=env)
+    # Per-env namespace supporting resources (shared/identity Secrets + issuers),
+    # isolated from the app churn — its own deploy unit / Argo Application.
+    SupportingChart(app, f"{name}-supporting", env=env)
     # Stateful resources (postgres + dashcam PV/PVC) as a separate deploy unit /
     # Argo Application — isolated from the app churn, synced before the apps.
     DataChart(app, f"{name}-data", env=env)

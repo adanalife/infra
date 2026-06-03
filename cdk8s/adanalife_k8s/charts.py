@@ -14,7 +14,7 @@ from adanalife_k8s.eso import secret_store
 from adanalife_k8s.constructs.obs import ObsInstance
 from adanalife_k8s.constructs.onscreens import OnscreensServer
 from adanalife_k8s.constructs.postgres import Postgres
-from adanalife_k8s.constructs.tripbot import Tripbot
+from adanalife_k8s.constructs.tripbot import Tripbot, emit_identity_secrets
 from adanalife_k8s.constructs.vlc import (
     VlcServer,
     emit_dashcam_pv,
@@ -24,14 +24,15 @@ from adanalife_k8s.supporting import emit_supporting
 
 
 class AppsChart(Chart):
-    """STATELESS app workloads for one environment: the namespace-scoped
-    supporting resources (ESO store, shared-secrets, cert-manager issuers) plus
-    the app constructs. Mirrors the legacy `k8s/overlays/<env>` umbrella set,
-    minus the stateful pieces.
+    """STATELESS app workloads for one environment — the app constructs only.
+    Mirrors the legacy `k8s/overlays/<env>` umbrella set, minus the stateful and
+    supporting pieces.
 
-    The stateful resources (postgres + the dashcam PV/PVC) live in **DataChart**,
-    a separate deploy unit / Argo Application, so routine app churn can't disturb
-    the database or volumes (see DataChart).
+    The stateful resources (postgres + the dashcam PV/PVC) live in **DataChart**;
+    the namespace supporting resources (ESO store-referencing Secrets, issuers,
+    and tripbot's identity Secrets) live in **SupportingChart** — each its own
+    deploy unit / Argo Application, so routine app churn can't disturb the
+    database, volumes, or secrets.
 
     Deliberately excluded (applied via their own tasks, never on every apply):
     the tripbot one-shot Jobs (auth-bootstrap + seed) and the dashcam-cv vector
@@ -42,13 +43,10 @@ class AppsChart(Chart):
         super().__init__(scope, id, namespace=env.namespace or None)
         self.env = env
 
-        # --- supporting: SecretStore + shared-secrets + cert-manager issuers ---
-        emit_supporting(self, env)
-
         # --- one full stack per streaming platform: tripbot + vlc + onscreens +
         # obs, each named <app>-<platform> via the contract (naming.app_name). The
-        # identity-level resources (tripbot's DB/app Secrets) are emitted once, by
-        # the primary platform — see Tripbot. ---
+        # identity-level resources (tripbot's DB/app Secrets) + the shared
+        # observability secrets + issuers live in SupportingChart, not here. ---
         for platform in env.platforms:
             # --- tripbot (bot Deployment + Service + Ingress + ExternalSecrets) ---
             Tripbot(self, platform, env=env)
@@ -73,6 +71,25 @@ class AppsChart(Chart):
                 if platform == "youtube"
                 else None,
             )
+
+
+class SupportingChart(Chart):
+    """Per-env namespace supporting resources every stack in the env depends on,
+    isolated from the high-churn app workloads: the shared observability
+    ExternalSecrets + cert-manager Issuers (emit_supporting), plus tripbot's
+    identity-level Secrets (DB creds + twitch/maps/discord — one bot identity, one
+    DB, shared by every platform stack). Synced after data, before apps. The ESO
+    SecretStore these reference is in DataChart (the synced-first unit).
+    """
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        self.env = env
+
+        # shared observability secrets + cert-manager issuers (eso envs only)
+        emit_supporting(self, env)
+        # tripbot identity Secrets (every env — local Secret or DB ES + app ES)
+        emit_identity_secrets(self, env)
 
 
 class DataChart(Chart):

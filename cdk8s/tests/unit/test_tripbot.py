@@ -61,63 +61,32 @@ def test_deployment_and_jobs_reference_stable_config():
             )
 
 
-# ---- ExternalSecrets ----
+# ---- Secret references (the Secrets themselves live in SupportingChart — see
+# test_supporting.py; the construct just envFroms them by name) ----
 
 
-def test_five_external_secrets_on_eso_envs_with_remote_keys():
-    objs = _synth("stage-1")
-    names = {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
-    assert names == {
-        "tripbot-database-creds",
-        "tripbot-twitch-creds",
-        "tripbot-google-maps-api-key",
-        "tripbot-discord-alerts-webhook",
-        "tripbot-discord-bot-token",
-    }
-    # database: target.template remaps the shared postgres SM JSON onto DATABASE_*
-    db = _by(objs, "ExternalSecret", "tripbot-database-creds")[0]["spec"]
-    assert db["target"]["template"]["data"]["DATABASE_USER"] == "{{ .user }}"
-    assert {d["remoteRef"]["key"] for d in db["data"]} == {"k8s/postgres/credentials"}
-    assert {d["remoteRef"]["property"] for d in db["data"]} == {
-        "user",
-        "password",
-        "db",
-    }
-    # twitch + maps use dataFrom.extract
-    tw = _by(objs, "ExternalSecret", "tripbot-twitch-creds")[0]["spec"]
-    assert tw["dataFrom"][0]["extract"]["key"] == "k8s/tripbot/twitch-creds"
-    gm = _by(objs, "ExternalSecret", "tripbot-google-maps-api-key")[0]["spec"]
-    assert gm["dataFrom"][0]["extract"]["key"] == "k8s/tripbot/google-maps-api-key"
-    # discord: bare remoteRef → named key
-    da = _by(objs, "ExternalSecret", "tripbot-discord-alerts-webhook")[0]["spec"]
-    assert da["data"][0]["secretKey"] == "DISCORD_ALERTS_WEBHOOK"
-    assert da["data"][0]["remoteRef"]["key"] == "k8s/tripbot/discord-alerts-webhook"
-    bt = _by(objs, "ExternalSecret", "tripbot-discord-bot-token")[0]["spec"]
-    assert bt["data"][0]["remoteRef"]["key"] == "k8s/tripbot/discord-bot-token"
-
-
-def test_local_drops_db_external_secret_and_builds_secret():
-    objs = _synth("local")
-    # No cloud DB ExternalSecret on the laptop...
-    assert not _by(objs, "ExternalSecret", "tripbot-database-creds")
-    # ...but the other four ExternalSecrets still come from ESO.
-    es = {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
-    assert es == {
-        "tripbot-twitch-creds",
-        "tripbot-google-maps-api-key",
-        "tripbot-discord-alerts-webhook",
-        "tripbot-discord-bot-token",
-    }
-    # A stable-named on-disk Secret carries the DB creds, and the Deployment
-    # envFroms it (not tripbot-database-creds).
-    sec = _by(objs, "Secret", "tripbot-secret")[0]
-    assert sec["stringData"]["DATABASE_USER"] == "tripbot_docker"
-    dep = _by(objs, "Deployment", "tripbot-twitch")[0]
+def test_deployment_envfroms_db_and_app_secrets_by_name():
+    dep = _by(_synth("stage-1"), "Deployment", "tripbot-twitch")[0]
     names = [
         e.get("secretRef", {}).get("name")
         for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]
     ]
-    assert "tripbot-secret" in names
+    # eso env: ESO-materialized DB creds + the app Secrets (all by name)
+    assert "tripbot-database-creds" in names
+    assert "tripbot-twitch-creds" in names
+    assert "tripbot-google-maps-api-key" in names
+    # the construct itself emits NO Secret/ExternalSecret (moved to supporting)
+    objs = _synth("stage-1")
+    assert not [o for o in objs if o["kind"] in ("ExternalSecret", "Secret")]
+
+
+def test_local_deployment_envfroms_local_secret_not_eso_db():
+    dep = _by(_synth("local"), "Deployment", "tripbot-twitch")[0]
+    names = [
+        e.get("secretRef", {}).get("name")
+        for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]
+    ]
+    assert "tripbot-secret" in names  # secret.env DB creds
     assert "tripbot-database-creds" not in names
 
 

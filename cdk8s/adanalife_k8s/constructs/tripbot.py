@@ -16,11 +16,12 @@ Reproduces k8s/apps/tripbot/base + overlays:
     (EventSub via WebSocket), but the dashboard Ingress is published per env;
     minipc envs add TLS + a Tailscale Ingress. local is HTTP-only at
     tripbot.localhost.
-  * Five ExternalSecrets (eso envs): database (target.template remaps the
-    shared postgres SM JSON onto DATABASE_*), twitch + google-maps (extract),
-    discord-alerts + discord-bot-token (bare remoteRef). The laptop drops the
-    database ExternalSecret and builds `tripbot-secret` from placeholder DB
-    creds instead.
+The construct envFroms its DB + app Secrets by name but does NOT emit them —
+they're identity-level (one bot, one DB, shared by every platform stack), so
+`emit_identity_secrets` emits them once into the per-env supporting unit
+(SupportingChart): database (ESO target.template remap, or the on-disk
+`tripbot-secret` on the laptop), twitch + google-maps (extract), discord-alerts
++ discord-bot-token (bare remoteRef).
 
 The `tripbot-config` ConfigMap keeps its STABLE name (not the kustomize hash)
 so the one-shot Jobs below can `envFrom` it; the pod template still rolls on
@@ -43,6 +44,9 @@ from adanalife_k8s.naming import app_name, meta_labels, selector
 IMAGE = "adanalife/tripbot"
 DB_SECRET_NAME = "tripbot-database-creds"  # ESO-materialized DB creds (eso envs)
 LOCAL_DB_SECRET = "tripbot-secret"  # secret.env-built DB creds (laptop)
+# Identity label for the shared (non-per-platform) Secrets — they belong to the
+# bot identity, not any one platform stack.
+NAME_IDENTITY = "tripbot"
 
 # Constant base ConfigMap literals (base kustomization configMapGenerator). The
 # sibling-service hosts (VLC/ONSCREENS/OBS_SERVER_HOST) are per-platform, so
@@ -137,10 +141,11 @@ class Tripbot(Construct):
         labels = meta_labels(name)
         sel = selector(name)
         image = f"{IMAGE}:{env.image_tag}"
-        primary = platform == env.platforms[0]
         cm_name = config_map_name(platform)
         local = env.secret_source == "local"
         db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
+        # primary platform keeps the identity-stable public host (see _ingress).
+        primary = platform == env.platforms[0]
 
         # --- ConfigMap (per-platform stable name + content-hash annotation) ---
         data = config_data(env, platform)
@@ -148,23 +153,10 @@ class Tripbot(Construct):
             self, "config", name=cm_name, namespace=ns, labels=labels, data=data
         )
 
-        # --- DB creds + app Secrets: identity-level, shared across a namespace's
-        # tripbot instances (one bot identity, one DB), so the PRIMARY platform
-        # owns them — a future second-platform instance reuses the same Secrets by
-        # name rather than re-declaring (and colliding on) them. Names unchanged. ---
-        if primary:
-            if local:
-                k8s.KubeSecret(
-                    self,
-                    "secret",
-                    metadata=k8s.ObjectMeta(name=LOCAL_DB_SECRET, namespace=ns),
-                    type="Opaque",
-                    string_data=dict(_LOCAL_SECRET),
-                )
-            else:
-                self._db_external_secret(ns, labels)
-            # the other four ExternalSecrets (every env, even local)
-            self._external_secrets(ns, labels)
+        # tripbot's DB + app Secrets are identity-level (one bot, one DB — shared by
+        # every platform stack in the namespace), so they're emitted ONCE in the
+        # per-env supporting unit (emit_identity_secrets), not here. The component
+        # just envFroms them by name below.
 
         # --- envFrom: config, DB creds, shared OTLP/Sentry, then app Secrets ---
         # Order matches the legacy render exactly (later entries win on key
@@ -304,119 +296,6 @@ class Tripbot(Construct):
         if env.tailscale:
             self._tailscale_ingress(name, env, ns, labels)
 
-    # ---- ExternalSecret helpers ----
-    def _db_external_secret(self, ns, labels):
-        # database creds: reads the shared postgres SM JSON ({user,password,db})
-        # and remaps it onto DATABASE_* keys via target.template — a shape the
-        # eso.external_secret helper doesn't cover, so emit it as a raw ApiObject
-        # (same idiom as obs.py / postgres.py).
-        meta: dict = {"name": DB_SECRET_NAME}
-        if ns:
-            meta["namespace"] = ns
-        if labels:
-            meta["labels"] = labels
-        es = cdk8s.ApiObject(
-            self,
-            "database-external-secret",
-            api_version="external-secrets.io/v1",
-            kind="ExternalSecret",
-            metadata=meta,
-        )
-        es.add_json_patch(
-            cdk8s.JsonPatch.add(
-                "/spec",
-                {
-                    "refreshInterval": "1h",
-                    "secretStoreRef": {
-                        "name": "aws-secretsmanager",
-                        "kind": "SecretStore",
-                    },
-                    "target": {
-                        "name": DB_SECRET_NAME,
-                        "template": {
-                            "type": "Opaque",
-                            "data": {
-                                "DATABASE_USER": "{{ .user }}",
-                                "DATABASE_PASS": "{{ .password }}",
-                                "DATABASE_DB": "{{ .db }}",
-                            },
-                        },
-                    },
-                    "data": [
-                        {
-                            "secretKey": "user",
-                            "remoteRef": {
-                                "key": "k8s/postgres/credentials",
-                                "property": "user",
-                            },
-                        },
-                        {
-                            "secretKey": "password",
-                            "remoteRef": {
-                                "key": "k8s/postgres/credentials",
-                                "property": "password",
-                            },
-                        },
-                        {
-                            "secretKey": "db",
-                            "remoteRef": {
-                                "key": "k8s/postgres/credentials",
-                                "property": "db",
-                            },
-                        },
-                    ],
-                },
-            )
-        )
-
-    def _external_secrets(self, ns, labels):
-        # twitch + google-maps: extract every top-level key of the SM JSON blob.
-        for id_, name, sm in [
-            (
-                "twitch-external-secret",
-                "tripbot-twitch-creds",
-                "k8s/tripbot/twitch-creds",
-            ),
-            (
-                "google-maps-external-secret",
-                "tripbot-google-maps-api-key",
-                "k8s/tripbot/google-maps-api-key",
-            ),
-        ]:
-            eso.external_secret(
-                self,
-                id_,
-                name=name,
-                namespace=ns,
-                labels=labels,
-                creation_policy="Owner",
-                extract=sm,
-            )
-        # discord alerts + bot-token: one SM container → one materialized key.
-        for id_, name, sm, key in [
-            (
-                "discord-alerts-external-secret",
-                "tripbot-discord-alerts-webhook",
-                "k8s/tripbot/discord-alerts-webhook",
-                "DISCORD_ALERTS_WEBHOOK",
-            ),
-            (
-                "discord-bot-token-external-secret",
-                "tripbot-discord-bot-token",
-                "k8s/tripbot/discord-bot-token",
-                "DISCORD_BOT_TOKEN",
-            ),
-        ]:
-            eso.external_secret(
-                self,
-                id_,
-                name=name,
-                namespace=ns,
-                labels=labels,
-                creation_policy="Owner",
-                data=[ESData(key, sm)],
-            )
-
     # ---- Ingress helpers ----
     def _ingress(self, name, primary, env: EnvConfig, ns, labels):
         # The public dashboard/OAuth host stays identity-stable ("tripbot.<dns>")
@@ -487,6 +366,146 @@ class Tripbot(Construct):
                 ),
                 tls=[k8s.IngressTls(hosts=[f"{name}-{short}"])],
             ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Identity-level Secrets — emitted ONCE per env in the supporting unit, not per
+# component. tripbot is one bot identity against one DB, shared by every platform
+# stack in the namespace, so its DB creds + app Secrets are namespace
+# infrastructure rather than a per-component concern. Names are unchanged.
+# ---------------------------------------------------------------------------
+
+
+def emit_identity_secrets(scope: Construct, env: EnvConfig) -> None:
+    """tripbot's DB creds (ESO ExternalSecret on eso envs, on-disk Secret on the
+    laptop) + the twitch/maps/discord ExternalSecrets. Called by SupportingChart."""
+    ns = env.namespace or None
+    labels = meta_labels(NAME_IDENTITY)
+    if env.secret_source == "local":
+        k8s.KubeSecret(
+            scope,
+            "secret",
+            metadata=k8s.ObjectMeta(name=LOCAL_DB_SECRET, namespace=ns),
+            type="Opaque",
+            string_data=dict(_LOCAL_SECRET),
+        )
+    else:
+        _emit_db_external_secret(scope, ns, labels)
+    _emit_app_external_secrets(scope, ns, labels)
+
+
+def _emit_db_external_secret(scope, ns, labels):
+    # database creds: reads the shared postgres SM JSON ({user,password,db})
+    # and remaps it onto DATABASE_* keys via target.template — a shape the
+    # eso.external_secret helper doesn't cover, so emit it as a raw ApiObject
+    # (same idiom as obs.py / postgres.py).
+    meta: dict = {"name": DB_SECRET_NAME}
+    if ns:
+        meta["namespace"] = ns
+    if labels:
+        meta["labels"] = labels
+    es = cdk8s.ApiObject(
+        scope,
+        "database-external-secret",
+        api_version="external-secrets.io/v1",
+        kind="ExternalSecret",
+        metadata=meta,
+    )
+    es.add_json_patch(
+        cdk8s.JsonPatch.add(
+            "/spec",
+            {
+                "refreshInterval": "1h",
+                "secretStoreRef": {
+                    "name": "aws-secretsmanager",
+                    "kind": "SecretStore",
+                },
+                "target": {
+                    "name": DB_SECRET_NAME,
+                    "template": {
+                        "type": "Opaque",
+                        "data": {
+                            "DATABASE_USER": "{{ .user }}",
+                            "DATABASE_PASS": "{{ .password }}",
+                            "DATABASE_DB": "{{ .db }}",
+                        },
+                    },
+                },
+                "data": [
+                    {
+                        "secretKey": "user",
+                        "remoteRef": {
+                            "key": "k8s/postgres/credentials",
+                            "property": "user",
+                        },
+                    },
+                    {
+                        "secretKey": "password",
+                        "remoteRef": {
+                            "key": "k8s/postgres/credentials",
+                            "property": "password",
+                        },
+                    },
+                    {
+                        "secretKey": "db",
+                        "remoteRef": {
+                            "key": "k8s/postgres/credentials",
+                            "property": "db",
+                        },
+                    },
+                ],
+            },
+        )
+    )
+
+
+def _emit_app_external_secrets(scope, ns, labels):
+    # twitch + google-maps: extract every top-level key of the SM JSON blob.
+    for id_, name, sm in [
+        (
+            "twitch-external-secret",
+            "tripbot-twitch-creds",
+            "k8s/tripbot/twitch-creds",
+        ),
+        (
+            "google-maps-external-secret",
+            "tripbot-google-maps-api-key",
+            "k8s/tripbot/google-maps-api-key",
+        ),
+    ]:
+        eso.external_secret(
+            scope,
+            id_,
+            name=name,
+            namespace=ns,
+            labels=labels,
+            creation_policy="Owner",
+            extract=sm,
+        )
+    # discord alerts + bot-token: one SM container → one materialized key.
+    for id_, name, sm, key in [
+        (
+            "discord-alerts-external-secret",
+            "tripbot-discord-alerts-webhook",
+            "k8s/tripbot/discord-alerts-webhook",
+            "DISCORD_ALERTS_WEBHOOK",
+        ),
+        (
+            "discord-bot-token-external-secret",
+            "tripbot-discord-bot-token",
+            "k8s/tripbot/discord-bot-token",
+            "DISCORD_BOT_TOKEN",
+        ),
+    ]:
+        eso.external_secret(
+            scope,
+            id_,
+            name=name,
+            namespace=ns,
+            labels=labels,
+            creation_policy="Owner",
+            data=[ESData(key, sm)],
         )
 
 
