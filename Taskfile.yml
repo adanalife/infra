@@ -447,12 +447,19 @@ tasks:
       - kubectl rollout restart deploy/obs -n prod-1
       - kubectl rollout status deploy/obs -n prod-1 --timeout=120s
 
+  k8s:prod:rollout:onscreens:
+    desc: restart prod-1 onscreens-server so it re-pulls the image
+    cmds:
+      - kubectl rollout restart deploy/onscreens-server -n prod-1
+      - kubectl rollout status deploy/onscreens-server -n prod-1 --timeout=120s
+
   k8s:prod:rollout:all:
-    desc: restart all three prod-1 app deployments (tripbot + vlc-server + obs)
+    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
     deps:
       - k8s:prod:rollout:tripbot
       - k8s:prod:rollout:vlc-server
       - k8s:prod:rollout:obs
+      - k8s:prod:rollout:onscreens
 
   k8s:stage:rollout:tripbot:
     desc: restart stage-1 tripbot so it re-pulls the image
@@ -472,12 +479,19 @@ tasks:
       - kubectl rollout restart deploy/obs -n stage-1
       - kubectl rollout status deploy/obs -n stage-1 --timeout=120s
 
+  k8s:stage:rollout:onscreens:
+    desc: restart stage-1 onscreens-server so it re-pulls the image
+    cmds:
+      - kubectl rollout restart deploy/onscreens-server -n stage-1
+      - kubectl rollout status deploy/onscreens-server -n stage-1 --timeout=120s
+
   k8s:stage:rollout:all:
-    desc: restart all three stage-1 app deployments (tripbot + vlc-server + obs)
+    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
     deps:
       - k8s:stage:rollout:tripbot
       - k8s:stage:rollout:vlc-server
       - k8s:stage:rollout:obs
+      - k8s:stage:rollout:onscreens
 
   k8s:dev:rollout:tripbot:
     desc: restart development tripbot so it re-pulls the image
@@ -497,12 +511,19 @@ tasks:
       - kubectl rollout restart deploy/obs -n development
       - kubectl rollout status deploy/obs -n development --timeout=120s
 
+  k8s:dev:rollout:onscreens:
+    desc: restart development onscreens-server so it re-pulls the image
+    cmds:
+      - kubectl rollout restart deploy/onscreens-server -n development
+      - kubectl rollout status deploy/onscreens-server -n development --timeout=120s
+
   k8s:dev:rollout:all:
-    desc: restart all three development app deployments (tripbot + vlc-server + obs)
+    desc: restart all four development app deployments (tripbot + vlc-server + obs + onscreens-server)
     deps:
       - k8s:dev:rollout:tripbot
       - k8s:dev:rollout:vlc-server
       - k8s:dev:rollout:obs
+      - k8s:dev:rollout:onscreens
 
   # The k8s:*:diff tasks below are server-side dry-run previews (read-only) of
   # what the matching :apply would change. Each :apply runs its diff first so
