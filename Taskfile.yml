@@ -82,6 +82,22 @@ tasks:
         echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
         kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
 
+  # dashcam-cv (stage-only vector fill). The PERSISTENT workload (PriorityClass +
+  # models PVC + suspended fill CronJob) and the ON-DEMAND one-shot Jobs are
+  # separate dist units so a normal apply never re-runs the Jobs.
+  k8s:stage:dashcam-cv:
+    desc: apply the persistent dashcam-cv fill workload (PriorityClass + models PVC + suspended fill CronJob) to stage-1
+    cmds:
+      - kubectl apply -f cdk8s/dist/dashcam-cv.k8s.yaml
+      - 'echo "Applied (CronJob ships SUSPENDED). Ramp with: task k8s:stage:dashcam-cv:jobs, then unsuspend: kubectl -n stage-1 patch cronjob dashcam-cv-fill --type merge -p suspend=false"'
+
+  k8s:stage:dashcam-cv:jobs:
+    desc: run the on-demand dashcam-cv one-shot Jobs (fill-once + find + stats) in stage-1; re-creates them (Jobs are immutable)
+    cmds:
+      - kubectl -n stage-1 delete job dashcam-cv-fill-once dashcam-cv-find dashcam-cv-stats --ignore-not-found
+      - kubectl apply -f cdk8s/dist/dashcam-cv-jobs.k8s.yaml
+      - 'echo "Applied. Logs: kubectl -n stage-1 logs -f job/dashcam-cv-find (or -stats / -fill-once)"'
+
   cdk8s:test:
     desc: Run the cdk8s unit + contract tests
     dir: cdk8s

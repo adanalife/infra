@@ -17,6 +17,7 @@ from adanalife_k8s.charts import (
     AppsChart,
     ArgoCDChart,
     DashcamCVChart,
+    DashcamCVJobsChart,
     DashcamPVChart,
     DataChart,
     JobsChart,
@@ -45,8 +46,11 @@ for name in targets:
     if env.dashcam_mode == "nfs":
         DashcamPVChart(app, f"{name}-dashcam-pv", env=env)
     # dashcam-cv is stage-only today (the only env running the vector fill).
+    # The persistent fill workload and the on-demand one-shot Jobs are separate
+    # deploy units so a normal apply never re-runs the Jobs.
     if name == "stage-1":
         DashcamCVChart(app, "dashcam-cv", env=env)
+        DashcamCVJobsChart(app, "dashcam-cv-jobs", env=env)
 
 # Argo CD GitOps config (env-agnostic, offline) — committed deploy unit applied
 # after the Argo install. Skipped when narrowed to a single env via CDK8S_ENV.
