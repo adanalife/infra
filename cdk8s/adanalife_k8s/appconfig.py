@@ -22,7 +22,7 @@ def telemetry_config(env: EnvConfig) -> dict[str, str]:
 
 
 def local_stubs() -> dict[str, str]:
-    """DB / Twitch / Twilio stub values the local overlay injects (and that the
+    """DB / Twitch stub values the local overlay injects (and that the
     development overlay inherits by extending local). Absent on stage/prod,
     where the real values arrive via ESO Secrets."""
     return {
@@ -35,10 +35,6 @@ def local_stubs() -> dict[str, str]:
         "TWITCH_CLIENT_ID": "stub",
         "TWITCH_CLIENT_SECRET": "stub",
         "TWITCH_AUTH_TOKEN": "oauth:stub",
-        "TWILIO_ACCT_SID": "stub",
-        "TWILIO_AUTH_TOKEN": "stub",
-        "TWILIO_FROM_NUM": "+15555550100",
-        "TWILIO_TO_NUM": "+15555550101",
     }
 
 
