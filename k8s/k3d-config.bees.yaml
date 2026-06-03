@@ -15,12 +15,12 @@
 # stream a real dashcam directory instead, pass DASHCAM_NAS=<host path>
 # to cluster:up; the task adds a :ro `/host/nas-dashcam` bind-mount via a
 # `--volume` CLI flag (k3d merges it with this config), keeping the real
-# footage path out of git. See the development-nas overlay.
+# footage path out of git. (Note: the legacy development-nas overlay that
+# consumed this mount is gone; cdk8s dev doesn't read it yet.)
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
 # *.dev.whereisdana.today URLs (managed by external-dns in development
-# mode) can hit traefik directly. Cloudflare Tunnel keeps running in
-# parallel for whalecore.com traffic — the two paths don't overlap.
+# mode) can hit traefik directly.
 # High ports (9080/9443) instead of standard 80/443 because Colima
 # can't forward privileged ports (<1024) to the host without sudo;
 # test URLs include the port suffix until a router/CDN translates
