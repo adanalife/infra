@@ -1699,6 +1699,37 @@ tasks:
           echo
         done
 
+  # On-demand prod-1 Postgres dump — runs the postgres-backup CronJob's script
+  # now (instead of waiting for the hourly schedule), for a "just in case before
+  # a risky op" snapshot. The one-shot Job lands in the hourly/ tier (expires at
+  # 2 days). Set ARCHIVE=true to also copy the resulting dump into the permanent
+  # archive/ tier (no lifecycle rule — lives forever), for snapshots worth
+  # keeping past the 2-day window.
+  tripbot:prod:db:backup:
+    desc: "run an on-demand prod-1 Postgres dump (lands in hourly/); ARCHIVE=true also pins it to the permanent archive/ tier"
+    vars:
+      BUCKET: adanalife-prod-1-postgres-backups
+    preconditions:
+      - sh: kubectl get cronjob postgres-backup -n prod-1 >/dev/null 2>&1
+        msg: "postgres-backup CronJob not found in prod-1 — apply the postgres overlay first"
+    cmds:
+      - |
+        set -euo pipefail
+        job="postgres-backup-manual-$(date +%Y%m%d-%H%M%S)"
+        echo "Creating one-shot backup Job ${job} from cronjob/postgres-backup..."
+        kubectl create job --from=cronjob/postgres-backup "${job}" -n prod-1
+        echo "Waiting for ${job} to complete..."
+        kubectl wait --for=condition=complete "job/${job}" -n prod-1 --timeout=300s
+        kubectl logs "job/${job}" -n prod-1 --tail=20 || true
+        echo "Backup complete (written to s3://{{.BUCKET}}/hourly/)."
+        if [ "{{.ARCHIVE}}" = "true" ]; then
+          newest=$(aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/hourly/" | sort | tail -1 | awk '{print $4}')
+          [ -n "$newest" ] || { echo "no dump found in hourly/ to pin"; exit 1; }
+          echo "Pinning hourly/${newest} → archive/${newest}"
+          aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/hourly/${newest}" "s3://{{.BUCKET}}/archive/${newest}"
+          echo "Pinned to archive/ (permanent)."
+        fi
+
   # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
   # env creds (no credential handling here). Then clears a stale
   # schema_migrations dirty flag if the dump carried one — the historical
