@@ -22,10 +22,6 @@ data:
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
   OTEL_TRACES_SAMPLER_ARG: "0.1"
   SENTRY_ENVIRONMENT: development
-  TWILIO_ACCT_SID: stub
-  TWILIO_AUTH_TOKEN: stub
-  TWILIO_FROM_NUM: "+15555550100"
-  TWILIO_TO_NUM: "+15555550101"
   TWITCH_AUTH_TOKEN: oauth:stub
   TWITCH_CLIENT_ID: stub
   TWITCH_CLIENT_SECRET: stub
@@ -53,7 +49,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: f25f791ceb
+        adanalife.dev/config-hash: 3bf7d9cf6b
       labels:
         app: vlc-twitch
     spec:

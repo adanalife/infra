@@ -127,8 +127,9 @@ class DataChart(Chart):
 class DashcamPVChart(Chart):
     """The dashcam NFS PersistentVolume (cluster-scoped) — host-specific bootstrap
     infra deliberately kept OUT of Argo. Synthed to its own
-    dist/<env>-dashcam-pv.k8s.yaml, which neither the apps nor data ApplicationSet
-    globs (they match `<env>-{apps,data}.k8s.yaml`), and provisioned once per
+    dist/<env>-dashcam-pv.k8s.yaml, which no ApplicationSet includes (the apps set
+    matches `<env>-<component>-<platform>.k8s.yaml`; supporting/data match their
+    own per-env files), and provisioned once per
     cluster via `task k8s:<env>:dashcam-pv` with the real NFS coords from the
     gitignored cdk8s/dashcam-nfs.local.env. The committed golden carries
     placeholders. The matching PVC lives in DataChart (Argo binds it by name).

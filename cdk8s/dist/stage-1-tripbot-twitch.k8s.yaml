@@ -7,7 +7,7 @@ metadata:
   name: tripbot-twitch-config
   namespace: stage-1
 data:
-  BOT_USERNAME: tripbot4000
+  BOT_USERNAME: tripbot4001
   CHANNEL_NAME: adanalife_staging
   DATABASE_HOST: postgres
   DISCORD_GUILD_ID: "607964164220125258"
@@ -44,7 +44,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: b8b19f2c85
+        adanalife.dev/config-hash: ba1111e92a
       labels:
         app: tripbot-twitch
     spec:
