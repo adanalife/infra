@@ -146,7 +146,21 @@ class ArgoCD(Construct):
                         ".spec.dataFrom[]?.extract.metadataPolicy",
                         ".spec.dataFrom[]?.extract.nullBytePolicy",
                     ],
-                }
+                },
+                # The apiserver defaults apiVersion: v1 / kind: PersistentVolumeClaim
+                # onto every StatefulSet volumeClaimTemplate at admission. The k8s
+                # schema's embedded-PVC props (KubePersistentVolumeClaimProps) have
+                # no apiVersion/kind fields, so cdk8s can't render them — leaving the
+                # postgres data Application perpetually OutOfSync on those two keys.
+                # Ignore exactly those paths. No-op on the apps unit (no StatefulSets).
+                {
+                    "group": "apps",
+                    "kind": "StatefulSet",
+                    "jqPathExpressions": [
+                        ".spec.volumeClaimTemplates[]?.apiVersion",
+                        ".spec.volumeClaimTemplates[]?.kind",
+                    ],
+                },
             ],
         }
         appset = cdk8s.ApiObject(
