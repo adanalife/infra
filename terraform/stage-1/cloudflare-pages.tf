@@ -31,6 +31,24 @@ provider "cloudflare" {
   api_token = data.aws_secretsmanager_secret_version.cloudflare_api_token.secret_string
 }
 
+# Whalecore is the dedicated domain for Cloudflare-managed services.
+# Authoritative DNS lives here (not Route53) — point whalecore.com's
+# nameservers at the values from `terraform output stage_1_zone_name_servers`
+# at your registrar.
+#
+# Originally added for the (now-retired) Cloudflare Tunnel; kept solely
+# because the `www.whalecore.com` Pages custom domain + its CNAME below
+# bind to this zone. Cloudflare Free only allows zone creation for root
+# domains, which is why this is a fresh root rather than a subzone of
+# whereisdana.today.
+resource "cloudflare_zone" "stage_1" {
+  account = {
+    id = var.cloudflare_account_id
+  }
+  name = "whalecore.com"
+  type = "full"
+}
+
 resource "cloudflare_pages_project" "stage_1" {
   account_id = var.cloudflare_account_id
   name       = var.project_name
@@ -98,4 +116,11 @@ resource "cloudflare_pages_domain" "stage_1_staging_dana_lol" {
   account_id   = var.cloudflare_account_id
   project_name = cloudflare_pages_project.stage_1.name
   name         = "staging.dana.lol"
+}
+
+# Nameservers Cloudflare assigned to whalecore.com. Point the registrar's
+# NS records at these to delegate the zone to Cloudflare.
+output "stage_1_zone_name_servers" {
+  value       = cloudflare_zone.stage_1.name_servers
+  description = "Update whalecore.com NS at the registrar to these"
 }

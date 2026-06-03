@@ -32,7 +32,6 @@
 #      provider auth or at-plan reads. Examples:
 #        aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
 #          --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
-#        task stage:allowlist:add-current-ip   # writes ["X.X.X.X/32"] to stage-1/allowlist-cidrs
 #   3. `task tf:stage:apply` again — provider auths cleanly.
 
 # ============================================================================
@@ -54,26 +53,6 @@ resource "aws_secretsmanager_secret_version" "cloudflare_api_token" {
 
 data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
   secret_id = aws_secretsmanager_secret.cloudflare_api_token.id
-}
-
-# JSON array of CIDR strings, e.g. ["69.222.113.215/32"]. Edited interactively
-# via `task stage:allowlist:add-current-ip`. Consumed by the Cloudflare Access
-# policy on tripbot — see cloudflare-tunnel.tf.
-resource "aws_secretsmanager_secret" "stage_1_allowlist_cidrs" {
-  name        = "stage-1/allowlist-cidrs"
-  description = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
-}
-
-resource "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
-  secret_id     = aws_secretsmanager_secret.stage_1_allowlist_cidrs.id
-  secret_string = "[]"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
-  secret_id = aws_secretsmanager_secret.stage_1_allowlist_cidrs.id
 }
 
 # ============================================================================
@@ -375,7 +354,6 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
     ]
     resources = [
       aws_secretsmanager_secret.cloudflare_api_token.arn,
-      aws_secretsmanager_secret.stage_1_allowlist_cidrs.arn,
       aws_secretsmanager_secret.grafana_cloud_otlp.arn,
       aws_secretsmanager_secret.grafana_cloud_api.arn,
       aws_secretsmanager_secret.sentry_tripbot.arn,
