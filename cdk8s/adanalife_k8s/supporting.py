@@ -2,7 +2,7 @@
 apps: the cross-cutting observability ExternalSecrets (shared-secrets) and the
 namespaced cert-manager Issuers (+ their Route53 creds).
 
-These are emitted by `AppsChart`. The ESO SecretStore they reference is emitted
+These are emitted by `SupportingChart`. The ESO SecretStore they reference is emitted
 by `DataChart` (the synced-first unit) so the data unit is self-sufficient — see
 DataChart. Skipped for the `local` env (no ESO / no cert-manager there).
 """

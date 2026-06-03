@@ -512,7 +512,7 @@ def _emit_app_external_secrets(scope, ns, labels):
 # ---------------------------------------------------------------------------
 # One-shot Jobs — module-level emitters, NOT auto-run by the Tripbot construct.
 #
-# They are deliberately separate so AppsChart never fires a one-shot on a routine
+# They are deliberately separate so a routine app apply never fires a one-shot on a routine
 # apply (matches the stage-prod-cotenancy ADR). The deploy tasks emit + apply
 # them on demand. All `envFrom` the PRIMARY platform's tripbot ConfigMap by name
 # (config_map_name(env.platforms[0]), e.g. tripbot-twitch-config) — the Jobs are

@@ -145,39 +145,28 @@ def namespace_exists(cluster_reachable, core_v1, namespace) -> None:
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="session")
 def expected(env_config, contract):
-    """The objects AppsChart synthesizes for this env, by canonical name.
+    """The objects the app charts synthesize for this env, by canonical name.
 
-    Mirrors adanalife_k8s/charts.py: postgres (StatefulSet), tripbot/vlc-server/
-    onscreens-server (Deployments + Services), and one OBS instance per
-    env.platforms (obs-twitch everywhere; obs-youtube on stage). Ingresses with a
-    LB address only exist on minipc envs (cluster == minipc).
+    Mirrors adanalife_k8s/charts.py emit_app_charts: one Deployment + Service per
+    (component, platform) for tripbot/vlc/onscreens/obs — each named
+    <component>-<platform> via the contract — plus the shared postgres
+    StatefulSet. Ingresses with a LB address only exist on minipc envs.
     """
     svc = contract.svc
-    obs_deployments = [f"obs-{p}" for p in env_config.platforms]
+    platforms = env_config.platforms
+    components = ("tripbot", "vlc", "onscreens", "obs")
 
-    deployments = [
-        "tripbot",
-        svc("vlc_server"),
-        svc("onscreens_server"),
-    ] + obs_deployments
-
-    # Services that should exist AND have ready endpoints.
-    services = [
-        svc("vlc_server"),
-        svc("onscreens_server"),
-        svc("obs_twitch"),
-        svc("postgres"),
-        svc("tripbot"),
-    ]
-    if "youtube" in env_config.platforms:
-        services.append(svc("obs_youtube"))
+    # one Deployment + Service per (component, platform)
+    deployments = [svc(f"{c}_{p}") for p in platforms for c in components]
+    services = deployments + [svc("postgres")]
 
     # Ingresses we expect a load-balancer address on (external-dns / traefik).
     # Only the minipc clusters (stage-1, prod-1) carry app Ingresses; dev has a
-    # vlc Ingress but no LB-IP machinery worth asserting, local has none.
+    # vlc Ingress but no LB-IP machinery worth asserting, local has none. tripbot
+    # + vlc carry the LB-addressed Ingresses per platform (onscreens is internal).
     lb_ingresses = []
     if env_config.cluster == "minipc":
-        lb_ingresses = ["vlc-server", "tripbot"]
+        lb_ingresses = [svc(f"{c}_{p}") for p in platforms for c in ("vlc", "tripbot")]
 
     return {
         "deployments": deployments,

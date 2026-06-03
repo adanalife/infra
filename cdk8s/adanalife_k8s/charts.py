@@ -1,6 +1,8 @@
 """Deploy units. Each Chart synthesizes to one file in dist/ and is applied
-independently — `AppsChart` per env, `PlatformChart` per cluster (later) — so
-the platform stack stays decoupled from any app env.
+independently — one per (component, platform) for the apps (emit_app_charts),
+plus per-env SupportingChart / DataChart / JobsChart, and PlatformChart per
+cluster — so every component is its own sync/health unit (one Argo Application,
+one URL) and the platform stack stays decoupled from any app env.
 """
 
 from __future__ import annotations
@@ -23,54 +25,45 @@ from adanalife_k8s.constructs.vlc import (
 from adanalife_k8s.supporting import emit_supporting
 
 
-class AppsChart(Chart):
-    """STATELESS app workloads for one environment — the app constructs only.
-    Mirrors the legacy `k8s/overlays/<env>` umbrella set, minus the stateful and
-    supporting pieces.
+# Stateless app components that each get their own Chart (→ one dist file + one
+# Argo Application) per (env, platform). obs is emitted separately for its
+# streaming args. Keep this list in sync with the contract's per-platform service
+# keys; naming.app_name maps (component, platform) -> the Service name.
+COMPONENTS = ("tripbot", "vlc", "onscreens", "obs")
+_SIMPLE_COMPONENTS = (
+    ("tripbot", Tripbot),
+    ("vlc", VlcServer),
+    ("onscreens", OnscreensServer),
+)
 
-    The stateful resources (postgres + the dashcam PV/PVC) live in **DataChart**;
-    the namespace supporting resources (ESO store-referencing Secrets, issuers,
-    and tripbot's identity Secrets) live in **SupportingChart** — each its own
-    deploy unit / Argo Application, so routine app churn can't disturb the
-    database, volumes, or secrets.
 
-    Deliberately excluded (applied via their own tasks, never on every apply):
-    the tripbot one-shot Jobs (auth-bootstrap + seed) and the dashcam-cv vector
-    fill — see JobsChart / DashcamCVChart below.
+def emit_app_charts(scope: Construct, env: EnvConfig) -> None:
+    """One Chart per (component, platform) — each synthesizes to its own
+    `dist/<env>-<component>-<platform>.k8s.yaml`, so every component is an
+    independent Argo Application (one sync/health/URL). The supporting + stateful
+    + one-shot units stay separate (SupportingChart / DataChart / JobsChart).
     """
+    ns = env.namespace or None
+    for platform in env.platforms:
+        for comp, ctor in _SIMPLE_COMPONENTS:
+            chart = Chart(scope, f"{env.name}-{comp}-{platform}", namespace=ns)
+            ctor(chart, platform, env=env)
 
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
-        self.env = env
-
-        # --- one full stack per streaming platform: tripbot + vlc + onscreens +
-        # obs, each named <app>-<platform> via the contract (naming.app_name). The
-        # identity-level resources (tripbot's DB/app Secrets) + the shared
-        # observability secrets + issuers live in SupportingChart, not here. ---
-        for platform in env.platforms:
-            # --- tripbot (bot Deployment + Service + Ingress + ExternalSecrets) ---
-            Tripbot(self, platform, env=env)
-
-            # --- vlc-server (dashcam video pipeline; shared dashcam PVC) ---
-            VlcServer(self, platform, env=env)
-
-            # --- onscreens-server (NATS consumer; its own Deployment) ---
-            OnscreensServer(self, platform, env=env)
-
-            # --- OBS ---
-            # twitch streams by default in prod (ESO stream-key); everything else
-            # boots idle until toggled on. youtube carries STREAM_PLATFORM=youtube.
-            streaming = platform == "twitch" and env.name == "prod-1"
-            ObsInstance(
-                self,
-                platform,
-                env=env,
-                streaming=streaming,
-                stream_key_sm=f"k8s/obs/{platform}-stream-key" if streaming else None,
-                extra_config={"STREAM_PLATFORM": "youtube"}
-                if platform == "youtube"
-                else None,
-            )
+        # OBS — its own chart. twitch streams by default in prod (ESO stream-key);
+        # everything else boots idle until toggled on. youtube carries
+        # STREAM_PLATFORM=youtube.
+        streaming = platform == "twitch" and env.name == "prod-1"
+        obs_chart = Chart(scope, f"{env.name}-obs-{platform}", namespace=ns)
+        ObsInstance(
+            obs_chart,
+            platform,
+            env=env,
+            streaming=streaming,
+            stream_key_sm=f"k8s/obs/{platform}-stream-key" if streaming else None,
+            extra_config={"STREAM_PLATFORM": "youtube"}
+            if platform == "youtube"
+            else None,
+        )
 
 
 class SupportingChart(Chart):
@@ -93,7 +86,7 @@ class SupportingChart(Chart):
 
 
 class DataChart(Chart):
-    """STATEFUL resources for one environment, isolated from AppsChart so the
+    """STATEFUL resources for one environment, isolated from the app charts so the
     high-churn stateless apps can't affect them: the postgres StatefulSet (+ its
     PVC/StorageClass, backup CronJob) and the dashcam PVC.
 
@@ -108,7 +101,7 @@ class DataChart(Chart):
     Argo entirely (see DashcamPVChart). Only the PVC lives here; it binds to the
     out-of-band PV by name.
 
-    The ESO SecretStore is emitted here (not AppsChart) so this unit is fully
+    The ESO SecretStore is emitted here (not the app charts) so this unit is fully
     self-sufficient: postgres-credentials no longer depends on the apps unit
     landing the store first. apps' ExternalSecrets reference the same store,
     synced after data — matching the documented data-before-apps order.
