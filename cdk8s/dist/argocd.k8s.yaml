@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: adanalife-apps
+  name: tripbot
   namespace: argocd
 spec:
   description: adanalife app workloads synthesized by cdk8s
@@ -24,7 +24,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: adanalife-apps
+  name: tripbot-apps
   namespace: argocd
 spec:
   goTemplate: true
@@ -34,18 +34,32 @@ spec:
     - list:
         elements:
           - env: prod-1
+            app: tripbot-twitch
+          - env: prod-1
+            app: vlc-twitch
+          - env: prod-1
+            app: onscreens-twitch
+          - env: prod-1
+            app: obs-twitch
           - env: stage-1
+            app: tripbot-twitch
+          - env: stage-1
+            app: vlc-twitch
+          - env: stage-1
+            app: onscreens-twitch
+          - env: stage-1
+            app: obs-twitch
   template:
     metadata:
-      name: "{{.env}}-apps"
+      name: "{{.env}}-{{.app}}"
     spec:
-      project: adanalife-apps
+      project: tripbot
       source:
         repoURL: git@github.com:adanalife/infra.git
         targetRevision: master
         path: cdk8s/dist
         directory:
-          include: "{{.env}}-apps.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -75,7 +89,58 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: adanalife-data
+  name: tripbot-supporting
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+          - env: stage-1
+  template:
+    metadata:
+      name: "{{.env}}-supporting"
+    spec:
+      project: tripbot
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: master
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-supporting.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tripbot-data
   namespace: argocd
 spec:
   goTemplate: true
@@ -90,7 +155,7 @@ spec:
     metadata:
       name: "{{.env}}-data"
     spec:
-      project: adanalife-apps
+      project: tripbot
       source:
         repoURL: git@github.com:adanalife/infra.git
         targetRevision: master

@@ -4,15 +4,17 @@ deploy unit applied after the Argo install (which is the Helm chart in
 PlatformChart). Argo CD itself is the controller; these are the objects that tell
 it what to watch:
 
-  * AppProject (adanalife-apps) — a restrictive project: only the infra repo, only
-    the in-cluster prod-1/stage-1 namespaces, only the cluster-scoped kinds the
-    apps actually use (PV, StorageClass). Caps the blast radius vs the wide-open
-    `default` project.
-  * ApplicationSet — one Application per minipc env reconciling
-    cdk8s/dist/<env>-apps.k8s.yaml. MONITOR-ONLY: manual sync (no automated
-    prune/selfHeal), so Argo reports drift but changes nothing until you sync.
-    ignoreDifferences keeps the dashcam PV's host-specific NFS coords out of the
-    diff (they're placeholders in git, set out-of-band live).
+  * AppProject (tripbot) — a restrictive project: only the infra repo, only the
+    in-cluster prod-1/stage-1 namespaces, only the cluster-scoped kinds the apps
+    actually use (PV, StorageClass). Caps the blast radius vs the wide-open
+    `default` project. (Reserve "infra"/"platform" naming for shared cluster
+    infrastructure; these are tripbot-project workloads.)
+  * Three ApplicationSets — `tripbot-apps` (one Application per
+    <env>-<component>-<platform>, so each component is its own sync/health/URL),
+    `tripbot-supporting` and `tripbot-data` (one per env). Each reconciles its own
+    cdk8s/dist file. MONITOR-ONLY: manual sync (no automated prune/selfHeal), so
+    Argo reports drift but changes nothing until you sync. ignoreDifferences keeps
+    ESO's CRD schema-default fields out of the diff so ExternalSecrets read Synced.
   * tailscale Ingress — the UI at argocd-prod.<tailnet>.ts.net.
   * repo ExternalSecret — IaC repo registration: ESO materializes the
     Argo-recognized `repository` Secret from a read-only deploy key in SM.
@@ -31,7 +33,10 @@ from constructs import Construct
 REPO_URL = "git@github.com:adanalife/infra.git"
 TARGET_REVISION = "master"
 ARGO_NS = "argocd"
-PROJECT = "adanalife-apps"
+# The project governs all the tripbot-project workloads (apps + supporting + data,
+# and later the cross-repo console/helix). "infra"/"platform" naming is reserved
+# for shared cluster infrastructure, never the tripbot app workloads.
+PROJECT = "tripbot"
 IN_CLUSTER = "https://kubernetes.default.svc"
 # minipc envs Argo runs in-cluster against (development is on the bees cluster —
 # needs separate registration, a follow-up).
@@ -40,25 +45,56 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
 
 
+def _app_elements() -> list[dict]:
+    """The per-component ApplicationSet elements: one {env, app} per
+    (env, platform, component), where app = "<component>-<platform>". Computed
+    from the SAME source emit_app_charts loops over (ENVS × env.platforms ×
+    COMPONENTS), so the generated Applications can't drift from the synthed files
+    — adding a platform extends both. Lazy imports avoid an import cycle with
+    charts.py (which imports this module's ArgoCD)."""
+    from adanalife_k8s.charts import COMPONENTS
+    from adanalife_k8s.config import load_env
+
+    return [
+        {"env": env_name, "app": f"{comp}-{platform}"}
+        for env_name in ENVS
+        for platform in load_env(env_name).platforms
+        for comp in COMPONENTS
+    ]
+
+
 class ArgoCD(Construct):
     def __init__(self, scope: Construct, id: str = "argocd"):
         super().__init__(scope, id)
 
         self._app_project()
-        # Two ApplicationSets: the stateless apps and the stateful data. They get
-        # different sync policies — that's the whole point of the split. Data
-        # never prunes, so an app deploy can't delete the database or volumes.
-        # The host-specific dashcam PV is NOT in either unit (it's its own
-        # out-of-Argo deploy unit — see DashcamPVChart), so neither needs an
-        # ignoreDifferences for it anymore.
+        # Three ApplicationSets, one Application each per unit. The apps set is
+        # per-COMPONENT (one Application per <env>-<component>-<platform> →
+        # cdk8s/dist/<env>-<component>-<platform>.k8s.yaml), so each component is
+        # its own sync/health/URL. supporting + data are per-env. Data never
+        # prunes, so an app deploy can't delete the database or volumes.
         self._application_set(
-            unit="apps",
             id="appset-apps",
+            name="tripbot-apps",
+            elements=_app_elements(),
+            app_name_tmpl="{{.env}}-{{.app}}",
+            include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
             prune_disabled=False,
         )
         self._application_set(
-            unit="data",
+            id="appset-supporting",
+            name="tripbot-supporting",
+            elements=[{"env": e} for e in ENVS],
+            app_name_tmpl="{{.env}}-supporting",
+            include_tmpl="{{.env}}-supporting.k8s.yaml",
+            prune_disabled=False,
+        )
+        self._application_set(
             id="appset-data",
+            name="tripbot-data",
+            elements=[{"env": e} for e in ENVS],
+            app_name_tmpl="{{.env}}-data",
+            include_tmpl="{{.env}}-data.k8s.yaml",
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
@@ -95,11 +131,21 @@ class ArgoCD(Construct):
             )
         )
 
-    def _application_set(self, *, unit: str, id: str, prune_disabled: bool):
-        """Emit one ApplicationSet -> one Application per env reconciling
-        `dist/<env>-<unit>.k8s.yaml`. `unit` is "apps" (stateless) or "data"
-        (stateful). The data unit disables prune so it can never delete the
-        database/volumes, even when apps later flips to automated sync."""
+    def _application_set(
+        self,
+        *,
+        id: str,
+        name: str,
+        elements: list[dict],
+        app_name_tmpl: str,
+        include_tmpl: str,
+        prune_disabled: bool,
+    ):
+        """Emit one ApplicationSet -> one Application per generator element. The
+        apps set has one element per (env, component, platform) so each component
+        is its own Application reconciling its own dist file; supporting + data
+        have one element per env. The data set disables prune so it can never
+        delete the database/volumes, even when apps later flips to automated sync."""
         sync_options = [
             "CreateNamespace=false",  # namespaces owned by bootstrap
             "ServerSideApply=true",
@@ -113,7 +159,7 @@ class ArgoCD(Construct):
                 "repoURL": REPO_URL,
                 "targetRevision": TARGET_REVISION,
                 "path": "cdk8s/dist",
-                "directory": {"include": f"{{{{.env}}}}-{unit}.k8s.yaml"},
+                "directory": {"include": include_tmpl},
             },
             "destination": {"server": IN_CLUSTER, "namespace": "{{.env}}"},
             "syncPolicy": {
@@ -151,8 +197,8 @@ class ArgoCD(Construct):
                 # onto every StatefulSet volumeClaimTemplate at admission. The k8s
                 # schema's embedded-PVC props (KubePersistentVolumeClaimProps) have
                 # no apiVersion/kind fields, so cdk8s can't render them — leaving the
-                # postgres data Application perpetually OutOfSync on those two keys.
-                # Ignore exactly those paths. No-op on the apps unit (no StatefulSets).
+                # postgres -data Application perpetually OutOfSync on those two keys.
+                # Ignore exactly those paths. No-op on the apps/supporting units.
                 {
                     "group": "apps",
                     "kind": "StatefulSet",
@@ -168,7 +214,7 @@ class ArgoCD(Construct):
             id,
             api_version="argoproj.io/v1alpha1",
             kind="ApplicationSet",
-            metadata={"name": f"adanalife-{unit}", "namespace": ARGO_NS},
+            metadata={"name": name, "namespace": ARGO_NS},
         )
         appset.add_json_patch(
             cdk8s.JsonPatch.add(
@@ -176,9 +222,9 @@ class ArgoCD(Construct):
                 {
                     "goTemplate": True,
                     "goTemplateOptions": ["missingkey=error"],
-                    "generators": [{"list": {"elements": [{"env": e} for e in ENVS]}}],
+                    "generators": [{"list": {"elements": elements}}],
                     "template": {
-                        "metadata": {"name": f"{{{{.env}}}}-{unit}"},
+                        "metadata": {"name": app_name_tmpl},
                         "spec": spec,
                     },
                 },

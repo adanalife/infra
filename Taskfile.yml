@@ -28,7 +28,7 @@ tasks:
       - mise exec -- uv run cdk8s import
 
   cdk8s:synth:
-    desc: Synthesize the app manifests (offline) -> cdk8s/dist/<env>-{apps,jobs}.k8s.yaml
+    desc: Synthesize the manifests (offline) -> cdk8s/dist/<env>-<component>-<platform>.k8s.yaml (+ supporting/data/jobs)
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
@@ -121,19 +121,23 @@ tasks:
   # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
   # when a diff exists, so `|| true` keeps Task from treating "there's a diff" as
   # a failure. Point kubectl at the right context first.
+  # Diff the per-component app manifests (one file per <env>-<component>-<platform>)
+  # for the env against the live cluster. Loops the four components so it picks up
+  # every platform without a hardcoded file list. supporting/data are their own
+  # diff concerns; not included here.
   cdk8s:local:diff:
     desc: kubectl diff the synthesized local app manifests against the live cluster (read-only, colorized)
     dir: cdk8s
     deps: [cdk8s:synth]
     cmds:
-      - kubectl diff -f dist/local-apps.k8s.yaml || true
+      - for c in tripbot vlc onscreens obs; do for f in dist/local-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
 
   cdk8s:dev:diff:
     desc: kubectl diff the synthesized development app manifests against the live cluster (read-only, colorized)
     dir: cdk8s
     deps: [cdk8s:synth]
     cmds:
-      - kubectl diff -f dist/development-apps.k8s.yaml || true
+      - for c in tripbot vlc onscreens obs; do for f in dist/development-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
 
   # cdk8s:dev:apply — the development (bees) deploy path. dev is NOT Argo-managed
   # (only prod-1/stage-1 are), so it applies the synthesized manifests directly:
@@ -154,14 +158,14 @@ tasks:
     dir: cdk8s
     deps: [cdk8s:synth]
     cmds:
-      - kubectl diff -f dist/stage-1-apps.k8s.yaml || true
+      - for c in tripbot vlc onscreens obs; do for f in dist/stage-1-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
 
   cdk8s:prod:diff:
     desc: kubectl diff the synthesized prod app manifests against the live cluster (read-only, colorized)
     dir: cdk8s
     deps: [cdk8s:synth]
     cmds:
-      - kubectl diff -f dist/prod-1-apps.k8s.yaml || true
+      - for c in tripbot vlc onscreens obs; do for f in dist/prod-1-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
 
   gitops:apply:
     desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)

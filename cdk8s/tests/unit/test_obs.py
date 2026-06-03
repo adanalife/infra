@@ -4,16 +4,22 @@ and the contract anti-drift bridge."""
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
-from adanalife_k8s.charts import AppsChart
 from adanalife_k8s.config import load_env
 from adanalife_k8s.constructs.obs import ObsInstance
 from adanalife_k8s.contract import load_contract
 
 
 def _synth(env_name):
-    app = K8sTesting.app()
-    chart = AppsChart(app, f"{env_name}-apps", env=load_env(env_name))
-    return K8sTesting.synth(chart)
+    # the env's primary-platform OBS instance, wired exactly as emit_app_charts does.
+    env = load_env(env_name)
+    platform = env.platforms[0]
+    streaming = platform == "twitch" and env.name == "prod-1"
+    return _synth_obs(
+        platform,
+        env_name,
+        streaming=streaming,
+        stream_key_sm=f"k8s/obs/{platform}-stream-key" if streaming else None,
+    )
 
 
 def _synth_obs(platform, env_name, **kwargs):

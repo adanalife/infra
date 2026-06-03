@@ -111,7 +111,7 @@ class PlatformChart(Chart):
       * local-path-provisioner  (k8s/local-path-provisioner/<env>)
       * intel-gpu-plugin / intel-xpu-manager  (k8s/intel-*/<env>) — minipc
       * ESO cluster-store  (k8s/external-secrets/cluster-store)
-      * cert-manager app-issuers  (emitted per-env by AppsChart already)
+      * cert-manager app-issuers  (emitted per-env by SupportingChart already)
     """
 
     def __init__(
