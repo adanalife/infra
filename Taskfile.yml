@@ -1644,18 +1644,21 @@ tasks:
     desc: "run an on-demand prod-1 Postgres dump (lands in hourly/); ARCHIVE=true also pins it to the permanent archive/ tier"
     vars:
       BUCKET: adanalife-prod-1-postgres-backups
+      # postgres + its backup CronJob live in the data namespace (prod-1-data)
+      # after the isolation move; override NS=prod-1 for the pre-move location.
+      NS: '{{.NS | default "prod-1-data"}}'
     preconditions:
-      - sh: kubectl get cronjob postgres-backup -n prod-1 >/dev/null 2>&1
-        msg: "postgres-backup CronJob not found in prod-1 — apply the postgres overlay first"
+      - sh: kubectl get cronjob postgres-backup -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-backup CronJob not found in {{.NS}} — apply the data unit first (override NS= if postgres is elsewhere)"
     cmds:
       - |
         set -euo pipefail
         job="postgres-backup-manual-$(date +%Y%m%d-%H%M%S)"
         echo "Creating one-shot backup Job ${job} from cronjob/postgres-backup..."
-        kubectl create job --from=cronjob/postgres-backup "${job}" -n prod-1
+        kubectl create job --from=cronjob/postgres-backup "${job}" -n {{.NS}}
         echo "Waiting for ${job} to complete..."
-        kubectl wait --for=condition=complete "job/${job}" -n prod-1 --timeout=300s
-        kubectl logs "job/${job}" -n prod-1 --tail=20 || true
+        kubectl wait --for=condition=complete "job/${job}" -n {{.NS}} --timeout=300s
+        kubectl logs "job/${job}" -n {{.NS}} --tail=20 || true
         echo "Backup complete (written to s3://{{.BUCKET}}/hourly/)."
         if [ "{{.ARCHIVE}}" = "true" ]; then
           newest=$(aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/hourly/" | sort | tail -1 | awk '{print $4}')
@@ -1680,9 +1683,12 @@ tasks:
     desc: "restore prod-1 Postgres from an S3 dump (DUMP_KEY=tripbot/<ts>.dump, default newest) + clear stale migrate dirty flag"
     vars:
       BUCKET: adanalife-prod-1-postgres-backups
+      # postgres lives in the data namespace (prod-1-data) after the isolation
+      # move; override NS=prod-1 for a pre-move (app-namespace) restore.
+      NS: '{{.NS | default "prod-1-data"}}'
     preconditions:
-      - sh: kubectl get pod postgres-0 -n prod-1 >/dev/null 2>&1
-        msg: "postgres-0 not found in prod-1 — bring the cluster + postgres up first"
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
     cmds:
       - |
         set -euo pipefail
@@ -1694,12 +1700,12 @@ tasks:
         fi
         echo "Restoring prod-1 Postgres from s3://{{.BUCKET}}/$key"
         aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/$key" - \
-          | kubectl exec -i -n prod-1 postgres-0 -- sh -c \
+          | kubectl exec -i -n {{.NS}} postgres-0 -- sh -c \
             'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
         echo "Restore complete."
       - |
         set -euo pipefail
-        psql() { kubectl exec -i -n prod-1 postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
+        psql() { kubectl exec -i -n {{.NS}} postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
         ver=$(psql "SELECT version FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         dirty=$(psql "SELECT dirty FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         echo "schema_migrations: version=$ver dirty=$dirty"
@@ -1708,7 +1714,7 @@ tasks:
           psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
           echo "cleared."
         fi
-      - 'echo "Next: kubectl rollout restart deploy/tripbot -n prod-1 — its migrate init re-applies any pending migrations."'
+      - 'echo "Next: kubectl rollout restart deploy/tripbot-twitch -n prod-1 — its migrate init re-applies any pending migrations."'
 
   tripbot:dev:db:seed:
     desc: run the one-shot ESO-wired seed Job in the development namespace; idempotent — skips if the videos table already has real rows
