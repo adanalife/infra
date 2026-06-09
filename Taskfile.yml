@@ -707,10 +707,11 @@ tasks:
   # adanalife-prod aws-vault profile, writes the external-dns values
   # file into k8s/external-dns/prod-1/.
   k8s:prod:bootstrap-secrets:
-    desc: apply prod-1 ESO bootstrap Secret + write external-dns/traefik values.local.yml (no plaintext on disk)
+    desc: apply prod-1 ESO bootstrap Secret into prod-1 + prod-1-data + prod-1-platform + external-secrets + write external-dns/traefik values.local.yml (no plaintext on disk)
     status:
       - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
       - kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n prod-1-data >/dev/null 2>&1
       # Stale-target guard: re-run when either values.local.yml is missing OR
       # its embedded target no longer matches the cluster's current node
       # InternalIP, so a re-IP'd node doesn't silently persist a stale target.
@@ -729,17 +730,21 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first (also the source of the node InternalIP target)"
     cmds:
-      # eso-aws-credentials goes in THREE namespaces (same prod-account
+      # eso-aws-credentials goes in FOUR namespaces (same prod-account
       # creds in all): external-secrets (for the aws-secretsmanager-cluster
       # ClusterSecretStore the kube-system platform components use), prod-1
-      # (for the namespaced aws-secretsmanager SecretStore the apps use), and
-      # prod-1-platform (for the namespaced store external-dns reads).
+      # (for the namespaced aws-secretsmanager SecretStore the apps use),
+      # prod-1-data (for the isolated DB namespace's store — postgres'
+      # ExternalSecret reads it), and prod-1-platform (the store external-dns
+      # reads).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1 --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace prod-1-data --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
         if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1 \
            && kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n prod-1-data >/dev/null 2>&1 \
            && kubectl get secret eso-aws-credentials -n prod-1-platform >/dev/null 2>&1; then
           echo "eso-aws-credentials already present, skipping"
         else
@@ -747,14 +752,14 @@ tasks:
           ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          for ns in external-secrets prod-1 prod-1-platform; do
+          for ns in external-secrets prod-1 prod-1-data prod-1-platform; do
             kubectl create secret generic eso-aws-credentials \
               --namespace="$ns" \
               --from-literal=AWS_ACCESS_KEY_ID="$ak" \
               --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
               --dry-run=client -o yaml | kubectl apply -f -
           done
-          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-platform namespaces"
+          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-data + prod-1-platform namespaces"
         fi
       - |
         set -euo pipefail
