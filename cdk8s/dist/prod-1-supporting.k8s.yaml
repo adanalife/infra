@@ -233,3 +233,36 @@ spec:
   target:
     creationPolicy: Owner
     name: tripbot-discord-bot-token
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: aws-secretsmanager
+  namespace: prod-1
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: us-east-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:
+            name: eso-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKeySecretRef:
+            name: eso-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vlc-dashcam
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: ""
+  volumeName: vlc-dashcam-nfs
