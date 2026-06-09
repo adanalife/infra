@@ -90,7 +90,10 @@ echo "OK"
 class Postgres(Construct):
     def __init__(self, scope: Construct, *, env: EnvConfig):
         super().__init__(scope, NAME)
-        ns = env.namespace or None
+        # postgres lives in the data namespace — the app namespace by default
+        # (parity), or an isolated one (env.data_namespace). The backup CronJob
+        # rides along here, so its --host=postgres stays a same-namespace lookup.
+        ns = env.data_ns or None
         labels = meta_labels(NAME)
         sel = selector(NAME)
 

@@ -12,6 +12,8 @@ spec:
       namespace: prod-1
     - server: https://kubernetes.default.svc
       namespace: stage-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1-data
   clusterResourceWhitelist:
     - group: ""
       kind: PersistentVolume
@@ -141,6 +143,7 @@ spec:
     - list:
         elements:
           - env: stage-1
+            ns: stage-1-data
   template:
     metadata:
       name: "{{.env}}-data"
@@ -154,7 +157,7 @@ spec:
           include: "{{.env}}-data.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
-        namespace: "{{.env}}"
+        namespace: "{{.ns}}"
       syncPolicy:
         syncOptions:
           - CreateNamespace=false

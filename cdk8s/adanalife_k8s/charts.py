@@ -84,6 +84,18 @@ class SupportingChart(Chart):
         # tripbot identity Secrets (every env — local Secret or DB ES + app ES)
         emit_identity_secrets(self, env)
 
+        # When postgres is isolated in its own namespace, its ESO SecretStore went
+        # with it (DataChart) — so the app namespace needs its OWN store for the
+        # ExternalSecrets above + in the component charts. (Co-located envs share
+        # DataChart's same-namespace store, so this would be a duplicate there.)
+        if env.data_isolated and env.secret_source == "eso":
+            secret_store(self, "secret-store", namespace=env.namespace or None)
+        # The dashcam PVC can't follow postgres into the data namespace — vlc
+        # mounts it and PVCs are namespace-local — so when the DB is isolated it
+        # lives here in the app namespace. (Co-located envs keep it in DataChart.)
+        if env.data_isolated:
+            emit_dashcam_pvc(self, env)
+
 
 class DataChart(Chart):
     """STATEFUL resources for one environment, isolated from the app charts so the
@@ -101,27 +113,41 @@ class DataChart(Chart):
     Argo entirely (see DashcamPVChart). Only the PVC lives here; it binds to the
     out-of-band PV by name.
 
-    The ESO SecretStore is emitted here (not the app charts) so this unit is fully
-    self-sufficient: postgres-credentials no longer depends on the apps unit
-    landing the store first. apps' ExternalSecrets reference the same store,
-    synced after data — matching the documented data-before-apps order.
+    Lands in env.data_ns — the app namespace by default (byte-identical render),
+    or an isolated namespace (env.data_namespace, e.g. stage-1-data) so a
+    `kubectl delete ns <app>` can't take the database. Apps reach it cross-
+    namespace via env.postgres_host (an FQDN when isolated).
+
+    The ESO SecretStore is emitted here so this unit is self-sufficient (its
+    postgres ExternalSecret doesn't depend on another unit landing the store
+    first). When co-located, it doubles as the app namespace's store; when
+    isolated, the app namespace gets its own store in SupportingChart, and the
+    dashcam PVC moves there too (vlc mounts it — it can't live in the data ns).
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
+        super().__init__(scope, id, namespace=env.data_ns or None)
         self.env = env
 
-        # --- ESO SecretStore (eso envs only): foundational, every ExternalSecret
-        #     in BOTH units references it, so it lives in the synced-first unit ---
+        # --- ESO SecretStore (eso envs only): the postgres ExternalSecret here
+        #     references it, so it lives in the same (data) namespace. When the DB
+        #     is co-located this is also the app namespace's store (every
+        #     ExternalSecret references it); when isolated, the app namespace gets
+        #     its own store in SupportingChart. ---
         if env.secret_source == "eso":
-            secret_store(self, "secret-store", namespace=env.namespace or None)
+            secret_store(self, "secret-store", namespace=env.data_ns or None)
 
-        # --- postgres (StatefulSet; prod adds StorageClass + backup CronJob) ---
+        # --- postgres (StatefulSet; prod adds StorageClass + backup CronJob).
+        #     Lands in env.data_ns — the deletion boundary this unit protects. ---
         Postgres(self, env=env)
 
         # --- dashcam PVC (nfs envs only; no-op on hostPath local/dev). The PV it
-        #     binds to is provisioned out-of-band via DashcamPVChart. ---
-        emit_dashcam_pvc(self, env)
+        #     binds to is provisioned out-of-band via DashcamPVChart. Mounted by
+        #     vlc (namespace-local), so it can only live in the app namespace:
+        #     co-located here, but moved to SupportingChart when the DB is isolated
+        #     in a different namespace. ---
+        if not env.data_isolated:
+            emit_dashcam_pvc(self, env)
 
 
 class DashcamPVChart(Chart):

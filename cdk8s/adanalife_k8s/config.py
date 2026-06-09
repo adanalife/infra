@@ -36,6 +36,13 @@ class EnvConfig:
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
+    # "" → postgres co-locates in the app namespace (default, byte-identical
+    # render). Set to an isolated namespace (e.g. "stage-1-data") to move the DB
+    # StatefulSet + its ESO SecretStore out of the app namespace, so deleting the
+    # app namespace can't drop the database. Apps reach it cross-namespace via the
+    # postgres_host FQDN. The dashcam PVC does NOT move (vlc mounts it; PVCs are
+    # namespace-local) — it shifts to SupportingChart in the app namespace.
+    data_namespace: str = ""
     external_dns_role_arn: str = (
         ""  # cert-manager DNS-01 Route53 role (per AWS account)
     )
@@ -60,6 +67,27 @@ class EnvConfig:
     def tls(self) -> bool:
         """Whether app ingresses get cert-manager TLS (minipc envs only)."""
         return self.cluster == "minipc"
+
+    @property
+    def data_ns(self) -> str:
+        """Namespace the stateful data unit (postgres + its SecretStore) lands in:
+        the app namespace by default, or the isolated one when data_namespace set."""
+        return self.data_namespace or self.namespace
+
+    @property
+    def data_isolated(self) -> bool:
+        """True when postgres lives in its own namespace, split from the app ns."""
+        return bool(self.data_namespace) and self.data_namespace != self.namespace
+
+    @property
+    def postgres_host(self) -> str:
+        """DATABASE_HOST apps connect to: the bare Service name when co-located
+        (parity), the cross-namespace FQDN when the DB is isolated."""
+        return (
+            f"postgres.{self.data_namespace}.svc.cluster.local"
+            if self.data_isolated
+            else "postgres"
+        )
 
 
 # Stage and dev share the adanalife-stage account → same ExternalDNSRole ARN.
@@ -115,6 +143,10 @@ ENVS: dict[str, EnvConfig] = {
         postgres_storage_class="local-path",
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
+        # Stage rehearses DB-in-its-own-namespace: postgres + its SecretStore land
+        # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
+        # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
+        data_namespace="stage-1-data",
         # YouTube OBS is deferred until we're closer to testing the YouTube
         # streaming path — keeps the manifests/diffs tidy meanwhile. The
         # ObsInstance factory still supports it (tested directly); re-enable by

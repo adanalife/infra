@@ -51,6 +51,28 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
 
 
+def _data_ns(env_name: str) -> str:
+    """The namespace the data unit deploys into for an env — env.data_ns (its own
+    isolated namespace when set, else the app namespace). Lazy import avoids the
+    charts.py <-> argocd.py cycle."""
+    from adanalife_k8s.config import load_env
+
+    return load_env(env_name).data_ns
+
+
+def _project_namespaces() -> list[str]:
+    """Every namespace an Application in this project may target: the app
+    namespaces plus any isolated data namespace (e.g. stage-1-data). Drives the
+    AppProject `destinations` allowlist — an Application can't sync into a
+    namespace the project doesn't permit."""
+    seen: list[str] = list(ENVS)
+    for e in CUTOVER_ENVS:
+        ns = _data_ns(e)
+        if ns not in seen:
+            seen.append(ns)
+    return seen
+
+
 def _app_elements() -> list[dict]:
     """The per-component ApplicationSet elements: one {env, app} per
     (env, platform, component), where app = "<component>-<platform>". Computed
@@ -98,9 +120,13 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-data",
             name="tripbot-data",
-            elements=[{"env": e} for e in CUTOVER_ENVS],
+            # The data unit deploys into env.data_ns (its own namespace when the DB
+            # is isolated, e.g. stage-1-data), not the app namespace — so carry the
+            # target namespace in each element rather than deriving it from env.
+            elements=[{"env": e, "ns": _data_ns(e)} for e in CUTOVER_ENVS],
             app_name_tmpl="{{.env}}-data",
             include_tmpl="{{.env}}-data.k8s.yaml",
+            dest_ns_tmpl="{{.ns}}",
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
@@ -123,7 +149,8 @@ class ArgoCD(Construct):
                     "description": "adanalife app workloads synthesized by cdk8s",
                     "sourceRepos": [REPO_URL],
                     "destinations": [
-                        {"server": IN_CLUSTER, "namespace": e} for e in ENVS
+                        {"server": IN_CLUSTER, "namespace": ns}
+                        for ns in _project_namespaces()
                     ],
                     # The apps' cluster-scoped objects — nothing else may be created.
                     "clusterResourceWhitelist": [
@@ -146,6 +173,7 @@ class ArgoCD(Construct):
         app_name_tmpl: str,
         include_tmpl: str,
         prune_disabled: bool,
+        dest_ns_tmpl: str = "{{.env}}",
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
@@ -167,7 +195,7 @@ class ArgoCD(Construct):
                 "path": "cdk8s/dist",
                 "directory": {"include": include_tmpl},
             },
-            "destination": {"server": IN_CLUSTER, "namespace": "{{.env}}"},
+            "destination": {"server": IN_CLUSTER, "namespace": dest_ns_tmpl},
             "syncPolicy": {
                 # MONITOR-ONLY: no `automated` block, so manual sync. For the apps
                 # unit, enable continuous reconcile post-cutover with

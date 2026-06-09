@@ -123,6 +123,9 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
     applied on its own carries the same config the Deployment runs with. NATS_URL
     is only present where the env defines one (absent on local)."""
     data = dict(_BASE_CONFIG)
+    # bare "postgres" when co-located (parity); cross-namespace FQDN when the DB
+    # is isolated in its own namespace (env.data_namespace).
+    data["DATABASE_HOST"] = env.postgres_host
     data["VLC_SERVER_HOST"] = f"{app_name('vlc', platform)}:8080"
     data["ONSCREENS_SERVER_HOST"] = f"{app_name('onscreens', platform)}:8080"
     data["OBS_SERVER_HOST"] = f"{app_name('obs', platform)}:8080"
@@ -659,7 +662,7 @@ def seed(scope: Construct, env: EnvConfig) -> None:
         command=[
             "sh",
             "-c",
-            'until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done',
+            f'until nc -z {env.postgres_host} 5432; do echo "waiting for postgres..."; sleep 2; done',
         ],
     )
     migrate = k8s.Container(
