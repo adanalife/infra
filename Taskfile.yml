@@ -816,9 +816,10 @@ tasks:
   # in stage-1-platform, reading the stage account). Point kubectl at
   # adanalife-minipc.
   k8s:stage:bootstrap-secrets:
-    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-platform + write stage external-dns values.local.yml (mini-PC cluster)
+    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-data + stage-1-platform + write stage external-dns values.local.yml (mini-PC cluster)
     status:
       - kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n stage-1-data >/dev/null 2>&1
       - kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1
       # Stale-target guard: re-run when the file is missing OR its embedded
       # --default-targets no longer matches the resolved target IP (the
@@ -840,24 +841,28 @@ tasks:
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
       - kubectl create namespace stage-1 --dry-run=client -o yaml | kubectl apply -f -
+      # stage-1-data: the isolated DB namespace (postgres + its SecretStore). Its
+      # ExternalSecret needs eso-aws-credentials here, same as the app namespace.
+      - kubectl create namespace stage-1-data --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace stage-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
         if kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n stage-1-data >/dev/null 2>&1 \
            && kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1; then
-          echo "eso-aws-credentials already present in stage-1 + stage-1-platform, skipping"
+          echo "eso-aws-credentials already present in stage-1 + stage-1-data + stage-1-platform, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          for ns in stage-1 stage-1-platform; do
+          for ns in stage-1 stage-1-data stage-1-platform; do
             kubectl create secret generic eso-aws-credentials \
               --namespace="$ns" \
               --from-literal=AWS_ACCESS_KEY_ID="$ak" \
               --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
               --dry-run=client -o yaml | kubectl apply -f -
           done
-          echo "applied eso-aws-credentials Secret to stage-1 + stage-1-platform namespaces"
+          echo "applied eso-aws-credentials Secret to stage-1 + stage-1-data + stage-1-platform namespaces"
         fi
       # The stage SecretStore (aws-secretsmanager, namespaced) ships in both
       # the stage-1 umbrella and k8s/external-dns/stage-1.
