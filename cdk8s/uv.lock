@@ -431,7 +431,7 @@ wheels = [
 
 [[package]]
 name = "jsii"
-version = "1.133.0"
+version = "1.134.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -441,9 +441,9 @@ dependencies = [
     { name = "typeguard" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/a3/9b5beeffd72df7457007b5c22f28230b460fbcafad8658899a823677e77b/jsii-1.133.0.tar.gz", hash = "sha256:6fe14c5a0cc414390470663a83500d477861d0dbe140739de462d626df6a18fa", size = 447469, upload-time = "2026-06-01T11:25:07.306Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/d3/930a9e4c09a5ef8b9a9d2a54a480a215b2ac16277089b80451998f4c54b3/jsii-1.134.0.tar.gz", hash = "sha256:22aa450dc9538952453dcd4e51de0b9e92e3c94a6b4e468832acbcbd7b124b57", size = 448323, upload-time = "2026-06-03T19:05:01.19Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/ac/4ef09fd2a76b032b187ceece3e165ed7f177276a774603c09bb110765909/jsii-1.133.0-py3-none-any.whl", hash = "sha256:84ec3adffa1b496358267f6689363ca606f351ac9b3794ab7bd111ab2075401f", size = 420247, upload-time = "2026-06-01T11:25:05.932Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/fc/4d6a3936fc36753c2b9da33fb9816e9928bd93cabefdd9923b8f79a7a169/jsii-1.134.0-py3-none-any.whl", hash = "sha256:c2288ce3568222883e1620dc9c2f2477331d36a4925a84711cf48297ee13cb50", size = 421348, upload-time = "2026-06-03T19:04:59.768Z" },
 ]
 
 [[package]]

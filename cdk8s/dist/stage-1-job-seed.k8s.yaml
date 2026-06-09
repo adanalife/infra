@@ -22,7 +22,7 @@ spec:
         - command:
             - sh
             - -c
-            - until nc -z postgres 5432; do echo "waiting for postgres..."; sleep 2; done
+            - until nc -z postgres.stage-1-data.svc.cluster.local 5432; do echo "waiting for postgres..."; sleep 2; done
           image: busybox:1.36
           name: wait-for-postgres
         - args:

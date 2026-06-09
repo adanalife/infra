@@ -9,7 +9,7 @@ metadata:
 data:
   BOT_USERNAME: tripbot4001
   CHANNEL_NAME: adanalife_staging
-  DATABASE_HOST: postgres
+  DATABASE_HOST: postgres.stage-1-data.svc.cluster.local
   DISCORD_GUILD_ID: "607964164220125258"
   ENV: staging
   EXTERNAL_URL: https://tripbot.stage.whereisdana.today
@@ -44,7 +44,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: ba1111e92a
+        adanalife.dev/config-hash: bdea8a7209
       labels:
         app: tripbot-twitch
     spec:
