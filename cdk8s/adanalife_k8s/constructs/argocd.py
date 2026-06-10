@@ -48,6 +48,12 @@ ENVS = ("prod-1", "stage-1")
 # during that wipe (they collide with the new sets on the shared `{env}-data`
 # Application name, so they can't coexist) — see the prod cutover runbook.
 CUTOVER_ENVS = ENVS
+# Envs whose *apps* run automated (prune + selfHeal) — a merged dist/ change
+# deploys itself. Applied per-env via a templatePatch on the apps ApplicationSet,
+# so the rest stay manual. stage-1 leads; prod-1 is held out deliberately until
+# we're confident. The DATA units NEVER autosync (Prune=false is their guarantee);
+# supporting stays manual too — only the apps set reads this.
+AUTOSYNC_ENVS = ("stage-1",)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
 
@@ -109,6 +115,7 @@ class ArgoCD(Construct):
             app_name_tmpl="{{.env}}-{{.app}}",
             include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
             prune_disabled=False,
+            automated_envs=AUTOSYNC_ENVS,
         )
         self._application_set(
             id="appset-supporting",
@@ -175,12 +182,18 @@ class ArgoCD(Construct):
         include_tmpl: str,
         prune_disabled: bool,
         dest_ns_tmpl: str = "{{.env}}",
+        automated_envs: tuple[str, ...] = (),
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
         is its own Application reconciling its own dist file; supporting + data
         have one element per env. The data set disables prune so it can never
-        delete the database/volumes, even when apps later flips to automated sync."""
+        delete the database/volumes, even when apps flips to automated sync.
+
+        `automated_envs` turns on continuous reconcile (prune + selfHeal) for just
+        those envs via a per-element templatePatch — so one ApplicationSet can run
+        some envs automated (stage-1) and others manual (prod-1). Empty = every
+        Application stays manual-sync (monitor-only)."""
         sync_options = [
             "CreateNamespace=false",  # namespaces owned by bootstrap
             "ServerSideApply=true",
@@ -198,10 +211,10 @@ class ArgoCD(Construct):
             },
             "destination": {"server": IN_CLUSTER, "namespace": dest_ns_tmpl},
             "syncPolicy": {
-                # MONITOR-ONLY: no `automated` block, so manual sync. For the apps
-                # unit, enable continuous reconcile post-cutover with
-                # "automated": {"prune": True, "selfHeal": True}. Leave the DATA
-                # unit manual + Prune=false forever — that's its safety guarantee.
+                # Manual sync by default (no `automated` block) — Argo reports drift
+                # but touches nothing. The apps set turns on `automated` per-env via
+                # the templatePatch below (AUTOSYNC_ENVS). The DATA unit stays manual
+                # + Prune=false forever — that's its safety guarantee.
                 "syncOptions": sync_options,
             },
             # ESO's ExternalSecret CRD stamps schema defaults our manifests omit
@@ -244,6 +257,30 @@ class ArgoCD(Construct):
                 },
             ],
         }
+        appset_spec: dict = {
+            "goTemplate": True,
+            "goTemplateOptions": ["missingkey=error"],
+            "generators": [{"list": {"elements": elements}}],
+            "template": {
+                "metadata": {"name": app_name_tmpl},
+                "spec": spec,
+            },
+        }
+        # Per-env autosync: merge an `automated` block onto only the matching envs'
+        # Applications. templatePatch is re-rendered with the same goTemplate, so a
+        # non-matching env renders an empty patch (a no-op merge) and stays manual.
+        if automated_envs:
+            test = " ".join(f'(eq .env "{e}")' for e in automated_envs)
+            cond = f"or {test}" if len(automated_envs) > 1 else test
+            appset_spec["templatePatch"] = (
+                "{{- if " + cond + " }}\n"
+                "spec:\n"
+                "  syncPolicy:\n"
+                "    automated:\n"
+                "      prune: true\n"
+                "      selfHeal: true\n"
+                "{{- end }}\n"
+            )
         appset = cdk8s.ApiObject(
             self,
             id,
@@ -251,20 +288,7 @@ class ArgoCD(Construct):
             kind="ApplicationSet",
             metadata={"name": name, "namespace": ARGO_NS},
         )
-        appset.add_json_patch(
-            cdk8s.JsonPatch.add(
-                "/spec",
-                {
-                    "goTemplate": True,
-                    "goTemplateOptions": ["missingkey=error"],
-                    "generators": [{"list": {"elements": elements}}],
-                    "template": {
-                        "metadata": {"name": app_name_tmpl},
-                        "spec": spec,
-                    },
-                },
-            )
-        )
+        appset.add_json_patch(cdk8s.JsonPatch.add("/spec", appset_spec))
 
     # ---- supporting objects (typed) ----
     def _ui_ingress(self):

@@ -89,6 +89,14 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if (eq .env "stage-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet

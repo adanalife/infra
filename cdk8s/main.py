@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 """cdk8s entrypoint. Synthesizes the deploy units into dist/.
 
-Per env:  <env>-apps   — the umbrella app set (applied on every `task k8s:<env>:apply`)
-          <env>-jobs    — tripbot one-shot Jobs (applied via the auth/seed tasks)
-stage:    dashcam-cv    — the vector-fill batch workload (its own task)
+Per env:  <env>-<component>-<platform>  — one deploy unit / Argo Application each
+          <env>-supporting              — shared + identity Secrets, cert-manager Issuers
+          <env>-data                    — postgres + dashcam PVC (stateful, never pruned)
+          <env>-job-<name>              — tripbot one-shot Jobs (auth/seed; their own tasks)
+stage:    dashcam-cv[-jobs]             — the vector-fill batch workload (its own task)
 
 Synth all envs by default; CDK8S_ENV=<name> narrows to one (handy for diffing a
-single env's output against the legacy Kustomize render during migration).
+single env's output).
 """
 
 import os
