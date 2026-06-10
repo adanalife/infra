@@ -98,6 +98,12 @@ tasks:
       - kubectl apply -f cdk8s/dist/dashcam-cv-jobs.k8s.yaml
       - 'echo "Applied. Logs: kubectl -n stage-1 logs -f job/dashcam-cv-find (or -stats / -fill-once)"'
 
+  k8s:stage:dashcam-cv:start:
+    desc: unsuspend the stage-1 dashcam-cv-fill CronJob (ramp step 3 — flips suspend=false)
+    cmds:
+      - kubectl -n stage-1 patch cronjob dashcam-cv-fill --type merge -p suspend=false
+      - 'echo "dashcam-cv-fill unsuspended. Suspend again with: kubectl -n stage-1 patch cronjob dashcam-cv-fill --type merge -p suspend=true"'
+
   cdk8s:test:
     desc: Run the cdk8s unit + contract tests
     dir: cdk8s
