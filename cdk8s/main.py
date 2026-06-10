@@ -22,6 +22,7 @@ from adanalife_k8s.charts import (
     DashcamPVChart,
     DataChart,
     emit_job_charts,
+    PlatformArgoChart,
     SupportingChart,
     emit_app_charts,
 )
@@ -63,6 +64,10 @@ for name in targets:
 # after the Argo install. Skipped when narrowed to a single env via CDK8S_ENV.
 if not only:
     ArgoCDChart(app, "argocd")
+    # Argo-native delivery of the platform Helm stack — one multi-source Helm
+    # Application per release (offline: just Application objects, no rendered
+    # charts). MONITOR-ONLY until adopted; see gitops/README.md.
+    PlatformArgoChart(app, "platform-argo")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

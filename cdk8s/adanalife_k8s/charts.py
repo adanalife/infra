@@ -224,3 +224,18 @@ class ArgoCDChart(Chart):
         from adanalife_k8s.constructs.argocd import ArgoCD
 
         ArgoCD(self)
+
+
+class PlatformArgoChart(Chart):
+    """Argo CD Applications that deliver the platform Helm stack natively (one
+    multi-source Helm Application per release, version-pinned, values from the
+    in-repo k8s/*/values.yml). Offline — just Application objects, no rendered
+    charts — so it's committed + golden-gated like the app units. The actual chart
+    rendering happens in-cluster (Argo runs helm template), not at synth. See
+    constructs/argo_platform.py. Cluster-level (minipc; env-agnostic)."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        from adanalife_k8s.constructs.argo_platform import ArgoPlatform
+
+        ArgoPlatform(self)
