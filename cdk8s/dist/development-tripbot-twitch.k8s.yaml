@@ -16,6 +16,7 @@ data:
   MAPS_OUTPUT_DIR: /opt/data/maps
   NATS_URL: nats://nats.development-platform.svc.cluster.local:4222
   OBS_SERVER_HOST: obs-twitch:8080
+  OBS_WEBSOCKET_ADDR: obs-twitch:4455
   ONSCREENS_SERVER_HOST: onscreens-twitch:8080
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=development,service.namespace=tripbot
   OTEL_SDK_DISABLED: "true"
@@ -43,7 +44,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 238f8fc069
+        adanalife.dev/config-hash: 1ff0ecbbf9
       labels:
         app: tripbot-twitch
     spec:
