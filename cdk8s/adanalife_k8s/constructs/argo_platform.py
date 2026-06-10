@@ -155,6 +155,23 @@ class ArgoPlatform(Construct):
                             "ServerSideApply=true",
                         ],
                     },
+                    # The apiserver defaults apiVersion: v1 / kind:
+                    # PersistentVolumeClaim onto every StatefulSet volumeClaimTemplate
+                    # at admission; the chart-rendered manifest omits them, so a
+                    # StatefulSet-bearing release (NATS, with its JetStream PVC) reads
+                    # perpetually OutOfSync on those two keys. Ignore exactly those
+                    # paths (same as the tripbot-data app set's postgres handling).
+                    # No-op on the non-StatefulSet releases.
+                    "ignoreDifferences": [
+                        {
+                            "group": "apps",
+                            "kind": "StatefulSet",
+                            "jqPathExpressions": [
+                                ".spec.volumeClaimTemplates[]?.apiVersion",
+                                ".spec.volumeClaimTemplates[]?.kind",
+                            ],
+                        },
+                    ],
                 },
             )
         )
