@@ -2,7 +2,7 @@ apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
   name: aws-secretsmanager
-  namespace: prod-1
+  namespace: prod-1-data
 spec:
   provider:
     aws:
@@ -24,7 +24,7 @@ metadata:
     app.kubernetes.io/name: postgres
     app.kubernetes.io/part-of: tripbot
   name: postgres-credentials
-  namespace: prod-1
+  namespace: prod-1-data
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -59,7 +59,7 @@ metadata:
     app.kubernetes.io/name: postgres
     app.kubernetes.io/part-of: tripbot
   name: postgres
-  namespace: prod-1
+  namespace: prod-1-data
 spec:
   replicas: 1
   selector:
@@ -128,7 +128,7 @@ metadata:
     app.kubernetes.io/name: postgres
     app.kubernetes.io/part-of: tripbot
   name: postgres
-  namespace: prod-1
+  namespace: prod-1-data
 spec:
   clusterIP: None
   ports:
@@ -142,7 +142,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: local-path-retain
-  namespace: prod-1
+  namespace: prod-1-data
 allowVolumeExpansion: false
 provisioner: rancher.io/local-path
 reclaimPolicy: Retain
@@ -152,7 +152,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: postgres-backup-s3-credentials
-  namespace: prod-1
+  namespace: prod-1-data
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -189,7 +189,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: postgres-backup
-  namespace: prod-1
+  namespace: prod-1-data
 spec:
   concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 3
@@ -253,17 +253,3 @@ spec:
   successfulJobsHistoryLimit: 3
   suspend: false
   timeZone: Etc/UTC
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: vlc-dashcam
-  namespace: prod-1
-spec:
-  accessModes:
-    - ReadOnlyMany
-  resources:
-    requests:
-      storage: 1Ti
-  storageClassName: ""
-  volumeName: vlc-dashcam-nfs

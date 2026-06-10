@@ -120,6 +120,11 @@ ENVS: dict[str, EnvConfig] = {
         postgres_backup=True,
         external_dns_role_arn=_PROD_ROLE,
         nfs_pv_name="vlc-dashcam-nfs",
+        # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
+        # take years of irreplaceable data. Applied at the prod per-component
+        # cutover wipe (restore the pg_dump into prod-1-data). Rehearsed on stage
+        # (stage-1-data) first.
+        data_namespace="prod-1-data",
         platforms=("twitch",),
     ),
     "stage-1": EnvConfig(

@@ -129,6 +129,12 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
     data["VLC_SERVER_HOST"] = f"{app_name('vlc', platform)}:8080"
     data["ONSCREENS_SERVER_HOST"] = f"{app_name('onscreens', platform)}:8080"
     data["OBS_SERVER_HOST"] = f"{app_name('obs', platform)}:8080"
+    # OBS WebSocket control addr (port 4455) — distinct from OBS_SERVER_HOST's
+    # :8080 Flask health server. Read directly by tripbot's pkg/obs (watchdog +
+    # stream start/stop); must be per-platform so the YouTube stack dials
+    # obs-youtube, not obs-twitch. Was previously unset, leaving pkg/obs on its
+    # stale "obs:4455" default after OBS went per-platform.
+    data["OBS_WEBSOCKET_ADDR"] = f"{app_name('obs', platform)}:4455"
     data.update(appconfig.telemetry_config(env))
     data.update(_ENV_CONFIG[env.name])
     if env.nats_url:

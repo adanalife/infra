@@ -15,6 +15,7 @@ data:
   GOOGLE_APPS_PROJECT_ID: tripbot-stage
   MAPS_OUTPUT_DIR: /opt/data/maps
   OBS_SERVER_HOST: obs-twitch:8080
+  OBS_WEBSOCKET_ADDR: obs-twitch:4455
   ONSCREENS_SERVER_HOST: onscreens-twitch:8080
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=development,service.namespace=tripbot
   OTEL_SDK_DISABLED: "true"
@@ -42,7 +43,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 1406559faa
+        adanalife.dev/config-hash: 970cd0cf06
       labels:
         app: tripbot-twitch
     spec:

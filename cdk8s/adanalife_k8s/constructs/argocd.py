@@ -41,12 +41,13 @@ IN_CLUSTER = "https://kubernetes.default.svc"
 # minipc envs Argo runs in-cluster against (development is on the bees cluster —
 # needs separate registration, a follow-up).
 ENVS = ("prod-1", "stage-1")
-# Envs migrated to the per-component topology. Stage cuts over first; prod stays
-# on its (live, pre-#661) legacy adanalife-* ApplicationSets until its own wipe,
-# then joins here (CUTOVER_ENVS = ENVS) and the legacy sets are retired. Keeping
-# the new sets stage-only avoids colliding with the legacy sets on the shared
-# `{env}-data` Application name.
-CUTOVER_ENVS = ("stage-1",)
+# Envs migrated to the per-component topology. Stage cut over first; prod now
+# joins at its own wipe — the per-component topology AND the postgres data-
+# namespace move land together in one prod wipe (config.prod-1.data_namespace).
+# The live legacy adanalife-* ApplicationSets + AppProject are deleted by hand
+# during that wipe (they collide with the new sets on the shared `{env}-data`
+# Application name, so they can't coexist) — see the prod cutover runbook.
+CUTOVER_ENVS = ENVS
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
 
