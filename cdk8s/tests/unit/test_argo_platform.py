@@ -23,13 +23,18 @@ def _release(app):
     return app["spec"]["sources"][0]["helm"]["releaseName"]
 
 
-def test_bootstrap_floor_excluded():
+def test_non_argo_manageable_charts_excluded():
     releases = {_release(a) for a in _apps(_synth())}
-    # cilium = the CNI Argo rides on; argocd = Argo's own install
+    # cilium = the CNI Argo rides on; argocd = Argo's own install (bootstrap floor)
     assert "cilium" not in releases
     assert "argocd" not in releases
-    # the safe middle is present
-    assert {"external-secrets", "traefik", "cert-manager"} <= releases
+    # traefik + external-dns are host-IP-coupled (node InternalIP in gitignored
+    # values.local.yml) — not git-declarable, so they stay task-installed.
+    assert "traefik" not in releases
+    assert "external-dns" not in releases
+    assert "external-dns-stage" not in releases
+    # the git-declarable middle is present
+    assert {"external-secrets", "cert-manager", "k8s-monitoring", "nats"} <= releases
 
 
 def test_every_app_is_multisource_pinned_with_values_ref():
@@ -56,10 +61,7 @@ def test_single_broad_platform_project():
 
 def test_per_env_apps_name_qualified():
     names = {a["metadata"]["name"] for a in _apps(_synth())}
-    # external-dns + NATS exist once per env, name-qualified so they don't collide
-    assert {
-        "prod-1-nats",
-        "stage-1-nats",
-        "prod-1-external-dns",
-        "stage-1-external-dns",
-    } <= names
+    # NATS exists once per env, name-qualified so prod/stage don't collide.
+    # (external-dns is excluded — host-coupled — so it's not here.)
+    assert {"prod-1-nats", "stage-1-nats"} <= names
+    assert not any(n.endswith("-external-dns") for n in names)
