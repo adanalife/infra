@@ -219,6 +219,32 @@ spec:
     - hosts:
         - argocd-prod
 ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: argocd.prod.whereisdana.today
+  name: argocd-server-traefik
+  namespace: argocd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: argocd.prod.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: argocd-server
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - argocd.prod.whereisdana.today
+      secretName: argocd-server-tls
+---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
