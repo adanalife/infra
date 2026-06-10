@@ -19,8 +19,8 @@ cdk8s import            # generate typed k8s constructs into imports/ (gitignore
 ## Develop
 
 ```bash
-uv run cdk8s synth                 # -> dist/<env>-{apps,jobs}.k8s.yaml (all envs, fast, offline)
-CDK8S_ENV=stage-1 uv run cdk8s synth   # one env (handy for diffing vs legacy)
+uv run cdk8s synth                 # -> dist/<env>-<component>-<platform>.k8s.yaml (+ -supporting/-data/-job-*), all envs, fast, offline
+CDK8S_ENV=stage-1 uv run cdk8s synth   # one env (handy for diffing a single env)
 uv run pytest -q                   # unit + parity + contract tests
 uv run python tests/parity.py      # diff synth vs the legacy kustomize render
 ```
@@ -55,11 +55,16 @@ it stays a `cdk8s.ApiObject` in `eso.py` — see the note in `cdk8s.yaml`.
 ## Layout
 
 - `adanalife_k8s/config.py` — `EnvConfig` + the per-env matrix (`ENVS`).
-- `adanalife_k8s/charts.py` — `AppsChart` (stateless app set per env), `DataChart`
-  (stateful: postgres + dashcam PV/PVC, isolated so app churn can't disturb them),
-  `JobsChart` (one-shot auth/seed Jobs), `DashcamCVChart` (stage-only vector fill).
+- `adanalife_k8s/charts.py` — the deploy units. `emit_app_charts` emits one Chart
+  per (env, component, platform) → one dist file + one Argo Application;
+  `SupportingChart` (per-env shared + identity Secrets + cert-manager Issuers),
+  `DataChart` (stateful: postgres + the dashcam PVC, isolated so app churn can't
+  disturb them; optional `<env>-data` namespace), `emit_job_charts` (one-shot
+  auth/seed Jobs), `DashcamCVChart` / `DashcamCVJobsChart` (stage-only vector
+  fill), `DashcamPVChart` (the host-specific NFS PV, kept out of Argo), `ArgoCDChart`.
 - `adanalife_k8s/constructs/` — the app factories: `ObsInstance` (per-platform),
-  `VlcServer`, `OnscreensServer`, `Tripbot` (+ `emit_jobs`), `Postgres`, `DashcamCV`.
+  `VlcServer`, `OnscreensServer`, `Tripbot` (+ identity Secrets + auth/seed Jobs),
+  `Postgres`, `DashcamCV`, and `argocd.py` (the Argo AppProject + ApplicationSets).
 - `adanalife_k8s/{naming,configmap,appconfig,eso,supporting}.py` — shared helpers
   (labels, stable-name ConfigMaps + content-hash, config blocks, ESO CR builders,
   per-ns SecretStore + shared-secrets + cert-manager issuers).
