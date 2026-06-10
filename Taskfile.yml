@@ -155,6 +155,12 @@ tasks:
     desc: apply the synthesized development manifests (data + apps) to the bees cluster — dev is not Argo-managed
     dir: cdk8s
     deps: [cdk8s:synth]
+    preconditions:
+      # Guard: bees (k3d) dev cluster only — never the minipc (Talos). Applying
+      # dev manifests against the minipc would collide with the live stage/prod
+      # workloads. (dir: cdk8s, so reach back up to the repo-root kubeconfig.)
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "refusing: cdk8s:dev:apply must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
     cmds:
       - kubectl apply -f dist/development-data.k8s.yaml
       - kubectl apply -f dist/development-apps.k8s.yaml
@@ -622,6 +628,15 @@ tasks:
         cur=$(grep -oE -- '--default-targets=[0-9.]+' k8s/external-dns/development/values.local.yml 2>/dev/null | cut -d= -f2)
         [ -n "$ip" ] && [ "$cur" = "$ip" ]
     preconditions:
+      # Guard: dev tasks target the bees (k3d) dev cluster ONLY. The minipc
+      # (stage/prod, Talos) is never a k3d context — and this task writes
+      # eso-aws-credentials into the SHARED external-secrets namespace with
+      # stage-account creds (dev borrows stage). Run against the minipc, it
+      # clobbers prod's external-secrets/eso-aws-credentials → the prod
+      # ClusterSecretStore feeds cert-manager's ClusterIssuer the wrong account
+      # → cross-account AssumeRole fails → no ClusterIssuer certs issue.
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "refusing: k8s:dev:* must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault` (see infra/README.md)"
       - sh: command -v keybase >/dev/null
@@ -850,6 +865,11 @@ tasks:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the bees cluster
     deps: [k8s:dev:bootstrap-secrets]
     preconditions:
+      # Guard: bees (k3d) dev cluster only — never the minipc (Talos). See the
+      # k8s:dev:bootstrap-secrets precondition for why running dev against the
+      # minipc breaks prod's ClusterIssuer.
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "refusing: k8s:dev:* must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
