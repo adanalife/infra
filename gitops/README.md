@@ -99,11 +99,54 @@ To flip an env's **apps** to continuous reconciliation, add it to
 `AUTOSYNC_ENVS` in `argocd.py`, re-synth + commit, re-apply. stage-1 is already
 there; prod-1 is held out deliberately. The **data** units stay manual forever.
 
+## Platform stack (Argo-native Helm)
+
+The platform Helm charts (ESO, traefik, cert-manager, external-dns, node-exporter,
+k8s-monitoring, NATS, tailscale-operator) are authored as **Argo Applications with
+a multi-source Helm source** — the upstream chart (version-pinned) + your in-repo
+`k8s/<component>/values.yml` via a `$values` ref. Argo runs `helm template`
+in-cluster, so **no rendered charts land in git** — only the small Application
+objects in `cdk8s/dist/platform-argo.k8s.yaml` (offline, committed, golden-gated).
+Source: `cdk8s/adanalife_k8s/constructs/argo_platform.py`; the chart table is
+`helm_platform.py` (shared with the legacy `cdk8s.Helm` render path).
+
+A separate, intentionally broad **`platform` AppProject** (all namespaces, all
+cluster kinds — installing platform charts means CRDs / ClusterRoles / webhooks)
+governs them, distinct from the restrictive `tripbot` app project.
+
+**Two charts are deliberately excluded** — the bootstrap floor Argo can't own:
+**cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
+install). They stay task-installed (`task k8s:<env>:platform:up`). The
+kustomize-only bits (local-path-provisioner, intel-gpu/xpu, ESO cluster-store,
+cert-manager ClusterIssuers) are out of scope here too.
+
+### Adoption (deliberate, rehearse on stage — NOT merge-and-forget)
+
+Argo would be *adopting* releases that `helm upgrade --install` currently owns, so
+the risk is Helm/SSA field-manager conflicts. Mirror the app cutover:
+
+1. Apply the project + Applications: `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml`.
+   They come up **OutOfSync, monitor-only** — nothing changes.
+2. Review each Application's diff vs the live release in the Argo UI.
+3. **Rehearse on stage first** — sync the stage-scoped Applications
+   (`stage-1-external-dns`, `stage-1-nats`); confirm DNS + NATS stay healthy.
+4. Adopt the cluster-scoped charts one at a time in a maintenance window. Highest
+   care: **traefik** (LAN ingress — an ingress blip drops the stream's public
+   path) and **tailscale-operator** (serves the Argo UI's own tailnet Ingress).
+   `ServerSideApply=true` adopts live objects; verify the diff before each sync.
+5. Once a release is cleanly Synced, retire its `helm upgrade --install` step from
+   `task k8s:<env>:platform:up`.
+
+> Namespace pod-security labels (e.g. the NATS PSS hardening) are applied by
+> `bootstrap`, not these charts — `CreateNamespace=true` only creates a bare
+> namespace on a fresh cluster. Adoption onto the existing cluster keeps the
+> labels that are already there.
+
 ## Not covered yet
 
 - **development** (bees cluster) — needs that cluster registered with Argo
   (`argocd cluster add`) and a third env added to the ApplicationSet generators
-  pointing at its destination server.
-- **Platform Helm** — being migrated to Argo-native Helm Applications (see the
-  cdk8s README); until then it stays task-driven (`task k8s:<env>:platform:up`).
+  pointing at its destination server. The platform-argo set is minipc-only for the
+  same reason.
 - **One-shot Jobs** — stay task-driven (they'd re-run on every sync).
+- **cilium / argo-cd** — stay task-installed (the bootstrap floor, above).

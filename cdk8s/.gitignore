@@ -4,12 +4,15 @@ __pycache__/
 .pytest_cache/
 # dist/ — the synthesized app deploy units are COMMITTED as the GitOps source +
 # golden-file regression gate (a CI check asserts synth matches the committed
-# files). But the platform Helm output is helm-rendered (network, version-pinned,
-# multi-MB) and regenerated on demand via CDK8S_PLATFORM=1 — keep it untracked.
+# files). But the platform Helm RENDER (CDK8S_PLATFORM=1) is helm-rendered
+# (network, version-pinned, multi-MB) and regenerated on demand — keep it untracked.
 dist/platform-*.k8s.yaml
 dist/*-platform.k8s.yaml
 dist/*.log
 dist/.*
+# Exception: the Argo-native platform delivery is just small Application objects
+# (offline, no rendered charts), so it IS committed + golden-gated like the apps.
+!dist/platform-argo.k8s.yaml
 # Generated typed k8s constructs (cdk8s import). Regenerate with `cdk8s import`
 # (pinned to k8s API version in cdk8s.yaml). Gitignored to keep the tree
 # reviewable; CI/setup runs the import.

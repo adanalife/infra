@@ -1,0 +1,302 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: shared cluster platform (Helm) reconciled by Argo CD
+  sourceRepos:
+    - git@github.com:adanalife/infra.git
+    - https://argoproj.github.io/argo-helm
+    - https://charts.external-secrets.io
+    - https://charts.jetstack.io
+    - https://grafana.github.io/helm-charts
+    - https://helm.cilium.io
+    - https://kubernetes-sigs.github.io/external-dns/
+    - https://nats-io.github.io/k8s/helm/charts/
+    - https://pkgs.tailscale.com/helmcharts
+    - https://prometheus-community.github.io/helm-charts
+    - https://traefik.github.io/charts
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-secrets
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://charts.external-secrets.io
+      chart: external-secrets
+      targetRevision: 2.5.0
+      helm:
+        releaseName: external-secrets
+        valueFiles:
+          - $values/k8s/external-secrets/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://pkgs.tailscale.com/helmcharts
+      chart: tailscale-operator
+      targetRevision: 1.98.3
+      helm:
+        releaseName: tailscale-operator
+        valueFiles:
+          - $values/k8s/tailscale-operator/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://traefik.github.io/charts
+      chart: traefik
+      targetRevision: 40.2.0
+      helm:
+        releaseName: traefik
+        valueFiles:
+          - $values/k8s/traefik/values.yml
+          - $values/k8s/traefik/values.prod-1.yml
+        valuesObject:
+          providers:
+            kubernetesIngress:
+              ingressEndpoint:
+                ip: 192.168.1.200
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.20.2
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/k8s/cert-manager/prod-1/config.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: node-exporter
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: prometheus-node-exporter
+      targetRevision: 4.55.0
+      helm:
+        releaseName: node-exporter
+        valueFiles:
+          - $values/k8s/monitoring/node-exporter/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-host
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-monitoring
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: k8s-monitoring
+      targetRevision: 4.1.3
+      helm:
+        releaseName: k8s-monitoring
+        valueFiles:
+          - $values/k8s/monitoring/prod-1/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-1-external-dns
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://kubernetes-sigs.github.io/external-dns/
+      chart: external-dns
+      targetRevision: 1.21.1
+      helm:
+        releaseName: external-dns
+        valueFiles:
+          - $values/k8s/external-dns/prod-1/config.yml
+        valuesObject:
+          extraArgs:
+            - --default-targets=192.168.1.200
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-1-nats
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://nats-io.github.io/k8s/helm/charts/
+      chart: nats
+      targetRevision: 2.14.0
+      helm:
+        releaseName: nats
+        valueFiles:
+          - $values/k8s/nats/values.yml
+          - $values/k8s/nats/prod-1/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stage-1-external-dns
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://kubernetes-sigs.github.io/external-dns/
+      chart: external-dns
+      targetRevision: 1.21.1
+      helm:
+        releaseName: external-dns-stage
+        valueFiles:
+          - $values/k8s/external-dns/stage-1/config.yml
+        valuesObject:
+          extraArgs:
+            - --default-targets=192.168.1.200
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: stage-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stage-1-nats
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://nats-io.github.io/k8s/helm/charts/
+      chart: nats
+      targetRevision: 2.14.0
+      helm:
+        releaseName: nats
+        valueFiles:
+          - $values/k8s/nats/values.yml
+          - $values/k8s/nats/stage-1/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: stage-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
