@@ -10,17 +10,24 @@ Application objects. Synthesized to `dist/platform-argo.k8s.yaml` (offline, so i
 committed + golden-gated like the app units).
 
 Scope (minipc only — development is on the bees cluster, not Argo-managed):
-  * cluster-scoped releases (ESO, traefik, cert-manager, node-exporter,
-    k8s-monitoring, tailscale-operator) — installed once; values from prod-1
-    (stage rides prod's cluster-scoped platform, per stage-prod-cotenancy).
-  * per-env releases (external-dns, NATS) — one Application per env namespace, for
-    prod-1 + stage-1.
+  * cluster-scoped releases (ESO, cert-manager, node-exporter, k8s-monitoring,
+    tailscale-operator) — installed once; values from prod-1 (stage rides prod's
+    cluster-scoped platform, per stage-prod-cotenancy).
+  * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
 
-Excluded — the bootstrap floor Argo can't manage (`HelmComponent.argo = False`):
-**cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
-install). Those stay task-installed. The kustomize-only platform bits
-(local-path-provisioner, intel-gpu/xpu, ESO cluster-store, cert-manager
-ClusterIssuers) are out of scope here too — a later kustomize-source pass.
+Excluded — not Argo-manageable (`HelmComponent.argo = False`):
+  * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
+    install) — the bootstrap floor.
+  * **traefik** + **external-dns** — host-coupled: traefik's ingressEndpoint.ip and
+    external-dns's --default-targets are the node's discovered InternalIP, written to
+    gitignored values.local.yml at bootstrap (not git-declarable; prod's differs from
+    the committed lan_ip). external-dns also carries --force-default-targets in that
+    same gitignored arg list. Argo-rendering them from committed values would force
+    the wrong target / drop the flag on adoption, so they stay task-installed.
+
+The kustomize-only platform bits (local-path-provisioner, intel-gpu/xpu, ESO
+cluster-store, cert-manager ClusterIssuers) are out of scope here too — a later
+kustomize-source pass.
 
 **MONITOR-ONLY.** Manual sync; adoption of the live helm releases is deliberate
 and rehearsed on stage first — see `gitops/README.md`. The `platform` AppProject is
@@ -69,11 +76,14 @@ class ArgoPlatform(Construct):
             if comp.argo:
                 self._application(comp.release, comp, comp.namespace)
 
-        # Per-env releases — name-qualified by env so prod-1/stage-1 NATS +
-        # external-dns don't collide on the Application name.
+        # Per-env releases — name-qualified by env so prod-1/stage-1 don't collide
+        # on the Application name. Skips the non-Argo-manageable ones (external-dns:
+        # its --default-targets is a host-discovered node IP in gitignored
+        # values.local.yml), leaving NATS.
         for env_name in PLATFORM_ENVS:
             for comp in env_components(load_env(env_name)):
-                self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+                if comp.argo:
+                    self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
 
     def _project(self):
         proj = cdk8s.ApiObject(

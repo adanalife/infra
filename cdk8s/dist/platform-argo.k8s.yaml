@@ -82,38 +82,6 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: traefik
-  namespace: argocd
-spec:
-  project: platform
-  sources:
-    - repoURL: https://traefik.github.io/charts
-      chart: traefik
-      targetRevision: 40.2.0
-      helm:
-        releaseName: traefik
-        valueFiles:
-          - $values/k8s/traefik/values.yml
-          - $values/k8s/traefik/values.prod-1.yml
-        valuesObject:
-          providers:
-            kubernetesIngress:
-              ingressEndpoint:
-                ip: 192.168.1.200
-    - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: kube-system
-  syncPolicy:
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
   name: cert-manager
   namespace: argocd
 spec:
@@ -192,35 +160,6 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: prod-1-external-dns
-  namespace: argocd
-spec:
-  project: platform
-  sources:
-    - repoURL: https://kubernetes-sigs.github.io/external-dns/
-      chart: external-dns
-      targetRevision: 1.21.1
-      helm:
-        releaseName: external-dns
-        valueFiles:
-          - $values/k8s/external-dns/prod-1/config.yml
-        valuesObject:
-          extraArgs:
-            - --default-targets=192.168.1.200
-    - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: prod-1-platform
-  syncPolicy:
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
   name: prod-1-nats
   namespace: argocd
 spec:
@@ -240,35 +179,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: prod-1-platform
-  syncPolicy:
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: stage-1-external-dns
-  namespace: argocd
-spec:
-  project: platform
-  sources:
-    - repoURL: https://kubernetes-sigs.github.io/external-dns/
-      chart: external-dns
-      targetRevision: 1.21.1
-      helm:
-        releaseName: external-dns-stage
-        valueFiles:
-          - $values/k8s/external-dns/stage-1/config.yml
-        valuesObject:
-          extraArgs:
-            - --default-targets=192.168.1.200
-    - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: stage-1-platform
   syncPolicy:
     syncOptions:
       - CreateNamespace=true

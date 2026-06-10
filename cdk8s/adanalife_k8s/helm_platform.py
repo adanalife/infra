@@ -171,6 +171,13 @@ def cluster_components(
 
     # traefik on the mini-PC runs hostNetwork and stamps the LAN IP into
     # Ingress status (replaces values.local.yml's ingressEndpoint.ip).
+    #
+    # NOT Argo-manageable (argo=False): ingressEndpoint.ip is the node's
+    # InternalIP, discovered at bootstrap and written to the gitignored
+    # values.local.yml — it's host state, not git-declarable (prod's differs from
+    # the committed lan_ip). Inlining env.lan_ip would make Argo stamp the wrong
+    # IP into every Ingress on adoption, so traefik stays task-installed (the
+    # bootstrap discovers the IP). Same class as cilium/argo-cd.
     traefik_files = ["traefik/values.yml"]
     traefik_values: dict = {}
     if minipc:
@@ -187,6 +194,7 @@ def cluster_components(
             "kube-system",
             value_files=tuple(traefik_files),
             values=traefik_values,
+            argo=False,
         )
     )
 
@@ -253,9 +261,17 @@ def env_components(env: EnvConfig) -> list[HelmComponent]:
             "external-dns",
             edns_ns,
             value_files=(f"external-dns/{env.name}/config.yml",),
-            # LAN IP as the default record target (replaces values.local.yml's
-            # --default-targets), injected from config instead of a gitignored file.
+            # `extraArgs` (--default-targets=<node IP> + --force-default-targets)
+            # lives in the gitignored values.local.yml, written by bootstrap from
+            # the node's discovered InternalIP. The cdk8s.Helm path approximates it
+            # with the committed lan_ip, but it's NOT git-declarable — NOT
+            # Argo-manageable (argo=False). Like traefik (its IP source) and
+            # cilium/argo-cd, external-dns stays task-installed so the bootstrap
+            # owns the discovered IP + the force flag. Inlining lan_ip here would
+            # make Argo drop --force-default-targets and force the wrong target on
+            # adoption.
             values={"extraArgs": [f"--default-targets={env.lan_ip}"]},
+            argo=False,
         ),
         HelmComponent(
             "nats",
