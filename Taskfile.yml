@@ -966,6 +966,23 @@ tasks:
           -f k8s/nats/development/values.yml
       - kubectl rollout status statefulset/nats -n development-platform --timeout=120s
       - 'echo "NATS up in development-platform. Connect via nats://nats.development-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n development-platform -- nats pub foo bar"'
+      # Argo CD on the k3d dev cluster — a SEPARATE in-cluster Argo managing ONLY
+      # the development env (no cross-cluster wiring: it reconciles development
+      # against this cluster's own API, same as the minipc Argo does for
+      # prod/stage). dev borrows the stage AWS account, so the repo deploy key must
+      # live at k8s/argocd/repo-ssh-key in the stage SM (the cluster-store reads
+      # it). Version pinned to match cdk8s/adanalife_k8s/helm_platform.py. UI via
+      # port-forward (no tailscale on the dev cluster). See gitops/README.md.
+      - helm repo add argo https://argoproj.github.io/argo-helm
+      - helm repo update argo
+      - helm upgrade --install argocd argo/argo-cd
+          --version 9.5.17
+          -n argocd --create-namespace
+          -f k8s/argo-cd/values.yml
+          -f k8s/argo-cd/values.k3d.yml
+      - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd
+      - kubectl apply -f cdk8s/dist/argocd-k3d.k8s.yaml
+      - 'echo "Argo CD up on the dev cluster (monitor-only). development Applications created. UI: kubectl -n argocd port-forward svc/argocd-server 8080:80. If the repo Secret stays empty, seed k8s/argocd/repo-ssh-key in the stage SM. See gitops/README.md."'
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should

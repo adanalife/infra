@@ -157,8 +157,16 @@ def cluster_components(
                 value_files=("tailscale-operator/values.yml",),
             )
         )
-        # Argo CD — the GitOps controller itself. Bootstrap floor (Argo managing
-        # its own install is a footgun), so argo=False; stays task-installed.
+
+    # Argo CD — the GitOps controller itself, on every cluster that runs an Argo
+    # (minipc + the k3d dev cluster; local doesn't). k3d layers values.k3d.yml over
+    # the base to swap the tailnet domain / managed-namespace for development.
+    # Bootstrap floor (Argo managing its own install is a footgun), so argo=False;
+    # stays task-installed.
+    if cluster in ("minipc", "k3d"):
+        argo_values = ["argo-cd/values.yml"]
+        if cluster == "k3d":
+            argo_values.append("argo-cd/values.k3d.yml")
         components.append(
             HelmComponent(
                 "argocd",
@@ -166,7 +174,7 @@ def cluster_components(
                 "argo-cd",
                 "argo-cd",
                 "argocd",
-                value_files=("argo-cd/values.yml",),
+                value_files=tuple(argo_values),
                 argo=False,
             )
         )
@@ -223,7 +231,7 @@ def cluster_components(
     )
 
     # k8s-monitoring 4.1.4 is confirmed live on the minipc (prod renders + the
-    # pin matches `helm list`). But dev's values.yml was authored for the bees
+    # pin matches `helm list`). But dev's values.yml was authored for the k3d dev
     # cluster's OLDER deployed chart and trips the chart's collector-validation
     # under 4.1.3. Until that cluster's live version is captured (it's on a
     # separate box) and pinned, dev monitoring is skipped here rather than guessed
@@ -287,7 +295,7 @@ def env_components(env: EnvConfig) -> list[HelmComponent]:
 
 
 class PlatformChart(Chart):
-    """Cluster-scoped platform stack for one cluster (`minipc` | `bees`),
+    """Cluster-scoped platform stack for one cluster (`minipc` | `k3d`),
     rendered via cdk8s.Helm (opt-in CDK8S_PLATFORM synth). The component table
     lives in `cluster_components`; this just renders it. The Argo-native delivery
     path (argo_platform.py) reads the SAME table. Excludes the per-env charts

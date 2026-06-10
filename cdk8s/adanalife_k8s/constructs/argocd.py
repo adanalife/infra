@@ -42,8 +42,11 @@ ARGO_NS = "argocd"
 # for shared cluster infrastructure, never the tripbot app workloads.
 PROJECT = "tripbot"
 IN_CLUSTER = "https://kubernetes.default.svc"
-# minipc envs Argo runs in-cluster against (development is on the bees cluster —
-# needs separate registration, a follow-up).
+# The minipc Argo manages these envs in-cluster. development runs its OWN Argo on
+# the k3d dev cluster (a separate install reconciling development against that
+# cluster's own in-cluster API — no cross-cluster networking). The ArgoCD construct
+# is parameterized by env-set so both instances share one authoring path; see
+# main.py (argocd = minipc, argocd-k3d = the dev cluster).
 ENVS = ("prod-1", "stage-1")
 # Envs migrated to the per-component topology. Stage cut over first; prod now
 # joins at its own wipe — the per-component topology AND the postgres data-
@@ -76,23 +79,23 @@ def _data_ns(env_name: str) -> str:
     return load_env(env_name).data_ns
 
 
-def _project_namespaces() -> list[str]:
+def _project_namespaces(envs: tuple[str, ...]) -> list[str]:
     """Every namespace an Application in this project may target: the app
     namespaces plus any isolated data namespace (e.g. stage-1-data). Drives the
     AppProject `destinations` allowlist — an Application can't sync into a
     namespace the project doesn't permit."""
-    seen: list[str] = list(ENVS)
-    for e in CUTOVER_ENVS:
+    seen: list[str] = list(envs)
+    for e in envs:
         ns = _data_ns(e)
         if ns not in seen:
             seen.append(ns)
     return seen
 
 
-def _app_elements() -> list[dict]:
+def _app_elements(envs: tuple[str, ...]) -> list[dict]:
     """The per-component ApplicationSet elements: one {env, app} per
     (env, platform, component), where app = "<component>-<platform>". Computed
-    from the SAME source emit_app_charts loops over (ENVS × env.platforms ×
+    from the SAME source emit_app_charts loops over (envs × env.platforms ×
     COMPONENTS), so the generated Applications can't drift from the synthed files
     — adding a platform extends both. Lazy imports avoid an import cycle with
     charts.py (which imports this module's ArgoCD)."""
@@ -101,15 +104,31 @@ def _app_elements() -> list[dict]:
 
     return [
         {"env": env_name, "app": f"{comp}-{platform}"}
-        for env_name in CUTOVER_ENVS
+        for env_name in envs
         for platform in load_env(env_name).platforms
         for comp in COMPONENTS
     ]
 
 
 class ArgoCD(Construct):
-    def __init__(self, scope: Construct, id: str = "argocd"):
+    """The Argo CD config one cluster's Argo install reconciles. Parameterized by
+    env-set so the same authoring path emits both the minipc instance (prod-1 +
+    stage-1, tailscale UI) and the k3d dev instance (development only, no tailscale —
+    UI via port-forward). Each Argo targets its OWN cluster in-cluster, so there's
+    no cross-cluster networking; the two instances differ only by which envs +
+    whether a tailnet UI Ingress is emitted."""
+
+    def __init__(
+        self,
+        scope: Construct,
+        id: str = "argocd",
+        *,
+        envs: tuple[str, ...] = CUTOVER_ENVS,
+        autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
+        ui_ingress: bool = True,
+    ):
         super().__init__(scope, id)
+        self.envs = envs
 
         self._app_project()
         # Three ApplicationSets, one Application each per unit. The apps set is
@@ -120,16 +139,16 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-apps",
             name="tripbot-apps",
-            elements=_app_elements(),
+            elements=_app_elements(envs),
             app_name_tmpl="{{.env}}-{{.app}}",
             include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
             prune_disabled=False,
-            automated_envs=AUTOSYNC_ENVS,
+            automated_envs=autosync_envs,
         )
         self._application_set(
             id="appset-supporting",
             name="tripbot-supporting",
-            elements=[{"env": e} for e in CUTOVER_ENVS],
+            elements=[{"env": e} for e in envs],
             app_name_tmpl="{{.env}}-supporting",
             include_tmpl="{{.env}}-supporting.k8s.yaml",
             prune_disabled=False,
@@ -140,15 +159,19 @@ class ArgoCD(Construct):
             # The data unit deploys into env.data_ns (its own namespace when the DB
             # is isolated, e.g. stage-1-data), not the app namespace — so carry the
             # target namespace in each element rather than deriving it from env.
-            elements=[{"env": e, "ns": _data_ns(e)} for e in CUTOVER_ENVS],
+            elements=[{"env": e, "ns": _data_ns(e)} for e in envs],
             app_name_tmpl="{{.env}}-data",
             include_tmpl="{{.env}}-data.k8s.yaml",
             dest_ns_tmpl="{{.ns}}",
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
-        self._ui_ingress()
-        self._lan_ingress()
+        # UI Ingresses are minipc-only — the k3d dev cluster has neither
+        # tailscale-operator (tailnet UI) nor the prod LAN/DNS host (traefik UI),
+        # so its UI is reached by port-forward.
+        if ui_ingress:
+            self._ui_ingress()
+            self._lan_ingress()
         self._repo_external_secret()
 
     # ---- Argo CRs (ApiObject) ----
@@ -168,7 +191,7 @@ class ArgoCD(Construct):
                     "sourceRepos": [REPO_URL],
                     "destinations": [
                         {"server": IN_CLUSTER, "namespace": ns}
-                        for ns in _project_namespaces()
+                        for ns in _project_namespaces(self.envs)
                     ],
                     # The apps' cluster-scoped objects — nothing else may be created.
                     "clusterResourceWhitelist": [

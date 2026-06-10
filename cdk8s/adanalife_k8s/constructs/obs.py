@@ -165,7 +165,7 @@ class ObsInstance(Construct):
 
         # --- host-access LoadBalancer (k3d-only convenience: local + dev). The
         # legacy obs-host VNC Service, now per-platform (obs-twitch-host). ---
-        if env.cluster in ("local", "bees"):
+        if env.cluster in ("local", "k3d"):
             k8s.KubeService(
                 self,
                 "host-access",
