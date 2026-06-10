@@ -69,6 +69,14 @@ variable "secondary_stage_nameservers" {
   default = []
 }
 
+# Which entry in local.minipc_location_ips (minipc-dns.tf) the
+# minipc.whereisdana.today pointer currently resolves to. Change this + apply
+# when the minipc moves to a different physical network.
+variable "minipc_active_location" {
+  type    = string
+  default = "tallman-local"
+}
+
 # dev.whereisdana.today nameservers — obtained from terraform/stage-1's
 # dev_route53_name_servers output after that zone is applied. Empty default
 # leaves the delegation record uncreated (see route53.tf).

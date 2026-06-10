@@ -16,6 +16,10 @@ it what to watch:
     Argo reports drift but changes nothing until you sync. ignoreDifferences keeps
     ESO's CRD schema-default fields out of the diff so ExternalSecrets read Synced.
   * tailscale Ingress — the UI at argocd-prod.<tailnet>.ts.net.
+  * traefik Ingress — the same UI at argocd.prod.whereisdana.today, published by
+    external-dns to the cluster's LAN endpoint (reachable on-LAN directly, off-LAN
+    via the tailscale subnet route). cert-manager issues the cert via the route53
+    ClusterIssuer. Mirrors the apps' traefik+tailscale dual exposure.
   * repo ExternalSecret — IaC repo registration: ESO materializes the
     Argo-recognized `repository` Secret from a read-only deploy key in SM.
 
@@ -55,6 +59,11 @@ CUTOVER_ENVS = ENVS
 # supporting stays manual too — only the apps set reads this.
 AUTOSYNC_ENVS = ("stage-1",)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
+# LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
+# Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
+# lives under the prod subdomain alongside the apps (vlc-twitch.prod...) and the
+# traefik dashboard.
+LAN_HOST = "argocd.prod.whereisdana.today"
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
 
 
@@ -139,6 +148,7 @@ class ArgoCD(Construct):
             prune_disabled=True,
         )
         self._ui_ingress()
+        self._lan_ingress()
         self._repo_external_secret()
 
     # ---- Argo CRs (ApiObject) ----
@@ -306,6 +316,50 @@ class ArgoCD(Construct):
                     )
                 ),
                 tls=[k8s.IngressTls(hosts=[TAILNET_HOST])],
+            ),
+        )
+
+    def _lan_ingress(self):
+        # LAN-reachable UI at argocd.prod.whereisdana.today, the same shape as the
+        # apps' traefik Ingress + the traefik dashboard. external-dns publishes the
+        # record (to the cluster's LAN endpoint); cert-manager issues the cert via
+        # the route53 ClusterIssuer (the argocd namespace has no namespaced Issuer,
+        # so use the cluster-scoped one, like the kube-system dashboard Ingress).
+        # Forwards to argocd-server:80 (the chart runs server.insecure, TLS
+        # terminated at traefik).
+        k8s.KubeIngress(
+            self,
+            "lan-ingress",
+            metadata=k8s.ObjectMeta(
+                name="argocd-server-traefik",
+                namespace=ARGO_NS,
+                annotations={
+                    "external-dns.alpha.kubernetes.io/hostname": LAN_HOST,
+                    "cert-manager.io/cluster-issuer": "letsencrypt-route53",
+                },
+            ),
+            spec=k8s.IngressSpec(
+                ingress_class_name="traefik",
+                tls=[k8s.IngressTls(hosts=[LAN_HOST], secret_name="argocd-server-tls")],
+                rules=[
+                    k8s.IngressRule(
+                        host=LAN_HOST,
+                        http=k8s.HttpIngressRuleValue(
+                            paths=[
+                                k8s.HttpIngressPath(
+                                    path="/",
+                                    path_type="Prefix",
+                                    backend=k8s.IngressBackend(
+                                        service=k8s.IngressServiceBackend(
+                                            name="argocd-server",
+                                            port=k8s.ServiceBackendPort(name="http"),
+                                        )
+                                    ),
+                                )
+                            ]
+                        ),
+                    )
+                ],
             ),
         )
 
