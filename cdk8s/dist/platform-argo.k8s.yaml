@@ -37,7 +37,7 @@ spec:
   sources:
     - repoURL: https://charts.external-secrets.io
       chart: external-secrets
-      targetRevision: 2.5.0
+      targetRevision: 2.6.0
       helm:
         releaseName: external-secrets
         valueFiles:
@@ -141,7 +141,7 @@ spec:
   sources:
     - repoURL: https://grafana.github.io/helm-charts
       chart: k8s-monitoring
-      targetRevision: 4.1.3
+      targetRevision: 4.1.4
       helm:
         releaseName: k8s-monitoring
         valueFiles:

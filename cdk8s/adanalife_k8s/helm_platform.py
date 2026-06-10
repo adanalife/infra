@@ -52,19 +52,21 @@ REPOS = {
     "argo": "https://argoproj.github.io/argo-helm",
 }
 
-# --- Version pins (captured 2026-06-02 from the repos above, and CONFIRMED
-# against the live minipc: cert-manager v1.20.2, traefik 40.2.0,
-# external-secrets 2.5.0, nats 2.14.0, external-dns 1.21.1,
-# prometheus-node-exporter 4.55.0 (via helm.sh/chart labels) and
-# k8s-monitoring 4.1.3 (via `helm list`) all match what's pinned here. cilium /
-# tailscale-operator don't surface the umbrella chart label, but their live
-# subcharts/values are consistent with these.) ---
+# --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
+# so adoption is pin == deployed (no up/down-grade on first sync). The
+# legacy platform tasks install ESO / cert-manager / node-exporter /
+# k8s-monitoring WITHOUT --version (floating latest), so they drift up over time;
+# re-capture before each adoption pass. Deltas since the 2026-06-02 capture:
+# external-secrets 2.5.0 -> 2.6.0, k8s-monitoring 4.1.3 -> 4.1.4 (both floated up).
+# All others match live: cert-manager v1.20.2, node-exporter 4.55.0, nats 2.14.0,
+# tailscale-operator 1.98.3, argo-cd 9.5.17 (+ the excluded traefik 40.2.0 /
+# external-dns 1.21.1 / cilium 1.19.4). ---
 VERSIONS = {
-    "external-secrets": "2.5.0",
+    "external-secrets": "2.6.0",
     "traefik": "40.2.0",
     "external-dns": "1.21.1",
     "cert-manager": "v1.20.2",
-    "k8s-monitoring": "4.1.3",
+    "k8s-monitoring": "4.1.4",
     "prometheus-node-exporter": "4.55.0",
     "cilium": "1.19.4",
     "nats": "2.14.0",  # already pinned in the legacy task
@@ -220,7 +222,7 @@ def cluster_components(
         )
     )
 
-    # k8s-monitoring 4.1.3 is confirmed live on the minipc (prod renders + the
+    # k8s-monitoring 4.1.4 is confirmed live on the minipc (prod renders + the
     # pin matches `helm list`). But dev's values.yml was authored for the bees
     # cluster's OLDER deployed chart and trips the chart's collector-validation
     # under 4.1.3. Until that cluster's live version is captured (it's on a
