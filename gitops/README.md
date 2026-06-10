@@ -146,9 +146,30 @@ the risk is Helm/SSA field-manager conflicts. Mirror the app cutover:
 > `bootstrap`, not these charts — `CreateNamespace=true` only creates a bare
 > namespace on a fresh cluster.
 
+## development on the k3d cluster (its own Argo)
+
+`development` runs a **separate, independent Argo CD install** on its local k3d
+cluster rather than being managed cross-cluster from the minipc. Each Argo targets
+its **own** cluster in-cluster (`https://kubernetes.default.svc`), so there's no
+inbound reachability to the residential dev box — it only needs outbound git, same
+as the minipc Argo. The dev cluster can be off whenever; when it's up, its Argo
+reconciles.
+
+The config is authored by the **same** `ArgoCD` construct, parameterized to a
+different env-set → `cdk8s/dist/argocd-k3d.k8s.yaml`: the `tripbot` project + the
+three ApplicationSets scoped to `development` only, **no tailscale UI** (the dev
+cluster has no tailscale-operator — reach the UI by port-forward), and
+`development` apps on **automated sync** (the env is throwaway). The data unit
+stays `Prune=false`.
+
+Bring-up is folded into `task k8s:dev:platform:up`: it installs argo-cd on the dev
+cluster (`-f k8s/argo-cd/values.yml -f k8s/argo-cd/values.k3d.yml`) and applies
+`argocd-k3d.k8s.yaml`. The one out-of-band step is seeding the read-only repo
+deploy key at `k8s/argocd/repo-ssh-key` in the **stage** SM (dev borrows the
+adanalife-stage account); the same GitHub deploy key works. UI:
+`kubectl -n argocd port-forward svc/argocd-server 8080:80`.
+
 ## Not covered yet
 
-- **development** (bees cluster) — runs its own in-cluster Argo (separate install,
-  not cross-cluster); see [#679](https://github.com/adanalife/infra/pull/679).
 - **traefik / external-dns / cilium / argo-cd** — stay task-installed (above).
 - **One-shot Jobs** — stay task-driven (they'd re-run on every sync).

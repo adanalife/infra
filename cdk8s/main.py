@@ -63,7 +63,18 @@ for name in targets:
 # Argo CD GitOps config (env-agnostic, offline) — committed deploy unit applied
 # after the Argo install. Skipped when narrowed to a single env via CDK8S_ENV.
 if not only:
+    # minipc Argo — prod-1 + stage-1, tailscale UI.
     ArgoCDChart(app, "argocd")
+    # k3d (development) Argo — a SEPARATE in-cluster install managing only
+    # development (no tailscale UI; dev apps autosync since the env is throwaway).
+    # Each Argo targets its own cluster in-cluster, so there's no cross-cluster wiring.
+    ArgoCDChart(
+        app,
+        "argocd-k3d",
+        envs=("development",),
+        autosync_envs=("development",),
+        ui_ingress=False,
+    )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
     # charts). MONITOR-ONLY until adopted; see gitops/README.md.
@@ -75,12 +86,12 @@ if not only:
 # the env-platform chart (external-dns + NATS) is per env-platform namespace.
 if os.environ.get("CDK8S_PLATFORM"):
     PlatformChart(app, "platform-minipc", cluster="minipc", env=load_env("prod-1"))
-    # bees k8s-monitoring needs its live chart version pinned first (see
-    # PlatformChart) — skip it here so the synth stays green until captured.
+    # the k3d dev cluster's k8s-monitoring needs its live chart version pinned
+    # first (see PlatformChart) — skip it here so the synth stays green until captured.
     PlatformChart(
         app,
-        "platform-bees",
-        cluster="bees",
+        "platform-k3d",
+        cluster="k3d",
         env=load_env("development"),
         skip_monitoring=True,
     )

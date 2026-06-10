@@ -16,7 +16,7 @@ from dataclasses import dataclass
 class EnvConfig:
     name: str  # prod-1 | stage-1 | development | local
     namespace: str
-    cluster: str  # minipc | bees | local
+    cluster: str  # minipc | k3d | local
     aws_account: str  # adanalife-prod | adanalife-stage | "" (local)
     image_tag: str  # latest | develop
     dns_base: str  # prod.whereisdana.today | stage... | dev...  ("" for local)
@@ -161,7 +161,7 @@ ENVS: dict[str, EnvConfig] = {
     "development": EnvConfig(
         name="development",
         namespace="development",
-        cluster="bees",
+        cluster="k3d",
         aws_account="adanalife-stage",
         image_tag="develop",
         dns_base="dev.whereisdana.today",

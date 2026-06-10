@@ -1,0 +1,24 @@
+# Argo CD — k3d dev-cluster (development) overrides, layered over values.yml.
+#
+# The k3d dev cluster runs its OWN Argo CD install, separate from the minipc one. It
+# reconciles the `development` env against that cluster's own in-cluster API (no
+# cross-cluster networking). Reached by port-forward — the dev cluster has no
+# tailscale-operator, so there's no tailnet Ingress (the base values.yml's tailnet
+# domain doesn't apply here).
+#
+# Layer this AFTER values.yml:
+#   helm upgrade --install argocd argo/argo-cd -n argocd \
+#     -f k8s/argo-cd/values.yml -f k8s/argo-cd/values.k3d.yml
+
+# Cosmetic under port-forward (link/redirect generation); set to the port-forward
+# host so generated links aren't the prod tailnet name.
+global:
+  domain: localhost:8080
+
+configs:
+  params:
+    # This Argo manages only the development namespace (base values.yml lists the
+    # minipc prod-1,stage-1).
+    application.namespaces: development
+    # No tailnet edge here — port-forward to argocd-server:80 over plain HTTP.
+    server.insecure: true

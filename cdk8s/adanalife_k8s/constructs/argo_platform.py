@@ -9,7 +9,7 @@ pulled via a `$values` ref. No rendered charts land in git — just these small
 Application objects. Synthesized to `dist/platform-argo.k8s.yaml` (offline, so it's
 committed + golden-gated like the app units).
 
-Scope (minipc only — development is on the bees cluster, not Argo-managed):
+Scope (minipc only — development is on the k3d cluster, with its own Argo):
   * cluster-scoped releases (ESO, cert-manager, node-exporter, k8s-monitoring,
     tailscale-operator) — installed once; values from prod-1 (stage rides prod's
     cluster-scoped platform, per stage-prod-cotenancy).
@@ -58,7 +58,7 @@ from adanalife_k8s.helm_platform import (
 
 PROJECT = "platform"
 # Envs whose per-env platform charts (external-dns, NATS) Argo manages. minipc only
-# — development is on the bees cluster, which isn't registered with Argo yet.
+# — development is on the k3d cluster, which runs its own separate Argo install.
 PLATFORM_ENVS = ("prod-1", "stage-1")
 # Cluster-scoped platform releases install once with prod-1's values (stage rides
 # prod's cluster-scoped platform — see stage-prod-cotenancy).
