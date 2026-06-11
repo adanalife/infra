@@ -45,12 +45,24 @@ resource "google_service_account" "terraform" {
   display_name = "Terraform automation (managed by infra/terraform/prod-1)"
 }
 
-# serviceUsageAdmin lets the SA enable/inspect the google_project_service
-# resources below. apikeys.admin (for the deferred google_apikeys_key Maps
-# import — TODO #188) is intentionally NOT granted yet.
-resource "google_project_iam_member" "terraform_serviceusage" {
+# The SA is used ONLY by CI `terraform plan`, which refreshes everything this
+# config tracks AS the SA — the SA itself, its key, the project IAM policy, and
+# the enabled services. So it needs read access across all of those; it does
+# NOT need write — Dana applies as project owner (ADC). Hence a read-only role
+# set rather than the admin roles:
+#   - roles/viewer            : services.get + serviceAccounts.get + keys.get
+#                               (refreshes google_service_account[_key] + _service)
+#   - roles/iam.securityReviewer : projects.getIamPolicy
+#                               (refreshes this google_project_iam_member itself)
+# apikeys.admin (for the deferred google_apikeys_key Maps import — TODO #188)
+# is intentionally NOT granted; that's owner-applied if/when it lands.
+resource "google_project_iam_member" "terraform" {
+  for_each = toset([
+    "roles/viewer",
+    "roles/iam.securityReviewer",
+  ])
   project = "tripbot-prod"
-  role    = "roles/serviceusage.serviceUsageAdmin"
+  role    = each.value
   member  = "serviceAccount:${google_service_account.terraform.email}"
 }
 
