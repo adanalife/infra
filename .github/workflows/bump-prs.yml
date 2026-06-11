@@ -1,0 +1,138 @@
+name: bump-prs
+
+# Dependabot-style prod version-bump PRs, one per component, so each deploy
+# is its own merge gesture (OBS/VLC restarts interrupt the stream — those PRs
+# sit until a quiet moment; tripbot/onscreens merge freely).
+#
+# Fired by tripbot's release workflow (repository_dispatch: tripbot-release,
+# client_payload.version) or by hand (workflow_dispatch). Each component leg:
+#
+#   - recreates the well-known branch bump/prod-<component> from master with
+#     the one-line cdk8s/versions.yaml edit and force-pushes, so there is at
+#     most ONE open bump PR per component, always offering the latest release
+#     (update-in-place, like Dependabot);
+#   - opens the PR if missing, refreshes title/body if it exists;
+#   - if prod is already on the dispatched version, closes any stale PR.
+#
+# dist/ is NOT synthed here — the cdk8s workflow's auto-synth pushes the
+# regenerated dist/ onto the branch (that's also why this job needs no
+# Python toolchain). Everything uses AUTOMATION_PAT: GITHUB_TOKEN-created
+# commits/PRs never trigger workflow runs, so checks would not run.
+#
+# The awk edit is scoped to the prod-1 block; if another pinned env ever
+# lands in versions.yaml, the edit stays correct (it only touches keys
+# inside prod-1).
+
+on:
+  repository_dispatch:
+    types: [tripbot-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'tripbot release version to offer (e.g. 3.2.0; leading v is stripped)'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [tripbot, vlc, obs, onscreens-server]
+    concurrency:
+      group: bump-prs-${{ matrix.component }}
+    env:
+      GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+      COMPONENT: ${{ matrix.component }}
+      BRANCH: bump/prod-${{ matrix.component }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.AUTOMATION_PAT }}
+
+      - name: Resolve and validate version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${{ github.event.client_payload.version }}"
+          fi
+          VERSION="${VERSION#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version '$VERSION' is not bare semver (expected e.g. 3.2.0)"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Read current prod pin
+        run: |
+          CURRENT=$(awk -v comp="$COMPONENT" '
+            /^[^ #]/ { in_prod = ($0 == "prod-1:") }
+            in_prod && $1 == comp":" { gsub(/"/, "", $2); print $2 }
+          ' cdk8s/versions.yaml)
+          if [ -z "$CURRENT" ]; then
+            echo "::error::no prod-1 pin found for $COMPONENT in cdk8s/versions.yaml"
+            exit 1
+          fi
+          echo "CURRENT=$CURRENT" >> "$GITHUB_ENV"
+
+      - name: Close stale PR if prod is already on this version
+        if: env.CURRENT == env.VERSION
+        run: |
+          PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR" ]; then
+            gh pr close "$PR" --comment "prod is already on $VERSION — closing." --delete-branch
+          fi
+          echo "prod $COMPONENT already pinned at $VERSION; nothing to offer."
+
+      - name: Recreate bump branch with the pin edit
+        if: env.CURRENT != env.VERSION
+        run: |
+          git checkout -B "$BRANCH"
+          awk -v comp="$COMPONENT" -v ver="$VERSION" '
+            /^[^ #]/ { in_prod = ($0 == "prod-1:") }
+            in_prod && $1 == comp":" { sub(/"[^"]*"/, "\"" ver "\"") }
+            { print }
+          ' cdk8s/versions.yaml > /tmp/versions.yaml
+          mv /tmp/versions.yaml cdk8s/versions.yaml
+          if git diff --quiet -- cdk8s/versions.yaml; then
+            echo "::error::pin edit produced no diff for $COMPONENT"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Bump prod $COMPONENT to $VERSION"
+          git push -f origin "$BRANCH"
+
+      - name: Create or refresh the bump PR
+        if: env.CURRENT != env.VERSION
+        run: |
+          TITLE="Bump prod $COMPONENT to $VERSION"
+          case "$COMPONENT" in
+            obs) IMPACT="⚠️ **Merging restarts the OBS pod — the stream goes down until it reconnects.** Pick a quiet moment." ;;
+            vlc) IMPACT="⚠️ **Merging restarts vlc-server — the playing video drops briefly on stream.** Pick a quiet moment." ;;
+            tripbot) IMPACT="Restarts the chat bot only; no stream impact." ;;
+            *) IMPACT="Restarts the overlay server; overlays blip, the stream itself stays up." ;;
+          esac
+          cat > /tmp/body.md <<EOF
+          Offers prod \`$COMPONENT\`: **$CURRENT → $VERSION**.
+
+          $IMPACT
+
+          - What changed: [v$CURRENT...v$VERSION](https://github.com/adanalife/tripbot/compare/v$CURRENT...v$VERSION) · [release notes](https://github.com/adanalife/tripbot/releases/tag/v$VERSION)
+          - Merging is the deploy gesture: after merge, sync the \`$COMPONENT\` app in Argo.
+          - Rollback: \`git revert\` the bump commit and sync again.
+          - \`dist/\` is regenerated on this branch by the cdk8s workflow's auto-synth.
+
+          This PR updates in place when newer releases ship (force-push to \`$BRANCH\`).
+          EOF
+          PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR" ]; then
+            gh pr edit "$PR" --title "$TITLE" --body-file /tmp/body.md
+          else
+            gh pr create --base master --head "$BRANCH" --title "$TITLE" --body-file /tmp/body.md
+          fi
