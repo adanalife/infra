@@ -12,7 +12,7 @@ data:
   DATABASE_HOST: postgres.stage-1-data.svc.cluster.local
   DISCORD_GUILD_ID: "607964164220125258"
   ENV: staging
-  EXTERNAL_URL: https://tripbot.stage.whereisdana.today
+  EXTERNAL_URL: https://tripbot-youtube.stage.whereisdana.today
   GOOGLE_APPS_PROJECT_ID: tripbot-stage
   MAPS_OUTPUT_DIR: /opt/data/maps
   NATS_URL: nats://nats.stage-1-platform.svc.cluster.local:4222
@@ -66,7 +66,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: e91cd5febc
+        adanalife.dev/config-hash: 9e0a82067e
       labels:
         app: tripbot-youtube
     spec:

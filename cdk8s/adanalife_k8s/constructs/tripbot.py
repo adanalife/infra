@@ -87,14 +87,12 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
     "prod-1": {
         "CHANNEL_NAME": "adanalife_",
         "BOT_USERNAME": "tripbot4000",
-        "EXTERNAL_URL": "https://tripbot.prod.whereisdana.today",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-prod",
     },
     "stage-1": {
         "CHANNEL_NAME": "adanalife_staging",
         # tripbot4001 (the non-prod test bot), not the prod tripbot4000.
         "BOT_USERNAME": "tripbot4001",
-        "EXTERNAL_URL": "https://tripbot.stage.whereisdana.today",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-stage",
         # ADanaLife guild snowflake — stage's discord bot is gated to it.
         "DISCORD_GUILD_ID": "607964164220125258",
@@ -103,19 +101,36 @@ _ENV_CONFIG: dict[str, dict[str, str]] = {
         "CHANNEL_NAME": "adanalife_staging",
         # tripbot4001 (shared with stage), not the prod tripbot4000.
         "BOT_USERNAME": "tripbot4001",
-        # k3d's traefik is mapped to host :9443 (Colima can't bind :443), so the
-        # dev EXTERNAL_URL / Twitch redirect carry the port.
-        "EXTERNAL_URL": "https://tripbot.dev.whereisdana.today:9443",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-stage",
     },
     "local": {
         "CHANNEL_NAME": "adanalife_staging",
         # tripbot4001 (the non-prod test bot), not the prod tripbot4000.
         "BOT_USERNAME": "tripbot4001",
-        "EXTERNAL_URL": "http://tripbot.localhost",
         "GOOGLE_APPS_PROJECT_ID": "tripbot-stage",
     },
 }
+
+
+def public_host(env: EnvConfig, platform: str) -> str:
+    """The instance's public host: per-name everywhere (tripbot-twitch.<dns>,
+    tripbot-youtube.<dns>); the .localhost TLD when the env publishes no DNS.
+    Single source for the Ingress rule, external-dns annotation, TLS secret
+    host, and EXTERNAL_URL — they can't drift apart."""
+    name = app_name("tripbot", platform)
+    return f"{name}.localhost" if not env.dns_base else f"{name}.{env.dns_base}"
+
+
+def external_url(env: EnvConfig, platform: str) -> str:
+    """EXTERNAL_URL for an instance: scheme + public_host (+ the env's
+    non-standard port, e.g. dev's :9443). Both OAuth flows build their redirect
+    as EXTERNAL_URL + /auth/callback, so this must match the host the instance
+    actually serves on — and each value needs a matching authorized redirect
+    URI registered on the platform's OAuth app (Twitch dev console / GCP
+    console)."""
+    scheme = "https" if env.dns_base else "http"
+    port = f":{env.external_port}" if env.external_port else ""
+    return f"{scheme}://{public_host(env, platform)}{port}"
 
 
 def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
@@ -146,6 +161,7 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
         data["STREAM_PLATFORM"] = platform
     data.update(appconfig.telemetry_config(env))
     data.update(_ENV_CONFIG[env.name])
+    data["EXTERNAL_URL"] = external_url(env, platform)
     if env.nats_url:
         data["NATS_URL"] = env.nats_url
     return data
@@ -163,8 +179,6 @@ class Tripbot(Construct):
         cm_name = config_map_name(platform)
         local = env.secret_source == "local"
         db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
-        # primary platform keeps the identity-stable public host (see _ingress).
-        primary = platform == env.platforms[0]
 
         # --- ConfigMap (per-platform stable name + content-hash annotation) ---
         data = config_data(env, platform)
@@ -334,25 +348,17 @@ class Tripbot(Construct):
         )
 
         # --- Ingress (dashboard / OAuth) — published in every env ---
-        self._ingress(name, primary, env, ns, labels)
+        self._ingress(name, platform, env, ns, labels)
         if env.tailscale:
             self._tailscale_ingress(name, env, ns, labels)
 
     # ---- Ingress helpers ----
-    def _ingress(self, name, primary, env: EnvConfig, ns, labels):
-        # The public dashboard/OAuth host stays identity-stable ("tripbot.<dns>")
-        # on the primary platform so the registered Twitch OAuth redirect URI /
-        # EXTERNAL_URL don't change with the workload rename; a future non-primary
-        # platform would get its own per-name host. The Ingress object + backend,
-        # though, are per-platform so the route targets THIS platform's Service.
-        host_sub = "tripbot" if primary else name
-        # local uses the .localhost TLD (no DNS/TLS); every other env publishes a
-        # real host with external-dns + cert-manager TLS (DNS-01 Route53).
-        host = (
-            f"{host_sub}.localhost"
-            if not env.dns_base
-            else f"{host_sub}.{env.dns_base}"
-        )
+    def _ingress(self, name, platform, env: EnvConfig, ns, labels):
+        # Per-name host shared with EXTERNAL_URL via public_host() — symmetric
+        # with the other per-platform components. local uses the .localhost TLD
+        # (no DNS/TLS); every other env publishes a real host with external-dns
+        # + cert-manager TLS (DNS-01 Route53).
+        host = public_host(env, platform)
         ann = (
             {}
             if not env.dns_base
@@ -375,7 +381,7 @@ class Tripbot(Construct):
             ),
             spec=k8s.IngressSpec(
                 ingress_class_name="traefik",
-                tls=[k8s.IngressTls(hosts=[host], secret_name=f"{host_sub}-tls")]
+                tls=[k8s.IngressTls(hosts=[host], secret_name=f"{name}-tls")]
                 if tls
                 else None,
                 rules=[

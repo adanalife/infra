@@ -126,6 +126,12 @@ def test_youtube_instance_emits_creds_external_secret_and_envfrom():
     twitch_cm = _by(_synth("stage-1"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
     assert "STREAM_PLATFORM" not in twitch_cm
 
+    # EXTERNAL_URL must match the instance's own per-name Ingress host —
+    # pkg/youtube's OAuth redirect is EXTERNAL_URL + /auth/callback, and the
+    # primary host would bounce the callback to the creds-less twitch instance.
+    assert cm["EXTERNAL_URL"] == "https://tripbot-youtube.stage.whereisdana.today"
+    assert twitch_cm["EXTERNAL_URL"] == "https://tripbot-twitch.stage.whereisdana.today"
+
 
 def test_twitch_instance_has_no_youtube_creds():
     # zero blast radius on running envs: the twitch instance neither emits the
@@ -190,8 +196,8 @@ def test_nats_url_present_except_local():
 def test_ingress_minipc_has_tls_and_tailscale():
     objs = _synth("prod-1")
     ing = _by(objs, "Ingress", "tripbot-twitch")[0]
-    assert ing["spec"]["rules"][0]["host"] == "tripbot.prod.whereisdana.today"
-    assert ing["spec"]["tls"][0]["secretName"] == "tripbot-tls"
+    assert ing["spec"]["rules"][0]["host"] == "tripbot-twitch.prod.whereisdana.today"
+    assert ing["spec"]["tls"][0]["secretName"] == "tripbot-twitch-tls"
     assert (
         ing["metadata"]["annotations"]["cert-manager.io/issuer"]
         == "letsencrypt-route53"
@@ -206,15 +212,15 @@ def test_ingress_minipc_has_tls_and_tailscale():
 def test_dev_ingress_has_tls_no_tailscale():
     objs = _synth("development")
     ing = _by(objs, "Ingress", "tripbot-twitch")[0]
-    assert ing["spec"]["rules"][0]["host"] == "tripbot.dev.whereisdana.today"
-    assert ing["spec"]["tls"][0]["secretName"] == "tripbot-tls"
+    assert ing["spec"]["rules"][0]["host"] == "tripbot-twitch.dev.whereisdana.today"
+    assert ing["spec"]["tls"][0]["secretName"] == "tripbot-twitch-tls"
     assert not _by(objs, "Ingress", "tripbot-twitch-ts")
 
 
 def test_local_ingress_is_plain_http_localhost():
     objs = _synth("local")
     ing = _by(objs, "Ingress", "tripbot-twitch")[0]
-    assert ing["spec"]["rules"][0]["host"] == "tripbot.localhost"
+    assert ing["spec"]["rules"][0]["host"] == "tripbot-twitch.localhost"
     assert "tls" not in ing["spec"] or not ing["spec"]["tls"]
     assert "annotations" not in ing["metadata"] or not ing["metadata"]["annotations"]
     assert not _by(objs, "Ingress", "tripbot-twitch-ts")

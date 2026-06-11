@@ -11,7 +11,7 @@ data:
   CHANNEL_NAME: adanalife_
   DATABASE_HOST: postgres.prod-1-data.svc.cluster.local
   ENV: production
-  EXTERNAL_URL: https://tripbot.prod.whereisdana.today
+  EXTERNAL_URL: https://tripbot-twitch.prod.whereisdana.today
   GOOGLE_APPS_PROJECT_ID: tripbot-prod
   MAPS_OUTPUT_DIR: /opt/data/maps
   NATS_URL: nats://nats.prod-1-platform.svc.cluster.local:4222
@@ -44,7 +44,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: b9ec7be084
+        adanalife.dev/config-hash: 0bfee8cbe5
       labels:
         app: tripbot-twitch
     spec:
@@ -152,7 +152,7 @@ kind: Ingress
 metadata:
   annotations:
     cert-manager.io/issuer: letsencrypt-route53
-    external-dns.alpha.kubernetes.io/hostname: tripbot.prod.whereisdana.today
+    external-dns.alpha.kubernetes.io/hostname: tripbot-twitch.prod.whereisdana.today
   labels:
     app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
@@ -161,7 +161,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: tripbot.prod.whereisdana.today
+    - host: tripbot-twitch.prod.whereisdana.today
       http:
         paths:
           - backend:
@@ -173,8 +173,8 @@ spec:
             pathType: Prefix
   tls:
     - hosts:
-        - tripbot.prod.whereisdana.today
-      secretName: tripbot-tls
+        - tripbot-twitch.prod.whereisdana.today
+      secretName: tripbot-twitch-tls
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
