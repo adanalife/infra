@@ -50,8 +50,8 @@ spec:
             - secretRef:
                 name: grafana-cloud-otlp
                 optional: false
-          image: adanalife/onscreens-server:latest
-          imagePullPolicy: Always
+          image: adanalife/onscreens-server:3.1.0
+          imagePullPolicy: IfNotPresent
           livenessProbe:
             httpGet:
               path: /health/live

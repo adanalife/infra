@@ -15,8 +15,8 @@ spec:
                 name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-database-creds
-          image: adanalife/tripbot:latest
-          imagePullPolicy: Always
+          image: adanalife/tripbot:3.1.0
+          imagePullPolicy: IfNotPresent
           name: seed
       initContainers:
         - command:
@@ -38,8 +38,8 @@ spec:
                 name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-database-creds
-          image: adanalife/tripbot:latest
-          imagePullPolicy: Always
+          image: adanalife/tripbot:3.1.0
+          imagePullPolicy: IfNotPresent
           name: migrate
       restartPolicy: Never
   ttlSecondsAfterFinished: 600

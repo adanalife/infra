@@ -102,8 +102,8 @@ class VlcServer(Construct):
 
         container = k8s.Container(
             name=name,
-            image=f"adanalife/vlc:{env.image_tag}",
-            image_pull_policy="Always",
+            image=f"adanalife/vlc:{env.tag_for('vlc')}",
+            image_pull_policy=env.pull_policy_for("vlc"),
             security_context=k8s.SecurityContext(
                 allow_privilege_escalation=False,
                 capabilities=k8s.Capabilities(drop=["ALL"]),

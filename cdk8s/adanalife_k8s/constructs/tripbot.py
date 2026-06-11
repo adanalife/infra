@@ -149,7 +149,8 @@ class Tripbot(Construct):
         ns = env.namespace or None
         labels = meta_labels(name)
         sel = selector(name)
-        image = f"{IMAGE}:{env.image_tag}"
+        image = f"{IMAGE}:{env.tag_for('tripbot')}"
+        pull = env.pull_policy_for("tripbot")
         cm_name = config_map_name(platform)
         local = env.secret_source == "local"
         db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
@@ -207,7 +208,7 @@ class Tripbot(Construct):
         migrate = k8s.Container(
             name="migrate",
             image=image,
-            image_pull_policy="Always",
+            image_pull_policy=pull,
             security_context=hardened,
             command=["migrate"],
             args=[
@@ -226,7 +227,7 @@ class Tripbot(Construct):
         container = k8s.Container(
             name=name,
             image=image,
-            image_pull_policy="Always",
+            image_pull_policy=pull,
             security_context=hardened,
             ports=[k8s.ContainerPort(name="http", container_port=8080)],
             # USER must be set so OTel's process resource detector (user.Current)
@@ -582,8 +583,8 @@ def _auth_bootstrap(
         )
     container = k8s.Container(
         name="auth-bootstrap",
-        image=f"{IMAGE}:{env.image_tag}",
-        image_pull_policy="Always",
+        image=f"{IMAGE}:{env.tag_for('tripbot')}",
+        image_pull_policy=env.pull_policy_for("tripbot"),
         command=["/usr/local/bin/auth-bootstrap"],
         args=args,
         ports=[k8s.ContainerPort(container_port=8080)],
@@ -652,7 +653,8 @@ def seed(scope: Construct, env: EnvConfig) -> None:
     ns = env.namespace or None
     local = env.secret_source == "local"
     db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
-    image = f"{IMAGE}:{env.image_tag}"
+    image = f"{IMAGE}:{env.tag_for('tripbot')}"
+    pull = env.pull_policy_for("tripbot")
     db_env = [
         k8s.EnvFromSource(
             config_map_ref=k8s.ConfigMapEnvSource(
@@ -674,7 +676,7 @@ def seed(scope: Construct, env: EnvConfig) -> None:
     migrate = k8s.Container(
         name="migrate",
         image=image,
-        image_pull_policy="Always",
+        image_pull_policy=pull,
         command=["migrate"],
         args=[
             "-path",
@@ -688,7 +690,7 @@ def seed(scope: Construct, env: EnvConfig) -> None:
     seed_c = k8s.Container(
         name="seed",
         image=image,
-        image_pull_policy="Always",
+        image_pull_policy=pull,
         command=["/usr/local/bin/seed-db"],
         env_from=db_env,
     )
