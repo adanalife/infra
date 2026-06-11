@@ -76,6 +76,10 @@ class EnvConfig:
     # Streaming platforms present in this env (obs instances). twitch everywhere;
     # youtube currently stage-only while the bot side is built out.
     platforms: tuple[str, ...] = ("twitch",)
+    # Non-standard public HTTPS port carried in externally-visible URLs
+    # (EXTERNAL_URL, registered OAuth redirect URIs). Only dev needs it — k3d's
+    # traefik is mapped to host :9443 because Colima can't bind :443.
+    external_port: str = ""
 
     def tag_for(self, component: str) -> str:
         """Image tag for a component: its pinned release tag when versions.yaml
@@ -207,6 +211,7 @@ ENVS: dict[str, EnvConfig] = {
         otel=False,
         external_dns_role_arn=_STAGE_ROLE,
         platforms=("twitch",),
+        external_port="9443",
     ),
     "local": EnvConfig(
         name="local",
