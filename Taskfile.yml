@@ -598,7 +598,7 @@ tasks:
           -f k8s/nats/values.yml
           -f k8s/nats/stage-1/values.yml
       - kubectl rollout status statefulset/nats -n stage-1-platform --timeout=120s
-      - 'echo "NATS up in stage-1-platform. Connect via nats://nats.stage-1-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n stage-1-platform -- nats pub foo bar"'
+      - 'echo "NATS up in stage-1-platform. Connect via nats://nats.stage-1-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n stage-1-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
 
   # Bootstrap the cluster Secrets that don't survive a recreate but
   # have to exist before the platform stack can come up:
@@ -965,7 +965,7 @@ tasks:
           -f k8s/nats/values.yml
           -f k8s/nats/development/values.yml
       - kubectl rollout status statefulset/nats -n development-platform --timeout=120s
-      - 'echo "NATS up in development-platform. Connect via nats://nats.development-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n development-platform -- nats pub foo bar"'
+      - 'echo "NATS up in development-platform. Connect via nats://nats.development-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n development-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
       # Argo CD on the k3d dev cluster — a SEPARATE in-cluster Argo managing ONLY
       # the development env (no cross-cluster wiring: it reconciles development
       # against this cluster's own API, same as the minipc Argo does for
@@ -1136,7 +1136,7 @@ tasks:
           -f k8s/nats/values.yml
           -f k8s/nats/prod-1/values.yml
       - kubectl rollout status statefulset/nats -n prod-1-platform --timeout=120s
-      - 'echo "NATS up in prod-1-platform. Connect via nats://nats.prod-1-platform.svc.cluster.local:4222. Smoke test: kubectl exec -ti deploy/nats-box -n prod-1-platform -- nats pub foo bar"'
+      - 'echo "NATS up in prod-1-platform. Connect via nats://nats.prod-1-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n prod-1-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
       # Intel GPU device plugin + XPU Manager. Plugin registers
       # gpu.intel.com/i915 (+ i915_monitoring) so OBS/vlc-server pods
       # can claim the iGPU as an extended resource without hostPath.
