@@ -51,7 +51,7 @@ def test_youtube_factory_emits_clean_instance():
 
 
 def test_platform_matrix_stage_has_youtube_prod_defers():
-    # stage burns the youtube stack in first; prod flips after Track A's
+    # stage burns the youtube stack in first; prod flips after the
     # dual-encode validation. twitch stays primary (platforms[0]) everywhere —
     # primary keeps the identity-stable public host and the one-shot Jobs
     # envFrom the primary platform's ConfigMap.

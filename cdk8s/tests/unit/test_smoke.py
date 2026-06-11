@@ -1,4 +1,4 @@
-"""Phase 0 smoke tests: the harness synths and the env table loads."""
+"""Smoke tests: the harness synths and the env table loads."""
 
 from cdk8s import App
 

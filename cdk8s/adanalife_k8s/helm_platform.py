@@ -1,4 +1,4 @@
-"""Platform Helm layer (Phase 3): the in-cluster platform stack wrapped in
+"""Platform Helm layer: the in-cluster platform stack wrapped in
 `cdk8s.Helm`, which renders each chart via `helm template` at synth time.
 
 Replaces the imperative `helm upgrade --install` sequence in `k8s:<env>:platform:up`
@@ -13,10 +13,9 @@ Two deploy units (mirrors the legacy split):
     `<env>-platform` namespace (external-dns, NATS), with the LAN IP injected
     from `EnvConfig` (replacing the gitignored `values.local.yml`).
 
-Version pins captured 2026-06-02 from the chart repos (the plan calls for pinning
-the several charts that were deploying at floating latest). Bump deliberately per
-[[use-latest-stable-when-adding]]; re-capture from a live `helm list -A` before a
-cutover to confirm they match what's deployed.
+Version pins captured 2026-06-02 from the chart repos. Bump deliberately;
+re-capture from a live `helm list -A` before a cutover to confirm they match
+what's deployed.
 
 The kustomize-only platform bits (local-path-provisioner, intel-gpu-plugin,
 intel-xpu-manager, the ESO cluster-store, cert-manager ClusterIssuers) are NOT
