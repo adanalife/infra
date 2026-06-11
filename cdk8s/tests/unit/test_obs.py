@@ -34,9 +34,8 @@ def _by(objs, kind, name):
 
 
 def test_youtube_factory_emits_clean_instance():
-    # YouTube is deferred from the env matrix (no env emits it yet — see config.py),
-    # but the ObsInstance factory must still produce clean obs-youtube objects so
-    # re-enabling is a one-line config change. Test the factory directly.
+    # The ObsInstance factory must produce clean obs-youtube objects (stage
+    # emits them via env.platforms; prod still defers). Test the factory directly.
     objs = _synth_obs("youtube", "stage-1", extra_config={"STREAM_PLATFORM": "youtube"})
     # Clean first-class names — NOT the kustomize obs-twitch-youtube double-suffix.
     assert _by(objs, "Deployment", "obs-youtube"), "obs-youtube deployment missing"
@@ -51,12 +50,16 @@ def test_youtube_factory_emits_clean_instance():
     assert not _by(objs, "ExternalSecret", "obs-youtube-stream-key")
 
 
-def test_stage_emits_twitch_only_youtube_deferred():
+def test_platform_matrix_stage_has_youtube_prod_defers():
+    # stage burns the youtube stack in first; prod flips after Track A's
+    # dual-encode validation. twitch stays primary (platforms[0]) everywhere —
+    # primary keeps the identity-stable public host and the one-shot Jobs
+    # envFrom the primary platform's ConfigMap.
+    assert load_env("stage-1").platforms == ("twitch", "youtube")
+    assert load_env("prod-1").platforms == ("twitch",)
+    assert load_env("development").platforms == ("twitch",)
     objs = _synth("stage-1")
     assert _by(objs, "Deployment", "obs-twitch"), "obs-twitch deployment missing"
-    assert not _by(objs, "Deployment", "obs-youtube"), (
-        "youtube is deferred from the env matrix — stage should emit twitch only"
-    )
 
 
 def test_prod_twitch_streams_via_eso_and_has_no_youtube():

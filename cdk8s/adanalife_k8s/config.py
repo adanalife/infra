@@ -182,11 +182,12 @@ ENVS: dict[str, EnvConfig] = {
         # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
         # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
         data_namespace="stage-1-data",
-        # YouTube OBS is deferred until we're closer to testing the YouTube
-        # streaming path — keeps the manifests/diffs tidy meanwhile. The
-        # ObsInstance factory still supports it (tested directly); re-enable by
-        # restoring: platforms=("twitch", "youtube").
-        platforms=("twitch",),
+        # The YouTube platform stack burns in on stage first (tripbot-youtube
+        # binds chat once a broadcast is live; vlc-youtube self-sustains;
+        # obs-youtube boots idle — the streaming toggle is prod-twitch-only).
+        # prod follows once the stage burn-in + dual-iGPU-encode validation
+        # pass (Track A).
+        platforms=("twitch", "youtube"),
     ),
     "development": EnvConfig(
         name="development",

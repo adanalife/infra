@@ -119,6 +119,13 @@ def test_youtube_instance_emits_creds_external_secret_and_envfrom():
     # identity-level Secrets still ride along on the youtube instance
     assert "tripbot-twitch-creds" in names
 
+    # Run() branches on STREAM_PLATFORM — without it the instance boots as a
+    # second Twitch bot. twitch instances stay keyless (binary default).
+    cm = _by(objs, "ConfigMap", "tripbot-youtube-config")[0]["data"]
+    assert cm["STREAM_PLATFORM"] == "youtube"
+    twitch_cm = _by(_synth("stage-1"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
+    assert "STREAM_PLATFORM" not in twitch_cm
+
 
 def test_twitch_instance_has_no_youtube_creds():
     # zero blast radius on running envs: the twitch instance neither emits the
