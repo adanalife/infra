@@ -141,6 +141,7 @@ class DashcamCV(Construct):
                                 "--apply",
                             ],
                             with_corpus=True,
+                            postgres_host=env.postgres_host,
                         ),
                     )
                 ),
@@ -177,6 +178,7 @@ class DashcamCVJobs(Construct):
                     container_name="embed",
                     args=["embed", "--random", "1", "--interval", "5", "--apply"],
                     with_corpus=True,
+                    postgres_host=env.postgres_host,
                 ),
             ),
         )
@@ -229,6 +231,7 @@ def _pod_spec(
     container_name: str,
     args: list[str],
     with_corpus: bool,
+    postgres_host: str = "postgres",
 ) -> k8s.PodTemplateSpec:
     """The hardened dashcam-cv pod, shared by all four workloads. `with_corpus`
     adds the wait-for-postgres init + the read-only dashcam corpus mount +
@@ -247,7 +250,7 @@ def _pod_spec(
                 command=[
                     "sh",
                     "-c",
-                    "until nc -z postgres 5432; do echo waiting; sleep 2; done",
+                    f"until nc -z {postgres_host} 5432; do echo waiting; sleep 2; done",
                 ],
                 security_context=_CONTAINER_SECURITY_CONTEXT,
             )
