@@ -2,8 +2,7 @@
 
 Programmatic, typed, testable replacement for the Kustomize `k8s/` overlays.
 Synthesizes plain YAML (Flux/Argo-ready) that's applied with `kubectl`. Terraform
-stays authoritative for cloud; this manages **only** Kubernetes. See the migration
-plan and `vault/decisions/` for rationale.
+stays authoritative for cloud; this manages **only** Kubernetes.
 
 ## Setup
 

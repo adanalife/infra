@@ -5,7 +5,7 @@ of `task cdk8s:synth`). Argo CD reconciles them from git, so **deploying becomes
 "merge a PR that changes `dist/`"** — no `kubectl apply`, no toolchain in the
 cluster, and Argo's diff shows real Kubernetes YAML.
 
-This is the pre-render model (see the cdk8s ADR + README): Argo doesn't run cdk8s;
+This is the pre-render model (see `cdk8s/README.md`): Argo doesn't run cdk8s;
 it tracks the plain manifests cdk8s already produced. Same story would work for
 Flux pointed at `cdk8s/dist/` — Argo is chosen for the UI.
 
@@ -90,7 +90,7 @@ Both minipc envs are **cut over** — `prod-1` and `stage-1` apps/supporting/dat
 run on cdk8s + Argo (the legacy Kustomize app manifests were deleted in
 [#660](https://github.com/adanalife/infra/pull/660)). Stage cut over first as the
 rehearsal; prod followed at a stream-off wipe that also moved postgres into the
-isolated `prod-1-data` namespace (see `vault/sessions/2026-06-09-prod-data-namespace-cutover`).
+isolated `prod-1-data` namespace.
 
 `ServerSideApply=true` is on every unit so syncs **adopt** live objects (e.g. the
 postgres PVC) by name rather than replacing them.

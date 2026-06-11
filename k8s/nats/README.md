@@ -1,23 +1,22 @@
 # k8s/nats
 
-NATS message bus — **phase 0**: deploy chart per-env, no JetStream, no PVC,
-single-node. Tracked by the NATS bullet in `vault/tripbot/TODO.md`
-(captured 2026-05-28).
+NATS message bus — deployed per-env via the upstream chart: single-node,
+JetStream on (file-backed), prom-exporter sidecar.
 
 ## Why NATS
 
-Decouple producer/consumer for inter-component traffic. Today
-chatbot ↔ vlc-server ↔ onscreens-server is point-to-point HTTP
-(`pkg/onscreens-client`, `pkg/vlc-client`). Phase 1 will migrate one
-fire-and-forget call (`onscreens-client.ShowMiddleText`) as proof; later
-phases peel off the rest of the onscreens-client surface, then
-`video.changed`, then session/stream lifecycle events. Queries stay on HTTP.
+Decouple producer/consumer for inter-component traffic. Fire-and-forget
+calls between tripbot, vlc-server, and onscreens-server ride NATS subjects;
+queries stay on HTTP. JetStream backs the admin console's chat log and
+live-map breadcrumb trail so they survive a tripbot restart (tripbot
+declares the `TRIPBOT_CHAT` / `TRIPBOT_VIDEO` streams at startup and
+backfills from them).
 
 ## Layout
 
 ```text
 k8s/nats/
-├── values.yml              # shared chart values (JetStream off, prom-exporter on)
+├── values.yml              # shared chart values (JetStream on, prom-exporter on)
 ├── development/values.yml  # per-env resource sizing
 ├── stage-1/values.yml
 └── prod-1/values.yml
@@ -35,8 +34,7 @@ everything.
 | stage-1     | `stage-1-platform`    | `task k8s:stage:apply`      |
 | prod-1      | `prod-1-platform`     | `task k8s:prod:platform:up` |
 
-stage and prod are co-tenant on the mini-PC (see
-`vault/decisions/stage-prod-cotenancy.md`); the two NATS instances are
+stage and prod are co-tenant on the mini-PC; the two NATS instances are
 isolated structurally by namespace, not by topic-name discipline.
 
 ## Connection URL (in-cluster)
