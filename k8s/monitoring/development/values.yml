@@ -246,8 +246,13 @@ telemetryServices:
 # Alloy collector deployments. Defaults are fine for a single-node k3d;
 # revisit on a real multi-node cluster.
 collectors:
+  # dev ships only logs + cluster events — every metrics feature above
+  # (clusterMetrics / hostMetrics / annotationAutodiscovery) is disabled, so
+  # alloy-metrics has no consumer. Chart >=4.x validation rejects an enabled
+  # collector with no enabled feature using it, so turn it off explicitly. Flip
+  # back to `presets: [clustered, statefulset]` if dev metrics are re-enabled.
   alloy-metrics:
-    presets: [clustered, statefulset]
+    enabled: false
   alloy-logs:
     # `clustered` lets replicas partition pods between themselves so
     # podLogsViaKubernetesApi doesn't N-multiply kube-API log fetches.
