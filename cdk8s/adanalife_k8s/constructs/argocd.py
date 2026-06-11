@@ -53,7 +53,7 @@ ENVS = ("prod-1", "stage-1")
 # namespace move land together in one prod wipe (config.prod-1.data_namespace).
 # The live legacy adanalife-* ApplicationSets + AppProject are deleted by hand
 # during that wipe (they collide with the new sets on the shared `{env}-data`
-# Application name, so they can't coexist) — see the prod cutover runbook.
+# Application name, so they can't coexist).
 CUTOVER_ENVS = ENVS
 # Envs whose *apps* run automated (prune + selfHeal) — a merged dist/ change
 # deploys itself. Applied per-env via a templatePatch on the apps ApplicationSet,

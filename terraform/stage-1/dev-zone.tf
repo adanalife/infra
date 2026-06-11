@@ -10,8 +10,7 @@
 # external-dns + cert-manager (DNS-01) for the dev cluster reach this zone
 # via the SHARED stage ExternalDNSUser / ExternalDNSRole, granted
 # ChangeResourceRecordSets on the dev zone below. A dedicated dev
-# external-dns principal is deferred — see vault/infra/TODO.md ("Give dev
-# its own external-dns IAM user + role").
+# external-dns principal is deferred.
 #
 # Two-phase apply (the zone's nameservers aren't known until first apply):
 #   1. apply this workspace  → creates the zone, prints dev_route53_name_servers

@@ -113,7 +113,7 @@ resource "google_service_account_iam_member" "ci_workload_identity" {
 # youtube/maps/geocoding are the app-facing APIs; the rest are the meta-APIs
 # terraform's own auth model (impersonation + WIF) depends on. The Maps *key*
 # itself stays on the gcloud Taskfile target for now; importing it into
-# google_apikeys_key is deferred (vault/infra/TODO.md #188).
+# google_apikeys_key is deferred.
 # disable_on_destroy=false — never tear an enabled API down on resource removal.
 resource "google_project_service" "apis" {
   for_each = toset([

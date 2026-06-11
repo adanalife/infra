@@ -357,9 +357,8 @@ tasks:
       - aws-vault login adanalife-core
 
   # GCP — single bootstrap helper today, used by the tripbot prod-1 Maps
-  # credential mint (see vault/tripbot/credentials.md → Google Maps section).
-  # If/when more GCP resources show up here, lift this to a hashicorp/google
-  # provider in terraform/prod-1/; the migration TODO lives in vault/infra/TODO.md.
+  # credential mint. If/when more GCP resources show up here, lift this to a
+  # hashicorp/google provider in terraform/prod-1/.
   # Pre-req: `gcloud auth login` once + billing attached to the target project.
   gcp:prod:mint-maps-key:
     desc: mint a fresh Maps API key on tripbot-prod (Geocoding + Maps JavaScript only) and print the keyString to stdout
@@ -450,11 +449,9 @@ tasks:
       - task: cdk8s:dev:apply
 
   # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
-  # cluster — its lifecycle is talosctl wipe-and-rebuild (see
-  # vault/infra/adanalife-minipc-bootstrap.md). The k8s:prod:* tasks below
-  # (bootstrap-secrets / platform:up / apply) target the live Talos cluster;
-  # there is no k8s:prod:cluster:* (the old k3d-on-empty tasks were vestigial
-  # and were dropped post-convergence).
+  # cluster — its lifecycle is talosctl wipe-and-rebuild. The k8s:prod:*
+  # tasks below (bootstrap-secrets / platform:up / apply) target the live
+  # Talos cluster; there is no k8s:prod:cluster:*.
 
   k8s:import-images:
     desc: build the tripbot/vlc/obs images and import them into the local cluster
@@ -489,7 +486,7 @@ tasks:
   # imagePullPolicy: Always on these deployments (#411) means "rollout
   # restart" is sufficient; no need to bump tags or delete the cached image.
   #
-  # Env-prefixed per [[vault/decisions/env-prefixed-k8s-tasks]] because the
+  # Env-prefixed because the
   # mini-PC cluster co-tenants prod-1 + stage-1 in different namespaces — a
   # context-less `kubectl rollout` would target whichever namespace is
   # current, which is ambiguous. Each task bakes in `-n <namespace>` so the
@@ -623,9 +620,8 @@ tasks:
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns-stage -n stage-1-platform
       - 'echo "stage external-dns up in stage-1-platform. *.stage.whereisdana.today records now publish to the adanalife-stage zone."'
-      # NATS — phase 0 pubsub substrate per
-      # vault/tripbot/TODO.md "Adopt NATS as the inter-component message
-      # bus". Stage gets its OWN NATS install in stage-1-platform —
+      # NATS — pubsub substrate for inter-component messaging.
+      # Stage gets its OWN NATS install in stage-1-platform —
       # namespace isolation from prod-1-platform's instance (rather than
       # cross-env topic-name discipline). Same chart, same values shape;
       # k8s/nats/stage-1/values.yml carries the (currently identical)
@@ -679,9 +675,9 @@ tasks:
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
         msg: "refusing: k8s:dev:* must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v aws-vault >/dev/null
-        msg: "aws-vault not found — install with `brew install aws-vault` (see infra/README.md)"
+        msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
-        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+        msg: "keybase not found — install with `brew install --cask keybase`, then log in"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: command -v curl >/dev/null
@@ -774,7 +770,7 @@ tasks:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
-        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+        msg: "keybase not found — install with `brew install --cask keybase`, then log in"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
@@ -839,7 +835,7 @@ tasks:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
-        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+        msg: "keybase not found — install with `brew install --cask keybase`, then log in"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
@@ -883,8 +879,7 @@ tasks:
   #
   # k8s-monitoring requires the k8s/grafana-cloud-metrics-write SM value
   # to have been seeded out-of-band first; if it hasn't, the ExternalSecret
-  # materialization will fail and the helm install won't run. See
-  # vault/infra/grafana-cloud-bootstrap.md.
+  # materialization will fail and the helm install won't run.
   #
   # Traefik: the bundled k3s Traefik is disabled via --disable=traefik in
   # the k3d configs, so this task is the only thing that brings up an
@@ -989,14 +984,13 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/development/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
-      # NATS — phase 0 pubsub substrate per
-      # vault/tripbot/TODO.md "Adopt NATS as the inter-component message
-      # bus". Single-node, no JetStream, prom-exporter sidecar scraped by
+      # NATS — pubsub substrate for inter-component messaging.
+      # Single-node, no JetStream, prom-exporter sidecar scraped by
       # alloy-metrics via prometheus.io/* pod annotations. Lives in its
       # own development-platform namespace mirroring stage-1-platform /
       # prod-1-platform (see k8s/nats/values.yml for the phase-0 framing).
@@ -1079,8 +1073,7 @@ tasks:
       - kubectl wait --for=condition=Ready node --all --timeout=180s
       - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
       # local-path-provisioner — cluster storage backing. Must precede any
-      # PVC-consuming workload (postgres). Codified from the former manual
-      # bootstrap-runbook Phase 5.0 steps; see k8s/local-path-provisioner/prod-1.
+      # PVC-consuming workload (postgres). See k8s/local-path-provisioner/prod-1.
       - kubectl apply -k k8s/local-path-provisioner/prod-1
       - kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=120s
       - 'echo "local-path-provisioner up. StorageClass local-path available; local-path-retain comes from the postgres overlay."'
@@ -1185,14 +1178,13 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded in prod-1? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
-      # NATS — phase 0 pubsub substrate per
-      # vault/tripbot/TODO.md "Adopt NATS as the inter-component message
-      # bus". Single-node, no JetStream, prom-exporter sidecar scraped by
+      # NATS — pubsub substrate for inter-component messaging.
+      # Single-node, no JetStream, prom-exporter sidecar scraped by
       # alloy-metrics via prometheus.io/* pod annotations. Lives in
       # prod-1-platform (the env-platform namespace external-dns created
       # above) so prod-1 stays app-only. Stage runs its own NATS in
@@ -1452,8 +1444,7 @@ tasks:
   # secrets. They're SOPS-encrypted with the prod-1 KMS key
   # (alias/sops-talos-pki, terraform/prod-1/sops.tf) and committed as
   # talos/adanalife-minipc/*.sops.yaml; the plaintext stays gitignored.
-  # Bootstrap order + full workflow: vault/infra/adanalife-minipc-bootstrap.md
-  # Phase 4. Encrypted as opaque binary blobs because the configs are
+  # Encrypted as opaque binary blobs because the configs are
   # multi-document YAML (sops's native YAML store doesn't handle multi-doc).
   talos:minipc:secrets:decrypt:
     desc: decrypt the SOPS-sealed adanalife-minipc Talos PKI (+ tailscale patch) into gitignored plaintext
@@ -1476,7 +1467,7 @@ tasks:
             chmod 600 "$dst"
           done
         '
-      - 'echo "Talos secrets decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step (runbook Phase 4) before apply-config."'
+      - 'echo "Talos secrets decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step before apply-config."'
 
   talos:minipc:secrets:encrypt:
     desc: re-seal the adanalife-minipc Talos PKI (+ tailscale patch) to SOPS after regenerating/rotating it
@@ -1636,7 +1627,6 @@ tasks:
   # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
   # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
   # most recent S3 dump written by the postgres-backup CronJob (pg_dump -Fc).
-  # See vault/infra/adanalife-minipc-bootstrap.md "Wipe-and-rebuild loop".
   #
   # The CronJob (k8s/apps/postgres/overlays/prod-1/backup-cronjob.yaml) writes
   # to tiered prefixes under the bucket — see #584. Lifecycle rules vary by tier:

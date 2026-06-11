@@ -4,13 +4,12 @@
 #
 # Talos has no LoadBalancer controller of its own; hostNetwork binds
 # traefik directly to the node's IP on 80/443. MetalLB is the
-# eventual alternative once a second node lands — see
-# vault/infra/TODO.md. Trade-offs of this shape:
+# eventual alternative once a second node lands. Trade-offs of this shape:
 #   - single replica only (host ports can't coexist)
 #   - second node needs revisiting (MetalLB or DaemonSet)
 #   - traefik Service EXTERNAL-IP stays <pending> (no controller fills it)
 #
-# TODO[vault/infra/TODO.md#traefik-non-root]: drop runAsUser: 0 +
+# TODO: drop runAsUser: 0 +
 # NET_BIND_SERVICE — instead route inbound :80/:443 through the
 # router's port-forward to high ports on the node, run traefik
 # unprivileged.

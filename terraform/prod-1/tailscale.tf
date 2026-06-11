@@ -6,8 +6,8 @@
 # entity — one ACL, one operator — so it's managed once, here in prod-1, the
 # workspace that owns the adanalife-minipc cluster. stage-1 has no tailscale.tf.
 #
-# Credential flow mirrors the cloudflare provider (see secrets.tf +
-# vault/decisions/secrets-manager-for-tf-providers.md): the provider's own
+# Credential flow mirrors the cloudflare provider (see secrets.tf): the
+# provider's own
 # bootstrap credential lives in an SM container, populated out-of-band;
 # everything else (the operator OAuth client, the node auth key) is TF-owned
 # and written back into SM for ESO / the machine-config patch to consume.
@@ -65,8 +65,7 @@ resource "tailscale_acl" "this" {
   # This resource was never `terraform import`ed, so the provider would
   # otherwise refuse to manage a non-empty policy. Setting this true declares
   # THIS file the single source of truth — edits made in the admin console are
-  # reverted on the next apply. (Codifies the policy per the "codify the
-  # Tailscale ACL as code" item in vault/infra/TODO.md.)
+  # reverted on the next apply.
   overwrite_existing_content = true
 
   acl = <<-EOT
@@ -188,8 +187,7 @@ resource "aws_secretsmanager_secret_version" "tailscale_operator_oauth" {
 #    that patch (`task talos:minipc:secrets:encrypt`) and commit.
 # ⚠️ Auth keys expire (90 days max). The key must be valid AT wipe time, so
 #    before a post-expiry wipe run `terraform apply -replace=tailscale_tailnet_key.node`
-#    to mint a fresh one, then re-seal. (This is the treadmill we accepted when
-#    migrating the hand-made key into TF — see vault/infra/TODO.md.)
+#    to mint a fresh one, then re-seal.
 resource "tailscale_tailnet_key" "node" {
   reusable      = true
   ephemeral     = false

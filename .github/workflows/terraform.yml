@@ -22,7 +22,7 @@ jobs:
     strategy:
       # Don't let one workspace's failing plan cancel the others — notably
       # terraform/platform, whose plan stays red until the GitHub App
-      # bootstrap seeds the SM key (see vault/infra/github-app-automation.md).
+      # bootstrap seeds the SM key.
       fail-fast: false
       matrix:
         terraform-dirs:

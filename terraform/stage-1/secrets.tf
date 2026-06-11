@@ -6,7 +6,7 @@
 # side resources (IAM users, providers, locals, dashboards) but no longer
 # declare SM containers themselves.
 #
-# Per-secret pattern (from vault/decisions/secrets-manager-for-tf-providers.md):
+# Per-secret pattern:
 #   - `aws_secretsmanager_secret`     — container, terraform-managed.
 #   - `aws_secretsmanager_secret_version` with `lifecycle.ignore_changes =
 #     [secret_string]` so the placeholder doesn't clobber out-of-band updates.
@@ -246,7 +246,7 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 # tripbot config marks it `required:"true"`, so the bot won't boot without
 # it. Per-env keys (stage and prod are separate API keys in the same GCP
 # project, restricted to the Geocoding + Maps JavaScript APIs) for bounded
-# blast radius. See vault/tripbot/credentials.md for minting / rotation.
+# blast radius.
 #
 # Materializes into a k8s Secret via an ExternalSecret resource owned by
 # k8s/apps/tripbot/overlays/local/, envFrom'd into the Deployment.

@@ -53,13 +53,12 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       # Toolchain via mise (cdk8s/.mise.toml pins python / node / cdk8s-cli /
-      # helm), per vault/decisions/golang-development-with-mise.md.
+      # helm).
       - uses: jdx/mise-action@v4
         with:
           working_directory: cdk8s
 
-      # uv handles project-local Python deps on top of mise's interpreter
-      # (vault/decisions/preferred-tools.md).
+      # uv handles project-local Python deps on top of mise's interpreter.
       - uses: astral-sh/setup-uv@v7
 
       - name: Install Python deps

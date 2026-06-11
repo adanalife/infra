@@ -10,7 +10,7 @@
 # TODO: once the home-network port-forward lands and real Ingresses are
 # consuming letsencrypt-route53 certs successfully, decide whether to
 # (a) flip this to letsencrypt-route53 as a continuous prod-issuer
-# canary, or (b) delete it as redundant. Tracked in vault/infra/TODO.md.
+# canary, or (b) delete it as redundant.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

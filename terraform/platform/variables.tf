@@ -5,7 +5,7 @@ variable "region" {
 
 # --- GitHub automation App (github.tf) ---
 # Both values come from the app's settings page after the one-time manual
-# creation; see vault/infra/github-app-automation.md.
+# creation.
 
 variable "github_app_id" {
   description = "App ID of the adanalife-automation GitHub App."

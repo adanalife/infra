@@ -37,8 +37,7 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key" {
 # with the same action set as that bulk policy. The prod-only ARN is the one
 # intended divergence from the KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has
 # no Argo CD). No lifecycle/manage or PutSecretValue grant: the value is set
-# out-of-band and SM-touching applies run locally (not in CI), per the
-# secrets-manager-for-tf-providers ADR.
+# out-of-band and SM-touching applies run locally (not in CI).
 #
 # Runtime read access (the actual GetSecretValue at reconcile time) is ESO's, not
 # CI's — covered by the eso_reader `k8s/*` wildcard in eso.tf.

@@ -3,15 +3,14 @@
 # Same shape as stage-1/secrets.tf: this file is the single bookkeeping point
 # for "what SM containers exist in this workspace."
 #
-# Per-secret pattern (from vault/decisions/secrets-manager-for-tf-providers.md):
+# Per-secret pattern:
 #   - `aws_secretsmanager_secret`     — container, terraform-managed.
 #   - `aws_secretsmanager_secret_version` with `lifecycle.ignore_changes =
 #     [secret_string]` so the placeholder doesn't clobber out-of-band updates.
 #   - `data.aws_secretsmanager_secret_version` when terraform itself needs
 #     the value at plan time (e.g. provider auth).
 #
-# First-apply flow (chicken-and-egg with the github provider) — full runbook
-# in vault/infra/github-app-automation.md:
+# First-apply flow (chicken-and-egg with the github provider):
 #   1. `task tf:platform:apply -- -target=aws_secretsmanager_secret_version.github_automation_app_key`
 #   2. aws-vault exec adanalife-core -- aws secretsmanager put-secret-value \
 #        --secret-id platform/github-automation-app-private-key \
