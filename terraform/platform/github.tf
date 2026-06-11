@@ -6,6 +6,11 @@
 # terraform.tfvars. Bootstrap + rotation runbook:
 # vault/infra/github-app-automation.md.
 #
+# Required App repository permissions: Contents r/w, Pull requests r/w
+# (workflow pushes/PRs), plus Secrets r/w and Variables r/w (so terraform
+# can manage the Actions credentials below). Permission changes on the App
+# must be approved on the installation before tokens carry them.
+#
 # The same App identity is fanned out to repo Actions so workflows mint
 # short-lived installation tokens via actions/create-github-app-token —
 # GITHUB_TOKEN can't be used for those jobs because commits/PRs it creates
@@ -36,8 +41,8 @@ resource "github_actions_variable" "automation_app_id" {
 }
 
 resource "github_actions_secret" "automation_app_private_key" {
-  for_each        = local.automation_repos
-  repository      = each.value
-  secret_name     = "AUTOMATION_APP_PRIVATE_KEY"
-  plaintext_value = data.aws_secretsmanager_secret_version.github_automation_app_key.secret_string
+  for_each    = local.automation_repos
+  repository  = each.value
+  secret_name = "AUTOMATION_APP_PRIVATE_KEY"
+  value       = data.aws_secretsmanager_secret_version.github_automation_app_key.secret_string
 }
