@@ -982,7 +982,33 @@ tasks:
           -f k8s/argo-cd/values.k3d.yml
       - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd
       - kubectl apply -f cdk8s/dist/argocd-k3d.k8s.yaml
-      - 'echo "Argo CD up on the dev cluster (monitor-only). development Applications created. UI: kubectl -n argocd port-forward svc/argocd-server 8080:80. If the repo Secret stays empty, seed k8s/argocd/repo-ssh-key in the stage SM. See gitops/README.md."'
+      - 'echo "Argo CD up on the dev cluster (monitor-only). development Applications created. UI: http://argocd.dev.whereisdana.today:9080 (external-dns + traefik; port-forward svc/argocd-server as fallback). Next: task k8s:dev:argo:sync to bring up data -> supporting -> apps. If the repo Secret stays empty, seed k8s/argocd/repo-ssh-key in the stage SM. See gitops/README.md."'
+
+  # Sync the dev Argo Applications in dependency order. data + supporting are
+  # manual-sync (data is Prune=false forever — it can never auto-prune the DB);
+  # the apps autosync, but this kicks them so you don't wait for the next reconcile.
+  # Replaces clicking Sync in the UI / the manual `argocd app sync` dance.
+  k8s:dev:argo:sync:
+    desc: "sync the dev Argo apps in order (data -> supporting -> apps) via argocd --core"
+    preconditions:
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-bees) first."
+      - sh: command -v argocd >/dev/null
+        msg: "argocd CLI not found — `brew install argocd`"
+    cmds:
+      # `argocd --core` talks to the cluster via the kubeconfig (no Argo server /
+      # login), but resolves argocd-cm from the CURRENT context's namespace — so
+      # point the context at argocd for the duration, then restore on exit.
+      - |
+        ns_prev=$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null)
+        trap 'kubectl config set-context --current --namespace="${ns_prev:-default}" >/dev/null 2>&1' EXIT
+        kubectl config set-context --current --namespace=argocd >/dev/null
+        set -e
+        argocd app sync development-data --core --timeout 300
+        argocd app wait development-data --core --health --timeout 300
+        argocd app sync development-supporting --core --timeout 300
+        argocd app wait development-supporting --core --health --timeout 300
+        argocd app sync -l argocd.argoproj.io/application-set-name=tripbot-apps --core --timeout 300
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
