@@ -9,7 +9,13 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
 
-_DEV = dict(envs=("development",), autosync_envs=("development",), ui_ingress=False)
+_DEV = dict(
+    envs=("development",),
+    autosync_envs=("development",),
+    tailscale_ui=False,
+    lan_host="argocd.dev.whereisdana.today",
+    lan_tls=False,
+)
 
 
 def _synth(**kwargs):
@@ -26,9 +32,12 @@ def _appset(objs, name):
     )
 
 
-def test_minipc_default_has_tailscale_ui_and_both_envs():
+def test_minipc_default_has_both_uis_and_both_envs():
     objs = _synth()
-    assert any(o["kind"] == "Ingress" for o in objs)  # tailscale UI
+    classes = {
+        o["spec"].get("ingressClassName") for o in objs if o["kind"] == "Ingress"
+    }
+    assert classes == {"tailscale", "traefik"}  # tailnet UI + LAN UI
     envs = {
         e["env"]
         for e in _appset(objs, "tripbot-apps")["spec"]["generators"][0]["list"][
@@ -38,11 +47,18 @@ def test_minipc_default_has_tailscale_ui_and_both_envs():
     assert envs == {"prod-1", "stage-1"}
 
 
-def test_dev_is_development_only_no_ui():
+def test_dev_is_development_only_with_traefik_ui():
     objs = _synth(**_DEV)
-    assert not any(
-        o["kind"] == "Ingress" for o in objs
-    )  # no tailnet UI on the dev cluster
+    ingresses = [o for o in objs if o["kind"] == "Ingress"]
+    # exactly one UI Ingress on dev — traefik, no tailscale, no TLS (reached at :9080)
+    assert len(ingresses) == 1
+    ing = ingresses[0]
+    assert ing["spec"]["ingressClassName"] == "traefik"
+    assert "tls" not in ing["spec"]
+    assert (
+        ing["metadata"]["annotations"]["external-dns.alpha.kubernetes.io/hostname"]
+        == "argocd.dev.whereisdana.today"
+    )
     proj = next(o for o in objs if o["kind"] == "AppProject")
     assert {d["namespace"] for d in proj["spec"]["destinations"]} == {"development"}
     # development apps autosync (it's throwaway)

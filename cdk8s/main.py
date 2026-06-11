@@ -66,14 +66,18 @@ if not only:
     # minipc Argo — prod-1 + stage-1, tailscale UI.
     ArgoCDChart(app, "argocd")
     # k3d (development) Argo — a SEPARATE in-cluster install managing only
-    # development (no tailscale UI; dev apps autosync since the env is throwaway).
-    # Each Argo targets its own cluster in-cluster, so there's no cross-cluster wiring.
+    # development (dev apps autosync since the env is throwaway). Each Argo targets
+    # its own cluster in-cluster, so there's no cross-cluster wiring. No tailnet UI
+    # (no tailscale-operator on the dev cluster); the UI rides a traefik Ingress at
+    # argocd.dev.whereisdana.today (no TLS), reached at :9080 via the k3d port-map.
     ArgoCDChart(
         app,
         "argocd-k3d",
         envs=("development",),
         autosync_envs=("development",),
-        ui_ingress=False,
+        tailscale_ui=False,
+        lan_host=f"argocd.{load_env('development').dns_base}",
+        lan_tls=False,
     )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered

@@ -113,10 +113,16 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
 class ArgoCD(Construct):
     """The Argo CD config one cluster's Argo install reconciles. Parameterized by
     env-set so the same authoring path emits both the minipc instance (prod-1 +
-    stage-1, tailscale UI) and the k3d dev instance (development only, no tailscale —
-    UI via port-forward). Each Argo targets its OWN cluster in-cluster, so there's
-    no cross-cluster networking; the two instances differ only by which envs +
-    whether a tailnet UI Ingress is emitted."""
+    stage-1) and the k3d dev instance (development only). Each Argo targets its OWN
+    cluster in-cluster, so there's no cross-cluster networking; the instances differ
+    by which envs + how the UI is exposed:
+
+      * `tailscale_ui` — emit the tailnet UI Ingress (minipc only; the dev cluster
+        has no tailscale-operator).
+      * `lan_host` — the traefik UI Ingress host (external-dns-published), or None
+        for no traefik UI. minipc: argocd.prod.whereisdana.today; the k3d dev
+        cluster: argocd.dev.whereisdana.today, reached at :9080 via the k3d
+        port-map. `lan_tls` adds the cert-manager TLS block (minipc; off on dev)."""
 
     def __init__(
         self,
@@ -125,7 +131,9 @@ class ArgoCD(Construct):
         *,
         envs: tuple[str, ...] = CUTOVER_ENVS,
         autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
-        ui_ingress: bool = True,
+        tailscale_ui: bool = True,
+        lan_host: str | None = LAN_HOST,
+        lan_tls: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -166,12 +174,14 @@ class ArgoCD(Construct):
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
-        # UI Ingresses are minipc-only — the k3d dev cluster has neither
-        # tailscale-operator (tailnet UI) nor the prod LAN/DNS host (traefik UI),
-        # so its UI is reached by port-forward.
-        if ui_ingress:
+        # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
+        # traefik/LAN Ingress is published on every cluster with a DNS host —
+        # external-dns publishes the record either way; the dev cluster reaches it
+        # at http://<lan_host>:9080 via the k3d port-map (no TLS).
+        if tailscale_ui:
             self._ui_ingress()
-            self._lan_ingress()
+        if lan_host:
+            self._lan_ingress(lan_host, tls=lan_tls)
         self._repo_external_secret()
 
     # ---- Argo CRs (ApiObject) ----
@@ -342,31 +352,33 @@ class ArgoCD(Construct):
             ),
         )
 
-    def _lan_ingress(self):
-        # LAN-reachable UI at argocd.prod.whereisdana.today, the same shape as the
-        # apps' traefik Ingress + the traefik dashboard. external-dns publishes the
-        # record (to the cluster's LAN endpoint); cert-manager issues the cert via
-        # the route53 ClusterIssuer (the argocd namespace has no namespaced Issuer,
-        # so use the cluster-scoped one, like the kube-system dashboard Ingress).
-        # Forwards to argocd-server:80 (the chart runs server.insecure, TLS
-        # terminated at traefik).
+    def _lan_ingress(self, host: str, *, tls: bool = True):
+        # LAN-reachable UI at `host` (argocd.<env>.whereisdana.today), the same shape
+        # as the apps' traefik Ingress + the traefik dashboard. external-dns
+        # publishes the record to the cluster's LAN endpoint. On minipc, cert-manager
+        # issues a cert via the route53 ClusterIssuer (the argocd namespace has no
+        # namespaced Issuer, so use the cluster-scoped one). The k3d dev cluster runs
+        # without TLS (tls=False) — reached at http://<host>:9080. Forwards to
+        # argocd-server:80 (the chart runs server.insecure).
+        annotations = {"external-dns.alpha.kubernetes.io/hostname": host}
+        tls_block = None
+        if tls:
+            annotations["cert-manager.io/cluster-issuer"] = "letsencrypt-route53"
+            tls_block = [k8s.IngressTls(hosts=[host], secret_name="argocd-server-tls")]
         k8s.KubeIngress(
             self,
             "lan-ingress",
             metadata=k8s.ObjectMeta(
                 name="argocd-server-traefik",
                 namespace=ARGO_NS,
-                annotations={
-                    "external-dns.alpha.kubernetes.io/hostname": LAN_HOST,
-                    "cert-manager.io/cluster-issuer": "letsencrypt-route53",
-                },
+                annotations=annotations,
             ),
             spec=k8s.IngressSpec(
                 ingress_class_name="traefik",
-                tls=[k8s.IngressTls(hosts=[LAN_HOST], secret_name="argocd-server-tls")],
+                tls=tls_block,
                 rules=[
                     k8s.IngressRule(
-                        host=LAN_HOST,
+                        host=host,
                         http=k8s.HttpIngressRuleValue(
                             paths=[
                                 k8s.HttpIngressPath(

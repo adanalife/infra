@@ -166,8 +166,17 @@ Bring-up is folded into `task k8s:dev:platform:up`: it installs argo-cd on the d
 cluster (`-f k8s/argo-cd/values.yml -f k8s/argo-cd/values.k3d.yml`) and applies
 `argocd-k3d.k8s.yaml`. The one out-of-band step is seeding the read-only repo
 deploy key at `k8s/argocd/repo-ssh-key` in the **stage** SM (dev borrows the
-adanalife-stage account); the same GitHub deploy key works. UI:
-`kubectl -n argocd port-forward svc/argocd-server 8080:80`.
+adanalife-stage account); the same GitHub deploy key works.
+
+**UI:** a traefik Ingress at `http://argocd.dev.whereisdana.today:9080` (the `:9080`
+is the k3d port-map of traefik's `:80`; external-dns publishes the record to the
+LAN endpoint, no TLS). Mirrors the minipc's `argocd.prod.whereisdana.today` — no
+port-forward. (`kubectl -n argocd port-forward svc/argocd-server 8080:80` is the
+fallback.)
+
+**First sync:** `data` + `supporting` are manual (data is `Prune=false` forever);
+the apps autosync. `task k8s:dev:argo:sync` syncs them in dependency order
+(`development-data` → `development-supporting` → apps) via `argocd --core`.
 
 ## Not covered yet
 
