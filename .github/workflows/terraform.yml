@@ -18,6 +18,10 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     strategy:
+      # Don't let one workspace's failing plan cancel the others — notably
+      # terraform/platform, whose plan stays red until the GitHub App
+      # bootstrap seeds the SM key (see vault/infra/github-app-automation.md).
+      fail-fast: false
       matrix:
         terraform-dirs:
           - terraform/core
