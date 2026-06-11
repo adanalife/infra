@@ -12,6 +12,9 @@
 #     (dashboards-as-code) stays in stage-1 against the shared Grafana
 #     Cloud stack. The SM container is here for symmetry / readiness;
 #     no terraform-side consumer reads it today.
+#   - `gcp_terraform_credentials`: prod-only. YouTube v1 is prod-only, so
+#     the google provider (google.tf) and its SA-key credential live in
+#     prod-1 alone. Stage-1 has no GCP resources.
 #
 # See stage-1/secrets.tf header for the full per-secret pattern and
 # first-apply flow.
@@ -173,6 +176,42 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 }
 
 # ============================================================================
+# GCP — terraform provider credentials
+# ============================================================================
+
+# Service-account JSON key for the `google` terraform provider (see google.tf).
+# prod-1-only deviation from the stage-1 KEEP-IN-SYNC sibling: YouTube v1 is
+# prod-only, so the GCP provider + its credential live in prod-1 alone. Follows
+# the placeholder-plus-out-of-band pattern (vault/decisions/secrets-manager-for-tf-providers).
+#
+# Bootstrap (one-time; chicken-and-egg — the provider needs creds before it can
+# manage anything):
+#   1. gcloud iam service-accounts create terraform --project tripbot-prod
+#   2. gcloud projects add-iam-policy-binding tripbot-prod \
+#        --member serviceAccount:terraform@tripbot-prod.iam.gserviceaccount.com \
+#        --role roles/serviceusage.serviceUsageAdmin
+#   3. gcloud iam service-accounts keys create key.json \
+#        --iam-account terraform@tripbot-prod.iam.gserviceaccount.com
+#   4. aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#        --secret-id prod-1/gcp-terraform-credentials --secret-string "$(cat key.json)"
+resource "aws_secretsmanager_secret" "gcp_terraform_credentials" {
+  name        = "prod-1/gcp-terraform-credentials"
+  description = "GCP service-account JSON key used by the google terraform provider. Role: serviceusage.serviceUsageAdmin on tripbot-prod."
+}
+
+resource "aws_secretsmanager_secret_version" "gcp_terraform_credentials" {
+  secret_id     = aws_secretsmanager_secret.gcp_terraform_credentials.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "gcp_terraform_credentials" {
+  secret_id = aws_secretsmanager_secret.gcp_terraform_credentials.id
+}
+
+# ============================================================================
 # Google Maps
 # ============================================================================
 
@@ -286,6 +325,10 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
+      # prod-only — GCP terraform-provider credential (defined above; google.tf
+      # reads it via data source on every plan). Stage-1 has no GCP, so this is
+      # an intended divergence from the KEEP-IN-SYNC sibling, same as argocd below.
+      aws_secretsmanager_secret.gcp_terraform_credentials.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.postgres_backup_s3.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
