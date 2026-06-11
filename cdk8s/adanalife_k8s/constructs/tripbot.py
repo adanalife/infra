@@ -21,7 +21,9 @@ they're identity-level (one bot, one DB, shared by every platform stack), so
 `emit_identity_secrets` emits them once into the per-env supporting unit
 (SupportingChart): database (ESO target.template remap, or the on-disk
 `tripbot-secret` on the laptop), twitch + google-maps (extract), discord-alerts
-+ discord-bot-token (bare remoteRef).
++ discord-bot-token (bare remoteRef). The one exception is the youtube
+instance's `tripbot-youtube-creds` (YouTube OAuth client) — per-platform, not
+identity-level, so the construct emits that ExternalSecret itself.
 
 The `tripbot-config` ConfigMap keeps its STABLE name (not the kustomize hash)
 so the one-shot Jobs below can `envFrom` it; the pod template still rolls on
@@ -196,6 +198,29 @@ class Tripbot(Construct):
                 )
             ),
         ]
+
+        # YouTube OAuth client creds are per-platform (only the youtube instance
+        # reads them), so unlike the identity-level Secrets above the
+        # ExternalSecret is emitted HERE, with the instance — the whole footprint
+        # appears/disappears with the platform's entry in env.platforms. The SM
+        # JSON holds YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (+ optionally
+        # YOUTUBE_CHANNEL_ID, the prod identity pin); extract mode materializes
+        # whichever keys exist.
+        if platform == "youtube":
+            eso.external_secret(
+                self,
+                "youtube-creds-external-secret",
+                name="tripbot-youtube-creds",
+                namespace=ns,
+                labels=labels,
+                creation_policy="Owner",
+                extract="k8s/tripbot/youtube-creds",
+            )
+            env_from.append(
+                k8s.EnvFromSource(
+                    secret_ref=k8s.SecretEnvSource(name="tripbot-youtube-creds")
+                )
+            )
 
         hardened = k8s.SecurityContext(
             allow_privilege_escalation=False,
