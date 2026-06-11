@@ -3,8 +3,7 @@
 # The provider auths AS the App (no PAT anywhere): the App's private key
 # lives in SM (platform/github-automation-app-private-key, seeded out-of-band
 # per secrets.tf), and the App ID / installation ID are plain config in
-# terraform.tfvars. Bootstrap + rotation runbook:
-# vault/infra/github-app-automation.md.
+# terraform.tfvars.
 #
 # Required App repository permissions: Contents r/w, Pull requests r/w
 # (workflow pushes/PRs), plus Secrets r/w and Variables r/w (so terraform

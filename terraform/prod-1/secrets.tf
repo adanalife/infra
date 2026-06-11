@@ -43,8 +43,7 @@ data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
 
 # OTLP credentials for in-cluster OpenTelemetry exporters (prod tripbot,
 # vlc-server). Same shared Grafana Cloud stack as stage-1; the value held
-# here matches stage's container byte-for-byte. Per the
-# vault/decisions/observability-projects-by-component.md ADR, env separation
+# here matches stage's container byte-for-byte. Env separation
 # happens via deployment.environment on each event/metric/log, not via
 # duplicate access-policy tokens. Bootstrap = copy stage's value into prod's
 # container (see the Sentry block below for the for-loop pattern).
@@ -106,8 +105,7 @@ resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
 # Sentry
 # ============================================================================
 
-# Sentry DSNs for prod-1 tripbot + vlc-server. Per the
-# vault/decisions/observability-projects-by-component.md ADR, Sentry partitions
+# Sentry DSNs for prod-1 tripbot + vlc-server. Sentry partitions
 # by component (tripbot, vlc-server) with SENTRY_ENVIRONMENT distinguishing
 # stage from prod on the event itself — no separate prod projects.
 # Bootstrap = copy stage's values into prod's containers:
@@ -115,8 +113,7 @@ resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
 #     aws-vault exec "$profile" -- aws secretsmanager get-secret-value \
 #       --secret-id k8s/sentry-tripbot ...
 #   done
-# Verify cross-env parity with the SHA-256 hash check in
-# vault/tripbot/monitoring.md's Sentry section.
+# Verify cross-env parity by comparing SHA-256 hashes of the two envs' values.
 resource "aws_secretsmanager_secret" "sentry_tripbot" {
   name        = "k8s/sentry-tripbot"
   description = "Sentry DSN for the tripbot Go service. Consumed by pkg/errors via SENTRY_DSN env var."
@@ -151,8 +148,7 @@ resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
 
 # Twitch app credentials for prod-1 tripbot. Separate Twitch app from stage-1's
 # `tripbot-development` — likely `tripbot-production` once minted. Minting is
-# gated on the redirect-URI decision per vault/infra/TODO.md:54; container can
-# stay placeholder until then.
+# gated on the redirect-URI decision; container can stay placeholder until then.
 #
 # Bootstrap (once prod Twitch app exists):
 #   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
@@ -179,7 +175,6 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 # Google Maps API key for prod-1 tripbot. Separate key from stage-1's (same
 # GCP project, distinct API keys) so a leak in one env doesn't compromise the
 # other. Restricted to the Geocoding + Maps JavaScript APIs.
-# See vault/tripbot/credentials.md for minting / rotation.
 #
 # Bootstrap:
 #   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
