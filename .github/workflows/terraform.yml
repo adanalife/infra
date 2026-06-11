@@ -21,6 +21,7 @@ jobs:
       matrix:
         terraform-dirs:
           - terraform/core
+          - terraform/platform
           - terraform/stage-1
           - terraform/prod-1
     env:
@@ -52,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -65,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
