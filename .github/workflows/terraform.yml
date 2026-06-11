@@ -10,6 +10,8 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # GCP Workload Identity Federation (stage-1 / prod-1 google provider auth)
+  id-token: write
 
 jobs:
   plan:
@@ -43,6 +45,35 @@ jobs:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
+      # stage-1 / prod-1 carry a google provider that authenticates keyless via
+      # Workload Identity Federation (GitHub OIDC -> the per-project terraform
+      # SA). Resolve the per-env WIF provider + SA, then mint a short-lived SA
+      # access token the google provider reads (GOOGLE_OAUTH_ACCESS_TOKEN) — this
+      # is an env var, so it reaches the dflook container action (a creds *file*
+      # would not). gcp_impersonate=false: CI is already the SA, no further hop.
+      - name: GCP WIF target
+        if: matrix.terraform-dirs == 'terraform/stage-1' || matrix.terraform-dirs == 'terraform/prod-1'
+        run: |
+          case "${{ matrix.terraform-dirs }}" in
+            terraform/prod-1)
+              echo "WIF_PROVIDER=projects/876608406330/locations/global/workloadIdentityPools/github/providers/github" >> "$GITHUB_ENV"
+              echo "WIF_SA=terraform@tripbot-prod.iam.gserviceaccount.com" >> "$GITHUB_ENV" ;;
+            terraform/stage-1)
+              echo "WIF_PROVIDER=projects/574760983858/locations/global/workloadIdentityPools/github/providers/github" >> "$GITHUB_ENV"
+              echo "WIF_SA=terraform@tripbot-stage.iam.gserviceaccount.com" >> "$GITHUB_ENV" ;;
+          esac
+          echo "TF_VAR_gcp_impersonate=false" >> "$GITHUB_ENV"
+      - name: GCP auth (WIF)
+        id: gcp_auth
+        if: matrix.terraform-dirs == 'terraform/stage-1' || matrix.terraform-dirs == 'terraform/prod-1'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SA }}
+          token_format: access_token
+      - name: Export GCP token for terraform
+        if: steps.gcp_auth.outcome == 'success'
+        run: echo "GOOGLE_OAUTH_ACCESS_TOKEN=${{ steps.gcp_auth.outputs.access_token }}" >> "$GITHUB_ENV"
       - name: terraform plan
         uses: dflook/terraform-plan@v2
         with:

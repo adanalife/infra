@@ -56,6 +56,21 @@ variable "primary_acm_cert_alternative_names" {
 # prod-1 (which symlinks this file) doesn't see them as required
 # inputs without having any cloudflare resources to use them on.
 
+# GCP project this environment manages (tripbot-stage / tripbot-prod). Per-env
+# value in terraform.tfvars; google.tf is otherwise identical across envs.
+variable "gcp_project" {
+  type        = string
+  description = "GCP project ID this environment manages"
+}
+
+# When true (steady state) the google provider impersonates the terraform SA.
+# Set false for the one-time bootstrap apply (owner ADC must create the SA
+# before it can be impersonated) and in CI (which auths AS the SA via WIF).
+variable "gcp_impersonate" {
+  type    = bool
+  default = true
+}
+
 # a secret string between CloudFront and S3 to control access
 resource "random_password" "static_site_secret" {
   length = 32
