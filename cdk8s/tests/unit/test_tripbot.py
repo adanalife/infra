@@ -126,6 +126,12 @@ def test_youtube_instance_emits_creds_external_secret_and_envfrom():
     twitch_cm = _by(_synth("stage-1"), "ConfigMap", "tripbot-twitch-config")[0]["data"]
     assert "STREAM_PLATFORM" not in twitch_cm
 
+    # EXTERNAL_URL must match the instance's own per-name Ingress host —
+    # pkg/youtube's OAuth redirect is EXTERNAL_URL + /auth/callback, and the
+    # primary host would bounce the callback to the creds-less twitch instance.
+    assert cm["EXTERNAL_URL"] == "https://tripbot-youtube.stage.whereisdana.today"
+    assert twitch_cm["EXTERNAL_URL"] == "https://tripbot.stage.whereisdana.today"
+
 
 def test_twitch_instance_has_no_youtube_creds():
     # zero blast radius on running envs: the twitch instance neither emits the

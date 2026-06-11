@@ -146,6 +146,18 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
         data["STREAM_PLATFORM"] = platform
     data.update(appconfig.telemetry_config(env))
     data.update(_ENV_CONFIG[env.name])
+    # Non-primary platforms serve on their own per-name Ingress host
+    # (_ingress: tripbot-youtube.<dns_base>), and EXTERNAL_URL must match —
+    # pkg/youtube builds its OAuth redirect as EXTERNAL_URL + /auth/callback,
+    # so the primary host would bounce the consent callback to the *twitch*
+    # instance, which has no youtube creds. Swap the host prefix inside the
+    # env literal to keep its scheme/port quirks (e.g. dev's :9443) intact.
+    # The per-name host needs a matching authorized redirect URI on the
+    # platform's OAuth client.
+    if platform != env.platforms[0]:
+        data["EXTERNAL_URL"] = data["EXTERNAL_URL"].replace(
+            "//tripbot.", f"//{app_name('tripbot', platform)}.", 1
+        )
     if env.nats_url:
         data["NATS_URL"] = env.nats_url
     return data
