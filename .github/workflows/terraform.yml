@@ -71,7 +71,7 @@ jobs:
       - name: GCP auth (WIF)
         id: gcp_auth
         if: matrix.terraform-dirs == 'terraform/stage-1' || matrix.terraform-dirs == 'terraform/prod-1'
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.WIF_SA }}
