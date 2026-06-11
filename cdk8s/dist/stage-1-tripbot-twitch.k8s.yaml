@@ -12,7 +12,7 @@ data:
   DATABASE_HOST: postgres.stage-1-data.svc.cluster.local
   DISCORD_GUILD_ID: "607964164220125258"
   ENV: staging
-  EXTERNAL_URL: https://tripbot.stage.whereisdana.today
+  EXTERNAL_URL: https://tripbot-twitch.stage.whereisdana.today
   GOOGLE_APPS_PROJECT_ID: tripbot-stage
   MAPS_OUTPUT_DIR: /opt/data/maps
   NATS_URL: nats://nats.stage-1-platform.svc.cluster.local:4222
@@ -45,7 +45,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 3800b35c1a
+        adanalife.dev/config-hash: af9be2b3dc
       labels:
         app: tripbot-twitch
     spec:
@@ -153,7 +153,7 @@ kind: Ingress
 metadata:
   annotations:
     cert-manager.io/issuer: letsencrypt-route53
-    external-dns.alpha.kubernetes.io/hostname: tripbot.stage.whereisdana.today
+    external-dns.alpha.kubernetes.io/hostname: tripbot-twitch.stage.whereisdana.today
   labels:
     app.kubernetes.io/name: tripbot-twitch
     app.kubernetes.io/part-of: tripbot
@@ -162,7 +162,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: tripbot.stage.whereisdana.today
+    - host: tripbot-twitch.stage.whereisdana.today
       http:
         paths:
           - backend:
@@ -174,8 +174,8 @@ spec:
             pathType: Prefix
   tls:
     - hosts:
-        - tripbot.stage.whereisdana.today
-      secretName: tripbot-tls
+        - tripbot-twitch.stage.whereisdana.today
+      secretName: tripbot-twitch-tls
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

@@ -146,18 +146,17 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
         data["STREAM_PLATFORM"] = platform
     data.update(appconfig.telemetry_config(env))
     data.update(_ENV_CONFIG[env.name])
-    # Non-primary platforms serve on their own per-name Ingress host
-    # (_ingress: tripbot-youtube.<dns_base>), and EXTERNAL_URL must match —
-    # pkg/youtube builds its OAuth redirect as EXTERNAL_URL + /auth/callback,
-    # so the primary host would bounce the consent callback to the *twitch*
-    # instance, which has no youtube creds. Swap the host prefix inside the
+    # Every instance serves on its own per-name Ingress host (_ingress:
+    # tripbot-twitch.<dns_base> / tripbot-youtube.<dns_base>), and EXTERNAL_URL
+    # must match — both OAuth flows build their redirect as EXTERNAL_URL +
+    # /auth/callback, so a mismatched host bounces the consent callback to an
+    # instance without that platform's creds. Swap the host prefix inside the
     # env literal to keep its scheme/port quirks (e.g. dev's :9443) intact.
-    # The per-name host needs a matching authorized redirect URI on the
-    # platform's OAuth client.
-    if platform != env.platforms[0]:
-        data["EXTERNAL_URL"] = data["EXTERNAL_URL"].replace(
-            "//tripbot.", f"//{app_name('tripbot', platform)}.", 1
-        )
+    # Each per-name host needs a matching authorized redirect URI registered
+    # on the platform's OAuth app (Twitch dev console / GCP console).
+    data["EXTERNAL_URL"] = data["EXTERNAL_URL"].replace(
+        "//tripbot.", f"//{app_name('tripbot', platform)}.", 1
+    )
     if env.nats_url:
         data["NATS_URL"] = env.nats_url
     return data
@@ -175,8 +174,6 @@ class Tripbot(Construct):
         cm_name = config_map_name(platform)
         local = env.secret_source == "local"
         db_secret = LOCAL_DB_SECRET if local else DB_SECRET_NAME
-        # primary platform keeps the identity-stable public host (see _ingress).
-        primary = platform == env.platforms[0]
 
         # --- ConfigMap (per-platform stable name + content-hash annotation) ---
         data = config_data(env, platform)
@@ -346,18 +343,18 @@ class Tripbot(Construct):
         )
 
         # --- Ingress (dashboard / OAuth) — published in every env ---
-        self._ingress(name, primary, env, ns, labels)
+        self._ingress(name, env, ns, labels)
         if env.tailscale:
             self._tailscale_ingress(name, env, ns, labels)
 
     # ---- Ingress helpers ----
-    def _ingress(self, name, primary, env: EnvConfig, ns, labels):
-        # The public dashboard/OAuth host stays identity-stable ("tripbot.<dns>")
-        # on the primary platform so the registered Twitch OAuth redirect URI /
-        # EXTERNAL_URL don't change with the workload rename; a future non-primary
-        # platform would get its own per-name host. The Ingress object + backend,
-        # though, are per-platform so the route targets THIS platform's Service.
-        host_sub = "tripbot" if primary else name
+    def _ingress(self, name, env: EnvConfig, ns, labels):
+        # Every platform instance serves on its own per-name host
+        # (tripbot-twitch.<dns> / tripbot-youtube.<dns>) — symmetric with the
+        # other per-platform components and with EXTERNAL_URL (config_data).
+        # The registered OAuth redirect URIs (Twitch dev console, GCP console)
+        # must carry the per-name hosts.
+        host_sub = name
         # local uses the .localhost TLD (no DNS/TLS); every other env publishes a
         # real host with external-dns + cert-manager TLS (DNS-01 Route53).
         host = (

@@ -11,7 +11,7 @@ data:
   CHANNEL_NAME: adanalife_staging
   DATABASE_HOST: postgres
   ENV: staging
-  EXTERNAL_URL: http://tripbot.localhost
+  EXTERNAL_URL: http://tripbot-twitch.localhost
   GOOGLE_APPS_PROJECT_ID: tripbot-stage
   MAPS_OUTPUT_DIR: /opt/data/maps
   OBS_SERVER_HOST: obs-twitch:8080
@@ -43,7 +43,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 970cd0cf06
+        adanalife.dev/config-hash: 44f9dbefcd
       labels:
         app: tripbot-twitch
     spec:
@@ -157,7 +157,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: tripbot.localhost
+    - host: tripbot-twitch.localhost
       http:
         paths:
           - backend:
