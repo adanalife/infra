@@ -7,16 +7,7 @@
   "editable": true,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
-  "links": [
-    {
-      "title": "Verification runbook",
-      "type": "link",
-      "icon": "doc",
-      "url": "https://github.com/adanalife/vault/blob/main/twitch/live-stream-verification.md",
-      "targetBlank": true,
-      "tooltip": "How to read this dashboard — the live-stream verification runbook"
-    }
-  ],
+  "links": [],
   "templating": {
     "list": [
       {

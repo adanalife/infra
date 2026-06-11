@@ -59,7 +59,7 @@
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/vlc data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. See [[../sessions/visualization-lab]] for the lineage. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
+        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/vlc data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
       }
     },
     {
