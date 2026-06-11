@@ -16,6 +16,12 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.0"
     }
+    # GCP — prod-only (YouTube provider). Configured in google.tf, credentialed
+    # out of AWS SM. Not in stage-1's versions.tf: stage has no GCP resources.
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
     # Manages the tailnet ACL + the K8s operator's OAuth client + the node join
     # key (prod-1 only — the tailnet is global; see tailscale.tf).
     tailscale = {
