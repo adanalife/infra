@@ -9,10 +9,12 @@ name: cdk8s
 # the job is verify-only and fails if dist/ is stale (belt-and-braces for
 # anything that slips around the PR path).
 #
-# The push-back uses AUTOMATION_PAT, not GITHUB_TOKEN — commits pushed with
-# GITHUB_TOKEN don't trigger workflows, so checks would never run on the
-# synth commit. Falls back to GITHUB_TOKEN (verify-only in practice: the
-# push is rejected) when the secret is unavailable, e.g. dependabot PRs.
+# The push-back authenticates as the adanalife-automation GitHub App (token
+# minted per run; credentials fanned out by terraform/platform), not
+# GITHUB_TOKEN — commits pushed with GITHUB_TOKEN don't trigger workflows,
+# so checks would never run on the synth commit. On dependabot PRs the app
+# secret is unavailable: the mint step soft-fails and checkout falls back to
+# GITHUB_TOKEN (effectively verify-only).
 on:
   pull_request:
     paths:
@@ -33,12 +35,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # continue-on-error: dependabot PRs can't read repo secrets — the mint
+      # fails there and the || fallback below kicks in.
+      - name: Mint automation app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v6
         with:
           # PR runs check out the branch tip (not the merge ref) so the
           # re-synth commit can be pushed straight back to the branch.
           ref: ${{ github.head_ref || github.ref }}
-          token: ${{ secrets.AUTOMATION_PAT || github.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       # Toolchain via mise (cdk8s/.mise.toml pins python / node / cdk8s-cli /
       # helm), per vault/decisions/golang-development-with-mise.md.
