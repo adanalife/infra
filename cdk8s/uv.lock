@@ -10,6 +10,7 @@ dependencies = [
     { name = "cdk8s" },
     { name = "cdk8s-plus-30" },
     { name = "constructs" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -24,6 +25,7 @@ requires-dist = [
     { name = "cdk8s", specifier = ">=2.69" },
     { name = "cdk8s-plus-30", specifier = ">=2.0" },
     { name = "constructs", specifier = ">=10.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [package.metadata.requires-dev]

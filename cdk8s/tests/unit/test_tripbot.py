@@ -5,7 +5,7 @@ and the one-shot Jobs (which envFrom the stable config and are NOT auto-emitted)
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
-from adanalife_k8s.config import load_env
+from adanalife_k8s.config import image_pins, load_env
 from adanalife_k8s.constructs import tripbot as tb
 from adanalife_k8s.constructs.tripbot import Tripbot
 
@@ -175,16 +175,31 @@ def test_local_ingress_is_plain_http_localhost():
 
 
 def test_image_tag_per_env():
-    for env, tag in [
-        ("prod-1", "latest"),
-        ("local", "latest"),
-        ("stage-1", "develop"),
-        ("development", "develop"),
+    # prod pins a release tag from versions.yaml (IfNotPresent — immutable tag);
+    # the floating envs ride latest/develop with Always.
+    for env, tag, pull in [
+        ("prod-1", image_pins()["prod-1"]["tripbot"], "IfNotPresent"),
+        ("local", "latest", "Always"),
+        ("stage-1", "develop", "Always"),
+        ("development", "develop", "Always"),
     ]:
         dep = _by(_synth(env), "Deployment", "tripbot-twitch")[0]
         spec = dep["spec"]["template"]["spec"]
         assert spec["containers"][0]["image"] == f"adanalife/tripbot:{tag}"
+        assert spec["containers"][0]["imagePullPolicy"] == pull
         assert spec["initContainers"][0]["image"] == f"adanalife/tripbot:{tag}"
+        assert spec["initContainers"][0]["imagePullPolicy"] == pull
+
+
+def test_prod_pins_are_release_tags():
+    # Guard the bump-PR contract: every prod pin is a bare semver release tag —
+    # never a floating tag, never v-prefixed (Docker Hub tags carry no v).
+    import re
+
+    pins = image_pins()["prod-1"]
+    assert set(pins) == {"tripbot", "vlc", "obs", "onscreens-server"}
+    for component, tag in pins.items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", tag), (component, tag)
 
 
 # ---- one-shot Jobs ----

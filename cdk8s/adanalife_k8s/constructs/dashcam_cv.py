@@ -73,7 +73,7 @@ class DashcamCV(Construct):
     def __init__(self, scope: Construct, *, env: EnvConfig):
         super().__init__(scope, NAME)
         ns = env.namespace or None
-        image = f"{IMAGE}:{env.image_tag}"  # adanalife/dashcam-cv:develop on stage
+        image = f"{IMAGE}:{env.tag_for(NAME)}"  # adanalife/dashcam-cv:develop on stage
         labels = meta_labels(NAME)
 
         # --- PriorityClass (cluster-scoped; no namespace) ---
@@ -159,7 +159,7 @@ class DashcamCVJobs(Construct):
     def __init__(self, scope: Construct, *, env: EnvConfig):
         super().__init__(scope, f"{NAME}-jobs")
         ns = env.namespace or None
-        image = f"{IMAGE}:{env.image_tag}"
+        image = f"{IMAGE}:{env.tag_for(NAME)}"
         labels = meta_labels(NAME)
 
         # --- Job: one-shot manual ramp (same embed pod, --random 1) ---

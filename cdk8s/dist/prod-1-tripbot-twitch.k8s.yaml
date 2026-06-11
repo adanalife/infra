@@ -71,8 +71,8 @@ spec:
             - secretRef:
                 name: tripbot-discord-bot-token
                 optional: true
-          image: adanalife/tripbot:latest
-          imagePullPolicy: Always
+          image: adanalife/tripbot:3.1.0
+          imagePullPolicy: IfNotPresent
           livenessProbe:
             httpGet:
               path: /health/live
@@ -115,8 +115,8 @@ spec:
                 name: tripbot-twitch-config
             - secretRef:
                 name: tripbot-database-creds
-          image: adanalife/tripbot:latest
-          imagePullPolicy: Always
+          image: adanalife/tripbot:3.1.0
+          imagePullPolicy: IfNotPresent
           name: migrate
           securityContext:
             allowPrivilegeEscalation: false

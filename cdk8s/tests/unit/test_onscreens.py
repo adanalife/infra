@@ -4,7 +4,7 @@ labels/selector correctness, and Deployment+Service across envs."""
 from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
-from adanalife_k8s.config import load_env
+from adanalife_k8s.config import image_pins, load_env
 from adanalife_k8s.constructs.onscreens import OnscreensServer
 
 
@@ -47,12 +47,14 @@ def test_nats_url_present_on_platform_envs_absent_on_local():
 
 
 def test_image_tag_per_env():
-    # prod + local ride :latest; dev + stage pin :develop.
+    # prod pins a release tag from versions.yaml; local rides :latest and
+    # dev + stage ride :develop.
     def image(env):
         dep = _by(_synth(env), "Deployment", "onscreens-twitch")[0]
         return dep["spec"]["template"]["spec"]["containers"][0]["image"]
 
-    assert image("prod-1") == "adanalife/onscreens-server:latest"
+    pin = image_pins()["prod-1"]["onscreens-server"]
+    assert image("prod-1") == f"adanalife/onscreens-server:{pin}"
     assert image("local") == "adanalife/onscreens-server:latest"
     assert image("stage-1") == "adanalife/onscreens-server:develop"
     assert image("development") == "adanalife/onscreens-server:develop"

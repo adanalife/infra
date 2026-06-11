@@ -54,8 +54,8 @@ class OnscreensServer(Construct):
 
         container = k8s.Container(
             name=name,
-            image=f"adanalife/onscreens-server:{env.image_tag}",
-            image_pull_policy="Always",
+            image=f"adanalife/onscreens-server:{env.tag_for('onscreens-server')}",
+            image_pull_policy=env.pull_policy_for("onscreens-server"),
             security_context=k8s.SecurityContext(
                 allow_privilege_escalation=False,
                 capabilities=k8s.Capabilities(drop=["ALL"]),

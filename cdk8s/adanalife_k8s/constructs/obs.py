@@ -100,8 +100,8 @@ class ObsInstance(Construct):
 
         container = k8s.Container(
             name="obs",
-            image=f"adanalife/obs:{env.image_tag}",
-            image_pull_policy="Always",
+            image=f"adanalife/obs:{env.tag_for('obs')}",
+            image_pull_policy=env.pull_policy_for("obs"),
             security_context=k8s.SecurityContext(
                 allow_privilege_escalation=False,
                 capabilities=k8s.Capabilities(drop=["ALL"]),
