@@ -16,8 +16,8 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.0"
     }
-    # GCP — prod-only (YouTube provider). Configured in google.tf, credentialed
-    # out of AWS SM. Not in stage-1's versions.tf: stage has no GCP resources.
+    # GCP — manages tripbot-prod (APIs, the delegated terraform SA, WIF).
+    # See google.tf; KEEP-IN-SYNC with stage-1's google provider block.
     google = {
       source  = "hashicorp/google"
       version = "~> 7.0"

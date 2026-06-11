@@ -1,7 +1,8 @@
 # GCP — google provider, a terraform-managed delegated identity, Workload
-# Identity Federation for CI, and API enablement. KEEP-IN-SYNC sibling of
-# terraform/stage-1/google.tf — identical except for var.gcp_project
-# (tripbot-prod here, tripbot-stage there).
+# Identity Federation for CI, and API enablement. KEEP-IN-SYNC across
+# terraform/{stage-1,prod-1}/google.tf — the two files are byte-identical;
+# the env difference (tripbot-stage vs tripbot-prod) is var.gcp_project,
+# set in each env's terraform.tfvars.
 #
 # AUTH MODEL (mirrors the AWS "assume a delegated role, never act as root"
 # pattern — see providers.tf's assume_role into AdminUser):
