@@ -270,6 +270,39 @@ resource "aws_secretsmanager_secret_version" "tripbot_google_maps_api_key" {
 }
 
 # ============================================================================
+# YouTube
+# ============================================================================
+
+# YouTube OAuth client credentials (Web-application client in the tripbot-stage
+# GCP project) for the tripbot-youtube platform instance. The OAuth client is
+# console-created — terraform can't manage user-consent OAuth clients (see
+# google.tf header). One SM secret holding YOUTUBE_CLIENT_ID +
+# YOUTUBE_CLIENT_SECRET; YOUTUBE_CHANNEL_ID may be added to the same JSON to pin
+# the bot to a specific channel identity (pkg/youtube treats it as optional).
+#
+# Materializes into the tripbot-youtube-creds k8s Secret via an ExternalSecret
+# emitted by the cdk8s Tripbot construct when the env's platforms include
+# youtube, envFrom'd into the tripbot-youtube Deployment.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/youtube-creds \
+#     --secret-string '{"YOUTUBE_CLIENT_ID":"...","YOUTUBE_CLIENT_SECRET":"..."}'
+resource "aws_secretsmanager_secret" "tripbot_youtube_creds" {
+  name        = "k8s/tripbot/youtube-creds"
+  description = "YouTube OAuth client credentials for tripbot (stage-1). Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID. Consumed by pkg/youtube (live-chat OAuth flow)."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_youtube_creds" {
+  secret_id     = aws_secretsmanager_secret.tripbot_youtube_creds.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
 # OBS
 # ============================================================================
 
@@ -381,6 +414,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
+      aws_secretsmanager_secret.tripbot_youtube_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
