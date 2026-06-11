@@ -43,6 +43,25 @@ jobs:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
+      # prod-1's google provider authenticates via GOOGLE_CREDENTIALS, sourced
+      # from the SM secret terraform itself manages (prod-1/secrets.tf +
+      # google.tf). Tolerates the pre-first-apply window where the secret does
+      # not exist yet. Other dirs have no GCP provider, so this is prod-1-only.
+      - name: GCP credentials for prod-1 plan
+        if: matrix.terraform-dirs == 'terraform/prod-1'
+        run: |
+          creds=$(aws secretsmanager get-secret-value \
+            --secret-id prod-1/gcp-terraform-credentials \
+            --query SecretString --output text 2>/dev/null || true)
+          if [ -n "$creds" ]; then
+            {
+              echo "GOOGLE_CREDENTIALS<<__GCP_EOF__"
+              echo "$creds"
+              echo "__GCP_EOF__"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::warning::prod-1/gcp-terraform-credentials not in SM yet — google provider unconfigured (expected until the first local apply bootstraps it)."
+          fi
       - name: terraform plan
         uses: dflook/terraform-plan@v2
         with:

@@ -181,34 +181,26 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 
 # Service-account JSON key for the `google` terraform provider (see google.tf).
 # prod-1-only deviation from the stage-1 KEEP-IN-SYNC sibling: YouTube v1 is
-# prod-only, so the GCP provider + its credential live in prod-1 alone. Follows
-# the placeholder-plus-out-of-band pattern (vault/decisions/secrets-manager-for-tf-providers).
+# prod-only, so the GCP provider + its credential live in prod-1 alone.
 #
-# Bootstrap (one-time; chicken-and-egg — the provider needs creds before it can
-# manage anything):
-#   1. gcloud iam service-accounts create terraform --project tripbot-prod
-#   2. gcloud projects add-iam-policy-binding tripbot-prod \
-#        --member serviceAccount:terraform@tripbot-prod.iam.gserviceaccount.com \
-#        --role roles/serviceusage.serviceUsageAdmin
-#   3. gcloud iam service-accounts keys create key.json \
-#        --iam-account terraform@tripbot-prod.iam.gserviceaccount.com
-#   4. aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#        --secret-id prod-1/gcp-terraform-credentials --secret-string "$(cat key.json)"
+# Deliberate exception to the placeholder-plus-out-of-band pattern
+# (vault/decisions/secrets-manager-for-tf-providers): terraform CREATES the SA
+# key (google.tf) and writes its value here directly — same shape as
+# aws_iam_access_key.* → aws_secretsmanager_secret_version.*. No manual
+# put-secret-value; the only manual bootstrap is `gcloud auth
+# application-default login` so the provider can create the SA the first time
+# (see google.tf's AUTH MODEL comment). CI reads this secret into
+# GOOGLE_CREDENTIALS for plan (see .github/workflows/terraform.yml).
 resource "aws_secretsmanager_secret" "gcp_terraform_credentials" {
   name        = "prod-1/gcp-terraform-credentials"
   description = "GCP service-account JSON key used by the google terraform provider. Role: serviceusage.serviceUsageAdmin on tripbot-prod."
 }
 
 resource "aws_secretsmanager_secret_version" "gcp_terraform_credentials" {
-  secret_id     = aws_secretsmanager_secret.gcp_terraform_credentials.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "gcp_terraform_credentials" {
   secret_id = aws_secretsmanager_secret.gcp_terraform_credentials.id
+  # google_service_account_key.private_key is base64-encoded JSON; decode so the
+  # secret holds raw JSON, consumable directly as GOOGLE_CREDENTIALS.
+  secret_string = base64decode(google_service_account_key.terraform.private_key)
 }
 
 # ============================================================================

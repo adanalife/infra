@@ -1,34 +1,58 @@
-# GCP — google provider + API enablement for tripbot-prod.
+# GCP — google provider, terraform-managed service account, + API enablement
+# for tripbot-prod. prod-only (YouTube v1 is prod-only).
 #
-# prod-only. The provider lives here (not providers.tf) so prod-1's
-# KEEP-IN-SYNC providers.tf stays byte-identical to stage-1, which has no GCP
-# resources — same reasoning the cloudflare provider lives in cloudflare-pages.tf.
+# AUTH MODEL (deliberate exception to secrets-manager-for-tf-providers):
+# Terraform creates its own automation service account + key and writes the
+# key into AWS SM itself — it does NOT use the out-of-band placeholder seed.
+# To avoid the chicken-and-egg (the provider can't authenticate as the SA it's
+# creating), the provider authenticates via Application Default Credentials:
+#   - locally: `gcloud auth application-default login` (one-time, as a
+#     project owner/editor — Dana). This is the only manual bootstrap step.
+#   - in CI: the plan job exports GOOGLE_CREDENTIALS from the SM secret this
+#     file populates (see .github/workflows/terraform.yml + secrets.tf).
+# No `credentials` argument here, so both paths resolve through the google
+# provider's standard ADC / GOOGLE_CREDENTIALS lookup.
 #
-# Credentialed out of AWS Secrets Manager via the placeholder-plus-out-of-band
-# pattern (vault/decisions/secrets-manager-for-tf-providers); the SA-key
-# container + bootstrap steps are in secrets.tf
-# (aws_secretsmanager_secret.gcp_terraform_credentials).
+# The provider lives in google.tf (not providers.tf) so prod-1's KEEP-IN-SYNC
+# providers.tf stays byte-identical to stage-1, which has no GCP resources —
+# same reasoning the cloudflare provider lives in cloudflare-pages.tf.
 #
-# Two-phase first apply: the credential is a placeholder until seeded, so apply
-# the SM container (secrets.tf) FIRST, run put-secret-value, THEN apply this
-# file — otherwise the provider can't authenticate. See the commit history /
-# the GCP-via-Terraform plan for the sequence.
-#
-# What terraform does NOT own (and can't): the OAuth 2.0 Client ID, the OAuth
-# consent screen, and the channel-owner refresh token. The google provider has
-# no resource for general user-consent OAuth clients, and YouTube live-chat
-# read/write must run as the channel owner via user consent (a service account
-# can't operate a channel's live chat). Those stay manual/console — runbook in
-# the vault.
+# What terraform still does NOT own (and can't): the OAuth 2.0 Client ID, the
+# OAuth consent screen, and the channel-owner refresh token. The google
+# provider has no resource for general user-consent OAuth clients, and YouTube
+# live-chat read/write must run as the channel owner via user consent (a
+# service account can't operate a channel's live chat). Those stay manual.
 
 provider "google" {
-  project     = "tripbot-prod"
-  credentials = data.aws_secretsmanager_secret_version.gcp_terraform_credentials.secret_string
+  project = "tripbot-prod"
+}
+
+# Automation service account terraform uses for steady-state / CI plan. Created
+# by Dana's ADC on first apply; thereafter the key below credentials CI.
+resource "google_service_account" "terraform" {
+  project      = "tripbot-prod"
+  account_id   = "terraform"
+  display_name = "Terraform automation (managed by infra/terraform/prod-1)"
+}
+
+# serviceUsageAdmin lets the SA enable/inspect the google_project_service
+# resources below. apikeys.admin (for the deferred google_apikeys_key Maps
+# import — TODO #188) is intentionally NOT granted yet.
+resource "google_project_iam_member" "terraform_serviceusage" {
+  project = "tripbot-prod"
+  role    = "roles/serviceusage.serviceUsageAdmin"
+  member  = "serviceAccount:${google_service_account.terraform.email}"
+}
+
+# Key for the SA. `private_key` is base64 JSON, surfaced only at create time and
+# kept in terraform state (S3, encrypted) — written into SM by secrets.tf.
+resource "google_service_account_key" "terraform" {
+  service_account_id = google_service_account.terraform.name
 }
 
 # YouTube Data API — the resource this whole workspace-addition exists to
 # enable. Prerequisite for the tripbot YouTube provider's OAuth + live-chat
-# polling (tripbot Track B, phase B1).
+# polling.
 resource "google_project_service" "youtube" {
   project = "tripbot-prod"
   service = "youtube.googleapis.com"
