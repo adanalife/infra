@@ -22,6 +22,16 @@
 # provider has no resource for general user-consent OAuth clients, and YouTube
 # live-chat read/write must run as the channel owner via user consent (a
 # service account can't operate a channel's live chat). Those stay manual.
+#
+# PREREQUISITE META-APIs (enabled out-of-band, NOT manageable here): the
+# provider itself needs serviceusage.googleapis.com AND
+# cloudresourcemanager.googleapis.com enabled to read/manage the
+# google_project_service resources below — terraform can't bootstrap these
+# (the refresh phase calls them before it could enable them). Enable once:
+#   gcloud services enable serviceusage.googleapis.com \
+#     cloudresourcemanager.googleapis.com --project tripbot-prod
+# They're declared below as google_project_service for visibility/drift, but
+# the enable must already have happened by gcloud.
 
 provider "google" {
   project = "tripbot-prod"
@@ -48,6 +58,21 @@ resource "google_project_iam_member" "terraform_serviceusage" {
 # kept in terraform state (S3, encrypted) — written into SM by secrets.tf.
 resource "google_service_account_key" "terraform" {
   service_account_id = google_service_account.terraform.name
+}
+
+# Prerequisite meta-APIs the google provider depends on (see header). Enabled
+# out-of-band by gcloud; declared here so they're tracked and not accidentally
+# disabled. disable_on_destroy=false — never tear these down.
+resource "google_project_service" "service_usage" {
+  project            = "tripbot-prod"
+  service            = "serviceusage.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "cloud_resource_manager" {
+  project            = "tripbot-prod"
+  service            = "cloudresourcemanager.googleapis.com"
+  disable_on_destroy = false
 }
 
 # YouTube Data API — the resource this whole workspace-addition exists to
