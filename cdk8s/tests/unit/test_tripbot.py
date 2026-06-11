@@ -90,6 +90,48 @@ def test_local_deployment_envfroms_local_secret_not_eso_db():
     assert "tripbot-database-creds" not in names
 
 
+# ---- YouTube platform instance ----
+# No env emits youtube yet (platforms gating in config.py), but the factory must
+# produce the per-platform creds wiring so flipping platforms is the whole B5
+# deploy gesture — same direct-synth idiom as test_obs.py.
+
+
+def test_youtube_instance_emits_creds_external_secret_and_envfrom():
+    app = K8sTesting.app()
+    chart = Chart(app, "t")
+    Tripbot(chart, "youtube", env=load_env("stage-1"))
+    objs = K8sTesting.synth(chart)
+
+    # the per-platform ExternalSecret is emitted by the construct itself
+    # (unlike the identity-level Secrets, which live in SupportingChart)
+    es = _by(objs, "ExternalSecret", "tripbot-youtube-creds")
+    assert es, "youtube instance must emit tripbot-youtube-creds"
+    assert es[0]["spec"]["dataFrom"][0]["extract"]["key"] == (
+        "k8s/tripbot/youtube-creds"
+    )
+
+    dep = _by(objs, "Deployment", "tripbot-youtube")[0]
+    names = [
+        e.get("secretRef", {}).get("name")
+        for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]
+    ]
+    assert "tripbot-youtube-creds" in names
+    # identity-level Secrets still ride along on the youtube instance
+    assert "tripbot-twitch-creds" in names
+
+
+def test_twitch_instance_has_no_youtube_creds():
+    # zero blast radius on running envs: the twitch instance neither emits the
+    # ExternalSecret (asserted in test_deployment_envfroms_db_and_app_secrets_
+    # by_name) nor envFroms the youtube Secret
+    dep = _by(_synth("stage-1"), "Deployment", "tripbot-twitch")[0]
+    names = [
+        e.get("secretRef", {}).get("name")
+        for e in dep["spec"]["template"]["spec"]["containers"][0]["envFrom"]
+    ]
+    assert "tripbot-youtube-creds" not in names
+
+
 # ---- per-env identity config ----
 
 
