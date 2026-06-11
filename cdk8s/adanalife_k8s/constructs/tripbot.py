@@ -137,6 +137,13 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
     # obs-youtube, not obs-twitch. Was previously unset, leaving pkg/obs on its
     # stale "obs:4455" default after OBS went per-platform.
     data["OBS_WEBSOCKET_ADDR"] = f"{app_name('obs', platform)}:4455"
+    # tripbot's Run() branches on STREAM_PLATFORM (chat transport, command
+    # allowlist, Twitch-only boot steps). twitch is the binary's default, so —
+    # same idiom as the OBS chart — only non-twitch instances carry the key,
+    # keeping the long-running twitch ConfigMaps (and their config-hash
+    # rollouts) untouched.
+    if platform != "twitch":
+        data["STREAM_PLATFORM"] = platform
     data.update(appconfig.telemetry_config(env))
     data.update(_ENV_CONFIG[env.name])
     if env.nats_url:
