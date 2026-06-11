@@ -47,9 +47,13 @@ nats://nats.<env-platform-ns>.svc.cluster.local:4222
 
 ## Smoke test
 
+The in-cluster `nats-box` pod is disabled (`natsBox.enabled: false`) — it's not
+in the data path and clashes with the namespace's restricted Pod Security
+Standard. Smoke-test by port-forwarding the server and using a local `nats` CLI:
+
 ```sh
-kubectl exec -ti deploy/nats-box -n prod-1-platform -- nats pub foo bar
-kubectl exec -ti deploy/nats-box -n prod-1-platform -- nats sub foo
+kubectl port-forward -n prod-1-platform svc/nats 4222:4222 &
+nats pub foo bar    # in another shell; nats sub foo to receive
 ```
 
 ## Topic convention
