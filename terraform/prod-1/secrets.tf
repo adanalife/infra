@@ -12,9 +12,6 @@
 #     (dashboards-as-code) stays in stage-1 against the shared Grafana
 #     Cloud stack. The SM container is here for symmetry / readiness;
 #     no terraform-side consumer reads it today.
-#   - `gcp_terraform_credentials`: prod-only. YouTube v1 is prod-only, so
-#     the google provider (google.tf) and its SA-key credential live in
-#     prod-1 alone. Stage-1 has no GCP resources.
 #
 # See stage-1/secrets.tf header for the full per-secret pattern and
 # first-apply flow.
@@ -176,34 +173,6 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 }
 
 # ============================================================================
-# GCP — terraform provider credentials
-# ============================================================================
-
-# Service-account JSON key for the `google` terraform provider (see google.tf).
-# prod-1-only deviation from the stage-1 KEEP-IN-SYNC sibling: YouTube v1 is
-# prod-only, so the GCP provider + its credential live in prod-1 alone.
-#
-# Deliberate exception to the placeholder-plus-out-of-band pattern
-# (vault/decisions/secrets-manager-for-tf-providers): terraform CREATES the SA
-# key (google.tf) and writes its value here directly — same shape as
-# aws_iam_access_key.* → aws_secretsmanager_secret_version.*. No manual
-# put-secret-value; the only manual bootstrap is `gcloud auth
-# application-default login` so the provider can create the SA the first time
-# (see google.tf's AUTH MODEL comment). CI reads this secret into
-# GOOGLE_CREDENTIALS for plan (see .github/workflows/terraform.yml).
-resource "aws_secretsmanager_secret" "gcp_terraform_credentials" {
-  name        = "prod-1/gcp-terraform-credentials"
-  description = "GCP service-account JSON key used by the google terraform provider. Role: serviceusage.serviceUsageAdmin on tripbot-prod."
-}
-
-resource "aws_secretsmanager_secret_version" "gcp_terraform_credentials" {
-  secret_id = aws_secretsmanager_secret.gcp_terraform_credentials.id
-  # google_service_account_key.private_key is base64-encoded JSON; decode so the
-  # secret holds raw JSON, consumable directly as GOOGLE_CREDENTIALS.
-  secret_string = base64decode(google_service_account_key.terraform.private_key)
-}
-
-# ============================================================================
 # Google Maps
 # ============================================================================
 
@@ -317,10 +286,6 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
-      # prod-only — GCP terraform-provider credential (defined above; google.tf
-      # reads it via data source on every plan). Stage-1 has no GCP, so this is
-      # an intended divergence from the KEEP-IN-SYNC sibling, same as argocd below.
-      aws_secretsmanager_secret.gcp_terraform_credentials.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.postgres_backup_s3.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
