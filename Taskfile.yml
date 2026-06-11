@@ -302,6 +302,47 @@ tasks:
     cmds:
       - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
 
+  # platform = env-agnostic config, i.e. things not owned by any specific
+  # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
+  # It has no account of its own — state/SM plumbing rides in the org-global
+  # core account, hence the adanalife-core profile; --no-session because it
+  # attaches IAM policies.
+  tf:platform:apply:
+    desc: terraform apply against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+
+  tf:platform:plan:
+    desc: terraform plan against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+
+  tf:platform:init:
+    desc: terraform init against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+
+  tf:platform:init:reconfigure:
+    desc: terraform init -reconfigure against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:platform:init:migrate:
+    desc: terraform init -migrate-state against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
+
+  tf:platform:destroy:
+    desc: terraform destroy against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
+
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
     cmds:

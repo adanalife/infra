@@ -16,6 +16,12 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.0"
     }
+    # GCP — manages tripbot-stage (APIs, the delegated terraform SA, WIF).
+    # See google.tf; KEEP-IN-SYNC with prod-1's google provider block.
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
     grafana = {
       source  = "grafana/grafana"
       version = "~> 4.35"

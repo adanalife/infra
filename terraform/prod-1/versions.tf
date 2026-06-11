@@ -16,6 +16,12 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.0"
     }
+    # GCP — manages tripbot-prod (APIs, the delegated terraform SA, WIF).
+    # See google.tf; KEEP-IN-SYNC with stage-1's google provider block.
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
     # Manages the tailnet ACL + the K8s operator's OAuth client + the node join
     # key (prod-1 only — the tailnet is global; see tailscale.tf).
     tailscale = {
