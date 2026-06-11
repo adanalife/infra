@@ -83,7 +83,7 @@ machine:
   # — hit empirically on the first wipe. Re-add once we move to a SecureBoot
   # image + UEFI Secure Boot (+ key enrollment). Until then, at-rest protection
   # is physical security; the S3 postgres dump + the SOPS-stashed PKI are the
-  # recovery path. Follow-up tracked in vault/infra/TODO.md.
+  # recovery path.
 
 cluster:
   allowSchedulingOnControlPlanes: true

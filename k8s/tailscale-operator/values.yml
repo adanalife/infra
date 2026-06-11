@@ -19,8 +19,7 @@
 # system:masters (cluster-admin) when reaching tag:k8s-operator. So no client
 # cert: `tailscale configure kubeconfig tailscale-operator` + kubectl works from
 # any tailnet device, gated by that ACL grant. (noauth was tried first but
-# pairs the proxy with a bearer token the apiserver rejects → 401.) See
-# vault/infra/kube-contexts.md.
+# pairs the proxy with a bearer token the apiserver rejects → 401.)
 apiServerProxyConfig:
   mode: "true"
 

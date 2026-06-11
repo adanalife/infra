@@ -5,7 +5,7 @@
 # `local-path-retain` StorageClass (Retain) that Postgres uses is defined
 # separately in k8s/apps/postgres/overlays/prod-1/storageclass.yaml.
 #
-# Codifies what the bootstrap runbook (Phase 5.0) previously did by hand. Two
+# Codifies what the cluster bootstrap previously did by hand. Two
 # Talos-specific adjustments, applied as patches over the upstream manifest:
 #
 #   1. config.json nodePathMap retargeted /opt -> /var/lib. Talos mounts /opt

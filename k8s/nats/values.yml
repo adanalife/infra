@@ -1,14 +1,11 @@
 # NATS chart values shared across all envs. Per-env overlays at
 # k8s/nats/<env>/values.yml layer resource sizing + namespace context on top.
 #
-# Phase 0 (captured 2026-05-28): single-node, no JetStream, no PVC — the
-# substrate to start migrating fire-and-forget HTTP calls onto a pubsub fabric.
-#
-# Phase 3 (2026-05-29): JetStream on, file-backed, so the admin live console's
+# Single-node. JetStream on, file-backed, so the admin live console's
 # chat log + live-map breadcrumb trail survive a tripbot reboot (core NATS has
 # no replay; the hub's in-memory ring/trail reset to empty on every restart).
 # tripbot declares the streams (TRIPBOT_CHAT, TRIPBOT_VIDEO) at startup and
-# backfills its buffers from them. Single-node still — durability here means
+# backfills its buffers from them. Durability here means
 # "survives a NATS pod restart / node reboot," not HA replication.
 #
 # Topic convention (producer-side, not enforced here):

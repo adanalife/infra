@@ -1,6 +1,6 @@
 # prod-1 NATS overrides. Layers on top of k8s/nats/values.yml.
 #
-# Phase 0: tiny footprint. NATS at idle uses single-digit MB; the
+# Tiny footprint. NATS at idle uses single-digit MB; the
 # exporter sidecar + reloader are similarly small. Bump once we have
 # real publish/subscribe traffic to justify it.
 
