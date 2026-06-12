@@ -76,6 +76,15 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
+# The private tripbot-console repo — Argo's second source. Its cdk8s/dist
+# deploy units (one <env>.k8s.yaml per env) live in that repo, per the split
+# design: the console repo owns its own deployment; infra owns everything else.
+CONSOLE_REPO_URL = "git@github.com:adanalife/tripbot-console.git"
+CONSOLE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-console"
+# Per-env git revision for the console units: stage tracks develop (manifests
+# float alongside the :develop image), prod tracks master (release-gated) —
+# the same philosophy as the image-tag pinning model.
+CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 
 
 def _data_ns(env_name: str) -> str:
@@ -146,6 +155,11 @@ class ArgoCD(Construct):
     ):
         super().__init__(scope, id)
         self.envs = envs
+        # Envs whose console (the cross-repo tripbot-console unit) this Argo
+        # delivers — the envs with a defined console revision. Resolves empty on
+        # the k3d dev instance (development deploys via `task deploy:dev` in the
+        # console repo; the dev cluster carries no private-repo deploy key).
+        self.console_envs = tuple(e for e in envs if e in CONSOLE_REVISIONS)
 
         self._app_project()
         # Three ApplicationSets, one Application each per unit. The apps set is
@@ -184,6 +198,25 @@ class ArgoCD(Construct):
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
+        # The cross-repo console unit: one Application per env, sourcing the
+        # PRIVATE tripbot-console repo's committed dist (per-env revision —
+        # stage follows develop, prod follows master). Same autosync posture
+        # as the apps set.
+        if self.console_envs:
+            self._application_set(
+                id="appset-console",
+                name="tripbot-console",
+                elements=[
+                    {"env": e, "revision": CONSOLE_REVISIONS[e]}
+                    for e in self.console_envs
+                ],
+                app_name_tmpl="{{.env}}-console",
+                include_tmpl="{{.env}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                repo_url=CONSOLE_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
         # traefik/LAN Ingress is published on every cluster with a DNS host —
         # external-dns publishes the record either way; the dev cluster reaches it
@@ -193,6 +226,13 @@ class ArgoCD(Construct):
         if lan_host:
             self._lan_ingress(lan_host, tls=lan_tls)
         self._repo_external_secret()
+        if self.console_envs:
+            self._repo_external_secret(
+                id="repo-secret-console",
+                name="argocd-repo-tripbot-console",
+                url=CONSOLE_REPO_URL,
+                sm_key=CONSOLE_REPO_SM_KEY,
+            )
 
     # ---- Argo CRs (ApiObject) ----
     def _app_project(self):
@@ -208,7 +248,8 @@ class ArgoCD(Construct):
                 "/spec",
                 {
                     "description": "adanalife app workloads synthesized by cdk8s",
-                    "sourceRepos": [REPO_URL],
+                    "sourceRepos": [REPO_URL]
+                    + ([CONSOLE_REPO_URL] if self.console_envs else []),
                     "destinations": [
                         {"server": IN_CLUSTER, "namespace": ns}
                         for ns in _project_namespaces(self.envs)
@@ -240,6 +281,8 @@ class ArgoCD(Construct):
         dest_ns_tmpl: str = "{{.env}}",
         automated_envs: tuple[str, ...] = (),
         automated_holdouts: tuple[tuple[str, str], ...] = (),
+        repo_url: str = REPO_URL,
+        target_revision_tmpl: str = TARGET_REVISION,
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
@@ -263,8 +306,8 @@ class ArgoCD(Construct):
         spec: dict = {
             "project": PROJECT,
             "source": {
-                "repoURL": REPO_URL,
-                "targetRevision": TARGET_REVISION,
+                "repoURL": repo_url,
+                "targetRevision": target_revision_tmpl,
                 "path": "cdk8s/dist",
                 "directory": {"include": include_tmpl},
             },
@@ -431,16 +474,22 @@ class ArgoCD(Construct):
             ),
         )
 
-    def _repo_external_secret(self):
+    def _repo_external_secret(
+        self,
+        id: str = "repo-secret",
+        name: str = "argocd-repo-infra",
+        url: str = REPO_URL,
+        sm_key: str = REPO_SM_KEY,
+    ):
         # IaC repo registration: ESO materializes the Argo-recognized `repository`
         # Secret (label argocd.argoproj.io/secret-type: repository) from the deploy
-        # key in SM. Reads the cluster-wide platform store. One-time bootstrap:
-        # generate a read-only deploy key, add the public half to GitHub, store the
-        # private half at k8s/argocd/repo-ssh-key in prod's SM.
+        # key in SM. Reads the cluster-wide platform store. One-time bootstrap per
+        # repo: generate a read-only deploy key, add the public half to GitHub,
+        # store the private half at the repo's SM key in prod's SM.
         esx.ExternalSecret(
             self,
-            "repo-secret",
-            metadata={"name": "argocd-repo-infra", "namespace": ARGO_NS},
+            id,
+            metadata={"name": name, "namespace": ARGO_NS},
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
@@ -448,7 +497,7 @@ class ArgoCD(Construct):
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(
-                    name="argocd-repo-infra",
+                    name=name,
                     creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
                     template=esx.ExternalSecretSpecTargetTemplate(
                         engine_version=esx.ExternalSecretSpecTargetTemplateEngineVersion.V2,
@@ -457,7 +506,7 @@ class ArgoCD(Construct):
                         ),
                         data={
                             "type": "git",
-                            "url": REPO_URL,
+                            "url": url,
                             "sshPrivateKey": "{{ .sshPrivateKey }}",
                         },
                     ),
@@ -465,7 +514,7 @@ class ArgoCD(Construct):
                 data=[
                     esx.ExternalSecretSpecData(
                         secret_key="sshPrivateKey",
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(key=REPO_SM_KEY),
+                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(key=sm_key),
                     )
                 ],
             ),
