@@ -304,6 +304,15 @@ class ArgoCD(Construct):
             "goTemplate": True,
             "goTemplateOptions": ["missingkey=error"],
             "generators": [{"list": {"elements": elements}}],
+            # Emergency brake: let a manual sync-policy change on a generated
+            # Application STICK instead of being stomped back within seconds by
+            # this controller. With this, `argocd app set <app> --sync-policy none`
+            # (or the UI autosync toggle) durably disables selfHeal on one
+            # Application so its workloads can be scaled down by hand. The
+            # override survives until a template change regenerates the
+            # Application (e.g. re-applying this file), which doubles as the
+            # recovery path back to the declared policy.
+            "ignoreApplicationDifferences": [{"jsonPointers": ["/spec/syncPolicy"]}],
             "template": {
                 "metadata": {"name": app_name_tmpl},
                 "spec": spec,

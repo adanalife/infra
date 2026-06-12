@@ -39,6 +39,9 @@ spec:
             app: onscreens-twitch
           - env: development
             app: obs-twitch
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -97,6 +100,9 @@ spec:
     - list:
         elements:
           - env: development
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
   template:
     metadata:
       name: "{{.env}}-supporting"
@@ -148,6 +154,9 @@ spec:
         elements:
           - env: development
             ns: development
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
   template:
     metadata:
       name: "{{.env}}-data"
