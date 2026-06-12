@@ -24,6 +24,9 @@ it what to watch:
     ClusterIssuer. Mirrors the apps' traefik+tailscale dual exposure.
   * repo ExternalSecret — IaC repo registration: ESO materializes the
     Argo-recognized `repository` Secret from a read-only deploy key in SM.
+  * notifications ExternalSecret — the Discord webhook for the notifications
+    controller (sync-failed / health-degraded pings; config in
+    k8s/argo-cd/values.yml), from the same SM container the Grafana alerts use.
 
 Argo CRDs (AppProject/ApplicationSet) are emitted via ApiObject — they're one-off
 objects, so (like SecretStore) the typed-import cost isn't worth it.
@@ -76,6 +79,10 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
+# Discord webhook for the notifications controller — deliberately the SAME SM
+# container tripbot's reportCmd and the Grafana alerts read (one channel, one
+# webhook, already seeded in both accounts), not a new argocd-scoped secret.
+NOTIFICATIONS_SM_KEY = "k8s/tripbot/discord-alerts-webhook"
 # The private tripbot-console repo — Argo's second source. Its cdk8s/dist
 # deploy units (one <env>.k8s.yaml per env) live in that repo, per the split
 # design: the console repo owns its own deployment; infra owns everything else.
@@ -152,6 +159,7 @@ class ArgoCD(Construct):
         tailscale_ui: bool = True,
         lan_host: str | None = LAN_HOST,
         lan_tls: bool = True,
+        notifications_secret: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -233,6 +241,10 @@ class ArgoCD(Construct):
                 url=CONSOLE_REPO_URL,
                 sm_key=CONSOLE_REPO_SM_KEY,
             )
+        # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
+        # skips the webhook secret too.
+        if notifications_secret:
+            self._notifications_external_secret()
 
     # ---- Argo CRs (ApiObject) ----
     def _app_project(self):
@@ -468,6 +480,36 @@ class ArgoCD(Construct):
                                     ),
                                 )
                             ]
+                        ),
+                    )
+                ],
+            ),
+        )
+
+    def _notifications_external_secret(self):
+        # Webhook credential for the notifications controller (configured in
+        # k8s/argo-cd/values.yml, which sets notifications.secret.create=false):
+        # ESO materializes argocd-notifications-secret from the shared Discord
+        # webhook in SM. The notifier references it as $discord-webhook-url.
+        esx.ExternalSecret(
+            self,
+            "notifications-secret",
+            metadata={"name": "argocd-notifications", "namespace": ARGO_NS},
+            spec=esx.ExternalSecretSpec(
+                refresh_interval="1h",
+                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
+                    name="aws-secretsmanager-cluster",
+                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
+                ),
+                target=esx.ExternalSecretSpecTarget(
+                    name="argocd-notifications-secret",
+                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
+                ),
+                data=[
+                    esx.ExternalSecretSpecData(
+                        secret_key="discord-webhook-url",
+                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
+                            key=NOTIFICATIONS_SM_KEY
                         ),
                     )
                 ],

@@ -374,3 +374,21 @@ spec:
       metadata:
         labels:
           argocd.argoproj.io/secret-type: repository
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-notifications
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: k8s/tripbot/discord-alerts-webhook
+      secretKey: discord-webhook-url
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secretsmanager-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-notifications-secret

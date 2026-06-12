@@ -13,6 +13,7 @@ _DEV = dict(
     envs=("development",),
     autosync_envs=("development",),
     autosync_holdouts=(),
+    notifications_secret=False,
     tailscale_ui=False,
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
@@ -77,6 +78,20 @@ def test_minipc_apps_autosync_except_prod_obs():
     # supporting + data stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
+
+
+def test_notifications_secret_minipc_only():
+    def names(objs):
+        return {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
+
+    # minipc: infra + console repo creds + the notifications Discord webhook
+    assert names(_synth()) == {
+        "argocd-repo-infra",
+        "argocd-repo-tripbot-console",
+        "argocd-notifications",
+    }
+    # dev runs notifications.enabled=false, so no webhook secret there
+    assert names(_synth(**_DEV)) == {"argocd-repo-infra"}
 
 
 def test_data_appset_never_prunes_either_variant():
