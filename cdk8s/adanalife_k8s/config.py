@@ -189,7 +189,15 @@ ENVS: dict[str, EnvConfig] = {
         # obs-youtube boots idle — the streaming toggle is prod-twitch-only).
         # prod follows once the stage burn-in + dual-iGPU-encode validation
         # pass.
-        platforms=("twitch", "youtube"),
+        #
+        # twitch is OFF here for the duration of the burn-in: running both
+        # stage stacks (8 pods, 4 iGPU claims) alongside prod made the prod
+        # twitch stream stutter on 2026-06-11 — the stage twitch pair never
+        # streamed (no stage stream key exists), but its VLC decode + OBS
+        # render still contended for the shared iGPU. Budget is two live
+        # streams total: prod-twitch + stage-youtube. Re-add "twitch" when
+        # the burn-in ends.
+        platforms=("youtube",),
     ),
     "development": EnvConfig(
         name="development",

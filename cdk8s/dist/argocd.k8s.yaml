@@ -46,14 +46,6 @@ spec:
           - env: prod-1
             app: obs-twitch
           - env: stage-1
-            app: tripbot-twitch
-          - env: stage-1
-            app: vlc-twitch
-          - env: stage-1
-            app: onscreens-twitch
-          - env: stage-1
-            app: obs-twitch
-          - env: stage-1
             app: tripbot-youtube
           - env: stage-1
             app: vlc-youtube

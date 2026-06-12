@@ -51,15 +51,19 @@ def test_youtube_factory_emits_clean_instance():
 
 
 def test_platform_matrix_stage_has_youtube_prod_defers():
-    # stage burns the youtube stack in first; prod flips after the
-    # dual-encode validation. twitch stays primary (platforms[0]) everywhere —
-    # primary keeps the identity-stable public host and the one-shot Jobs
-    # envFrom the primary platform's ConfigMap.
-    assert load_env("stage-1").platforms == ("twitch", "youtube")
+    # stage burns the youtube stack in first — twitch is OFF there for the
+    # burn-in (the 2026-06-11 stage-starves-prod incident: both stage stacks
+    # alongside prod made the prod stream stutter). prod flips to youtube
+    # after the dual-encode validation. The one-shot Jobs envFrom the primary
+    # (platforms[0]) ConfigMap, which on stage is now tripbot-youtube-config.
+    assert load_env("stage-1").platforms == ("youtube",)
     assert load_env("prod-1").platforms == ("twitch",)
     assert load_env("development").platforms == ("twitch",)
     objs = _synth("stage-1")
-    assert _by(objs, "Deployment", "obs-twitch"), "obs-twitch deployment missing"
+    assert _by(objs, "Deployment", "obs-youtube"), "obs-youtube deployment missing"
+    assert not _by(objs, "Deployment", "obs-twitch"), (
+        "stage twitch is off for the burn-in"
+    )
 
 
 def test_prod_twitch_streams_via_eso_and_has_no_youtube():
@@ -91,20 +95,20 @@ def test_gpu_and_encoder_track_env():
 
 def test_contract_drives_names_ports_and_urls():
     c = load_contract()
-    objs = _synth("stage-1")
-    svc = _by(objs, "Service", "obs-twitch")[0]
-    assert svc["metadata"]["name"] == c.svc("obs_twitch")
+    objs = _synth("stage-1")  # stage's primary platform is youtube (burn-in)
+    svc = _by(objs, "Service", "obs-youtube")[0]
+    assert svc["metadata"]["name"] == c.svc("obs_youtube")
     ports = {p["name"]: p["port"] for p in svc["spec"]["ports"]}
     assert ports["websocket"] == c.port("obs_websocket")
     assert ports["obs-server"] == c.port("obs_server")
     # OBS-config URLs are composed from contract names+ports (can't drift from the Services).
-    cm = _by(objs, "ConfigMap", "obs-twitch-config")[0]["data"]
-    assert cm["ONSCREENS_URL_BASE"] == c.onscreens_url_base("twitch")
-    assert cm["VLC_URL_BASE"] == c.vlc_url_base("twitch")
-    assert cm["DASHCAM_RTSP_URL"] == c.dashcam_rtsp_url("twitch")
-    # the twitch obs points at the twitch vlc/onscreens
-    assert cm["VLC_URL_BASE"] == "http://vlc-twitch:8080"
-    assert cm["ONSCREENS_URL_BASE"] == "http://onscreens-twitch:8080"
+    cm = _by(objs, "ConfigMap", "obs-youtube-config")[0]["data"]
+    assert cm["ONSCREENS_URL_BASE"] == c.onscreens_url_base("youtube")
+    assert cm["VLC_URL_BASE"] == c.vlc_url_base("youtube")
+    assert cm["DASHCAM_RTSP_URL"] == c.dashcam_rtsp_url("youtube")
+    # the youtube obs points at the youtube vlc/onscreens
+    assert cm["VLC_URL_BASE"] == "http://vlc-youtube:8080"
+    assert cm["ONSCREENS_URL_BASE"] == "http://onscreens-youtube:8080"
 
 
 def test_local_obs_has_no_ingress():

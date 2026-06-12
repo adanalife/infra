@@ -17,7 +17,7 @@ spec:
               value: http://localhost:8080
           envFrom:
             - configMapRef:
-                name: tripbot-twitch-config
+                name: tripbot-youtube-config
             - secretRef:
                 name: tripbot-database-creds
             - secretRef:
