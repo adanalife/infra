@@ -76,6 +76,25 @@ class EnvConfig:
     # Streaming platforms present in this env (obs instances). twitch everywhere;
     # youtube currently stage-only while the bot side is built out.
     platforms: tuple[str, ...] = ("twitch",)
+    # --- prod-stream protection (2026-06-11 stage-starves-prod incident) ---
+    # PriorityClassName stamped on the env's app Deployment pods; when set,
+    # SupportingChart also emits the PriorityClass itself. Prod outranks every
+    # default-priority (0) pod, so under node pressure the scheduler preempts
+    # co-tenant stage workloads, never the live stream.
+    priority_class: str = ""
+    # CPU requests for the stream-critical pair. Requests are the CFS weight —
+    # under CPU contention each cgroup gets CPU proportional to its request, so
+    # prod's real-sized requests guarantee the encode/decode chain its share no
+    # matter how many 200m co-tenant pods burst. Non-prod stays at the small
+    # default so stage/dev keep their light footprint.
+    obs_cpu_request: str = "200m"
+    vlc_cpu_request: str = "200m"
+    # ResourceQuota hard caps for the app namespace (emitted by SupportingChart
+    # when non-empty). Caps what the env can REQUEST in aggregate — scaling up
+    # too many deployments hits the quota and pods stay unscheduled instead of
+    # crowding the node. NB: quota on requests.* means every pod in the
+    # namespace must declare requests for those resources or be rejected.
+    app_quota: dict[str, str] = field(default_factory=dict)
     # Non-standard public HTTPS port carried in externally-visible URLs
     # (EXTERNAL_URL, registered OAuth redirect URIs). Only dev needs it — k3d's
     # traefik is mapped to host :9443 because Colima can't bind :443.
@@ -158,6 +177,13 @@ ENVS: dict[str, EnvConfig] = {
         # take years of irreplaceable data.
         data_namespace="prod-1-data",
         platforms=("twitch",),
+        # The live stream always wins: prod app pods outrank default-priority
+        # co-tenants (stage, dashcam-cv), and the encode/decode pair carries
+        # real CPU requests so contention can't starve it (20-core node; the
+        # whole prod chain requests ~3.2 CPU).
+        priority_class="prod-stream",
+        obs_cpu_request="2",
+        vlc_cpu_request="1",
     ),
     "stage-1": EnvConfig(
         name="stage-1",
@@ -189,7 +215,31 @@ ENVS: dict[str, EnvConfig] = {
         # obs-youtube boots idle — the streaming toggle is prod-twitch-only).
         # prod follows once the stage burn-in + dual-iGPU-encode validation
         # pass.
-        platforms=("twitch", "youtube"),
+        #
+        # twitch is OFF here for the duration of the burn-in: running both
+        # stage stacks (8 pods, 4 iGPU claims) alongside prod made the prod
+        # twitch stream stutter on 2026-06-11 — the stage twitch pair never
+        # streamed (no stage stream key exists), but its VLC decode + OBS
+        # render still contended for the shared iGPU. Budget is two live
+        # streams total: prod-twitch + stage-youtube. Re-add "twitch" when
+        # the burn-in ends.
+        platforms=("youtube",),
+        # Guardrail from the same incident: cap what stage can request in
+        # aggregate, so "accidentally scaled up too many stage deployments"
+        # parks pods Unschedulable instead of crowding prod off the node.
+        # CPU/memory sized roomy — youtube stack (~0.5 CPU / 1.3Gi requests) +
+        # dashcam-cv embed jobs (2× 1 CPU / 5Gi) + one-shot jobs fit with
+        # headroom; the node has 20 CPU / 31Gi. iGPU claims sized TIGHT to
+        # what stage runs today: vlc + obs steady (2) + 1 surge slot for
+        # vlc's RollingUpdate maxSurge=1 (obs is Recreate, no surge). Claims,
+        # not GPU time — encode contention is governed by the two-stream
+        # budget above, not by quota. Bump alongside re-adding twitch.
+        app_quota={
+            "requests.cpu": "6",
+            "requests.memory": "16Gi",
+            "requests.gpu.intel.com/i915": "3",
+            "pods": "30",
+        },
     ),
     "development": EnvConfig(
         name="development",

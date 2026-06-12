@@ -117,6 +117,18 @@ spec:
               key: secret-access-key
               name: cert-manager-aws-credentials
 ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: app-quota
+  namespace: stage-1
+spec:
+  hard:
+    pods: "30"
+    requests.cpu: "6"
+    requests.gpu.intel.com/i915: "3"
+    requests.memory: 16Gi
+---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:

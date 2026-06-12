@@ -22,7 +22,7 @@ from adanalife_k8s.constructs.vlc import (
     emit_dashcam_pv,
     emit_dashcam_pvc,
 )
-from adanalife_k8s.supporting import emit_supporting
+from adanalife_k8s.supporting import emit_stream_protection, emit_supporting
 
 
 # Stateless app components that each get their own Chart (→ one dist file + one
@@ -81,6 +81,8 @@ class SupportingChart(Chart):
 
         # shared observability secrets + cert-manager issuers (eso envs only)
         emit_supporting(self, env)
+        # prod-stream PriorityClass + co-tenant ResourceQuota (knob-gated)
+        emit_stream_protection(self, env)
         # tripbot identity Secrets (every env — local Secret or DB ES + app ES)
         emit_identity_secrets(self, env)
 

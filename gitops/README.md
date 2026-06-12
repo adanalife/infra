@@ -99,6 +99,37 @@ To flip an env's **apps** to continuous reconciliation, add it to
 `AUTOSYNC_ENVS` in `argocd.py`, re-synth + commit, re-apply. stage-1 is already
 there; prod-1 is held out deliberately. The **data** units stay manual forever.
 
+## Emergency stop (pausing an autosynced app)
+
+Autosynced Applications selfHeal: a `kubectl scale --replicas=0` is reverted
+within seconds. Don't fight the controller — turn its autosync off first. The
+ApplicationSets carry `ignoreApplicationDifferences` on `/spec/syncPolicy`, so a
+manual policy change on a *generated* Application sticks instead of being
+stomped back by the ApplicationSet controller:
+
+```sh
+# 1. disable autosync on the noisy app(s) — survives the appset controller
+argocd app set stage-1-obs-youtube --sync-policy none   # or the UI toggle
+# 2. now scale down freely
+kubectl -n stage-1 scale deploy --all --replicas=0
+```
+
+(`argocd … --core` needs the kube-context namespace set to `argocd`; a
+`kubectl -n argocd patch application <app> --type=json -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'`
+does the same without the CLI.)
+
+Cluster-wide big red button — stops ALL reconciliation at once, when there's no
+time to pick apps:
+
+```sh
+kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
+```
+
+**Recovery** for either path: re-apply `cdk8s/dist/argocd.k8s.yaml` (re-stamps
+the declared sync policies) and/or scale the application-controller back up.
+Anything still autosynced reconciles back to git immediately — make sure the
+merged `dist/` describes the state you want *before* turning Argo back on.
+
 ## Platform stack (Argo-native Helm)
 
 The git-declarable platform charts (ESO, cert-manager, node-exporter,

@@ -21,6 +21,8 @@ spec:
       kind: PersistentVolume
     - group: storage.k8s.io
       kind: StorageClass
+    - group: scheduling.k8s.io
+      kind: PriorityClass
   namespaceResourceWhitelist:
     - group: "*"
       kind: "*"
@@ -46,14 +48,6 @@ spec:
           - env: prod-1
             app: obs-twitch
           - env: stage-1
-            app: tripbot-twitch
-          - env: stage-1
-            app: vlc-twitch
-          - env: stage-1
-            app: onscreens-twitch
-          - env: stage-1
-            app: obs-twitch
-          - env: stage-1
             app: tripbot-youtube
           - env: stage-1
             app: vlc-youtube
@@ -61,6 +55,9 @@ spec:
             app: onscreens-youtube
           - env: stage-1
             app: obs-youtube
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -120,6 +117,9 @@ spec:
         elements:
           - env: prod-1
           - env: stage-1
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
   template:
     metadata:
       name: "{{.env}}-supporting"
@@ -173,6 +173,9 @@ spec:
             ns: prod-1-data
           - env: stage-1
             ns: stage-1-data
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
   template:
     metadata:
       name: "{{.env}}-data"

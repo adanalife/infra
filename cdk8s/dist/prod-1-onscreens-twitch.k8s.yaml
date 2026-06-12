@@ -83,6 +83,7 @@ spec:
           volumeMounts:
             - mountPath: /opt/data/run
               name: run
+      priorityClassName: prod-stream
       securityContext:
         seccompProfile:
           type: RuntimeDefault

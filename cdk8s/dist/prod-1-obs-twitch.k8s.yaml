@@ -93,7 +93,7 @@ spec:
               gpu.intel.com/i915: "1"
               memory: 3Gi
             requests:
-              cpu: 200m
+              cpu: "2"
               gpu.intel.com/i915: "1"
               memory: 512Mi
           securityContext:
@@ -101,6 +101,7 @@ spec:
             capabilities:
               drop:
                 - ALL
+      priorityClassName: prod-stream
       securityContext:
         seccompProfile:
           type: RuntimeDefault

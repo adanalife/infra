@@ -17,7 +17,7 @@ spec:
               value: http://localhost:8080
           envFrom:
             - configMapRef:
-                name: tripbot-twitch-config
+                name: tripbot-youtube-config
             - secretRef:
                 name: tripbot-database-creds
             - secretRef:
@@ -31,5 +31,9 @@ spec:
           name: auth-bootstrap
           ports:
             - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
       restartPolicy: Never
   ttlSecondsAfterFinished: 600

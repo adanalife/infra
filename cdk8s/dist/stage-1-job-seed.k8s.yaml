@@ -12,12 +12,16 @@ spec:
             - /usr/local/bin/seed-db
           envFrom:
             - configMapRef:
-                name: tripbot-twitch-config
+                name: tripbot-youtube-config
             - secretRef:
                 name: tripbot-database-creds
           image: adanalife/tripbot:develop
           imagePullPolicy: Always
           name: seed
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
       initContainers:
         - command:
             - sh
@@ -25,6 +29,10 @@ spec:
             - until nc -z postgres.stage-1-data.svc.cluster.local 5432; do echo "waiting for postgres..."; sleep 2; done
           image: busybox:1.36
           name: wait-for-postgres
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
         - args:
             - -path
             - /migrations
@@ -35,11 +43,15 @@ spec:
             - migrate
           envFrom:
             - configMapRef:
-                name: tripbot-twitch-config
+                name: tripbot-youtube-config
             - secretRef:
                 name: tripbot-database-creds
           image: adanalife/tripbot:develop
           imagePullPolicy: Always
           name: migrate
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
       restartPolicy: Never
   ttlSecondsAfterFinished: 600

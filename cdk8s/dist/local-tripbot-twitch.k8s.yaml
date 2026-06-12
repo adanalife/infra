@@ -117,6 +117,10 @@ spec:
           image: adanalife/tripbot:latest
           imagePullPolicy: Always
           name: migrate
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

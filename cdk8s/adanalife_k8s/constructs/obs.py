@@ -89,8 +89,11 @@ class ObsInstance(Construct):
         ]
 
         # --- resources (+ iGPU on GPU envs) ---
+        # The CPU request is the CFS weight under contention — prod sizes it
+        # for real (env.obs_cpu_request) so co-tenant bursts can't starve the
+        # encoder (the 2026-06-11 prod-stutter incident).
         requests = {
-            "cpu": k8s.Quantity.from_string("200m"),
+            "cpu": k8s.Quantity.from_string(env.obs_cpu_request),
             "memory": k8s.Quantity.from_string("512Mi"),
         }
         limits = {"memory": k8s.Quantity.from_string("3Gi")}
@@ -138,6 +141,7 @@ class ObsInstance(Construct):
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
                         ),
+                        priority_class_name=env.priority_class or None,
                         containers=[container],
                     ),
                 ),

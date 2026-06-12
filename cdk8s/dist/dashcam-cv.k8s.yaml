@@ -61,7 +61,7 @@ spec:
                   value: dashcam
               envFrom:
                 - configMapRef:
-                    name: tripbot-twitch-config
+                    name: tripbot-youtube-config
                 - secretRef:
                     name: tripbot-database-creds
               image: adanalife/dashcam-cv:develop
