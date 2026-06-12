@@ -1558,8 +1558,12 @@ tasks:
   # env is baked into the filename (stage-1-tripbot-<ts>.dump) so a stage dump
   # can never be confused with a prod one. Streams pg_dump -Fc out of postgres-0
   # reusing the pod's own POSTGRES_* creds (no credential handling here).
+  #
+  # frame_embeddings DATA is excluded (schema still ships): the CV vectors are
+  # derived + reproducible and GBs big — they'd dwarf the rest of the dump and
+  # corrupt over the tailnet proxy. Use :backup:vectors / :seed:vectors for them.
   tripbot:stage:db:backup:
-    desc: "dump stage-1 Postgres to a local file (OUT_DIR/stage-1-tripbot-<ts>.dump, default ./backups); on-demand, no S3"
+    desc: "dump stage-1 Postgres to a local file (OUT_DIR/stage-1-tripbot-<ts>.dump, default ./backups); excludes frame_embeddings data — see :backup:vectors"
     vars:
       OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
       # postgres lives in the data namespace (stage-1-data) after the isolation
@@ -1578,7 +1582,7 @@ tasks:
         # Write to a .partial then rename, so a failed dump never leaves a
         # truncated file that `:restore` (newest-first) would later pick up.
         kubectl exec -n {{.NS}} postgres-0 -- sh -c \
-          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --exclude-table-data=frame_embeddings -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB"' \
           > "${out}.partial"
         mv "${out}.partial" "$out"
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
@@ -1623,6 +1627,69 @@ tasks:
           echo "cleared."
         fi
       - 'echo "Next: kubectl rollout restart deploy/tripbot-twitch -n stage-1 — its migrate init re-applies any pending migrations."'
+
+  # Dedicated dump of JUST the dashcam-cv vector table (frame_embeddings),
+  # which the full-DB backup tasks deliberately exclude. The table is GBs big,
+  # so a single long stream over the tailnet apiserver proxy corrupts
+  # (`tls: bad record MAC` — see the prod-1 cutover runbook); instead this
+  # dumps in-pod, `kubectl cp`s the file out (--retries survives proxy
+  # hiccups), and cleans up.
+  tripbot:stage:db:backup:vectors:
+    desc: "dump ONLY the frame_embeddings table to a local file (OUT_DIR/stage-1-frame-embeddings-<ts>.dump, default ./backups); in-pod dump + kubectl cp, large-file-safe"
+    vars:
+      OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      NS: '{{.NS | default "stage-1-data"}}'
+    preconditions:
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
+    cmds:
+      - mkdir -p {{.OUT_DIR}}
+      - |
+        set -euo pipefail
+        ts=$(date -u +%Y%m%d-%H%M%SZ)
+        out="{{.OUT_DIR}}/stage-1-frame-embeddings-${ts}.dump"
+        echo "Dumping frame_embeddings in-pod..."
+        kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --table=frame_embeddings -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB" > /tmp/frame-embeddings.dump'
+        echo "Copying out to ${out}"
+        kubectl cp --retries=10 {{.NS}}/postgres-0:/tmp/frame-embeddings.dump "$out"
+        kubectl exec -n {{.NS}} postgres-0 -- rm -f /tmp/frame-embeddings.dump
+        echo "OK: ${out} ($(du -h "$out" | cut -f1))"
+
+  # Seed frame_embeddings from a dedicated vector dump (the counterpart of
+  # :backup:vectors). Run AFTER the regular seed/restore — the table has an
+  # FK to videos(id). pg_restore --clean drops + recreates the table, so the
+  # HNSW index rebuilds after the bulk load (much faster than row-by-row).
+  # Same cp-then-restore-in-pod shape as :backup:vectors for the same
+  # large-file-over-proxy reason.
+  tripbot:stage:db:seed:vectors:
+    desc: "seed frame_embeddings from a local vector dump (DUMP=path, default newest stage-1-frame-embeddings-*.dump in OUT_DIR, ./backups); run after the videos seed"
+    vars:
+      OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      NS: '{{.NS | default "stage-1-data"}}'
+    preconditions:
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
+    cmds:
+      - |
+        set -euo pipefail
+        dump="{{.DUMP}}"
+        if [ -z "$dump" ]; then
+          dump=$(ls -1t {{.OUT_DIR}}/stage-1-frame-embeddings-*.dump 2>/dev/null | head -1 || true)
+          [ -n "$dump" ] || { echo "no vector dumps found in {{.OUT_DIR}}/ (stage-1-frame-embeddings-*.dump) — pass DUMP=<path>"; exit 1; }
+        fi
+        [ -f "$dump" ] || { echo "dump not found: $dump"; exit 1; }
+        echo "Copying ${dump} into postgres-0..."
+        kubectl cp --retries=10 "$dump" {{.NS}}/postgres-0:/tmp/frame-embeddings.dump
+        echo "Restoring frame_embeddings (drop + recreate + HNSW rebuild)..."
+        kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/frame-embeddings.dump'
+        kubectl exec -n {{.NS}} postgres-0 -- rm -f /tmp/frame-embeddings.dump
+        rows=$(kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" psql -tAq -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) FROM frame_embeddings;"')
+        orphans=$(kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" psql -tAq -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) FROM frame_embeddings fe LEFT JOIN videos v ON v.id = fe.video_id WHERE v.id IS NULL;"')
+        echo "Restore complete: ${rows} rows, ${orphans} FK orphans (want 0 — nonzero means the videos seed doesn't match this dump)."
 
   # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
   # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the

@@ -213,6 +213,7 @@ spec:
                     --format=custom \
                     --host=postgres \
                     --username="$POSTGRES_USER" \
+                    --exclude-table-data=frame_embeddings \
                     "$POSTGRES_DB" \
                     > "$DUMP"
 

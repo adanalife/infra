@@ -51,8 +51,11 @@ _LOCAL_SECRET = {
     "POSTGRES_DB": "tripbot_docker",
 }
 
-# The backup CronJob's dump-and-upload script — reproduced verbatim from
-# overlays/prod-1/backup-cronjob.yaml so the rendered args block matches.
+# The backup CronJob's dump-and-upload script. frame_embeddings data is
+# excluded: the vectors are derived + reproducible (re-runnable batch embed,
+# dedicated dump via `task tripbot:stage:db:backup:vectors`) and would bloat
+# every tiered dump by GBs. The table definition still ships (schema, not
+# data), so a restore leaves an empty table for migrations/seed to fill.
 _BACKUP_SCRIPT = """\
 set -euo pipefail
 apk add --no-cache aws-cli
@@ -66,6 +69,7 @@ PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \\
   --format=custom \\
   --host=postgres \\
   --username="$POSTGRES_USER" \\
+  --exclude-table-data=frame_embeddings \\
   "$POSTGRES_DB" \\
   > "$DUMP"
 
