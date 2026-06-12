@@ -54,7 +54,7 @@ NAME_IDENTITY = "tripbot"
 # Job containers). Namespaces under a ResourceQuota that enforces requests.*
 # (stage-1's app-quota) reject any pod whose containers omit requests for the
 # quota'd resources — so every container must declare them.
-_SMALL_RESOURCES = k8s.ResourceRequirements(
+SMALL_RESOURCES = k8s.ResourceRequirements(
     requests={
         "cpu": k8s.Quantity.from_string("100m"),
         "memory": k8s.Quantity.from_string("128Mi"),
@@ -279,7 +279,7 @@ class Tripbot(Construct):
                 k8s.EnvFromSource(config_map_ref=k8s.ConfigMapEnvSource(name=cm_name)),
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=db_secret)),
             ],
-            resources=_SMALL_RESOURCES,
+            resources=SMALL_RESOURCES,
         )
 
         container = k8s.Container(
@@ -643,7 +643,7 @@ def _auth_bootstrap(
         # EXTERNAL_URL is pinned to localhost:8080 (overrides the config host).
         env=[k8s.EnvVar(name="EXTERNAL_URL", value="http://localhost:8080")],
         env_from=env_from,
-        resources=_SMALL_RESOURCES,
+        resources=SMALL_RESOURCES,
     )
     k8s.KubeJob(
         scope,
@@ -724,7 +724,7 @@ def seed(scope: Construct, env: EnvConfig) -> None:
             "-c",
             f'until nc -z {env.postgres_host} 5432; do echo "waiting for postgres..."; sleep 2; done',
         ],
-        resources=_SMALL_RESOURCES,
+        resources=SMALL_RESOURCES,
     )
     migrate = k8s.Container(
         name="migrate",
@@ -739,7 +739,7 @@ def seed(scope: Construct, env: EnvConfig) -> None:
             "up",
         ],
         env_from=db_env,
-        resources=_SMALL_RESOURCES,
+        resources=SMALL_RESOURCES,
     )
     seed_c = k8s.Container(
         name="seed",
@@ -747,7 +747,7 @@ def seed(scope: Construct, env: EnvConfig) -> None:
         image_pull_policy=pull,
         command=["/usr/local/bin/seed-db"],
         env_from=db_env,
-        resources=_SMALL_RESOURCES,
+        resources=SMALL_RESOURCES,
     )
 
     spec = k8s.JobSpec(

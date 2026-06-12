@@ -84,8 +84,11 @@ def test_cronjob_pod_is_preemptible_and_mounts():
     ]["spec"]
     assert pod["restartPolicy"] == "Never"
     assert pod["priorityClassName"] == "dashcam-cv-low"
-    # wait-for-postgres init container
-    assert pod["initContainers"][0]["name"] == "wait-for-postgres"
+    # wait-for-postgres init container — must declare requests or stage-1's
+    # app-quota (requests.cpu/memory) rejects the whole pod
+    wait = pod["initContainers"][0]
+    assert wait["name"] == "wait-for-postgres"
+    assert wait["resources"]["requests"] == {"cpu": "100m", "memory": "128Mi"}
     embed = pod["containers"][0]
     assert embed["args"] == ["embed", "--random", "10", "--interval", "5", "--apply"]
     assert embed["image"] == "adanalife/dashcam-cv:develop"  # stage image_tag
