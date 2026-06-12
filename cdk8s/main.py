@@ -75,6 +75,8 @@ if not only:
         "argocd-k3d",
         envs=("development",),
         autosync_envs=("development",),
+        autosync_holdouts=(),  # the prod OBS holdout is minipc-only
+        notifications_secret=False,  # dev runs notifications.enabled=false
         tailscale_ui=False,
         lan_host=f"argocd.{load_env('development').dns_base}",
         lan_tls=False,
