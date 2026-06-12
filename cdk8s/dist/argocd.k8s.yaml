@@ -95,7 +95,7 @@ spec:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
   templatePatch: |
-    {{- if (eq .env "stage-1") }}
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs-twitch"))) }}
     spec:
       syncPolicy:
         automated:

@@ -12,8 +12,10 @@ it what to watch:
   * Three ApplicationSets — `tripbot-apps` (one Application per
     <env>-<component>-<platform>, so each component is its own sync/health/URL),
     `tripbot-supporting` and `tripbot-data` (one per env). Each reconciles its own
-    cdk8s/dist file. MONITOR-ONLY: manual sync (no automated prune/selfHeal), so
-    Argo reports drift but changes nothing until you sync. ignoreDifferences keeps
+    cdk8s/dist file. The apps set runs automated (prune + selfHeal) for
+    AUTOSYNC_ENVS minus AUTOSYNC_HOLDOUTS (prod OBS stays manual — a sync restarts
+    the live stream); supporting + data are manual everywhere, so Argo reports
+    their drift but changes nothing until you sync. ignoreDifferences keeps
     ESO's CRD schema-default fields out of the diff so ExternalSecrets read Synced.
   * tailscale Ingress — the UI at argocd-prod.<tailnet>.ts.net.
   * traefik Ingress — the same UI at argocd.prod.whereisdana.today, published by
@@ -57,10 +59,16 @@ ENVS = ("prod-1", "stage-1")
 CUTOVER_ENVS = ENVS
 # Envs whose *apps* run automated (prune + selfHeal) — a merged dist/ change
 # deploys itself. Applied per-env via a templatePatch on the apps ApplicationSet,
-# so the rest stay manual. stage-1 leads; prod-1 is held out deliberately until
-# we're confident. The DATA units NEVER autosync (Prune=false is their guarantee);
-# supporting stays manual too — only the apps set reads this.
-AUTOSYNC_ENVS = ("stage-1",)
+# so the rest stay manual. stage-1 led; prod-1 joined once the version pins made
+# merge-to-master a deliberate deploy gesture (versions.yaml bump PRs). The DATA
+# units NEVER autosync (Prune=false is their guarantee); supporting stays manual
+# too — only the apps set reads this.
+AUTOSYNC_ENVS = ("stage-1", "prod-1")
+# (env, app) pairs held out of autosync even when their env is automated. OBS is
+# the live encoder: any pod-template change restarts the prod stream, so deploys
+# to it stay a deliberate manual sync (pick the quiet moment), while the rest of
+# prod autosyncs.
+AUTOSYNC_HOLDOUTS = (("prod-1", "obs-twitch"),)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
 # Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
@@ -131,6 +139,7 @@ class ArgoCD(Construct):
         *,
         envs: tuple[str, ...] = CUTOVER_ENVS,
         autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
+        autosync_holdouts: tuple[tuple[str, str], ...] = AUTOSYNC_HOLDOUTS,
         tailscale_ui: bool = True,
         lan_host: str | None = LAN_HOST,
         lan_tls: bool = True,
@@ -152,6 +161,7 @@ class ArgoCD(Construct):
             include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
             prune_disabled=False,
             automated_envs=autosync_envs,
+            automated_holdouts=autosync_holdouts,
         )
         self._application_set(
             id="appset-supporting",
@@ -229,6 +239,7 @@ class ArgoCD(Construct):
         prune_disabled: bool,
         dest_ns_tmpl: str = "{{.env}}",
         automated_envs: tuple[str, ...] = (),
+        automated_holdouts: tuple[tuple[str, str], ...] = (),
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
@@ -238,8 +249,10 @@ class ArgoCD(Construct):
 
         `automated_envs` turns on continuous reconcile (prune + selfHeal) for just
         those envs via a per-element templatePatch — so one ApplicationSet can run
-        some envs automated (stage-1) and others manual (prod-1). Empty = every
-        Application stays manual-sync (monitor-only)."""
+        some envs automated and others manual. Empty = every Application stays
+        manual-sync (monitor-only). `automated_holdouts` carves (env, app) pairs
+        back OUT of an automated env (prod OBS: a pod-template change restarts the
+        live stream, so its deploys stay a deliberate sync)."""
         sync_options = [
             "CreateNamespace=false",  # namespaces owned by bootstrap
             "ServerSideApply=true",
@@ -323,10 +336,18 @@ class ArgoCD(Construct):
         }
         # Per-env autosync: merge an `automated` block onto only the matching envs'
         # Applications. templatePatch is re-rendered with the same goTemplate, so a
-        # non-matching env renders an empty patch (a no-op merge) and stays manual.
+        # non-matching env (or a held-out app) renders an empty patch (a no-op
+        # merge) and stays manual.
         if automated_envs:
             test = " ".join(f'(eq .env "{e}")' for e in automated_envs)
             cond = f"or {test}" if len(automated_envs) > 1 else test
+            if automated_holdouts:
+                clauses = [
+                    f'(and (eq .env "{env}") (eq .app "{app}"))'
+                    for env, app in automated_holdouts
+                ]
+                held = f"(or {' '.join(clauses)})" if len(clauses) > 1 else clauses[0]
+                cond = f"and ({cond}) (not {held})"
             appset_spec["templatePatch"] = (
                 "{{- if " + cond + " }}\n"
                 "spec:\n"
