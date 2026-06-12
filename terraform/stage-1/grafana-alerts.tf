@@ -347,6 +347,119 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // Encode/render-lag siblings of the stream-output rule above. These two
+  // catch contention BEFORE the stream output visibly degrades: render-thread
+  // skips mean OBS can't composite at the canvas framerate (GPU contention —
+  // the 2026-06-11 stage-starves-prod incident showed up here), output-thread
+  // skips mean the encoder lags the render thread (encoder starvation).
+  // obs_stream_output_skipped_frames (above) only counts after the stream
+  // output drops them — the last symptom, not the first.
+  rule {
+    name           = "OBS: render thread skipping frames"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS render thread is skipping frames"
+      description = "Sustained render-thread skipped-frame rate > 0.5/s for 5m. OBS can't composite at the canvas framerate — usually iGPU contention from co-tenant workloads (stage VLC/OBS, dashcam-cv) or host CPU pressure. Check intel_gpu_top on the minipc and what else is running on the node."
+    }
+    labels = {
+      severity = "warning"
+      service  = "vlc-server"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(rate(obs_render_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name           = "OBS: output thread skipping frames"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS output thread is skipping frames (encoder lag)"
+      description = "Sustained output-thread skipped-frame rate > 0.5/s for 5m. The encoder can't keep up with the render thread — check the encode engine (vaapi on the shared iGPU), co-tenant encode load, and the encoder preset."
+    }
+    labels = {
+      severity = "warning"
+      service  = "vlc-server"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(rate(obs_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   rule {
     name           = "OBS: stream congested"
     for            = "2m"
