@@ -113,6 +113,8 @@ def test_backup_cronjob_prod_only():
     backup = tmpl["containers"][0]
     assert backup["image"] == "postgres:16-alpine"
     assert "pg_dump" in backup["args"][0]
+    # vectors are derived + reproducible; excluding them keeps tiered dumps small
+    assert "--exclude-table-data=frame_embeddings" in backup["args"][0]
     env_secrets = {e["secretRef"]["name"] for e in backup["envFrom"]}
     assert env_secrets == {"postgres-secret", "postgres-backup-s3"}
     # absent everywhere else

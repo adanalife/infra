@@ -1558,8 +1558,12 @@ tasks:
   # env is baked into the filename (stage-1-tripbot-<ts>.dump) so a stage dump
   # can never be confused with a prod one. Streams pg_dump -Fc out of postgres-0
   # reusing the pod's own POSTGRES_* creds (no credential handling here).
+  #
+  # frame_embeddings DATA is excluded (schema still ships): the CV vectors are
+  # derived + reproducible and GBs big — they'd dwarf the rest of the dump and
+  # corrupt over the tailnet proxy. Use :backup:vectors / :seed:vectors for them.
   tripbot:stage:db:backup:
-    desc: "dump stage-1 Postgres to a local file (OUT_DIR/stage-1-tripbot-<ts>.dump, default ./backups); on-demand, no S3"
+    desc: "dump stage-1 Postgres to a local file (OUT_DIR/stage-1-tripbot-<ts>.dump, default ./backups); excludes frame_embeddings data — see :backup:vectors"
     vars:
       OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
       # postgres lives in the data namespace (stage-1-data) after the isolation
@@ -1578,7 +1582,7 @@ tasks:
         # Write to a .partial then rename, so a failed dump never leaves a
         # truncated file that `:restore` (newest-first) would later pick up.
         kubectl exec -n {{.NS}} postgres-0 -- sh -c \
-          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --exclude-table-data=frame_embeddings -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB"' \
           > "${out}.partial"
         mv "${out}.partial" "$out"
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
