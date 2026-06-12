@@ -16,6 +16,7 @@ data:
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
   OTEL_TRACES_SAMPLER_ARG: "0.1"
   SENTRY_ENVIRONMENT: stage-1
+  STREAM_PLATFORM: youtube
   VLC_SERVER_HOST: vlc-youtube:8080
   XDG_RUNTIME_DIR: /root/.cache/xdgr
 ---
@@ -40,7 +41,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 1f9065e2b9
+        adanalife.dev/config-hash: 62b2b09337
       labels:
         app: vlc-youtube
     spec:

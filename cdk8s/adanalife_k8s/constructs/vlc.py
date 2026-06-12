@@ -61,6 +61,13 @@ class VlcServer(Construct):
         # gate as onscreens.py.
         if env.nats_url:
             data["NATS_URL"] = env.nats_url
+        # vlc-server scopes its JetStream lastplayed leaf (resume-on-restart)
+        # by STREAM_PLATFORM. twitch is the binary's default, so — same idiom
+        # as the tripbot/OBS charts — only non-twitch instances carry the key,
+        # keeping the long-running twitch ConfigMaps (and their config-hash
+        # rollouts) untouched.
+        if platform != "twitch":
+            data["STREAM_PLATFORM"] = platform
         cfg_hash = configmap.config_map(
             self,
             "config",
