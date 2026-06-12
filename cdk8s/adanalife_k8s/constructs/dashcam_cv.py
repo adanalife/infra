@@ -38,7 +38,7 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.tripbot import config_map_name
+from adanalife_k8s.constructs.tripbot import SMALL_RESOURCES, config_map_name
 from adanalife_k8s.naming import meta_labels
 
 NAME = "dashcam-cv"
@@ -253,6 +253,7 @@ def _pod_spec(
                     f"until nc -z {postgres_host} 5432; do echo waiting; sleep 2; done",
                 ],
                 security_context=_CONTAINER_SECURITY_CONTEXT,
+                resources=SMALL_RESOURCES,
             )
         ]
         env.append(k8s.EnvVar(name="DASHCAM_CV_CORPUS_DIR", value=CORPUS_DIR))

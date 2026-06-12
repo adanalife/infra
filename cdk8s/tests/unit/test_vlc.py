@@ -12,11 +12,21 @@ from adanalife_k8s.constructs.vlc import (
 )
 
 
-def _synth(env_name):
+def _synth(env_name, platform="twitch"):
     app = K8sTesting.app()
     chart = Chart(app, "t")
-    VlcServer(chart, "twitch", env=load_env(env_name))
+    VlcServer(chart, platform, env=load_env(env_name))
     return K8sTesting.synth(chart)
+
+
+def test_stream_platform_only_on_non_twitch_instances():
+    # vlc-server scopes its JetStream lastplayed leaf (resume-on-restart) by
+    # STREAM_PLATFORM. twitch instances stay keyless (binary default), same
+    # idiom as the tripbot/OBS charts.
+    cm = _by(_synth("stage-1", "youtube"), "ConfigMap", "vlc-youtube-config")[0]["data"]
+    assert cm["STREAM_PLATFORM"] == "youtube"
+    twitch_cm = _by(_synth("stage-1"), "ConfigMap", "vlc-twitch-config")[0]["data"]
+    assert "STREAM_PLATFORM" not in twitch_cm
 
 
 def _synth_emit(fn, env_name):

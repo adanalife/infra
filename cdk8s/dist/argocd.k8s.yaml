@@ -7,6 +7,7 @@ spec:
   description: adanalife app workloads synthesized by cdk8s
   sourceRepos:
     - git@github.com:adanalife/infra.git
+    - git@github.com:adanalife/tripbot-console.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: prod-1
@@ -95,7 +96,7 @@ spec:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
   templatePatch: |
-    {{- if (eq .env "stage-1") }}
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs-twitch"))) }}
     spec:
       syncPolicy:
         automated:
@@ -214,6 +215,70 @@ spec:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
 ---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tripbot-console
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            revision: master
+          - env: stage-1
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-console"
+    spec:
+      project: tripbot
+      source:
+        repoURL: git@github.com:adanalife/tripbot-console.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -282,3 +347,48 @@ spec:
       metadata:
         labels:
           argocd.argoproj.io/secret-type: repository
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-repo-tripbot-console
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: k8s/argocd/repo-ssh-key-console
+      secretKey: sshPrivateKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secretsmanager-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-repo-tripbot-console
+    template:
+      data:
+        sshPrivateKey: "{{ .sshPrivateKey }}"
+        type: git
+        url: git@github.com:adanalife/tripbot-console.git
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-notifications
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: k8s/tripbot/discord-alerts-webhook
+      secretKey: discord-webhook-url
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secretsmanager-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-notifications-secret

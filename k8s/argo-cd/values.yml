@@ -40,3 +40,57 @@ configs:
 # UI/API access is via the Tailscale Ingress (argocd-prod.<tailnet>.ts.net) — see
 # tailscale-ingress.yaml. `kubectl -n argocd port-forward svc/argocd-server` also
 # works as a fallback.
+
+# Notifications — autosync's safety net. With apps on automated sync, a bad
+# deploy lands while nobody is watching the UI; the notifications controller
+# (runs by default in this chart) posts sync failures + health degradation to
+# the same Discord channel tripbot's reportCmd and the Grafana alerts use.
+# Event-driven, so it costs zero Grafana Cloud active series (the metrics
+# budget sits near the free-tier cap) and fires faster than an eval loop.
+#
+# The webhook URL lives in the argocd-notifications-secret Secret, materialized
+# by ESO from SM `k8s/tripbot/discord-alerts-webhook` (the ExternalSecret ships
+# in cdk8s/dist/argocd.k8s.yaml via `task gitops:apply`) — hence
+# secret.create=false here.
+notifications:
+  argocdUrl: https://argocd-prod.tail020deb.ts.net
+  secret:
+    create: false
+  notifiers:
+    # Discord webhooks accept a plain {"content": ...} JSON POST.
+    service.webhook.discord: |
+      url: $discord-webhook-url
+      headers:
+        - name: Content-Type
+          value: application/json
+  templates:
+    # Bodies stay free of app.status free-text (operationState.message can
+    # contain quotes/newlines that would break the JSON) — the UI link carries
+    # the detail.
+    template.app-sync-failed: |
+      webhook:
+        discord:
+          method: POST
+          body: |
+            {"content": "🔴 Argo: **{{.app.metadata.name}}** sync {{.app.status.operationState.phase}} — {{.context.argocdUrl}}/applications/{{.app.metadata.name}}"}
+    template.app-health-degraded: |
+      webhook:
+        discord:
+          method: POST
+          body: |
+            {"content": "🟠 Argo: **{{.app.metadata.name}}** health Degraded — {{.context.argocdUrl}}/applications/{{.app.metadata.name}}"}
+  triggers:
+    trigger.on-sync-failed: |
+      - when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
+        send: [app-sync-failed]
+    trigger.on-health-degraded: |
+      - when: app.status.health.status == 'Degraded'
+        send: [app-health-degraded]
+  # Global default subscription — every Application in this Argo (tripbot apps +
+  # platform releases), no per-app annotations to maintain.
+  subscriptions:
+    - recipients:
+        - discord
+      triggers:
+        - on-sync-failed
+        - on-health-degraded

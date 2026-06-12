@@ -12,8 +12,10 @@ it what to watch:
   * Three ApplicationSets — `tripbot-apps` (one Application per
     <env>-<component>-<platform>, so each component is its own sync/health/URL),
     `tripbot-supporting` and `tripbot-data` (one per env). Each reconciles its own
-    cdk8s/dist file. MONITOR-ONLY: manual sync (no automated prune/selfHeal), so
-    Argo reports drift but changes nothing until you sync. ignoreDifferences keeps
+    cdk8s/dist file. The apps set runs automated (prune + selfHeal) for
+    AUTOSYNC_ENVS minus AUTOSYNC_HOLDOUTS (prod OBS stays manual — a sync restarts
+    the live stream); supporting + data are manual everywhere, so Argo reports
+    their drift but changes nothing until you sync. ignoreDifferences keeps
     ESO's CRD schema-default fields out of the diff so ExternalSecrets read Synced.
   * tailscale Ingress — the UI at argocd-prod.<tailnet>.ts.net.
   * traefik Ingress — the same UI at argocd.prod.whereisdana.today, published by
@@ -22,6 +24,9 @@ it what to watch:
     ClusterIssuer. Mirrors the apps' traefik+tailscale dual exposure.
   * repo ExternalSecret — IaC repo registration: ESO materializes the
     Argo-recognized `repository` Secret from a read-only deploy key in SM.
+  * notifications ExternalSecret — the Discord webhook for the notifications
+    controller (sync-failed / health-degraded pings; config in
+    k8s/argo-cd/values.yml), from the same SM container the Grafana alerts use.
 
 Argo CRDs (AppProject/ApplicationSet) are emitted via ApiObject — they're one-off
 objects, so (like SecretStore) the typed-import cost isn't worth it.
@@ -57,10 +62,16 @@ ENVS = ("prod-1", "stage-1")
 CUTOVER_ENVS = ENVS
 # Envs whose *apps* run automated (prune + selfHeal) — a merged dist/ change
 # deploys itself. Applied per-env via a templatePatch on the apps ApplicationSet,
-# so the rest stay manual. stage-1 leads; prod-1 is held out deliberately until
-# we're confident. The DATA units NEVER autosync (Prune=false is their guarantee);
-# supporting stays manual too — only the apps set reads this.
-AUTOSYNC_ENVS = ("stage-1",)
+# so the rest stay manual. stage-1 led; prod-1 joined once the version pins made
+# merge-to-master a deliberate deploy gesture (versions.yaml bump PRs). The DATA
+# units NEVER autosync (Prune=false is their guarantee); supporting stays manual
+# too — only the apps set reads this.
+AUTOSYNC_ENVS = ("stage-1", "prod-1")
+# (env, app) pairs held out of autosync even when their env is automated. OBS is
+# the live encoder: any pod-template change restarts the prod stream, so deploys
+# to it stay a deliberate manual sync (pick the quiet moment), while the rest of
+# prod autosyncs.
+AUTOSYNC_HOLDOUTS = (("prod-1", "obs-twitch"),)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
 # Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
@@ -68,6 +79,19 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
 REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
+# Discord webhook for the notifications controller — deliberately the SAME SM
+# container tripbot's reportCmd and the Grafana alerts read (one channel, one
+# webhook, already seeded in both accounts), not a new argocd-scoped secret.
+NOTIFICATIONS_SM_KEY = "k8s/tripbot/discord-alerts-webhook"
+# The private tripbot-console repo — Argo's second source. Its cdk8s/dist
+# deploy units (one <env>.k8s.yaml per env) live in that repo, per the split
+# design: the console repo owns its own deployment; infra owns everything else.
+CONSOLE_REPO_URL = "git@github.com:adanalife/tripbot-console.git"
+CONSOLE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-console"
+# Per-env git revision for the console units: stage tracks develop (manifests
+# float alongside the :develop image), prod tracks master (release-gated) —
+# the same philosophy as the image-tag pinning model.
+CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 
 
 def _data_ns(env_name: str) -> str:
@@ -131,12 +155,19 @@ class ArgoCD(Construct):
         *,
         envs: tuple[str, ...] = CUTOVER_ENVS,
         autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
+        autosync_holdouts: tuple[tuple[str, str], ...] = AUTOSYNC_HOLDOUTS,
         tailscale_ui: bool = True,
         lan_host: str | None = LAN_HOST,
         lan_tls: bool = True,
+        notifications_secret: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
+        # Envs whose console (the cross-repo tripbot-console unit) this Argo
+        # delivers — the envs with a defined console revision. Resolves empty on
+        # the k3d dev instance (development deploys via `task deploy:dev` in the
+        # console repo; the dev cluster carries no private-repo deploy key).
+        self.console_envs = tuple(e for e in envs if e in CONSOLE_REVISIONS)
 
         self._app_project()
         # Three ApplicationSets, one Application each per unit. The apps set is
@@ -152,6 +183,7 @@ class ArgoCD(Construct):
             include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
             prune_disabled=False,
             automated_envs=autosync_envs,
+            automated_holdouts=autosync_holdouts,
         )
         self._application_set(
             id="appset-supporting",
@@ -174,6 +206,25 @@ class ArgoCD(Construct):
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
+        # The cross-repo console unit: one Application per env, sourcing the
+        # PRIVATE tripbot-console repo's committed dist (per-env revision —
+        # stage follows develop, prod follows master). Same autosync posture
+        # as the apps set.
+        if self.console_envs:
+            self._application_set(
+                id="appset-console",
+                name="tripbot-console",
+                elements=[
+                    {"env": e, "revision": CONSOLE_REVISIONS[e]}
+                    for e in self.console_envs
+                ],
+                app_name_tmpl="{{.env}}-console",
+                include_tmpl="{{.env}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                repo_url=CONSOLE_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
         # traefik/LAN Ingress is published on every cluster with a DNS host —
         # external-dns publishes the record either way; the dev cluster reaches it
@@ -183,6 +234,17 @@ class ArgoCD(Construct):
         if lan_host:
             self._lan_ingress(lan_host, tls=lan_tls)
         self._repo_external_secret()
+        if self.console_envs:
+            self._repo_external_secret(
+                id="repo-secret-console",
+                name="argocd-repo-tripbot-console",
+                url=CONSOLE_REPO_URL,
+                sm_key=CONSOLE_REPO_SM_KEY,
+            )
+        # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
+        # skips the webhook secret too.
+        if notifications_secret:
+            self._notifications_external_secret()
 
     # ---- Argo CRs (ApiObject) ----
     def _app_project(self):
@@ -198,7 +260,8 @@ class ArgoCD(Construct):
                 "/spec",
                 {
                     "description": "adanalife app workloads synthesized by cdk8s",
-                    "sourceRepos": [REPO_URL],
+                    "sourceRepos": [REPO_URL]
+                    + ([CONSOLE_REPO_URL] if self.console_envs else []),
                     "destinations": [
                         {"server": IN_CLUSTER, "namespace": ns}
                         for ns in _project_namespaces(self.envs)
@@ -229,6 +292,9 @@ class ArgoCD(Construct):
         prune_disabled: bool,
         dest_ns_tmpl: str = "{{.env}}",
         automated_envs: tuple[str, ...] = (),
+        automated_holdouts: tuple[tuple[str, str], ...] = (),
+        repo_url: str = REPO_URL,
+        target_revision_tmpl: str = TARGET_REVISION,
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
@@ -238,8 +304,10 @@ class ArgoCD(Construct):
 
         `automated_envs` turns on continuous reconcile (prune + selfHeal) for just
         those envs via a per-element templatePatch — so one ApplicationSet can run
-        some envs automated (stage-1) and others manual (prod-1). Empty = every
-        Application stays manual-sync (monitor-only)."""
+        some envs automated and others manual. Empty = every Application stays
+        manual-sync (monitor-only). `automated_holdouts` carves (env, app) pairs
+        back OUT of an automated env (prod OBS: a pod-template change restarts the
+        live stream, so its deploys stay a deliberate sync)."""
         sync_options = [
             "CreateNamespace=false",  # namespaces owned by bootstrap
             "ServerSideApply=true",
@@ -250,8 +318,8 @@ class ArgoCD(Construct):
         spec: dict = {
             "project": PROJECT,
             "source": {
-                "repoURL": REPO_URL,
-                "targetRevision": TARGET_REVISION,
+                "repoURL": repo_url,
+                "targetRevision": target_revision_tmpl,
                 "path": "cdk8s/dist",
                 "directory": {"include": include_tmpl},
             },
@@ -323,10 +391,18 @@ class ArgoCD(Construct):
         }
         # Per-env autosync: merge an `automated` block onto only the matching envs'
         # Applications. templatePatch is re-rendered with the same goTemplate, so a
-        # non-matching env renders an empty patch (a no-op merge) and stays manual.
+        # non-matching env (or a held-out app) renders an empty patch (a no-op
+        # merge) and stays manual.
         if automated_envs:
             test = " ".join(f'(eq .env "{e}")' for e in automated_envs)
             cond = f"or {test}" if len(automated_envs) > 1 else test
+            if automated_holdouts:
+                clauses = [
+                    f'(and (eq .env "{env}") (eq .app "{app}"))'
+                    for env, app in automated_holdouts
+                ]
+                held = f"(or {' '.join(clauses)})" if len(clauses) > 1 else clauses[0]
+                cond = f"and ({cond}) (not {held})"
             appset_spec["templatePatch"] = (
                 "{{- if " + cond + " }}\n"
                 "spec:\n"
@@ -410,16 +486,15 @@ class ArgoCD(Construct):
             ),
         )
 
-    def _repo_external_secret(self):
-        # IaC repo registration: ESO materializes the Argo-recognized `repository`
-        # Secret (label argocd.argoproj.io/secret-type: repository) from the deploy
-        # key in SM. Reads the cluster-wide platform store. One-time bootstrap:
-        # generate a read-only deploy key, add the public half to GitHub, store the
-        # private half at k8s/argocd/repo-ssh-key in prod's SM.
+    def _notifications_external_secret(self):
+        # Webhook credential for the notifications controller (configured in
+        # k8s/argo-cd/values.yml, which sets notifications.secret.create=false):
+        # ESO materializes argocd-notifications-secret from the shared Discord
+        # webhook in SM. The notifier references it as $discord-webhook-url.
         esx.ExternalSecret(
             self,
-            "repo-secret",
-            metadata={"name": "argocd-repo-infra", "namespace": ARGO_NS},
+            "notifications-secret",
+            metadata={"name": "argocd-notifications", "namespace": ARGO_NS},
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
@@ -427,7 +502,44 @@ class ArgoCD(Construct):
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(
-                    name="argocd-repo-infra",
+                    name="argocd-notifications-secret",
+                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
+                ),
+                data=[
+                    esx.ExternalSecretSpecData(
+                        secret_key="discord-webhook-url",
+                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
+                            key=NOTIFICATIONS_SM_KEY
+                        ),
+                    )
+                ],
+            ),
+        )
+
+    def _repo_external_secret(
+        self,
+        id: str = "repo-secret",
+        name: str = "argocd-repo-infra",
+        url: str = REPO_URL,
+        sm_key: str = REPO_SM_KEY,
+    ):
+        # IaC repo registration: ESO materializes the Argo-recognized `repository`
+        # Secret (label argocd.argoproj.io/secret-type: repository) from the deploy
+        # key in SM. Reads the cluster-wide platform store. One-time bootstrap per
+        # repo: generate a read-only deploy key, add the public half to GitHub,
+        # store the private half at the repo's SM key in prod's SM.
+        esx.ExternalSecret(
+            self,
+            id,
+            metadata={"name": name, "namespace": ARGO_NS},
+            spec=esx.ExternalSecretSpec(
+                refresh_interval="1h",
+                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
+                    name="aws-secretsmanager-cluster",
+                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
+                ),
+                target=esx.ExternalSecretSpecTarget(
+                    name=name,
                     creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
                     template=esx.ExternalSecretSpecTargetTemplate(
                         engine_version=esx.ExternalSecretSpecTargetTemplateEngineVersion.V2,
@@ -436,7 +548,7 @@ class ArgoCD(Construct):
                         ),
                         data={
                             "type": "git",
-                            "url": REPO_URL,
+                            "url": url,
                             "sshPrivateKey": "{{ .sshPrivateKey }}",
                         },
                     ),
@@ -444,7 +556,7 @@ class ArgoCD(Construct):
                 data=[
                     esx.ExternalSecretSpecData(
                         secret_key="sshPrivateKey",
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(key=REPO_SM_KEY),
+                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(key=sm_key),
                     )
                 ],
             ),
