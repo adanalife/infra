@@ -363,7 +363,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS render thread is skipping frames"
-      description = "Sustained render-thread skipped-frame rate > 0.5/s for 5m. OBS can't composite at the canvas framerate — usually iGPU contention from co-tenant workloads (stage VLC/OBS, dashcam-cv) or host CPU pressure. Check intel_gpu_top on the minipc and what else is running on the node."
+      description = "Sustained render-thread skipped-frame rate > 0.1/s for 5m. OBS can't composite at the canvas framerate — usually iGPU contention from co-tenant workloads (stage VLC/OBS, dashcam-cv) or host CPU pressure. Check intel_gpu_top on the minipc and what else is running on the node."
     }
     labels = {
       severity = "warning"
@@ -398,7 +398,7 @@ resource "grafana_rule_group" "stream_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [0.5] }
+          evaluator = { type = "gt", params = [0.1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
@@ -416,7 +416,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS output thread is skipping frames (encoder lag)"
-      description = "Sustained output-thread skipped-frame rate > 0.5/s for 5m. The encoder can't keep up with the render thread — check the encode engine (vaapi on the shared iGPU), co-tenant encode load, and the encoder preset."
+      description = "Sustained output-thread skipped-frame rate > 0.1/s for 5m. The encoder can't keep up with the render thread — check the encode engine (vaapi on the shared iGPU), co-tenant encode load, and the encoder preset."
     }
     labels = {
       severity = "warning"
@@ -451,7 +451,7 @@ resource "grafana_rule_group" "stream_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [0.5] }
+          evaluator = { type = "gt", params = [0.1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
