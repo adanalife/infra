@@ -389,6 +389,31 @@ resource "aws_secretsmanager_secret_version" "tripbot_discord_bot_token" {
 # CI lifecycle grants
 # ============================================================================
 
+# ============================================================================
+# tripbot-console
+# ============================================================================
+
+# GHCR pull token for the private tripbot-console image. The console repo is
+# private, so its image is too; ESO renders this into the `ghcr-pull`
+# dockerconfigjson Secret each env's console Deployment pulls through.
+# Bootstrap (fine-grained GitHub token, read:packages on the package):
+#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot-console/ghcr-pull-token \
+#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
+resource "aws_secretsmanager_secret" "tripbot_console_ghcr_pull" {
+  name        = "k8s/tripbot-console/ghcr-pull-token"
+  description = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_console_ghcr_pull" {
+  secret_id     = aws_secretsmanager_secret.tripbot_console_ghcr_pull.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Allow CITerraformRole to read the SM secrets that terraform itself touches
 # at plan time. ReadOnlyAccess (already attached) excludes
 # secretsmanager:GetSecretValue. Two distinct call sites need it:
@@ -419,6 +444,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
       aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
+      aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
     ]
   }
 }
