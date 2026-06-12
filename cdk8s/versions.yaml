@@ -9,6 +9,6 @@
 # too — run `task cdk8s:synth` after changing a pin.
 prod-1:
   tripbot: "3.2.1"
-  vlc: "3.1.0"
+  vlc: "3.2.1"
   obs: "3.1.0"
   onscreens-server: "3.2.1"
