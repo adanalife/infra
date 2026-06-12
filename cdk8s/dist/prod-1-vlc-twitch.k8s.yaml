@@ -82,7 +82,7 @@ spec:
               gpu.intel.com/i915: "1"
               memory: 2Gi
             requests:
-              cpu: 200m
+              cpu: "1"
               gpu.intel.com/i915: "1"
               memory: 512Mi
           securityContext:
@@ -94,6 +94,7 @@ spec:
             - mountPath: /opt/data/Dashcam/_all
               name: dashcam
               readOnly: true
+      priorityClassName: prod-stream
       securityContext:
         seccompProfile:
           type: RuntimeDefault

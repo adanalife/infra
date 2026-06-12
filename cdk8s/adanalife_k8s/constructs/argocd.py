@@ -204,9 +204,12 @@ class ArgoCD(Construct):
                         for ns in _project_namespaces(self.envs)
                     ],
                     # The apps' cluster-scoped objects — nothing else may be created.
+                    # PriorityClass: the prod-stream class the supporting unit
+                    # emits (prod app pods outrank co-tenants under pressure).
                     "clusterResourceWhitelist": [
                         {"group": "", "kind": "PersistentVolume"},
                         {"group": "storage.k8s.io", "kind": "StorageClass"},
+                        {"group": "scheduling.k8s.io", "kind": "PriorityClass"},
                     ],
                     # Any namespaced kind is fine (it's already gated to the two namespaces
                     # by `destinations`).

@@ -125,6 +125,7 @@ class OnscreensServer(Construct):
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
                         ),
+                        priority_class_name=env.priority_class or None,
                         containers=[container],
                         volumes=[
                             k8s.Volume(name="run", empty_dir=k8s.EmptyDirVolumeSource())
