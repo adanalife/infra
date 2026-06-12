@@ -29,6 +29,27 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key" {
   }
 }
 
+# Read-only deploy key for the private tripbot-console repo — Argo's second
+# source repo (the console's cdk8s/dist deploy units live there). Same
+# bootstrap dance as the infra key above:
+#   ssh-keygen -t ed25519 -N "" -C argocd-tripbot-console -f argocd_console
+#   gh repo deploy-key add argocd_console.pub -R adanalife/tripbot-console --title "Argo CD (read-only)"
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/argocd/repo-ssh-key-console --secret-string file://argocd_console
+#   rm argocd_console argocd_console.pub
+resource "aws_secretsmanager_secret" "argocd_repo_ssh_key_console" {
+  name        = "k8s/argocd/repo-ssh-key-console"
+  description = "Read-only SSH deploy key for Argo CD to clone the private tripbot-console repo. Consumed via ESO into the argocd-repo-tripbot-console repository Secret. Value set out-of-band (see argocd.tf header)."
+}
+
+resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_console" {
+  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key_console.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # CI read grant — `terraform plan` refreshes this container + its placeholder
 # version, so CITerraformRole needs GetSecretValue/DescribeSecret on it. This
 # secret's ARN is folded into secrets.tf's bulk `ci_terraform_secrets_read`

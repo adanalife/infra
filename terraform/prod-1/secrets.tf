@@ -299,6 +299,31 @@ resource "aws_secretsmanager_secret_version" "tripbot_discord_bot_token" {
 # CI lifecycle grants
 # ============================================================================
 
+# ============================================================================
+# tripbot-console
+# ============================================================================
+
+# GHCR pull token for the private tripbot-console image. The console repo is
+# private, so its image is too; ESO renders this into the `ghcr-pull`
+# dockerconfigjson Secret each env's console Deployment pulls through.
+# Bootstrap (fine-grained GitHub token, read:packages on the package):
+#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot-console/ghcr-pull-token \
+#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
+resource "aws_secretsmanager_secret" "tripbot_console_ghcr_pull" {
+  name        = "k8s/tripbot-console/ghcr-pull-token"
+  description = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_console_ghcr_pull" {
+  secret_id     = aws_secretsmanager_secret.tripbot_console_ghcr_pull.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Bulk GetSecretValue for SM containers terraform refreshes during plan.
 # See stage-1/secrets.tf for the rationale and matching shape.
 data "aws_iam_policy_document" "ci_terraform_secrets_read" {
@@ -321,6 +346,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.postgres_backup_s3.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
       aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
+      aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
       # prod-only — Argo CD repo deploy key (defined in argocd.tf, which exists
       # only in prod-1). Folded into this bulk read grant rather than a standalone
       # policy because CITerraformRole is at AWS's hard cap of 10 managed policies
@@ -328,6 +354,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       # list, so it's a natural fit. This is the one intended divergence from the
       # KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has no Argo CD).
       aws_secretsmanager_secret.argocd_repo_ssh_key.arn,
+      aws_secretsmanager_secret.argocd_repo_ssh_key_console.arn,
     ]
   }
 }
