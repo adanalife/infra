@@ -22,3 +22,9 @@ configs:
     application.namespaces: development
     # No tailnet edge here — port-forward to argocd-server:80 over plain HTTP.
     server.insecure: true
+
+# No Discord pings from the throwaway dev env — run without the notifications
+# controller (the dev cluster also doesn't get the ESO-materialized webhook
+# secret; see argocd.py's notifications_secret flag).
+notifications:
+  enabled: false
