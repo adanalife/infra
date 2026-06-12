@@ -84,8 +84,12 @@ def test_notifications_secret_minipc_only():
     def names(objs):
         return {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
 
-    # minipc: repo cred + the Discord webhook for the notifications controller
-    assert names(_synth()) == {"argocd-repo-infra", "argocd-notifications"}
+    # minipc: infra + console repo creds + the notifications Discord webhook
+    assert names(_synth()) == {
+        "argocd-repo-infra",
+        "argocd-repo-tripbot-console",
+        "argocd-notifications",
+    }
     # dev runs notifications.enabled=false, so no webhook secret there
     assert names(_synth(**_DEV)) == {"argocd-repo-infra"}
 
