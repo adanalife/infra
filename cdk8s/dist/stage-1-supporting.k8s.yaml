@@ -126,7 +126,7 @@ spec:
   hard:
     pods: "30"
     requests.cpu: "6"
-    requests.gpu.intel.com/i915: "4"
+    requests.gpu.intel.com/i915: "3"
     requests.memory: 16Gi
 ---
 apiVersion: external-secrets.io/v1

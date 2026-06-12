@@ -227,15 +227,17 @@ ENVS: dict[str, EnvConfig] = {
         # Guardrail from the same incident: cap what stage can request in
         # aggregate, so "accidentally scaled up too many stage deployments"
         # parks pods Unschedulable instead of crowding prod off the node.
-        # Sized roomy — youtube stack (~0.5 CPU / 1.3Gi requests) + dashcam-cv
-        # embed jobs (2× 1 CPU / 5Gi) + one-shot jobs fit with headroom; the
-        # node has 20 CPU / 31Gi. iGPU claims capped at 4 of the node's 8
-        # shared slots (claims, not GPU time — encode contention is governed
-        # by the two-stream budget above, not by quota).
+        # CPU/memory sized roomy — youtube stack (~0.5 CPU / 1.3Gi requests) +
+        # dashcam-cv embed jobs (2× 1 CPU / 5Gi) + one-shot jobs fit with
+        # headroom; the node has 20 CPU / 31Gi. iGPU claims sized TIGHT to
+        # what stage runs today: vlc + obs steady (2) + 1 surge slot for
+        # vlc's RollingUpdate maxSurge=1 (obs is Recreate, no surge). Claims,
+        # not GPU time — encode contention is governed by the two-stream
+        # budget above, not by quota. Bump alongside re-adding twitch.
         app_quota={
             "requests.cpu": "6",
             "requests.memory": "16Gi",
-            "requests.gpu.intel.com/i915": "4",
+            "requests.gpu.intel.com/i915": "3",
             "pods": "30",
         },
     ),
