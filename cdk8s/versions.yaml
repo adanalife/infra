@@ -11,4 +11,4 @@ prod-1:
   tripbot: "3.3.0"
   vlc: "3.2.1"
   obs: "3.2.1"
-  onscreens-server: "3.2.1"
+  onscreens-server: "3.3.0"
