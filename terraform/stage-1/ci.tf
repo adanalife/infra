@@ -126,6 +126,33 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
       ]
     }
   }
+
+  # Allow GitHub Actions workflows in adanalife/infra to federate into
+  # this role via OIDC. Phase 1 of retiring the static CI_*_AWS_*
+  # secrets — kept additive alongside the CIUser principal above so the
+  # existing access-key path keeps working until workflows flip over.
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      # any branch / tag / PR in adanalife/infra. Tighten in a follow-up
+      # if we want apply to require master (e.g. `repo:adanalife/infra:ref:refs/heads/master`).
+      values = ["repo:adanalife/infra:*"]
+    }
+  }
 }
 
 #TODO: empty this, then set env-specific lists (stage and prod will probable be identical)
