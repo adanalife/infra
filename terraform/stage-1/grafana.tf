@@ -24,6 +24,12 @@ locals {
 provider "grafana" {
   url  = lookup(local.grafana_creds, "GRAFANA_CLOUD_URL", "https://placeholder.grafana.net")
   auth = lookup(local.grafana_creds, "GRAFANA_CLOUD_API_TOKEN", "placeholder")
+
+  # Synthetic Monitoring — requires GRAFANA_SM_URL + GRAFANA_SM_ACCESS_TOKEN in the
+  # stage-1/grafana-cloud-api SM blob (see grafana-synthetic-monitoring.tf for the
+  # bootstrap runbook). Uses placeholder defaults so plan doesn't error before seeding.
+  sm_url          = lookup(local.grafana_creds, "GRAFANA_SM_URL", "https://synthetic-monitoring-api.grafana.net")
+  sm_access_token = lookup(local.grafana_creds, "GRAFANA_SM_ACCESS_TOKEN", "placeholder")
 }
 
 # Datasource UIDs follow the pattern grafanacloud-<slug>-{prom,logs,traces}
