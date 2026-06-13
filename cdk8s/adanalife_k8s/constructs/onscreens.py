@@ -40,7 +40,7 @@ class OnscreensServer(Construct):
         # Telemetry block (ENV + OTEL_* + SENTRY_ENVIRONMENT) is shared with the
         # other Go services; NATS_URL is present wherever there's a platform NATS
         # (dev/stage/prod) and omitted on local.
-        data = dict(appconfig.telemetry_config(env))
+        data = dict(appconfig.telemetry_config(env, platform))
         if env.nats_url:
             data["NATS_URL"] = env.nats_url
         # Per-platform rotator-message filtering: a YouTube overlay must not

@@ -172,6 +172,14 @@ def test_telemetry_block_and_no_stub_block():
     assert prod["ENV"] == "production"
     assert prod["OTEL_SDK_DISABLED"] == "false"
     assert prod["SENTRY_ENVIRONMENT"] == "prod-1"
+    # service.platform is stamped into the OTel resource attributes so Grafana
+    # Cloud can surface a service_platform label for twitch-vs-youtube filtering.
+    assert "service.platform=twitch" in prod["OTEL_RESOURCE_ATTRIBUTES"]
+    app = K8sTesting.app()
+    chart = Chart(app, "t")
+    Tripbot(chart, "youtube", env=load_env("stage-1"))
+    yt = _by(K8sTesting.synth(chart), "ConfigMap", "tripbot-youtube-config")[0]["data"]
+    assert "service.platform=youtube" in yt["OTEL_RESOURCE_ATTRIBUTES"]
     # tripbot's ConfigMap (unlike vlc's) carries NO DB/Twitch stub block —
     # those come from the Secret. Verify even on local/dev.
     for env in ("local", "development"):
