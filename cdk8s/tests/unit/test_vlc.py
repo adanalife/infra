@@ -103,6 +103,16 @@ def test_gpu_only_on_gpu_envs():
     assert "gpu.intel.com/i915" not in lreqs
 
 
+def test_stage_vlc_drops_gpu_claim_despite_gpu_env():
+    # stage-1 is a GPU env (gpu=True, OBS needs VAAPI encode) but sets
+    # vlc_gpu=False: vlc's iGPU claim was proven unnecessary (stream-copy +
+    # trivial software decode), so it's dropped to free an iGPU slot. prod-1
+    # still claims it (covered by test_gpu_only_on_gpu_envs).
+    stage = _by(_synth("stage-1", "youtube"), "Deployment", "vlc-youtube")[0]
+    reqs = stage["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]
+    assert "gpu.intel.com/i915" not in reqs
+
+
 def test_prod_vlc_no_inpod_onscreens_port_but_has_nats():
     # The in-pod onscreens :8081 is decommissioned — no env re-exposes it; prod
     # still carries NATS_URL (its own command subscriber, not the old onscreens).

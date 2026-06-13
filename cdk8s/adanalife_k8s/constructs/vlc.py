@@ -106,7 +106,11 @@ class VlcServer(Construct):
             "memory": k8s.Quantity.from_string("512Mi"),
         }
         limits = {"memory": k8s.Quantity.from_string("2Gi")}
-        if env.gpu:
+        # vlc claims the iGPU only where the env has one AND vlc_gpu is set. The
+        # claim was proven unnecessary for vlc-server (stream-copy + trivial
+        # software decode), so an env can set vlc_gpu=False to free an iGPU slot
+        # for the encoders. OBS gates on env.gpu directly and is unaffected.
+        if env.gpu and env.vlc_gpu:
             requests["gpu.intel.com/i915"] = k8s.Quantity.from_string("1")
             limits["gpu.intel.com/i915"] = k8s.Quantity.from_string("1")
 
