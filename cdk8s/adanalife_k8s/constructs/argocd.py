@@ -92,6 +92,25 @@ CONSOLE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-console"
 # float alongside the :develop image), prod tracks master (release-gated) —
 # the same philosophy as the image-tag pinning model.
 CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+# The tripbot repo — Argo's source for the APP workloads (the four images built
+# from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
+# PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
+# (unlike the infra + console SSH sources). tripbot's dist filenames + path
+# ("cdk8s/dist/<env>-<app>.k8s.yaml") are identical to infra's, so only the
+# source repo + revision change per env.
+TRIPBOT_REPO_URL = "https://github.com/adanalife/tripbot.git"
+# Per-env revision: stage rides develop (manifests float with the :develop
+# image), prod rides master (release-gated) — same philosophy as the console +
+# the image-tag pins.
+TRIPBOT_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+# Envs whose APP workloads Argo reads from the tripbot repo instead of infra.
+# Stage-first: stage cuts over once tripbot's cdk8s/dist is on develop; prod joins
+# once it's on master (a release), by adding "prod-1" here. Envs absent here keep
+# reading infra's dist. Identity Secrets + stream protection stay infra-emitted
+# (SupportingChart) during the transition — the app charts only reference those
+# Secrets by name, so there's no ownership conflict until the later
+# identity-migration cleanup adds a tripbot-identity ApplicationSet.
+TRIPBOT_APPS_ENVS = ("stage-1",)
 
 
 def _data_ns(env_name: str) -> str:
@@ -126,12 +145,28 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
     from adanalife_k8s.charts import COMPONENTS
     from adanalife_k8s.config import load_env
 
-    return [
-        {"env": env_name, "app": f"{comp}-{platform}"}
-        for env_name in envs
-        for platform in load_env(env_name).platforms
-        for comp in COMPONENTS
-    ]
+    def _source(env_name: str) -> tuple[str, str]:
+        # Envs cut over to the tripbot repo read it (per-env revision); the rest
+        # read infra@master. Carried per-element so one ApplicationSet can source
+        # some envs from tripbot and others from infra during the staged cutover.
+        if env_name in TRIPBOT_APPS_ENVS:
+            return TRIPBOT_REPO_URL, TRIPBOT_REVISIONS[env_name]
+        return REPO_URL, TARGET_REVISION
+
+    elements: list[dict] = []
+    for env_name in envs:
+        repo, revision = _source(env_name)
+        for platform in load_env(env_name).platforms:
+            for comp in COMPONENTS:
+                elements.append(
+                    {
+                        "env": env_name,
+                        "app": f"{comp}-{platform}",
+                        "repo": repo,
+                        "revision": revision,
+                    }
+                )
+    return elements
 
 
 class ArgoCD(Construct):
@@ -168,6 +203,10 @@ class ArgoCD(Construct):
         # the k3d dev instance (development deploys via `task deploy:dev` in the
         # console repo; the dev cluster carries no private-repo deploy key).
         self.console_envs = tuple(e for e in envs if e in CONSOLE_REVISIONS)
+        # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
+        # allows that source). Resolves to () on any cluster not running a
+        # cut-over env.
+        self.tripbot_apps_envs = tuple(e for e in envs if e in TRIPBOT_APPS_ENVS)
 
         self._app_project()
         # Three ApplicationSets, one Application each per unit. The apps set is
@@ -184,6 +223,10 @@ class ArgoCD(Construct):
             prune_disabled=False,
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
+            # Source repo + revision are per-element (see _app_elements): cut-over
+            # envs read the tripbot repo, the rest read infra@master.
+            repo_url="{{.repo}}",
+            target_revision_tmpl="{{.revision}}",
         )
         self._application_set(
             id="appset-supporting",
@@ -261,7 +304,8 @@ class ArgoCD(Construct):
                 {
                     "description": "adanalife app workloads synthesized by cdk8s",
                     "sourceRepos": [REPO_URL]
-                    + ([CONSOLE_REPO_URL] if self.console_envs else []),
+                    + ([CONSOLE_REPO_URL] if self.console_envs else [])
+                    + ([TRIPBOT_REPO_URL] if self.tripbot_apps_envs else []),
                     "destinations": [
                         {"server": IN_CLUSTER, "namespace": ns}
                         for ns in _project_namespaces(self.envs)
