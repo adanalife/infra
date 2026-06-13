@@ -43,6 +43,10 @@ class OnscreensServer(Construct):
         data = dict(appconfig.telemetry_config(env))
         if env.nats_url:
             data["NATS_URL"] = env.nats_url
+        # Per-platform rotator-message filtering: a YouTube overlay must not
+        # advertise Twitch-only commands (!miles, !guess). onscreens-server reads
+        # ONSCREENS_SERVER_PLATFORM (defaults to twitch if unset).
+        data["ONSCREENS_SERVER_PLATFORM"] = platform
         cfg_hash = configmap.config_map(
             self,
             "config",
