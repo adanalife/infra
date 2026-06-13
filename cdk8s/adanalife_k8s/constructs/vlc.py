@@ -55,7 +55,7 @@ class VlcServer(Construct):
         data["VLC_SERVER_HOST"] = f"{name}:8080"  # self-reference
         if appconfig.uses_local_stubs(env):
             data.update(appconfig.local_stubs())
-        data.update(appconfig.telemetry_config(env))
+        data.update(appconfig.telemetry_config(env, platform))
         # vlc-server's own NATS command subscriber needs NATS_URL wherever
         # there's a platform NATS (dev/stage/prod), omitted on local — same
         # gate as onscreens.py.

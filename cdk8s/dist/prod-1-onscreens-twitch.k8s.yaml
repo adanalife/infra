@@ -10,7 +10,7 @@ data:
   ENV: production
   NATS_URL: nats://nats.prod-1-platform.svc.cluster.local:4222
   ONSCREENS_SERVER_PLATFORM: twitch
-  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod-1,service.namespace=tripbot
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod-1,service.namespace=tripbot,service.platform=twitch
   OTEL_SDK_DISABLED: "false"
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
   OTEL_TRACES_SAMPLER_ARG: "0.1"
@@ -37,7 +37,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: d2ef93fbcd
+        adanalife.dev/config-hash: 1689252f67
       labels:
         app: onscreens-twitch
     spec:

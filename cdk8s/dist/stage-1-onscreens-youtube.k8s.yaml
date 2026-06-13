@@ -10,7 +10,7 @@ data:
   ENV: staging
   NATS_URL: nats://nats.stage-1-platform.svc.cluster.local:4222
   ONSCREENS_SERVER_PLATFORM: youtube
-  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=stage-1,service.namespace=tripbot
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=stage-1,service.namespace=tripbot,service.platform=youtube
   OTEL_SDK_DISABLED: "true"
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
   OTEL_TRACES_SAMPLER_ARG: "0.1"
@@ -37,7 +37,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: b582890947
+        adanalife.dev/config-hash: f58e83b39b
       labels:
         app: onscreens-youtube
     spec:

@@ -170,7 +170,7 @@ def config_data(env: EnvConfig, platform: str) -> dict[str, str]:
     # rollouts) untouched.
     if platform != "twitch":
         data["STREAM_PLATFORM"] = platform
-    data.update(appconfig.telemetry_config(env))
+    data.update(appconfig.telemetry_config(env, platform))
     data.update(_ENV_CONFIG[env.name])
     data["EXTERNAL_URL"] = external_url(env, platform)
     if env.nats_url:
