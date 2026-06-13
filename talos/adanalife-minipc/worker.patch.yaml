@@ -1,0 +1,64 @@
+# Machine config patch for the adanalife-rpi5 worker node (Raspberry Pi 5, arm64)
+# joining the adanalife-minipc cluster.
+#
+# Applied on top of the generated worker.yaml (gitignored PKI — restore with
+# `task talos:minipc:secrets:decrypt`) via:
+#   talosctl machineconfig patch worker.yaml \
+#     --patch @worker.patch.yaml \
+#     --output worker.patched.yaml
+#
+# Non-secret. Safe to commit. The base worker.yaml carries the cluster CA +
+# join token + endpoint (https://192.168.1.200:6443) that let the Pi join.
+#
+# The node boots from the Talos SBC image already written to its SD card
+# (Image Factory schematic a636242df247ad4aad2e36d1026d8d4727b716a3061749bd7b19651e548f65e4
+# = vanilla `rpi_5` overlay, siderolabs/sbc-raspberrypi, metal-arm64). So no
+# install happens at apply-config time — install.* below is the reference Talos
+# uses for *upgrades*. install.image MUST be the Factory installer for that same
+# schematic, or a future `talosctl upgrade` would replace the rpi_5 overlay
+# (u-boot/dtb/firmware) and the Pi would stop booting. Extensions
+# (iscsi-tools for Longhorn, tailscale, etc.) get layered later by minting a new
+# schematic and `talosctl upgrade` — same pattern as the controlplane.
+
+machine:
+  install:
+    disk: /dev/mmcblk0   # the SD card on the Pi 5 (NVMe would be /dev/nvme0n1)
+    image: factory.talos.dev/installer/a636242df247ad4aad2e36d1026d8d4727b716a3061749bd7b19651e548f65e4:v1.13.2
+  # NIC: omitted on purpose. With no interfaces block Talos DHCPs all NICs, so
+  # the Pi 5's onboard ethernet (end0) comes up without us hard-coding the name.
+  # KubeSpan parity with the controlplane (cluster.discovery is already on in the
+  # base worker.yaml). Dormant-but-tested per the infra TODO: it's the plumbing
+  # that lets a future node join over the public internet. On the LAN it's a
+  # no-op for reachability — if the first join ever stalls, this is the first
+  # thing to drop to isolate the cause.
+  network:
+    kubespan:
+      enabled: true
+  # Opt-in-only scheduling. NOT an arch guard — tripbot/vlc/obs all ship
+  # multi-arch (amd64+arm64) manifest lists, so they'd run here fine. The reason
+  # is that this is a new, weak (4-core), SD-card-backed node on a community-
+  # tested Talos platform, and we don't want the scheduler silently relocating
+  # prod pods onto it — especially OBS (no H.264 hardware encoder on the Pi 5, so
+  # it'd fall back to software x264 on 4 ARM cores and tank the stream) or
+  # Postgres (write-heavy on slow SD). So nothing lands here unless it explicitly
+  # tolerates this taint. Cilium + the other DaemonSets tolerate all taints
+  # (operator: Exists), so the CNI still installs and the node reaches Ready.
+  # Opt a workload in with:
+  #   tolerations:
+  #     - key: adanalife.dev/sandbox
+  #       operator: Exists
+  #       effect: NoSchedule
+  nodeTaints:
+    adanalife.dev/sandbox: "true:NoSchedule"
+  nodeLabels:
+    # kubernetes.io/arch=arm64 is set automatically by the kubelet; this is just
+    # a human-readable board marker.
+    adanalife.dev/board: rpi5
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+# auto must be "off" — the base worker.yaml ships `auto: stable`, and Talos
+# rejects an auto-generating mode + a static hostname together. Quoted so YAML
+# doesn't coerce `off` to boolean false. (Same pattern as controlplane.patch.yaml.)
+auto: "off"
+hostname: adanalife-rpi5
