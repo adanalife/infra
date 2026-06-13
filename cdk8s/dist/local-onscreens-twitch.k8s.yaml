@@ -8,6 +8,7 @@ metadata:
   namespace: default
 data:
   ENV: staging
+  ONSCREENS_SERVER_PLATFORM: twitch
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=development,service.namespace=tripbot
   OTEL_SDK_DISABLED: "true"
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
@@ -35,7 +36,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 9ba3c36198
+        adanalife.dev/config-hash: c5ce9456d2
       labels:
         app: onscreens-twitch
     spec:
