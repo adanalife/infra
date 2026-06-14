@@ -50,6 +50,26 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_console" {
   }
 }
 
+# Read-only deploy key for the private video-pipeline repo — another Argo source
+# (the dashcam-cv workload's cdk8s/dist lives there). Same bootstrap dance:
+#   ssh-keygen -t ed25519 -N "" -C argocd-video-pipeline -f argocd_video_pipeline
+#   gh repo deploy-key add argocd_video_pipeline.pub -R adanalife/video-pipeline --title "Argo CD (read-only)"
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/argocd/repo-ssh-key-video-pipeline --secret-string file://argocd_video_pipeline
+#   rm argocd_video_pipeline argocd_video_pipeline.pub
+resource "aws_secretsmanager_secret" "argocd_repo_ssh_key_video_pipeline" {
+  name        = "k8s/argocd/repo-ssh-key-video-pipeline"
+  description = "Read-only SSH deploy key for Argo CD to clone the private video-pipeline repo. Consumed via ESO into the argocd-repo-video-pipeline repository Secret. Value set out-of-band (see argocd.tf header)."
+}
+
+resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_video_pipeline" {
+  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key_video_pipeline.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # CI read grant — `terraform plan` refreshes this container + its placeholder
 # version, so CITerraformRole needs GetSecretValue/DescribeSecret on it. This
 # secret's ARN is folded into secrets.tf's bulk `ci_terraform_secrets_read`
