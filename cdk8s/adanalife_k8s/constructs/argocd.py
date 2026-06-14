@@ -4,19 +4,23 @@ deploy unit applied after the Argo install (which is the Helm chart in
 PlatformChart). Argo CD itself is the controller; these are the objects that tell
 it what to watch:
 
-  * AppProject (tripbot) — a restrictive project: only the infra repo, only the
-    in-cluster prod-1/stage-1 namespaces, only the cluster-scoped kinds the apps
-    actually use (PV, StorageClass). Caps the blast radius vs the wide-open
-    `default` project. (Reserve "infra"/"platform" naming for shared cluster
-    infrastructure; these are tripbot-project workloads.)
-  * Three ApplicationSets — `tripbot-apps` (one Application per
-    <env>-<component>-<platform>, so each component is its own sync/health/URL),
-    `tripbot-supporting` and `tripbot-data` (one per env). Each reconciles its own
-    cdk8s/dist file. The apps set runs automated (prune + selfHeal) for
-    AUTOSYNC_ENVS minus AUTOSYNC_HOLDOUTS (prod OBS stays manual — a sync restarts
-    the live stream); supporting + data are manual everywhere, so Argo reports
-    their drift but changes nothing until you sync. ignoreDifferences keeps
-    ESO's CRD schema-default fields out of the diff so ExternalSecrets read Synced.
+  * AppProject (tripbot) — a restrictive project: the infra + tripbot repos, only
+    the in-cluster prod-1/stage-1 (or development) namespaces, only the
+    cluster-scoped kinds the apps actually use (PV, StorageClass, PriorityClass).
+    Caps the blast radius vs the wide-open `default` project. (Reserve
+    "infra"/"platform" naming for shared cluster infrastructure; these are
+    tripbot-project workloads.)
+  * ApplicationSets — `tripbot-apps` (one Application per
+    <env>-<component>-<platform>) + `tripbot-identity` (per-env identity Secrets +
+    stream protection) source the TRIPBOT repo (the app manifests live there now);
+    `tripbot-supporting` and `tripbot-data` (one per env) source infra. Each
+    reconciles its own cdk8s/dist file. The apps set runs automated (prune +
+    selfHeal) for AUTOSYNC_ENVS minus AUTOSYNC_HOLDOUTS (prod OBS stays manual — a
+    sync restarts the live stream); identity + supporting + data are manual
+    everywhere (identity + data also Prune=false — never GC creds/volumes), so
+    Argo reports their drift but changes nothing until you sync. ignoreDifferences
+    keeps ESO's CRD schema-default fields out of the diff so ExternalSecrets read
+    Synced.
   * tailscale Ingress — the UI at argocd-prod.<tailnet>.ts.net.
   * traefik Ingress — the same UI at argocd.prod.whereisdana.today, published by
     external-dns to the cluster's LAN endpoint (reachable on-LAN directly, off-LAN
@@ -99,19 +103,24 @@ CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # ("cdk8s/dist/<env>-<app>.k8s.yaml") are identical to infra's, so only the
 # source repo + revision change per env.
 TRIPBOT_REPO_URL = "https://github.com/adanalife/tripbot.git"
-# Per-env revision: stage rides develop (manifests float with the :develop
-# image), prod rides master (release-gated) — same philosophy as the console +
-# the image-tag pins.
-TRIPBOT_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
-# Envs whose APP workloads Argo reads from the tripbot repo instead of infra.
-# Both prod-1 (tracks master) and stage-1 (tracks develop) are now cut over: their
-# app dist in the tripbot repo is byte-identical to infra's, so the source flip is
-# a no-op. Envs absent here (dev/local) keep reading infra's dist until the
-# identity-migration cleanup moves them too. Identity Secrets + stream protection
-# stay infra-emitted (SupportingChart) during the transition — the app charts only
-# reference those Secrets by name, so there's no ownership conflict until that
-# cleanup adds a tripbot-identity ApplicationSet.
-TRIPBOT_APPS_ENVS = ("stage-1", "prod-1")
+# Per-env revision: prod rides master (release-gated), stage + dev ride develop
+# (manifests float with the :develop image) — same philosophy as the console +
+# the image-tag pins. (local isn't Argo-managed — it kubectl-applies tripbot's
+# dist directly.)
+TRIPBOT_REVISIONS = {"prod-1": "master", "stage-1": "develop", "development": "develop"}
+# Envs whose APP workloads + identity Secrets Argo reads from the tripbot repo
+# instead of infra. Every Argo-managed env is now cut over: prod-1/stage-1 on the
+# minipc and development on the k3d cluster. infra no longer authors any tripbot
+# app manifests — it delivers them cross-repo (see the apps + identity
+# ApplicationSets below) and keeps only postgres/supporting/dashcam.
+TRIPBOT_APPS_ENVS = ("stage-1", "prod-1", "development")
+# The tripbot APP components — one Application per (env, component, platform). The
+# matching dist files (`<env>-<component>-<platform>.k8s.yaml`) are authored in
+# the tripbot repo now, so this list is a cross-repo contract: it must track the
+# components tripbot's cdk8s emits, or the apps set would generate Applications
+# pointing at files that don't exist (or miss new ones). Lived in charts.py while
+# infra emitted the apps; it's now purely an Argo-config concern.
+TRIPBOT_COMPONENTS = ("tripbot", "vlc", "onscreens", "obs")
 
 
 def _data_ns(env_name: str) -> str:
@@ -138,32 +147,24 @@ def _project_namespaces(envs: tuple[str, ...]) -> list[str]:
 
 def _app_elements(envs: tuple[str, ...]) -> list[dict]:
     """The per-component ApplicationSet elements: one {env, app} per
-    (env, platform, component), where app = "<component>-<platform>". Computed
-    from the SAME source emit_app_charts loops over (envs × env.platforms ×
-    COMPONENTS), so the generated Applications can't drift from the synthed files
-    — adding a platform extends both. Lazy imports avoid an import cycle with
-    charts.py (which imports this module's ArgoCD)."""
-    from adanalife_k8s.charts import COMPONENTS
+    (env, platform, component), where app = "<component>-<platform>". Every env's
+    app workloads are authored in the tripbot repo now, so each element sources it
+    at the env's revision (prod→master, stage/dev→develop). The component list +
+    each env's platforms drive the (env, platform, component) fan-out; it must
+    stay in sync with the dist files tripbot's cdk8s emits. Lazy config import
+    avoids an import cycle (config has no cycle, but kept local for symmetry)."""
     from adanalife_k8s.config import load_env
-
-    def _source(env_name: str) -> tuple[str, str]:
-        # Envs cut over to the tripbot repo read it (per-env revision); the rest
-        # read infra@master. Carried per-element so one ApplicationSet can source
-        # some envs from tripbot and others from infra during the staged cutover.
-        if env_name in TRIPBOT_APPS_ENVS:
-            return TRIPBOT_REPO_URL, TRIPBOT_REVISIONS[env_name]
-        return REPO_URL, TARGET_REVISION
 
     elements: list[dict] = []
     for env_name in envs:
-        repo, revision = _source(env_name)
+        revision = TRIPBOT_REVISIONS[env_name]
         for platform in load_env(env_name).platforms:
-            for comp in COMPONENTS:
+            for comp in TRIPBOT_COMPONENTS:
                 elements.append(
                     {
                         "env": env_name,
                         "app": f"{comp}-{platform}",
-                        "repo": repo,
+                        "repo": TRIPBOT_REPO_URL,
                         "revision": revision,
                     }
                 )
@@ -210,11 +211,12 @@ class ArgoCD(Construct):
         self.tripbot_apps_envs = tuple(e for e in envs if e in TRIPBOT_APPS_ENVS)
 
         self._app_project()
-        # Three ApplicationSets, one Application each per unit. The apps set is
+        # ApplicationSets, one Application each per unit. The apps set is
         # per-COMPONENT (one Application per <env>-<component>-<platform> →
-        # cdk8s/dist/<env>-<component>-<platform>.k8s.yaml), so each component is
-        # its own sync/health/URL. supporting + data are per-env. Data never
-        # prunes, so an app deploy can't delete the database or volumes.
+        # cdk8s/dist/<env>-<component>-<platform>.k8s.yaml in the TRIPBOT repo), so
+        # each component is its own sync/health/URL. supporting + data + identity
+        # are per-env. Data never prunes, so an app deploy can't delete the
+        # database or volumes.
         self._application_set(
             id="appset-apps",
             name="tripbot-apps",
@@ -224,11 +226,34 @@ class ArgoCD(Construct):
             prune_disabled=False,
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
-            # Source repo + revision are per-element (see _app_elements): cut-over
-            # envs read the tripbot repo, the rest read infra@master.
+            # Source repo + revision are per-element (see _app_elements): every env
+            # reads the tripbot repo at its own revision (prod→master, else develop).
             repo_url="{{.repo}}",
             target_revision_tmpl="{{.revision}}",
         )
+        # The cross-repo identity unit: tripbot's per-env identity Secrets (DB creds
+        # + twitch/maps/discord ExternalSecrets) and the prod-stream PriorityClass/
+        # ResourceQuota, sourced from the tripbot repo (`<env>-tripbot-identity`).
+        # MANUAL sync + Prune=false, like the data unit: these are precious
+        # credentials whose ExternalSecrets own (creationPolicy: Owner) the
+        # materialized Secrets, so an accidental prune would GC live creds. Removing
+        # one is a deliberate manual gesture. (Handoff from the old infra-emitted
+        # identity-in-supporting: sync this set FIRST so it adopts the existing
+        # ExternalSecrets by name, THEN sync supporting — see the PR runbook.)
+        if self.tripbot_apps_envs:
+            self._application_set(
+                id="appset-identity",
+                name="tripbot-identity",
+                elements=[
+                    {"env": e, "revision": TRIPBOT_REVISIONS[e]}
+                    for e in self.tripbot_apps_envs
+                ],
+                app_name_tmpl="{{.env}}-tripbot-identity",
+                include_tmpl="{{.env}}-tripbot-identity.k8s.yaml",
+                prune_disabled=True,  # never GC a credential Secret
+                repo_url=TRIPBOT_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
         self._application_set(
             id="appset-supporting",
             name="tripbot-supporting",

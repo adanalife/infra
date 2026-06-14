@@ -16,7 +16,6 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import DataChart, SupportingChart
 from adanalife_k8s.config import EnvConfig, load_env
-from adanalife_k8s.constructs.tripbot import config_data
 
 
 def _synth(chart_cls, env: EnvConfig):
@@ -107,14 +106,3 @@ def test_colocated_supporting_has_no_duplicate_store_or_pvc():
     objs = _synth(SupportingChart, _COLOCATED_NFS)
     assert not _by(objs, "SecretStore", "aws-secretsmanager")
     assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")
-
-
-# --- DATABASE_HOST in the tripbot ConfigMap follows the env ---
-
-
-def test_database_host_is_fqdn_when_isolated_bare_when_not():
-    assert (
-        config_data(load_env("prod-1"), "twitch")["DATABASE_HOST"]
-        == "postgres.prod-1-data.svc.cluster.local"
-    )
-    assert config_data(load_env("development"), "twitch")["DATABASE_HOST"] == "postgres"

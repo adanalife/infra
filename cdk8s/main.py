@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 """cdk8s entrypoint. Synthesizes the deploy units into dist/.
 
-Per env:  <env>-<component>-<platform>  — one deploy unit / Argo Application each
-          <env>-supporting              — shared + identity Secrets, cert-manager Issuers
+Per env:  <env>-supporting              — shared obs Secrets, cert-manager Issuers
           <env>-data                    — postgres + dashcam PVC (stateful, never pruned)
-          <env>-job-<name>              — tripbot one-shot Jobs (auth/seed; their own tasks)
 stage:    dashcam-cv[-jobs]             — the vector-fill batch workload (its own task)
+
+The tripbot app workloads (<env>-<component>-<platform>), one-shot Jobs, and
+identity Secrets (<env>-tripbot-identity) are authored in the tripbot repo's
+cdk8s now; Argo delivers them cross-repo (see constructs/argocd.py).
 
 Synth all envs by default; CDK8S_ENV=<name> narrows to one (handy for diffing a
 single env's output).
@@ -21,10 +23,8 @@ from adanalife_k8s.charts import (
     DashcamCVJobsChart,
     DashcamPVChart,
     DataChart,
-    emit_job_charts,
     PlatformArgoChart,
     SupportingChart,
-    emit_app_charts,
 )
 from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
@@ -38,15 +38,14 @@ only = os.environ.get("CDK8S_ENV")
 targets = [only] if only else list(ENVS)
 for name in targets:
     env = load_env(name)
-    # One Chart per (component, platform) -> dist/<env>-<component>-<platform>.k8s.yaml.
-    emit_app_charts(app, env)
-    # Per-env namespace supporting resources (shared/identity Secrets + issuers),
-    # isolated from the app churn — its own deploy unit / Argo Application.
+    # Per-env namespace supporting resources (shared observability Secrets +
+    # cert-manager issuers), isolated from the app churn — its own deploy unit /
+    # Argo Application. The tripbot APP workloads, one-shot Jobs, and identity
+    # Secrets are authored in the tripbot repo now (Argo delivers them cross-repo).
     SupportingChart(app, f"{name}-supporting", env=env)
     # Stateful resources (postgres + dashcam PV/PVC) as a separate deploy unit /
     # Argo Application — isolated from the app churn, synced before the apps.
     DataChart(app, f"{name}-data", env=env)
-    emit_job_charts(app, env)
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
     # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
     # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist
