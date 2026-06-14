@@ -35,12 +35,20 @@ spec:
         elements:
           - env: development
             app: tripbot-twitch
+            repo: git@github.com:adanalife/infra.git
+            revision: master
           - env: development
             app: vlc-twitch
+            repo: git@github.com:adanalife/infra.git
+            revision: master
           - env: development
             app: onscreens-twitch
+            repo: git@github.com:adanalife/infra.git
+            revision: master
           - env: development
             app: obs-twitch
+            repo: git@github.com:adanalife/infra.git
+            revision: master
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -50,8 +58,8 @@ spec:
     spec:
       project: tripbot
       source:
-        repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        repoURL: "{{.repo}}"
+        targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
