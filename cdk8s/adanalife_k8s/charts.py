@@ -1,13 +1,13 @@
 """Deploy units. Each Chart synthesizes to one file in dist/ and is applied
-independently — the per-env SupportingChart / DataChart (+ the stage-only
-DashcamCV units) and PlatformChart per cluster — so each is its own sync/health
-unit (one Argo Application) and the platform stack stays decoupled from any app
-env.
+independently — the per-env SupportingChart / DataChart and PlatformChart per
+cluster — so each is its own sync/health unit (one Argo Application) and the
+platform stack stays decoupled from any app env.
 
 The tripbot APP workloads (tripbot/vlc/onscreens/obs Deployments + their one-shot
-Jobs + identity Secrets) are no longer authored here: they moved to the tripbot
-repo's cdk8s and Argo delivers them cross-repo (see constructs/argocd.py). This
-module keeps only the platform + stateful + dashcam-cv units that stay in infra.
+Jobs + identity Secrets) and the dashcam-cv vector-fill workload are no longer
+authored here: they moved to the tripbot and video-pipeline repos' cdk8s and Argo
+delivers them cross-repo (see constructs/argocd.py). This module keeps only the
+platform + stateful units that stay in infra.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.constructs.dashcam import emit_dashcam_pv, emit_dashcam_pvc
-from adanalife_k8s.constructs.dashcam_cv import DashcamCV, DashcamCVJobs
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.eso import secret_store
 from adanalife_k8s.supporting import emit_supporting
@@ -123,30 +122,6 @@ class DashcamPVChart(Chart):
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
-
-
-class DashcamCVChart(Chart):
-    """The PERSISTENT dashcam-cv vector-fill workload (PriorityClass + models PVC
-    + the suspended fill CronJob). A separate deploy unit because it was never in
-    the env umbrellas — a background batch job staged via its own task,
-    currently stage-only. The one-shot ops Jobs live in DashcamCVJobsChart.
-    """
-
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
-        DashcamCV(self, env=env)
-
-
-class DashcamCVJobsChart(Chart):
-    """The on-demand dashcam-cv one-shot Jobs (fill-once / find / stats). Their
-    own deploy unit so a normal `apply` of DashcamCVChart never re-runs them
-    (running a Job on each reconcile would be wrong — same split as JobsChart).
-    Run via the per-job tasks; depends on DashcamCVChart's PVC + PriorityClass.
-    """
-
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
-        DashcamCVJobs(self, env=env)
 
 
 class ArgoCDChart(Chart):

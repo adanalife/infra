@@ -3,11 +3,11 @@
 
 Per env:  <env>-supporting              — shared obs Secrets, cert-manager Issuers
           <env>-data                    — postgres + dashcam PVC (stateful, never pruned)
-stage:    dashcam-cv[-jobs]             — the vector-fill batch workload (its own task)
 
 The tripbot app workloads (<env>-<component>-<platform>), one-shot Jobs, and
 identity Secrets (<env>-tripbot-identity) are authored in the tripbot repo's
-cdk8s now; Argo delivers them cross-repo (see constructs/argocd.py).
+cdk8s now, and the dashcam-cv vector-fill workload in the video-pipeline repo's;
+Argo delivers both cross-repo (see constructs/argocd.py).
 
 Synth all envs by default; CDK8S_ENV=<name> narrows to one (handy for diffing a
 single env's output).
@@ -19,8 +19,6 @@ from cdk8s import App
 
 from adanalife_k8s.charts import (
     ArgoCDChart,
-    DashcamCVChart,
-    DashcamCVJobsChart,
     DashcamPVChart,
     DataChart,
     PlatformArgoChart,
@@ -52,12 +50,9 @@ for name in targets:
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
         DashcamPVChart(app, f"{name}-dashcam-pv", env=env)
-    # dashcam-cv is stage-only today (the only env running the vector fill).
-    # The persistent fill workload and the on-demand one-shot Jobs are separate
-    # deploy units so a normal apply never re-runs the Jobs.
-    if name == "stage-1":
-        DashcamCVChart(app, "dashcam-cv", env=env)
-        DashcamCVJobsChart(app, "dashcam-cv-jobs", env=env)
+    # The dashcam-cv vector-fill workload moved to the video-pipeline repo (it owns
+    # its own cdk8s/dist now); Argo delivers it cross-repo via the video-pipeline
+    # ApplicationSet (see constructs/argocd.py).
 
 # Argo CD GitOps config (env-agnostic, offline) — committed deploy unit applied
 # after the Argo install. Skipped when narrowed to a single env via CDK8S_ENV.

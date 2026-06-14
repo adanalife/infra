@@ -56,11 +56,12 @@ it stays a `cdk8s.ApiObject` in `eso.py` — see the note in `cdk8s.yaml`.
   `SupportingChart` (per-env shared + identity Secrets + cert-manager Issuers),
   `DataChart` (stateful: postgres + the dashcam PVC, isolated so app churn can't
   disturb them; optional `<env>-data` namespace), `emit_job_charts` (one-shot
-  auth/seed Jobs), `DashcamCVChart` / `DashcamCVJobsChart` (stage-only vector
-  fill), `DashcamPVChart` (the host-specific NFS PV, kept out of Argo), `ArgoCDChart`.
+  auth/seed Jobs), `DashcamPVChart` (the host-specific NFS PV, kept out of Argo),
+  `ArgoCDChart`. (The stage-only dashcam-cv vector fill moved to the
+  video-pipeline repo; Argo delivers it cross-repo.)
 - `adanalife_k8s/constructs/` — the app factories: `ObsInstance` (per-platform),
   `VlcServer`, `OnscreensServer`, `Tripbot` (+ identity Secrets + auth/seed Jobs),
-  `Postgres`, `DashcamCV`, and `argocd.py` (the Argo AppProject + ApplicationSets).
+  `Postgres`, and `argocd.py` (the Argo AppProject + ApplicationSets).
 - `adanalife_k8s/{naming,configmap,appconfig,eso,supporting}.py` — shared helpers
   (labels, stable-name ConfigMaps + content-hash, config blocks, ESO CR builders,
   per-ns SecretStore + shared-secrets + cert-manager issuers).
