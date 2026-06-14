@@ -104,13 +104,14 @@ TRIPBOT_REPO_URL = "https://github.com/adanalife/tripbot.git"
 # the image-tag pins.
 TRIPBOT_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # Envs whose APP workloads Argo reads from the tripbot repo instead of infra.
-# Stage-first: stage cuts over once tripbot's cdk8s/dist is on develop; prod joins
-# once it's on master (a release), by adding "prod-1" here. Envs absent here keep
-# reading infra's dist. Identity Secrets + stream protection stay infra-emitted
-# (SupportingChart) during the transition — the app charts only reference those
-# Secrets by name, so there's no ownership conflict until the later
-# identity-migration cleanup adds a tripbot-identity ApplicationSet.
-TRIPBOT_APPS_ENVS = ("stage-1",)
+# Both prod-1 (tracks master) and stage-1 (tracks develop) are now cut over: their
+# app dist in the tripbot repo is byte-identical to infra's, so the source flip is
+# a no-op. Envs absent here (dev/local) keep reading infra's dist until the
+# identity-migration cleanup moves them too. Identity Secrets + stream protection
+# stay infra-emitted (SupportingChart) during the transition — the app charts only
+# reference those Secrets by name, so there's no ownership conflict until that
+# cleanup adds a tripbot-identity ApplicationSet.
+TRIPBOT_APPS_ENVS = ("stage-1", "prod-1")
 
 
 def _data_ns(env_name: str) -> str:
