@@ -117,6 +117,21 @@ def test_per_repo_projects_scope_to_one_repo_each():
     assert kinds("tripbot") == {"PriorityClass"}
     assert kinds("video-pipeline") == {"PriorityClass"}
     assert kinds("tripbot-console") == set()
+    # destinations are scoped to the namespaces each project's apps target. The
+    # console reaches into the isolated data namespace too (read-only RBAC for
+    # the live status views), so its project must permit both — tripbot apps and
+    # video-pipeline only touch the app namespace.
+    dests = lambda n: {  # noqa: E731
+        d["namespace"] for d in _project(objs, n)["spec"]["destinations"]
+    }
+    assert dests("tripbot") == {"prod-1", "stage-1"}
+    assert dests("tripbot-console") == {
+        "prod-1",
+        "stage-1",
+        "prod-1-data",
+        "stage-1-data",
+    }
+    assert dests("video-pipeline") == {"stage-1"}
 
 
 def test_minipc_apps_autosync_except_prod_obs():

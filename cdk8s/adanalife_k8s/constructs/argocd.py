@@ -259,7 +259,10 @@ class ArgoCD(Construct):
                 name=CONSOLE_PROJECT,
                 description="tripbot-console admin dashboard, from the private tripbot-console repo",
                 source_repos=[CONSOLE_REPO_URL],
-                namespaces=list(self.console_envs),
+                # The console deploys into its app namespace AND the isolated
+                # data namespace (read-only RBAC for the live status views), so
+                # it needs both destinations like the infra project does.
+                namespaces=_project_namespaces(self.console_envs),
                 cluster_resources=[],
             )
         if self.video_pipeline_envs:
