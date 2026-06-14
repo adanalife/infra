@@ -62,6 +62,10 @@ spec:
       namespace: prod-1
     - server: https://kubernetes.default.svc
       namespace: stage-1
+    - server: https://kubernetes.default.svc
+      namespace: prod-1-data
+    - server: https://kubernetes.default.svc
+      namespace: stage-1-data
   clusterResourceWhitelist: []
   namespaceResourceWhitelist:
     - group: "*"
