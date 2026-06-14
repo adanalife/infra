@@ -4,12 +4,14 @@ deploy unit applied after the Argo install (which is the Helm chart in
 PlatformChart). Argo CD itself is the controller; these are the objects that tell
 it what to watch:
 
-  * AppProject (tripbot) — a restrictive project: the infra + tripbot repos, only
-    the in-cluster prod-1/stage-1 (or development) namespaces, only the
-    cluster-scoped kinds the apps actually use (PV, StorageClass, PriorityClass).
-    Caps the blast radius vs the wide-open `default` project. (Reserve
-    "infra"/"platform" naming for shared cluster infrastructure; these are
-    tripbot-project workloads.)
+  * AppProjects — one per source repo, each a restrictive tenancy boundary: its
+    single repo in sourceRepos, only the namespaces its apps target, only the
+    cluster-scoped kinds those apps actually create. Caps the blast radius vs the
+    wide-open `default` project AND vs a shared project (a misconfigured
+    Application can't pull from another repo or sync into another tenant's
+    namespace). The four: `tripbot` (apps + identity, tripbot repo), `infra`
+    (postgres data + supporting, infra repo), `tripbot-console` and
+    `video-pipeline` (the two private cross-repo sources).
   * ApplicationSets — `tripbot-apps` (one Application per
     <env>-<component>-<platform>) + `tripbot-identity` (per-env identity Secrets +
     stream protection) source the TRIPBOT repo (the app manifests live there now);
@@ -46,10 +48,22 @@ from constructs import Construct
 REPO_URL = "git@github.com:adanalife/infra.git"
 TARGET_REVISION = "master"
 ARGO_NS = "argocd"
-# The project governs all the tripbot-project workloads (apps + supporting + data,
-# and later the cross-repo console/helix). "infra"/"platform" naming is reserved
-# for shared cluster infrastructure, never the tripbot app workloads.
-PROJECT = "tripbot"
+# One AppProject per source repo — a per-repo tenancy boundary so an Application
+# can only ever pull from its one repo and sync into its own namespaces (see the
+# module docstring). `tripbot` governs the app workloads + identity (tripbot
+# repo); `infra` the postgres data + supporting (infra repo); the two private
+# cross-repo sources get their own.
+TRIPBOT_PROJECT = "tripbot"
+INFRA_PROJECT = "infra"
+CONSOLE_PROJECT = "tripbot-console"
+VIDEO_PIPELINE_PROJECT = "video-pipeline"
+# The cluster-scoped kinds each project's apps create. Scoped per project from
+# the dist each repo emits: tripbot's identity unit + video-pipeline each declare
+# the prod-stream PriorityClass; infra's data/supporting use a StorageClass and
+# (dashcam) PersistentVolumes; the console creates nothing cluster-scoped.
+PV = {"group": "", "kind": "PersistentVolume"}
+STORAGE_CLASS = {"group": "storage.k8s.io", "kind": "StorageClass"}
+PRIORITY_CLASS = {"group": "scheduling.k8s.io", "kind": "PriorityClass"}
 IN_CLUSTER = "https://kubernetes.default.svc"
 # The minipc Argo manages these envs in-cluster. development runs its OWN Argo on
 # the k3d dev cluster (a separate install reconciling development against that
@@ -221,7 +235,42 @@ class ArgoCD(Construct):
         # cut-over env.
         self.tripbot_apps_envs = tuple(e for e in envs if e in TRIPBOT_APPS_ENVS)
 
-        self._app_project()
+        # One AppProject per source repo. console/video-pipeline only on the
+        # cluster(s) that actually run those envs (empty -> skip the project).
+        self._app_project(
+            id="project-tripbot",
+            name=TRIPBOT_PROJECT,
+            description="tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo",
+            source_repos=[TRIPBOT_REPO_URL],
+            namespaces=list(self.envs),
+            cluster_resources=[PRIORITY_CLASS],
+        )
+        self._app_project(
+            id="project-infra",
+            name=INFRA_PROJECT,
+            description="shared cluster infrastructure (postgres data + supporting), from the infra repo",
+            source_repos=[REPO_URL],
+            namespaces=_project_namespaces(self.envs),
+            cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS],
+        )
+        if self.console_envs:
+            self._app_project(
+                id="project-console",
+                name=CONSOLE_PROJECT,
+                description="tripbot-console admin dashboard, from the private tripbot-console repo",
+                source_repos=[CONSOLE_REPO_URL],
+                namespaces=list(self.console_envs),
+                cluster_resources=[],
+            )
+        if self.video_pipeline_envs:
+            self._app_project(
+                id="project-video-pipeline",
+                name=VIDEO_PIPELINE_PROJECT,
+                description="dashcam video-pipeline workloads, from the private video-pipeline repo",
+                source_repos=[VIDEO_PIPELINE_REPO_URL],
+                namespaces=list(self.video_pipeline_envs),
+                cluster_resources=[PRIORITY_CLASS],
+            )
         # ApplicationSets, one Application each per unit. The apps set is
         # per-COMPONENT (one Application per <env>-<component>-<platform> →
         # cdk8s/dist/<env>-<component>-<platform>.k8s.yaml in the TRIPBOT repo), so
@@ -231,6 +280,7 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-apps",
             name="tripbot-apps",
+            project=TRIPBOT_PROJECT,
             elements=_app_elements(envs),
             app_name_tmpl="{{.env}}-{{.app}}",
             include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
@@ -255,6 +305,7 @@ class ArgoCD(Construct):
             self._application_set(
                 id="appset-identity",
                 name="tripbot-identity",
+                project=TRIPBOT_PROJECT,
                 elements=[
                     {"env": e, "revision": TRIPBOT_REVISIONS[e]}
                     for e in self.tripbot_apps_envs
@@ -268,6 +319,7 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-supporting",
             name="tripbot-supporting",
+            project=INFRA_PROJECT,
             elements=[{"env": e} for e in envs],
             app_name_tmpl="{{.env}}-supporting",
             include_tmpl="{{.env}}-supporting.k8s.yaml",
@@ -276,6 +328,7 @@ class ArgoCD(Construct):
         self._application_set(
             id="appset-data",
             name="tripbot-data",
+            project=INFRA_PROJECT,
             # The data unit deploys into env.data_ns (its own namespace when the DB
             # is isolated, e.g. stage-1-data), not the app namespace — so carry the
             # target namespace in each element rather than deriving it from env.
@@ -294,6 +347,7 @@ class ArgoCD(Construct):
             self._application_set(
                 id="appset-console",
                 name="tripbot-console",
+                project=CONSOLE_PROJECT,
                 elements=[
                     {"env": e, "revision": CONSOLE_REVISIONS[e]}
                     for e in self.console_envs
@@ -314,6 +368,7 @@ class ArgoCD(Construct):
             self._application_set(
                 id="appset-video-pipeline",
                 name="video-pipeline",
+                project=VIDEO_PIPELINE_PROJECT,
                 elements=[
                     {"env": e, "revision": VIDEO_PIPELINE_REVISIONS[e]}
                     for e in self.video_pipeline_envs
@@ -354,37 +409,37 @@ class ArgoCD(Construct):
             self._notifications_external_secret()
 
     # ---- Argo CRs (ApiObject) ----
-    def _app_project(self):
+    def _app_project(
+        self,
+        *,
+        id: str,
+        name: str,
+        description: str,
+        source_repos: list[str],
+        namespaces: list[str],
+        cluster_resources: list[dict],
+    ):
+        """One AppProject: the apps assigned to it may only pull from
+        `source_repos`, sync into `namespaces`, and create the cluster-scoped
+        `cluster_resources` (plus any namespaced kind — already gated to those
+        namespaces by `destinations`)."""
         proj = cdk8s.ApiObject(
             self,
-            "project",
+            id,
             api_version="argoproj.io/v1alpha1",
             kind="AppProject",
-            metadata={"name": PROJECT, "namespace": ARGO_NS},
+            metadata={"name": name, "namespace": ARGO_NS},
         )
         proj.add_json_patch(
             cdk8s.JsonPatch.add(
                 "/spec",
                 {
-                    "description": "adanalife app workloads synthesized by cdk8s",
-                    "sourceRepos": [REPO_URL]
-                    + ([CONSOLE_REPO_URL] if self.console_envs else [])
-                    + ([VIDEO_PIPELINE_REPO_URL] if self.video_pipeline_envs else [])
-                    + ([TRIPBOT_REPO_URL] if self.tripbot_apps_envs else []),
+                    "description": description,
+                    "sourceRepos": source_repos,
                     "destinations": [
-                        {"server": IN_CLUSTER, "namespace": ns}
-                        for ns in _project_namespaces(self.envs)
+                        {"server": IN_CLUSTER, "namespace": ns} for ns in namespaces
                     ],
-                    # The apps' cluster-scoped objects — nothing else may be created.
-                    # PriorityClass: the prod-stream class the supporting unit
-                    # emits (prod app pods outrank co-tenants under pressure).
-                    "clusterResourceWhitelist": [
-                        {"group": "", "kind": "PersistentVolume"},
-                        {"group": "storage.k8s.io", "kind": "StorageClass"},
-                        {"group": "scheduling.k8s.io", "kind": "PriorityClass"},
-                    ],
-                    # Any namespaced kind is fine (it's already gated to the two namespaces
-                    # by `destinations`).
+                    "clusterResourceWhitelist": cluster_resources,
                     "namespaceResourceWhitelist": [{"group": "*", "kind": "*"}],
                 },
             )
@@ -395,6 +450,7 @@ class ArgoCD(Construct):
         *,
         id: str,
         name: str,
+        project: str,
         elements: list[dict],
         app_name_tmpl: str,
         include_tmpl: str,
@@ -425,7 +481,7 @@ class ArgoCD(Construct):
             sync_options.append("Prune=false")  # never delete stateful resources
 
         spec: dict = {
-            "project": PROJECT,
+            "project": project,
             "source": {
                 "repoURL": repo_url,
                 "targetRevision": target_revision_tmpl,

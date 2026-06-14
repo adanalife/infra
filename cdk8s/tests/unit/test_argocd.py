@@ -35,6 +35,12 @@ def _appset(objs, name):
     )
 
 
+def _project(objs, name):
+    return next(
+        o for o in objs if o["kind"] == "AppProject" and o["metadata"]["name"] == name
+    )
+
+
 def test_minipc_default_has_both_uis_and_both_envs():
     objs = _synth()
     classes = {
@@ -62,10 +68,55 @@ def test_dev_is_development_only_with_traefik_ui():
         ing["metadata"]["annotations"]["external-dns.alpha.kubernetes.io/hostname"]
         == "argocd.dev.whereisdana.today"
     )
-    proj = next(o for o in objs if o["kind"] == "AppProject")
-    assert {d["namespace"] for d in proj["spec"]["destinations"]} == {"development"}
+    # dev runs only the per-repo tripbot + infra projects (no console/video-pipeline)
+    assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == {
+        "tripbot",
+        "infra",
+    }
+    for name in ("tripbot", "infra"):
+        assert {
+            d["namespace"] for d in _project(objs, name)["spec"]["destinations"]
+        } == {"development"}
     # development apps autosync (it's throwaway)
     assert "development" in _appset(objs, "tripbot-apps")["spec"]["templatePatch"]
+
+
+def test_per_repo_projects_scope_to_one_repo_each():
+    # One AppProject per source repo: each project's sourceRepos is locked to its
+    # single repo, and every ApplicationSet is assigned to the project for the repo
+    # it sources, so a misconfigured Application can't pull from another repo or
+    # sync into another tenant's namespace.
+    objs = _synth()
+    want_repos = {
+        "tripbot": ["https://github.com/adanalife/tripbot.git"],
+        "infra": ["git@github.com:adanalife/infra.git"],
+        "tripbot-console": ["git@github.com:adanalife/tripbot-console.git"],
+        "video-pipeline": ["git@github.com:adanalife/video-pipeline.git"],
+    }
+    assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
+        want_repos
+    )
+    for name, repos in want_repos.items():
+        assert _project(objs, name)["spec"]["sourceRepos"] == repos
+    # each ApplicationSet rides the project matching the repo it sources
+    for appset, project in (
+        ("tripbot-apps", "tripbot"),
+        ("tripbot-identity", "tripbot"),
+        ("tripbot-supporting", "infra"),
+        ("tripbot-data", "infra"),
+        ("tripbot-console", "tripbot-console"),
+        ("video-pipeline", "video-pipeline"),
+    ):
+        assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
+    # cluster-resource whitelists are scoped to what each repo's dist actually
+    # creates: infra owns the platform cluster-scoped kinds, the console none.
+    kinds = lambda n: {  # noqa: E731
+        c["kind"] for c in _project(objs, n)["spec"]["clusterResourceWhitelist"]
+    }
+    assert kinds("infra") == {"PersistentVolume", "StorageClass", "PriorityClass"}
+    assert kinds("tripbot") == {"PriorityClass"}
+    assert kinds("video-pipeline") == {"PriorityClass"}
+    assert kinds("tripbot-console") == set()
 
 
 def test_minipc_apps_autosync_except_prod_obs():

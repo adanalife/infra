@@ -4,10 +4,28 @@ metadata:
   name: tripbot
   namespace: argocd
 spec:
-  description: adanalife app workloads synthesized by cdk8s
+  description: tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo
+  sourceRepos:
+    - https://github.com/adanalife/tripbot.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: development
+  clusterResourceWhitelist:
+    - group: scheduling.k8s.io
+      kind: PriorityClass
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: infra
+  namespace: argocd
+spec:
+  description: shared cluster infrastructure (postgres data + supporting), from the infra repo
   sourceRepos:
     - git@github.com:adanalife/infra.git
-    - https://github.com/adanalife/tripbot.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: development
@@ -173,7 +191,7 @@ spec:
     metadata:
       name: "{{.env}}-supporting"
     spec:
-      project: tripbot
+      project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
         targetRevision: master
@@ -227,7 +245,7 @@ spec:
     metadata:
       name: "{{.env}}-data"
     spec:
-      project: tripbot
+      project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
         targetRevision: master
