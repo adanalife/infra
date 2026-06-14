@@ -355,6 +355,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       # KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has no Argo CD).
       aws_secretsmanager_secret.argocd_repo_ssh_key.arn,
       aws_secretsmanager_secret.argocd_repo_ssh_key_console.arn,
+      aws_secretsmanager_secret.argocd_repo_ssh_key_video_pipeline.arn,
     ]
   }
 }

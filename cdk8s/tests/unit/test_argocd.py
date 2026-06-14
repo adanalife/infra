@@ -5,6 +5,7 @@ in-cluster — no cross-cluster wiring. These pin that the dev variant is scoped
 development and the data unit never prunes on either.
 """
 
+import pytest
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
@@ -104,14 +105,30 @@ def test_notifications_secret_minipc_only():
     def names(objs):
         return {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
 
-    # minipc: infra + console repo creds + the notifications Discord webhook
+    # minipc: infra + console + video-pipeline repo creds + the notifications webhook
     assert names(_synth()) == {
         "argocd-repo-infra",
         "argocd-repo-tripbot-console",
+        "argocd-repo-video-pipeline",
         "argocd-notifications",
     }
     # dev runs notifications.enabled=false, so no webhook secret there
     assert names(_synth(**_DEV)) == {"argocd-repo-infra"}
+
+
+def test_video_pipeline_appset_stage_only_cross_repo():
+    objs = _synth()
+    vp = _appset(objs, "video-pipeline")
+    elements = vp["spec"]["generators"][0]["list"]["elements"]
+    assert {e["env"] for e in elements} == {"stage-1"}  # stage-only today
+    src = vp["spec"]["template"]["spec"]["source"]
+    assert src["repoURL"] == "git@github.com:adanalife/video-pipeline.git"
+    # exact-match include: the persistent unit, not the sibling -jobs file
+    assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
+    assert "automated" in vp["spec"]["templatePatch"]  # stage autosyncs
+    # dev cluster carries no private-repo deploy key, so no video-pipeline unit
+    with pytest.raises(StopIteration):
+        _appset(_synth(**_DEV), "video-pipeline")
 
 
 def test_data_appset_never_prunes_either_variant():

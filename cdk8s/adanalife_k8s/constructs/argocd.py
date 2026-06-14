@@ -96,6 +96,12 @@ CONSOLE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-console"
 # float alongside the :develop image), prod tracks master (release-gated) —
 # the same philosophy as the image-tag pinning model.
 CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+# The private video-pipeline repo — another cross-repo source (same split as the
+# console: the repo owns its own cdk8s/dist deploy units). The dashcam-cv embed
+# workload it delivers is stage-only today, so only stage-1 has a revision.
+VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
+VIDEO_PIPELINE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-video-pipeline"
+VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -205,6 +211,11 @@ class ArgoCD(Construct):
         # the k3d dev instance (development deploys via `task deploy:dev` in the
         # console repo; the dev cluster carries no private-repo deploy key).
         self.console_envs = tuple(e for e in envs if e in CONSOLE_REVISIONS)
+        # Envs whose video-pipeline (cross-repo) unit this Argo delivers — empty
+        # off any cluster not running stage-1 (development deploys via task).
+        self.video_pipeline_envs = tuple(
+            e for e in envs if e in VIDEO_PIPELINE_REVISIONS
+        )
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -294,6 +305,26 @@ class ArgoCD(Construct):
                 repo_url=CONSOLE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
+        # The cross-repo video-pipeline unit: one Application per env, sourcing the
+        # PRIVATE video-pipeline repo's committed dist. The include is the exact
+        # <env>.k8s.yaml (the persistent dashcam-cv workload) — the sibling
+        # <env>-jobs.k8s.yaml one-shots are deliberately NOT globbed, so reconciles
+        # never re-run them. Same autosync posture as the apps/console sets.
+        if self.video_pipeline_envs:
+            self._application_set(
+                id="appset-video-pipeline",
+                name="video-pipeline",
+                elements=[
+                    {"env": e, "revision": VIDEO_PIPELINE_REVISIONS[e]}
+                    for e in self.video_pipeline_envs
+                ],
+                app_name_tmpl="{{.env}}-video-pipeline",
+                include_tmpl="{{.env}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                repo_url=VIDEO_PIPELINE_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
         # traefik/LAN Ingress is published on every cluster with a DNS host —
         # external-dns publishes the record either way; the dev cluster reaches it
@@ -309,6 +340,13 @@ class ArgoCD(Construct):
                 name="argocd-repo-tripbot-console",
                 url=CONSOLE_REPO_URL,
                 sm_key=CONSOLE_REPO_SM_KEY,
+            )
+        if self.video_pipeline_envs:
+            self._repo_external_secret(
+                id="repo-secret-video-pipeline",
+                name="argocd-repo-video-pipeline",
+                url=VIDEO_PIPELINE_REPO_URL,
+                sm_key=VIDEO_PIPELINE_REPO_SM_KEY,
             )
         # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
         # skips the webhook secret too.
@@ -331,6 +369,7 @@ class ArgoCD(Construct):
                     "description": "adanalife app workloads synthesized by cdk8s",
                     "sourceRepos": [REPO_URL]
                     + ([CONSOLE_REPO_URL] if self.console_envs else [])
+                    + ([VIDEO_PIPELINE_REPO_URL] if self.video_pipeline_envs else [])
                     + ([TRIPBOT_REPO_URL] if self.tripbot_apps_envs else []),
                     "destinations": [
                         {"server": IN_CLUSTER, "namespace": ns}
