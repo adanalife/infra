@@ -145,12 +145,13 @@ def namespace_exists(cluster_reachable, core_v1, namespace) -> None:
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="session")
 def expected(env_config, contract):
-    """The objects the app charts synthesize for this env, by canonical name.
+    """The objects we expect running in this env's namespace, by canonical name.
 
-    Mirrors adanalife_k8s/charts.py emit_app_charts: one Deployment + Service per
-    (component, platform) for tripbot/vlc/onscreens/obs — each named
-    <component>-<platform> via the contract — plus the shared postgres
-    StatefulSet. Ingresses with a LB address only exist on minipc envs.
+    Contract-derived (not tied to which repo authors the manifests): one
+    Deployment + Service per (component, platform) for tripbot/vlc/onscreens/obs —
+    each named <component>-<platform> via the contract, now synthesized from the
+    tripbot repo — plus infra's shared postgres StatefulSet. Ingresses with a LB
+    address only exist on minipc envs.
     """
     svc = contract.svc
     platforms = env_config.platforms

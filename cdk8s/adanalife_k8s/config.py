@@ -10,20 +10,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from functools import lru_cache
-from pathlib import Path
-
-import yaml
-
-# Per-component image pins (cdk8s/versions.yaml). Envs present in the file
-# deploy pinned release tags; the rest float on EnvConfig.image_tag.
-_VERSIONS_FILE = Path(__file__).resolve().parents[1] / "versions.yaml"
-
-
-@lru_cache(maxsize=1)
-def image_pins() -> dict[str, dict[str, str]]:
-    with _VERSIONS_FILE.open() as f:
-        return yaml.safe_load(f) or {}
 
 
 @dataclass(frozen=True)
@@ -36,11 +22,6 @@ class EnvConfig:
     dns_base: str  # prod.whereisdana.today | stage... | dev...  ("" for local)
     nats_url: str
     sentry_env: str  # SENTRY_ENVIRONMENT (prod-1 | stage-1 | development)
-    # Per-component pinned release tags, loaded from versions.yaml by load_env.
-    # Keyed by image name (tripbot, vlc, obs, onscreens-server). Pinned
-    # components deploy that exact tag with IfNotPresent (release tags are
-    # immutable); unpinned ones fall back to image_tag with Always.
-    image_pins: dict[str, str] = field(default_factory=dict)
     binary_env: str = "development"  # ENV= the Go config validator accepts: production|staging|development
     deployment_env: str = (
         "development"  # OTEL deployment.environment + telemetry env id
@@ -104,17 +85,6 @@ class EnvConfig:
     # (EXTERNAL_URL, registered OAuth redirect URIs). Only dev needs it — k3d's
     # traefik is mapped to host :9443 because Colima can't bind :443.
     external_port: str = ""
-
-    def tag_for(self, component: str) -> str:
-        """Image tag for a component: its pinned release tag when versions.yaml
-        pins it for this env, else the env's floating tag."""
-        return self.image_pins.get(component, self.image_tag)
-
-    def pull_policy_for(self, component: str) -> str:
-        """Pinned release tags are immutable → IfNotPresent (no redundant pulls,
-        no silent drift). Floating tags (latest/develop) need Always to pick up
-        rebuilds under the same tag."""
-        return "IfNotPresent" if component in self.image_pins else "Always"
 
     @property
     def otel_disabled(self) -> str:
@@ -302,11 +272,6 @@ def load_env(name: str) -> EnvConfig:
         raise SystemExit(f"unknown env {name!r}; known: {', '.join(ENVS)}")
     from dataclasses import replace
 
-    # Per-component release pins ride in from versions.yaml rather than the
-    # static table above, so the bump-prs workflow edits one data file.
-    pins = image_pins().get(name)
-    if pins:
-        env = replace(env, image_pins=dict(pins))
     # NFS coordinates are deployment-host-specific (gitignored in Kustomize as
     # dashcam-nfs.local.yaml); thread them in from the environment at synth so
     # they never get committed. Placeholders match the legacy .example render.

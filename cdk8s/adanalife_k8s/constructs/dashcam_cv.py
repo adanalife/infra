@@ -38,11 +38,31 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.tripbot import SMALL_RESOURCES, config_map_name
-from adanalife_k8s.naming import meta_labels
+from adanalife_k8s.naming import app_name, meta_labels
 
 NAME = "dashcam-cv"
 IMAGE = "adanalife/dashcam-cv"  # tag from env.image_tag (develop on stage)
+
+# Minimal resource requests. stage-1's app-quota (a ResourceQuota on requests.*)
+# rejects any pod whose containers omit requests for the quota'd resources, so
+# every container must declare them. (Was shared with the tripbot constructs
+# before they moved to the tripbot repo; dashcam-cv is the only remaining user.)
+SMALL_RESOURCES = k8s.ResourceRequirements(
+    requests={
+        "cpu": k8s.Quantity.from_string("100m"),
+        "memory": k8s.Quantity.from_string("128Mi"),
+    }
+)
+
+
+def config_map_name(platform: str) -> str:
+    """The per-platform tripbot ConfigMap name (e.g. tripbot-twitch-config). That
+    ConfigMap is now emitted from the tripbot repo's cdk8s; dashcam-cv references
+    it by name (envFrom) — a cross-repo coupling on the stable name, the same as
+    the materialized-Secret names."""
+    return f"{app_name('tripbot', platform)}-config"
+
+
 PRIORITY_CLASS = "dashcam-cv-low"
 CORPUS_DIR = "/opt/data/Dashcam/_all"  # DASHCAM_CV_CORPUS_DIR + dashcam mount path
 MODELS_DIR = "/opt/models"  # HF_HOME (baked in the image)
@@ -73,7 +93,7 @@ class DashcamCV(Construct):
     def __init__(self, scope: Construct, *, env: EnvConfig):
         super().__init__(scope, NAME)
         ns = env.namespace or None
-        image = f"{IMAGE}:{env.tag_for(NAME)}"  # adanalife/dashcam-cv:develop on stage
+        image = f"{IMAGE}:{env.image_tag}"  # adanalife/dashcam-cv:develop on stage
         labels = meta_labels(NAME)
 
         # --- PriorityClass (cluster-scoped; no namespace) ---
@@ -159,7 +179,7 @@ class DashcamCVJobs(Construct):
     def __init__(self, scope: Construct, *, env: EnvConfig):
         super().__init__(scope, f"{NAME}-jobs")
         ns = env.namespace or None
-        image = f"{IMAGE}:{env.tag_for(NAME)}"
+        image = f"{IMAGE}:{env.image_tag}"
         labels = meta_labels(NAME)
 
         # --- Job: one-shot manual ramp (same embed pod, --random 1) ---

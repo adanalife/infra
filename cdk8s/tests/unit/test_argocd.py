@@ -75,9 +75,29 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert '(eq .env "prod-1")' in patch
     # ...except prod OBS, carved back out (a sync restarts the live stream)
     assert '(not (and (eq .env "prod-1") (eq .app "obs-twitch")))' in patch
-    # supporting + data stay manual everywhere
-    for name in ("tripbot-supporting", "tripbot-data"):
+    # supporting + data + identity stay manual everywhere
+    for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
+
+
+def test_identity_appset_sources_tripbot_and_never_prunes():
+    # The cross-repo identity unit: per-env identity Secrets + stream protection
+    # sourced from the tripbot repo, Prune=false (creationPolicy:Owner ESes own
+    # the materialized creds — an accidental prune would GC live credentials).
+    for kwargs, want_envs in (({}, {"prod-1", "stage-1"}), (_DEV, {"development"})):
+        objs = _synth(**kwargs)
+        ident = _appset(objs, "tripbot-identity")
+        elements = ident["spec"]["generators"][0]["list"]["elements"]
+        assert {e["env"] for e in elements} == want_envs
+        src = ident["spec"]["template"]["spec"]["source"]
+        assert src["repoURL"] == "https://github.com/adanalife/tripbot.git"
+        assert src["directory"]["include"] == "{{.env}}-tripbot-identity.k8s.yaml"
+        opts = ident["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
+        assert "Prune=false" in opts
+        # prod rides master (release-gated); stage + dev ride develop
+        revs = {e["env"]: e["revision"] for e in elements}
+        assert revs.get("prod-1", "master") == "master"
+        assert all(v == "develop" for k, v in revs.items() if k != "prod-1")
 
 
 def test_notifications_secret_minipc_only():

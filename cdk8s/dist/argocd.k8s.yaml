@@ -124,6 +124,63 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
+  name: tripbot-identity
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            revision: master
+          - env: stage-1
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-tripbot-identity"
+    spec:
+      project: tripbot
+      source:
+        repoURL: https://github.com/adanalife/tripbot.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-tripbot-identity.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+          - Prune=false
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
   name: tripbot-supporting
   namespace: argocd
 spec:
