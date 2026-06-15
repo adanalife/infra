@@ -28,7 +28,7 @@ tasks:
       - mise exec -- uv run cdk8s import
 
   cdk8s:synth:
-    desc: Synthesize the manifests (offline) -> cdk8s/dist/<env>-<component>-<platform>.k8s.yaml (+ supporting/data/jobs)
+    desc: Synthesize infra's deploy units (offline) -> cdk8s/dist/<env>-{supporting,data}.k8s.yaml + argocd (the tripbot app/job manifests + dashcam-cv live in their own repos now)
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
@@ -82,27 +82,8 @@ tasks:
         echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
         kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
 
-  # dashcam-cv (stage-only vector fill). The PERSISTENT workload (PriorityClass +
-  # models PVC + suspended fill CronJob) and the ON-DEMAND one-shot Jobs are
-  # separate dist units so a normal apply never re-runs the Jobs.
-  k8s:stage:dashcam-cv:
-    desc: apply the persistent dashcam-cv fill workload (PriorityClass + models PVC + suspended fill CronJob) to stage-1
-    cmds:
-      - kubectl apply -f cdk8s/dist/dashcam-cv.k8s.yaml
-      - 'echo "Applied (CronJob ships SUSPENDED). Ramp with: task k8s:stage:dashcam-cv:jobs, then unsuspend: kubectl -n stage-1 patch cronjob dashcam-cv-fill --type merge -p suspend=false"'
-
-  k8s:stage:dashcam-cv:jobs:
-    desc: run the on-demand dashcam-cv one-shot Jobs (fill-once + find + stats) in stage-1; re-creates them (Jobs are immutable)
-    cmds:
-      - kubectl -n stage-1 delete job dashcam-cv-fill-once dashcam-cv-find dashcam-cv-stats --ignore-not-found
-      - kubectl apply -f cdk8s/dist/dashcam-cv-jobs.k8s.yaml
-      - 'echo "Applied. Logs: kubectl -n stage-1 logs -f job/dashcam-cv-find (or -stats / -fill-once)"'
-
-  k8s:stage:dashcam-cv:start:
-    desc: unsuspend the stage-1 dashcam-cv-fill CronJob (ramp step 3 — flips suspend=false)
-    cmds:
-      - kubectl -n stage-1 patch cronjob dashcam-cv-fill --type merge -p suspend=false
-      - 'echo "dashcam-cv-fill unsuspended. Suspend again with: kubectl -n stage-1 patch cronjob dashcam-cv-fill --type merge -p suspend=true"'
+  # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
+  # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.
 
   cdk8s:test:
     desc: Run the cdk8s unit + contract tests
@@ -127,32 +108,18 @@ tasks:
   # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
   # when a diff exists, so `|| true` keeps Task from treating "there's a diff" as
   # a failure. Point kubectl at the right context first.
-  # Diff the per-component app manifests (one file per <env>-<component>-<platform>)
-  # for the env against the live cluster. Loops the four components so it picks up
-  # every platform without a hardcoded file list. supporting/data are their own
-  # diff concerns; not included here.
-  cdk8s:local:diff:
-    desc: kubectl diff the synthesized local app manifests against the live cluster (read-only, colorized)
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    cmds:
-      - for c in tripbot vlc onscreens obs; do for f in dist/local-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
+  # The tripbot APP manifests (per <env>-<component>-<platform>) moved to the
+  # tripbot repo's cdk8s; diff them there (`task cdk8s:{stage,prod}:diff` in
+  # ~/adanalife/tripbot). infra keeps only the data + supporting + dashcam units.
 
-  cdk8s:dev:diff:
-    desc: kubectl diff the synthesized development app manifests against the live cluster (read-only, colorized)
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    cmds:
-      - for c in tripbot vlc onscreens obs; do for f in dist/development-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
-
-  # cdk8s:dev:apply — the development (bees) deploy path. dev is NOT Argo-managed
-  # (only prod-1/stage-1 are), so it applies the synthesized manifests directly:
-  # data first (postgres + SecretStore), then apps (migrations need the DB +
-  # store). One-shot Jobs (dist/development-jobs.k8s.yaml) stay out — apply them
-  # deliberately, never on every deploy. Pre-reqs: a running bees cluster and
-  # `task k8s:dev:bootstrap-secrets` for the eso-aws-credentials Secret.
+  # cdk8s:dev:apply — bootstrap the development (k3d/bees) DATA unit directly.
+  # dev's apps + supporting + identity are Argo-managed (the k3d Argo reads the
+  # tripbot repo @ develop); this just lays down the postgres + SecretStore unit
+  # that Argo's app sync depends on, before/independently of an Argo bootstrap.
+  # Pre-req: a running k3d cluster + `task k8s:dev:bootstrap-secrets` for the
+  # eso-aws-credentials Secret.
   cdk8s:dev:apply:
-    desc: apply the synthesized development manifests (data + apps) to the bees cluster — dev is not Argo-managed
+    desc: apply the synthesized development DATA unit (postgres + SecretStore) to the k3d cluster — apps come via the k3d Argo from the tripbot repo
     dir: cdk8s
     deps: [cdk8s:synth]
     preconditions:
@@ -163,21 +130,6 @@ tasks:
         msg: "refusing: cdk8s:dev:apply must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
     cmds:
       - kubectl apply -f dist/development-data.k8s.yaml
-      - kubectl apply -f dist/development-apps.k8s.yaml
-
-  cdk8s:stage:diff:
-    desc: kubectl diff the synthesized stage app manifests against the live cluster (read-only, colorized)
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    cmds:
-      - for c in tripbot vlc onscreens obs; do for f in dist/stage-1-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
-
-  cdk8s:prod:diff:
-    desc: kubectl diff the synthesized prod app manifests against the live cluster (read-only, colorized)
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    cmds:
-      - for c in tripbot vlc onscreens obs; do for f in dist/prod-1-$c-*.k8s.yaml; do [ -e "$f" ] && kubectl diff -f "$f" || true; done; done
 
   gitops:apply:
     desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)
@@ -1800,10 +1752,11 @@ tasks:
     desc: run the one-shot ESO-wired seed Job in the development namespace; idempotent — skips if the videos table already has real rows
     aliases: [tripbot:db:seed]
     cmds:
-      # Same shared, env-agnostic Job as stage/prod (k8s/apps/tripbot/jobs/) —
-      # only the -n namespace differs.
+      # The seed Job is authored in the tripbot repo's cdk8s now (per-env, with
+      # the namespace baked in); applied from its committed dist in the sibling
+      # tripbot checkout (same source assumption as `task contract:sync`).
       - kubectl delete job tripbot-seed -n development --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/seed.yaml -n development
+      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-seed.k8s.yaml -n development
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
@@ -1827,9 +1780,10 @@ tasks:
   tripbot:dev:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token against development (development namespace); port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # Same shared, env-agnostic Job as stage/prod — only -n differs.
+      # Authored per-env in the tripbot repo's cdk8s; applied from its committed
+      # dist in the sibling tripbot checkout (same source as `task contract:sync`).
       - kubectl delete job tripbot-auth-bootstrap-bot -n development --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n development
+      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-bot.k8s.yaml -n development
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development
@@ -1841,7 +1795,7 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token against development; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n development --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n development
+      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-broadcaster.k8s.yaml -n development
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
@@ -1858,14 +1812,13 @@ tasks:
   tripbot:prod:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token (chat:read/edit etc.) against prod-1; port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # The auth-bootstrap Jobs are deliberately NOT part of any umbrella
-      # overlay (would otherwise re-run every apply and burn each leg's
-      # 5min timeout). The shared, env-agnostic manifests at
-      # k8s/apps/tripbot/jobs/auth-bootstrap-{bot,broadcaster}.yaml envFrom
-      # the namespace's tripbot-config + the ESO Secrets, so the same files
-      # serve prod (prod-1 ns) and stage (stage-1 ns) — only -n differs.
+      # The auth-bootstrap Jobs are deliberately their own deploy unit (NOT in any
+      # app sync — they'd otherwise re-run every reconcile and burn each leg's
+      # 5min timeout). Authored per-env in the tripbot repo's cdk8s and envFrom the
+      # namespace's tripbot-config + ESO Secrets; applied from its committed dist
+      # in the sibling tripbot checkout (same source as `task contract:sync`).
       - kubectl delete job tripbot-auth-bootstrap-bot -n prod-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n prod-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-bot.k8s.yaml -n prod-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1
@@ -1877,7 +1830,7 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token (channel:read:subscriptions, moderator:read:followers, user:edit:broadcast) against prod-1; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n prod-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n prod-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-broadcaster.k8s.yaml -n prod-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
@@ -1894,11 +1847,11 @@ tasks:
   tripbot:stage:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token against stage-1 (stage-1 namespace); port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # Same shared, env-agnostic Job as prod (k8s/apps/tripbot/jobs/) —
-      # only the -n namespace differs. envFrom the stage-1 tripbot-config +
-      # the stage ESO Secrets.
+      # Authored per-env in the tripbot repo's cdk8s (envFrom the stage-1
+      # tripbot-config + the stage ESO Secrets); applied from its committed dist in
+      # the sibling tripbot checkout (same source as `task contract:sync`).
       - kubectl delete job tripbot-auth-bootstrap-bot -n stage-1 --ignore-not-found
-      - kubectl apply -f cdk8s/dist/stage-1-job-auth-bootstrap-bot.k8s.yaml -n stage-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-bot.k8s.yaml -n stage-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1
@@ -1910,7 +1863,7 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token against stage-1; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n stage-1 --ignore-not-found
-      - kubectl apply -f cdk8s/dist/stage-1-job-auth-bootstrap-broadcaster.k8s.yaml -n stage-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-broadcaster.k8s.yaml -n stage-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1
@@ -1922,7 +1875,7 @@ tasks:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
     cmds:
       - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
-      - kubectl apply -f cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |

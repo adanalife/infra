@@ -4,10 +4,30 @@ metadata:
   name: tripbot
   namespace: argocd
 spec:
-  description: adanalife app workloads synthesized by cdk8s
+  description: tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo
+  sourceRepos:
+    - https://github.com/adanalife/tripbot.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist:
+    - group: scheduling.k8s.io
+      kind: PriorityClass
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: infra
+  namespace: argocd
+spec:
+  description: shared cluster infrastructure (postgres data + supporting), from the infra repo
   sourceRepos:
     - git@github.com:adanalife/infra.git
-    - git@github.com:adanalife/tripbot-console.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: prod-1
@@ -29,6 +49,48 @@ spec:
       kind: "*"
 ---
 apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: tripbot-console
+  namespace: argocd
+spec:
+  description: tripbot-console admin dashboard, from the private tripbot-console repo
+  sourceRepos:
+    - git@github.com:adanalife/tripbot-console.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+    - server: https://kubernetes.default.svc
+      namespace: prod-1-data
+    - server: https://kubernetes.default.svc
+      namespace: stage-1-data
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: video-pipeline
+  namespace: argocd
+spec:
+  description: dashcam video-pipeline workloads, from the private video-pipeline repo
+  sourceRepos:
+    - git@github.com:adanalife/video-pipeline.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist:
+    - group: scheduling.k8s.io
+      kind: PriorityClass
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: tripbot-apps
@@ -42,20 +104,36 @@ spec:
         elements:
           - env: prod-1
             app: tripbot-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: master
           - env: prod-1
             app: vlc-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: master
           - env: prod-1
             app: onscreens-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: master
           - env: prod-1
             app: obs-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: master
           - env: stage-1
             app: tripbot-youtube
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
           - env: stage-1
             app: vlc-youtube
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
           - env: stage-1
             app: onscreens-youtube
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
           - env: stage-1
             app: obs-youtube
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -65,8 +143,8 @@ spec:
     spec:
       project: tripbot
       source:
-        repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        repoURL: "{{.repo}}"
+        targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -107,6 +185,63 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
+  name: tripbot-identity
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            revision: master
+          - env: stage-1
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-tripbot-identity"
+    spec:
+      project: tripbot
+      source:
+        repoURL: https://github.com/adanalife/tripbot.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-tripbot-identity.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+          - Prune=false
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
   name: tripbot-supporting
   namespace: argocd
 spec:
@@ -125,7 +260,7 @@ spec:
     metadata:
       name: "{{.env}}-supporting"
     spec:
-      project: tripbot
+      project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
         targetRevision: master
@@ -181,7 +316,7 @@ spec:
     metadata:
       name: "{{.env}}-data"
     spec:
-      project: tripbot
+      project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
         targetRevision: master
@@ -238,9 +373,71 @@ spec:
     metadata:
       name: "{{.env}}-console"
     spec:
-      project: tripbot
+      project: tripbot-console
       source:
         repoURL: git@github.com:adanalife/tripbot-console.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: video-pipeline
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: stage-1
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-video-pipeline"
+    spec:
+      project: video-pipeline
+      source:
+        repoURL: git@github.com:adanalife/video-pipeline.git
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
@@ -370,6 +567,33 @@ spec:
         sshPrivateKey: "{{ .sshPrivateKey }}"
         type: git
         url: git@github.com:adanalife/tripbot-console.git
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-repo-video-pipeline
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: k8s/argocd/repo-ssh-key-video-pipeline
+      secretKey: sshPrivateKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secretsmanager-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-repo-video-pipeline
+    template:
+      data:
+        sshPrivateKey: "{{ .sshPrivateKey }}"
+        type: git
+        url: git@github.com:adanalife/video-pipeline.git
       engineVersion: v2
       metadata:
         labels:

@@ -69,9 +69,11 @@ variable "secondary_stage_nameservers" {
   default = []
 }
 
-# Which entry in local.minipc_location_ips (minipc-dns.tf) the
-# minipc.whereisdana.today pointer currently resolves to. Change this + apply
-# when the minipc moves to a different physical network.
+# Which entry in local.minipc_location_ips (minipc-dns.tf) /
+# local.nas_location_ips (nas-dns.tf) the minipc.whereisdana.today and
+# nas.whereisdana.today pointers currently resolve to. The two boxes always
+# move together, so one toggle drives both. Change this + apply when the gear
+# moves to a different physical network.
 variable "minipc_active_location" {
   type    = string
   default = "tallman-local"

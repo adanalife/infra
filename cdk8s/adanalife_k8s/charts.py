@@ -1,8 +1,13 @@
 """Deploy units. Each Chart synthesizes to one file in dist/ and is applied
-independently — one per (component, platform) for the apps (emit_app_charts),
-plus per-env SupportingChart / DataChart / JobsChart, and PlatformChart per
-cluster — so every component is its own sync/health unit (one Argo Application,
-one URL) and the platform stack stays decoupled from any app env.
+independently — the per-env SupportingChart / DataChart and PlatformChart per
+cluster — so each is its own sync/health unit (one Argo Application) and the
+platform stack stays decoupled from any app env.
+
+The tripbot APP workloads (tripbot/vlc/onscreens/obs Deployments + their one-shot
+Jobs + identity Secrets) and the dashcam-cv vector-fill workload are no longer
+authored here: they moved to the tripbot and video-pipeline repos' cdk8s and Argo
+delivers them cross-repo (see constructs/argocd.py). This module keeps only the
+platform + stateful units that stay in infra.
 """
 
 from __future__ import annotations
@@ -11,68 +16,23 @@ from cdk8s import Chart
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.dashcam_cv import DashcamCV, DashcamCVJobs
-from adanalife_k8s.eso import secret_store
-from adanalife_k8s.constructs.obs import ObsInstance
-from adanalife_k8s.constructs.onscreens import OnscreensServer
+from adanalife_k8s.constructs.dashcam import emit_dashcam_pv, emit_dashcam_pvc
 from adanalife_k8s.constructs.postgres import Postgres
-from adanalife_k8s.constructs.tripbot import Tripbot, emit_identity_secrets
-from adanalife_k8s.constructs.vlc import (
-    VlcServer,
-    emit_dashcam_pv,
-    emit_dashcam_pvc,
-)
-from adanalife_k8s.supporting import emit_stream_protection, emit_supporting
-
-
-# Stateless app components that each get their own Chart (→ one dist file + one
-# Argo Application) per (env, platform). obs is emitted separately for its
-# streaming args. Keep this list in sync with the contract's per-platform service
-# keys; naming.app_name maps (component, platform) -> the Service name.
-COMPONENTS = ("tripbot", "vlc", "onscreens", "obs")
-_SIMPLE_COMPONENTS = (
-    ("tripbot", Tripbot),
-    ("vlc", VlcServer),
-    ("onscreens", OnscreensServer),
-)
-
-
-def emit_app_charts(scope: Construct, env: EnvConfig) -> None:
-    """One Chart per (component, platform) — each synthesizes to its own
-    `dist/<env>-<component>-<platform>.k8s.yaml`, so every component is an
-    independent Argo Application (one sync/health/URL). The supporting + stateful
-    + one-shot units stay separate (SupportingChart / DataChart / JobsChart).
-    """
-    ns = env.namespace or None
-    for platform in env.platforms:
-        for comp, ctor in _SIMPLE_COMPONENTS:
-            chart = Chart(scope, f"{env.name}-{comp}-{platform}", namespace=ns)
-            ctor(chart, platform, env=env)
-
-        # OBS — its own chart. twitch streams by default in prod (ESO stream-key);
-        # everything else boots idle until toggled on. youtube carries
-        # STREAM_PLATFORM=youtube.
-        streaming = platform == "twitch" and env.name == "prod-1"
-        obs_chart = Chart(scope, f"{env.name}-obs-{platform}", namespace=ns)
-        ObsInstance(
-            obs_chart,
-            platform,
-            env=env,
-            streaming=streaming,
-            stream_key_sm=f"k8s/obs/{platform}-stream-key" if streaming else None,
-            extra_config={"STREAM_PLATFORM": "youtube"}
-            if platform == "youtube"
-            else None,
-        )
+from adanalife_k8s.eso import secret_store
+from adanalife_k8s.supporting import emit_supporting
 
 
 class SupportingChart(Chart):
     """Per-env namespace supporting resources every stack in the env depends on,
     isolated from the high-churn app workloads: the shared observability
-    ExternalSecrets + cert-manager Issuers (emit_supporting), plus tripbot's
-    identity-level Secrets (DB creds + twitch/maps/discord — one bot identity, one
-    DB, shared by every platform stack). Synced after data, before apps. The ESO
-    SecretStore these reference is in DataChart (the synced-first unit).
+    ExternalSecrets + cert-manager Issuers (emit_supporting). Synced after data,
+    before apps. The ESO SecretStore these reference is in DataChart (the
+    synced-first unit).
+
+    tripbot's identity-level Secrets (DB creds + twitch/maps/discord) and the
+    prod-stream PriorityClass/ResourceQuota are NOT here anymore — they moved to
+    the tripbot repo's cdk8s (`<env>-tripbot-identity.k8s.yaml`), delivered by the
+    `tripbot-identity` ApplicationSet. The apps reference those Secrets by name.
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
@@ -81,10 +41,6 @@ class SupportingChart(Chart):
 
         # shared observability secrets + cert-manager issuers (eso envs only)
         emit_supporting(self, env)
-        # prod-stream PriorityClass + co-tenant ResourceQuota (knob-gated)
-        emit_stream_protection(self, env)
-        # tripbot identity Secrets (every env — local Secret or DB ES + app ES)
-        emit_identity_secrets(self, env)
 
         # When postgres is isolated in its own namespace, its ESO SecretStore went
         # with it (DataChart) — so the app namespace needs its OWN store for the
@@ -166,52 +122,6 @@ class DashcamPVChart(Chart):
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
-
-
-class DashcamCVChart(Chart):
-    """The PERSISTENT dashcam-cv vector-fill workload (PriorityClass + models PVC
-    + the suspended fill CronJob). A separate deploy unit because it was never in
-    the env umbrellas — a background batch job staged via its own task,
-    currently stage-only. The one-shot ops Jobs live in DashcamCVJobsChart.
-    """
-
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
-        DashcamCV(self, env=env)
-
-
-class DashcamCVJobsChart(Chart):
-    """The on-demand dashcam-cv one-shot Jobs (fill-once / find / stats). Their
-    own deploy unit so a normal `apply` of DashcamCVChart never re-runs them
-    (running a Job on each reconcile would be wrong — same split as JobsChart).
-    Run via the per-job tasks; depends on DashcamCVChart's PVC + PriorityClass.
-    """
-
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
-        super().__init__(scope, id, namespace=env.namespace or None)
-        DashcamCVJobs(self, env=env)
-
-
-def emit_job_charts(scope: Construct, env: EnvConfig) -> None:
-    """tripbot one-shot Jobs — one Chart each, so every Job synthesizes to its own
-    `dist/<env>-job-<name>.k8s.yaml` and a deploy task can `kubectl apply` exactly
-    one. NOT auto-run on a normal apply (running a seed/auth Job on every reconcile
-    would be wrong) — invoked via `task tripbot:<env>:{db:seed,auth:bootstrap:*}`.
-    local gets the combined auth-bootstrap; eso envs get the bot + broadcaster
-    legs; both get seed."""
-    from adanalife_k8s.constructs import tripbot as tb
-
-    ns = env.namespace or None
-
-    def _chart(suffix: str) -> Chart:
-        return Chart(scope, f"{env.name}-job-{suffix}", namespace=ns)
-
-    if env.secret_source == "local":
-        tb.local_auth_bootstrap(_chart("auth-bootstrap"), env)
-    else:
-        tb.auth_bootstrap_bot(_chart("auth-bootstrap-bot"), env)
-        tb.auth_bootstrap_broadcaster(_chart("auth-bootstrap-broadcaster"), env)
-    tb.seed(_chart("seed"), env)
 
 
 class ArgoCDChart(Chart):
