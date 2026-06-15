@@ -46,7 +46,7 @@ machine:
   # (operator: Exists), so the CNI still installs and the node reaches Ready.
   # Opt a workload in with:
   #   tolerations:
-  #     - key: adanalife.dev/rpi5
+  #     - key: dana.lol/rpi5
   #       operator: Exists
   #       effect: NoSchedule
   #
@@ -60,18 +60,18 @@ machine:
   # registration (initial join / reset+rejoin), not on a plain reboot or a
   # config re-apply of an already-registered node — so on first bring-up the
   # taint is also applied once by hand
-  # (`kubectl taint node adanalife-rpi5 adanalife.dev/rpi5=true:NoSchedule`), and
+  # (`kubectl taint node adanalife-rpi5 dana.lol/rpi5=true:NoSchedule`), and
   # this flag keeps it correct across any future reprovision.
   kubelet:
     extraArgs:
-      register-with-taints: adanalife.dev/rpi5=true:NoSchedule
+      register-with-taints: dana.lol/rpi5=true:NoSchedule
   # nodeLabels (unlike nodeTaints) DO apply: NodeRestriction lets a node
-  # self-set labels under custom domains like adanalife.dev/. (They only failed
+  # self-set labels under custom domains like dana.lol/. (They only failed
   # while the nodeTaints error above was aborting the same reconcile.)
   nodeLabels:
     # kubernetes.io/arch=arm64 is set automatically by the kubelet; this is just
     # a human-readable board marker.
-    adanalife.dev/board: rpi5
+    dana.lol/board: rpi5
 cluster:
   # Override the control-plane endpoint to the stable LAN-DNS pointer rather than
   # the IP baked into the generated worker.yaml. minipc.whereisdana.today is a
