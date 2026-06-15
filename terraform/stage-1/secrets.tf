@@ -386,6 +386,56 @@ data "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
   depends_on = [aws_secretsmanager_secret_version.discord_alerts_webhook]
 }
 
+# ntfy webhook URL for the Grafana independent critical-alert contact point.
+# Receives severity=critical firings (escalation) + the notification-delivery-
+# failure alert, so a dead Discord webhook can't black-hole the page. Grafana-
+# only (deliberately NOT under k8s/* — in-cluster ESO has no reason to read it).
+# Populate after `task tf:stage:apply`:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/ntfy-critical-webhook --secret-string '<URL>'
+resource "aws_secretsmanager_secret" "ntfy_critical_webhook" {
+  name        = "stage-1/ntfy-critical-webhook"
+  description = "ntfy webhook URL for the Grafana independent critical-alert contact point."
+}
+
+resource "aws_secretsmanager_secret_version" "ntfy_critical_webhook" {
+  secret_id     = aws_secretsmanager_secret.ntfy_critical_webhook.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "ntfy_critical_webhook" {
+  secret_id  = aws_secretsmanager_secret.ntfy_critical_webhook.id
+  depends_on = [aws_secretsmanager_secret_version.ntfy_critical_webhook]
+}
+
+# healthchecks.io ping URL for the Grafana alerting deadman switch. An always-
+# firing rule pings this on the repeat interval; if the pings stop (Grafana
+# Cloud outage, eval engine stuck, egress dead, API token lapsed), healthchecks
+# notifies via its own independent channel — the one signal that survives the
+# whole Grafana pipeline being down. Grafana-only. Populate after apply:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/healthchecks-deadman-ping --secret-string '<URL>'
+resource "aws_secretsmanager_secret" "healthchecks_deadman_ping" {
+  name        = "stage-1/healthchecks-deadman-ping"
+  description = "healthchecks.io ping URL for the Grafana alerting deadman switch."
+}
+
+resource "aws_secretsmanager_secret_version" "healthchecks_deadman_ping" {
+  secret_id     = aws_secretsmanager_secret.healthchecks_deadman_ping.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "healthchecks_deadman_ping" {
+  secret_id  = aws_secretsmanager_secret.healthchecks_deadman_ping.id
+  depends_on = [aws_secretsmanager_secret_version.healthchecks_deadman_ping]
+}
+
 # Discord bot token for the staging tripbot Discord session (pkg/discord).
 # Consumed at runtime via the tripbot-discord-bot-token ExternalSecret in
 # k8s/apps/tripbot/base/; pkg/discord skips startup cleanly when this is
@@ -487,6 +537,8 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
+      aws_secretsmanager_secret.ntfy_critical_webhook.arn,
+      aws_secretsmanager_secret.healthchecks_deadman_ping.arn,
       aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
       aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
       aws_secretsmanager_secret.video_pipeline_ghcr_pull.arn,
