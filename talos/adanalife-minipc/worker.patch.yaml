@@ -8,7 +8,8 @@
 #     --output worker.patched.yaml
 #
 # Non-secret. Safe to commit. The base worker.yaml carries the cluster CA +
-# join token + endpoint (https://192.168.1.200:6443) that let the Pi join.
+# join token that let the Pi join; this patch overrides the control-plane
+# endpoint to the stable LAN-DNS pointer (see cluster.controlPlane.endpoint).
 #
 # The node boots from the Talos SBC image already written to its SD card
 # (Image Factory schematic a636242df247ad4aad2e36d1026d8d4727b716a3061749bd7b19651e548f65e4
@@ -45,15 +46,42 @@ machine:
   # (operator: Exists), so the CNI still installs and the node reaches Ready.
   # Opt a workload in with:
   #   tolerations:
-  #     - key: adanalife.dev/sandbox
+  #     - key: adanalife.dev/rpi5
   #       operator: Exists
   #       effect: NoSchedule
-  nodeTaints:
-    adanalife.dev/sandbox: "true:NoSchedule"
+  #
+  # The taint is set via the kubelet's `register-with-taints` flag, NOT
+  # machine.nodeTaints. nodeTaints is applied post-registration by Talos's
+  # NodeApplyController using the node's own identity, and the NodeRestriction
+  # admission plugin forbids a node from modifying its own taints
+  # ("node ... is not allowed to modify taints") — so nodeTaints loops forever
+  # and never lands. register-with-taints declares the taint at registration,
+  # which NodeRestriction permits. Caveat: it only takes effect on a FRESH node
+  # registration (initial join / reset+rejoin), not on a plain reboot or a
+  # config re-apply of an already-registered node — so on first bring-up the
+  # taint is also applied once by hand
+  # (`kubectl taint node adanalife-rpi5 adanalife.dev/rpi5=true:NoSchedule`), and
+  # this flag keeps it correct across any future reprovision.
+  kubelet:
+    extraArgs:
+      register-with-taints: adanalife.dev/rpi5=true:NoSchedule
+  # nodeLabels (unlike nodeTaints) DO apply: NodeRestriction lets a node
+  # self-set labels under custom domains like adanalife.dev/. (They only failed
+  # while the nodeTaints error above was aborting the same reconcile.)
   nodeLabels:
     # kubernetes.io/arch=arm64 is set automatically by the kubelet; this is just
     # a human-readable board marker.
     adanalife.dev/board: rpi5
+cluster:
+  # Override the control-plane endpoint to the stable LAN-DNS pointer rather than
+  # the IP baked into the generated worker.yaml. minipc.whereisdana.today is a
+  # Route53 CNAME → per-location A record (terraform/core/minipc-dns.tf), so a
+  # location move (e.g. back to shadyglen) is a single DNS flip with no Pi-side
+  # reconfig. REQUIRES minipc.whereisdana.today in the kube-apiserver certSANs
+  # (added to controlplane.patch.yaml in this change), or the kubelet's TLS
+  # verification of the apiserver fails on a hostname mismatch.
+  controlPlane:
+    endpoint: https://minipc.whereisdana.today:6443
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig
