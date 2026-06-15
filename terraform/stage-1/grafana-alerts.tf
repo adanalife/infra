@@ -911,6 +911,70 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // The stream-is-down page. Every other rule watches degradation or the
+  // half-open divergence (silent disconnect needs obs=1/twitch=0); none catch
+  // "OBS isn't broadcasting at all". A cleanly-stopped stream (OBS Stop
+  // Streaming, OBS crash, a deploy gap) otherwise sails through silently —
+  // found 2026-06-15 when a manual OBS stop produced zero alerts.
+  // obs_streaming_active is emitted by vlc-server whenever it's up (if
+  // vlc-server itself is down, the absent-visibility canary above covers that),
+  // so =0 cleanly means "not broadcasting". for=10m so routine OBS restarts /
+  // the watchdog's brief StopStream+StartStream / a rolling redeploy self-clear
+  // before paging. The stream is 24/7, so any sustained dark is page-worthy;
+  // silence this rule in Grafana during planned stops.
+  rule {
+    name           = "OBS: stream is down (not broadcasting)"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK" // vlc-server down → handled by the absent-visibility canary, not here
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Prod OBS has not been streaming for 10m"
+      description = "obs_streaming_active{deployment_environment=\"prod-1\"} has been 0 for 10m — OBS is not broadcasting (stopped, crashed, or never resumed after a restart) and viewers see nothing. If this is planned downtime, add a Grafana silence for this rule. Otherwise check OBS (the obs-twitch pod / OBS WebSocket) and start the stream. Distinct from the silent-disconnect alert, which is OBS streaming while Twitch shows offline."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // The #1 stream-health alert: catches the silent half-open RTMP state
   // where OBS reports outputActive=true but Twitch's API shows the channel
   // offline. OBS's built-in reconnect only fires on a detected drop;
