@@ -63,6 +63,22 @@ resource "grafana_contact_point" "healthchecks_deadman" {
   }
 }
 
+// Always-on mute timing. Covers every minute of every day, so any notification
+// policy route that references it never delivers. Used to silence a kept-but-
+// noisy rule (labelled mute=true): the rule keeps evaluating and shows in the
+// Alerting UI, but no notification is sent.
+resource "grafana_mute_timing" "always" {
+  name = "always-muted"
+
+  intervals {
+    times {
+      start = "00:00"
+      end   = "24:00"
+    }
+    weekdays = ["sunday:saturday"]
+  }
+}
+
 resource "grafana_notification_policy" "root" {
   // Default receiver: everything that doesn't match a child route below
   // (i.e. warnings) goes to Discord, same as before.
@@ -121,6 +137,26 @@ resource "grafana_notification_policy" "root" {
     }
     contact_point   = grafana_contact_point.discord_alerts.name
     continue        = false
+    group_by        = ["grafana_folder", "alertname"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "1h"
+  }
+
+  // Muted-but-kept alerts (labelled mute=true). The active-series-cap warning
+  // fires continuously now that two deployments share the free-tier budget and
+  // there's no action to take, so it's silenced via the always-on mute timing
+  // while the rule is kept (still visible/firing in the Alerting UI).
+  // continue=false so it never falls through to the Discord default receiver.
+  policy {
+    matcher {
+      label = "mute"
+      match = "="
+      value = "true"
+    }
+    contact_point   = grafana_contact_point.discord_alerts.name
+    continue        = false
+    mute_timings    = [grafana_mute_timing.always.name]
     group_by        = ["grafana_folder", "alertname"]
     group_wait      = "30s"
     group_interval  = "5m"
@@ -280,6 +316,11 @@ resource "grafana_rule_group" "metrics_budget" {
     labels = {
       severity = "warning"
       service  = "monitoring"
+      // Muted: fires continuously now that two deployments share the free-tier
+      // active-series budget and there's no action to take. Kept (still visible
+      // in the Alerting UI) but routed through the always-on mute timing — see
+      // the mute=true sub-route on grafana_notification_policy.root.
+      mute = "true"
     }
 
     data {
