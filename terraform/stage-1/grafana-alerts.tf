@@ -460,6 +460,75 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // Highpri escalation above the render/output frame-skip warnings: fires only
+  // when frame-skip has been HEAVY and SUSTAINED — i.e. the stream has been
+  // visibly unwatchable for ~an hour+, not a transient burst. The two warnings
+  // above use rate([5m]) + for=5m, which flaps Normal<->Pending<->Alerting every
+  // few minutes: the per-clip skip pattern dips to ~0 between clips, resetting
+  // the for-timer, so they never produce a single durable "the stream is bad"
+  // signal (and would spam fire/resolve pairs if they did notify). This rule
+  // averages the 5m render-skip rate over a rolling 1h window, so a short burst
+  // can't move the hourly average — it only fires on genuinely sustained
+  // degradation and cannot flap. Scoped to prod-1 (a janky stage/dev stream is
+  // low-stakes and must not page). Motivating incident: the 2026-06-15 overnight
+  // video-pipeline transcode starved the shared iGPU for ~10h (6-9 skipped
+  // frames/s), the render warning flapped the whole time, and no durable alert
+  // ever fired. Threshold 2/s on the 1h average is ~20x the warning's 0.1/s
+  // instantaneous threshold and sits well clear of the ~0 baseline when the
+  // iGPU isn't contended.
+  rule {
+    name           = "OBS: stream unwatchable (sustained heavy frame-skip)"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Prod stream has been dropping frames heavily for ~1h+ (unwatchable)"
+      description = "The 1h-average OBS render-thread skipped-frame rate on prod-1 is above 2/s — the stream has been visibly stuttering for an extended period, not a transient burst. Almost always iGPU contention from a co-tenant workload (a video-pipeline transcode/calibrate job, stage VLC/OBS) or sustained host CPU pressure. Check `kubectl get pods -A | grep -E 'transcode|calibrate|pipeline'` and intel_gpu_top on the minipc; stop the offending job to restore real-time encode."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 4200
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(avg_over_time(rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=\"prod-1\"}[5m])[1h:1m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [2] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   rule {
     name           = "OBS: stream congested"
     for            = "2m"
