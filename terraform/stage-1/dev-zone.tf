@@ -1,5 +1,5 @@
 # dev.whereisdana.today — Route 53 zone for the "development" k3d cluster
-# (adanalife-bees). dev borrows the adanalife-stage AWS account (it has no
+# (adanalife-dev). dev borrows the adanalife-stage AWS account (it has no
 # account of its own yet), so its subdomain zone lives here in the stage-1
 # workspace rather than a dev-specific one.
 #

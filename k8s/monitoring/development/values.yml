@@ -18,11 +18,11 @@
 # expression, so rotating the SM value + force-syncing the ExternalSecret
 # is enough to pick up new tokens without redeploying the chart.
 
-# Names the physical cluster (the k3d box on Dana's laptop). The host is
-# technically dmerrick-bees, but the monitoring label uses the adanalife-
-# prefixed form for consistency with adanalife-minipc.
+# Cluster label for the local development env. Env-based and
+# machine-independent (any laptop running `task k8s:dev:cluster:up`), the
+# adanalife- prefix matching adanalife-minipc.
 cluster:
-  name: adanalife-bees
+  name: adanalife-dev
 
 destinations:
   metrics:

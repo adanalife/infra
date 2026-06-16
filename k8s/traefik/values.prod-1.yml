@@ -1,6 +1,6 @@
 # Prod-1 traefik override — layered on top of values.yml via
 # `helm upgrade --install ... -f values.yml -f values.prod-1.yml`.
-# Stage-1 (bees / k3d) uses just values.yml.
+# dev (k3d) uses just values.yml.
 #
 # Talos has no LoadBalancer controller of its own; hostNetwork binds
 # traefik directly to the node's IP on 80/443. MetalLB is the

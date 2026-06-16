@@ -4,13 +4,13 @@ Infrastructure-as-code for [A Dana Life](https://dana.lol): terraform for the
 cloud accounts (AWS, GCP, Cloudflare, Tailscale, GitHub), cdk8s + Argo CD for
 the Kubernetes app manifests, and a Taskfile that ties the workflows together.
 
-## running kubernetes locally (development / bees)
+## running kubernetes locally (development)
 
 Dev app stack (postgres + tripbot + vlc-server + obs + onscreens-server) on a
-local k3d cluster ("bees"). The manifests are authored in cdk8s
-(`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`.
-dev is **not** Argo-managed, so it deploys with a direct `kubectl apply` via
-`task cdk8s:dev:apply`. The k3d cluster config is at `k8s/k3d-config.bees.yaml`.
+local k3d cluster (`adanalife-dev`). The infra manifests are authored in cdk8s
+(`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`;
+the tripbot app manifests live in the tripbot repo and are delivered by dev's
+own in-cluster Argo CD. The k3d cluster config is at `k8s/k3d-config.yaml`.
 
 > prod-1/stage-1 app workloads are delivered by Argo CD from `cdk8s/dist/`
 > instead — see `gitops/README.md`.
@@ -38,7 +38,7 @@ curl http://localhost:8080/health/live
 task k8s:dev:cluster:down
 ```
 
-The k3d cluster has no host-port bindings (see `k8s/k3d-config.bees.yaml`)
+The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
 — anything you want to reach from the laptop goes through
 `kubectl port-forward`. Off-LAN access to the mini-PC envs is via Tailscale;
 the dev k3d cluster is local-only.

@@ -1,14 +1,13 @@
-# k3d cluster config for development on the `bees` host (dmerrick-bees).
+# k3d cluster config for the local `development` environment.
 #
 # Bring up with:  task k8s:dev:cluster:up
 # Tear down with: task k8s:dev:cluster:down
 #
-# Cluster name is host-based, not env-based: `adanalife-bees` on bees,
-# `adanalife-empty` on the other host (see k3d-config.empty.yaml). Rationale:
-# when development eventually graduates between hosts, the cluster
-# on `empty` stays `adanalife-empty` and only the Taskfile mapping changes
-# (which env's tasks target which cluster). Host-based names decouple
-# cluster identity from env assignment.
+# Cluster name is env-based and machine-independent: `adanalife-dev` on
+# every laptop. (This supersedes the old host-based scheme — `adanalife-bees`
+# / `adanalife-empty` — which baked a specific machine into the tooling and
+# was confusing on a fresh box. A laptop dev cluster doesn't flip envs, so a
+# fixed `adanalife-dev` name + context is clearer and portable.)
 #
 # This is the only k3d config for development — it mounts the committed
 # example video and is what `task k8s:dev:cluster:up` always uses. To
@@ -39,7 +38,7 @@
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
-  name: adanalife-bees
+  name: adanalife-dev
 
 servers: 1
 agents: 0
