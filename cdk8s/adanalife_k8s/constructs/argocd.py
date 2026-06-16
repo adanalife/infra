@@ -213,6 +213,7 @@ class ArgoCD(Construct):
         envs: tuple[str, ...] = CUTOVER_ENVS,
         autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
         autosync_holdouts: tuple[tuple[str, str], ...] = AUTOSYNC_HOLDOUTS,
+        selfheal: bool = True,
         tailscale_ui: bool = True,
         lan_host: str | None = LAN_HOST,
         lan_tls: bool = True,
@@ -220,6 +221,13 @@ class ArgoCD(Construct):
     ):
         super().__init__(scope, id)
         self.envs = envs
+        # Whether the autosync block reconciles live drift (selfHeal). True on the
+        # minipc (prod/stage must match git). False on the throwaway k3d dev
+        # instance: autosync still deploys git changes, but a hand `kubectl edit`
+        # sticks (Argo shows OutOfSync rather than stomping it) — dev is a scratch
+        # env, so manual experimentation shouldn't be fought. The /spec/syncPolicy
+        # emergency brake (ignoreApplicationDifferences) still applies on top.
+        self._selfheal = selfheal
         # Envs whose console (the cross-repo tripbot-console unit) this Argo
         # delivers — the envs with a defined console revision. Resolves empty on
         # the k3d dev instance (development deploys via `task deploy:dev` in the
@@ -290,6 +298,7 @@ class ArgoCD(Construct):
             prune_disabled=False,
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
+            selfheal=self._selfheal,
             # Source repo + revision are per-element (see _app_elements): every env
             # reads the tripbot repo at its own revision (prod→master, else develop).
             repo_url="{{.repo}}",
@@ -359,6 +368,7 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
+                selfheal=self._selfheal,
                 repo_url=CONSOLE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
@@ -380,6 +390,7 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
+                selfheal=self._selfheal,
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
@@ -461,6 +472,7 @@ class ArgoCD(Construct):
         dest_ns_tmpl: str = "{{.env}}",
         automated_envs: tuple[str, ...] = (),
         automated_holdouts: tuple[tuple[str, str], ...] = (),
+        selfheal: bool = True,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
     ):
@@ -470,12 +482,14 @@ class ArgoCD(Construct):
         have one element per env. The data set disables prune so it can never
         delete the database/volumes, even when apps flips to automated sync.
 
-        `automated_envs` turns on continuous reconcile (prune + selfHeal) for just
-        those envs via a per-element templatePatch — so one ApplicationSet can run
-        some envs automated and others manual. Empty = every Application stays
-        manual-sync (monitor-only). `automated_holdouts` carves (env, app) pairs
-        back OUT of an automated env (prod OBS: a pod-template change restarts the
-        live stream, so its deploys stay a deliberate sync)."""
+        `automated_envs` turns on continuous reconcile (prune, + selfHeal when
+        `selfheal`) for just those envs via a per-element templatePatch — so one
+        ApplicationSet can run some envs automated and others manual. Empty = every
+        Application stays manual-sync (monitor-only). `automated_holdouts` carves
+        (env, app) pairs back OUT of an automated env (prod OBS: a pod-template
+        change restarts the live stream, so its deploys stay a deliberate sync).
+        `selfheal=False` keeps autosync but stops Argo reverting live drift, so a
+        hand-edit sticks — used on the throwaway k3d dev instance."""
         sync_options = [
             "CreateNamespace=false",  # namespaces owned by bootstrap
             "ServerSideApply=true",
@@ -577,7 +591,7 @@ class ArgoCD(Construct):
                 "  syncPolicy:\n"
                 "    automated:\n"
                 "      prune: true\n"
-                "      selfHeal: true\n"
+                f"      selfHeal: {'true' if selfheal else 'false'}\n"
                 "{{- end }}\n"
             )
         appset = cdk8s.ApiObject(

@@ -14,6 +14,7 @@ _DEV = dict(
     envs=("development",),
     autosync_envs=("development",),
     autosync_holdouts=(),
+    selfheal=False,  # dev autosyncs but doesn't revert hand-edits (scratch env)
     notifications_secret=False,
     tailscale_ui=False,
     lan_host="argocd.dev.whereisdana.today",
@@ -77,8 +78,12 @@ def test_dev_is_development_only_with_traefik_ui():
         assert {
             d["namespace"] for d in _project(objs, name)["spec"]["destinations"]
         } == {"development"}
-    # development apps autosync (it's throwaway)
-    assert "development" in _appset(objs, "tripbot-apps")["spec"]["templatePatch"]
+    # development apps autosync (it's throwaway)...
+    patch = _appset(objs, "tripbot-apps")["spec"]["templatePatch"]
+    assert "development" in patch
+    # ...but selfHeal is OFF so a hand `kubectl edit` sticks (autosync + prune stay on)
+    assert "prune: true" in patch
+    assert "selfHeal: false" in patch
 
 
 def test_per_repo_projects_scope_to_one_repo_each():
@@ -142,6 +147,8 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert '(eq .env "prod-1")' in patch
     # ...except prod OBS, carved back out (a sync restarts the live stream)
     assert '(not (and (eq .env "prod-1") (eq .app "obs-twitch")))' in patch
+    # minipc selfHeals (prod/stage must match git) — unlike the dev instance
+    assert "selfHeal: true" in patch
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
