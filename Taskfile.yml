@@ -539,32 +539,46 @@ tasks:
   # context-less `kubectl rollout` would target whichever namespace is
   # current, which is ambiguous. Each task bakes in `-n <namespace>` so the
   # right pods restart regardless of the operator's current kubeconfig ns.
+  #
+  # Workloads are per-platform (`<app>-<platform>`, e.g. tripbot-twitch),
+  # so PLATFORM selects which one to roll — default `twitch` (present in
+  # every env's steady state), override `PLATFORM=youtube` for the YouTube
+  # stack. `:all` rolls the default platform's four apps; pass PLATFORM= on
+  # the command line to roll a different platform's set.
   k8s:prod:rollout:tripbot:
-    desc: restart prod-1 tripbot so it re-pulls the image
+    desc: restart prod-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/tripbot -n prod-1
-      - kubectl rollout status deploy/tripbot -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:vlc-server:
-    desc: restart prod-1 vlc-server so it re-pulls the image
+    desc: restart prod-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/vlc-server -n prod-1
-      - kubectl rollout status deploy/vlc-server -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:obs:
-    desc: restart prod-1 obs so it re-pulls the image
+    desc: restart prod-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/obs -n prod-1
-      - kubectl rollout status deploy/obs -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:onscreens:
-    desc: restart prod-1 onscreens-server so it re-pulls the image
+    desc: restart prod-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/onscreens-server -n prod-1
-      - kubectl rollout status deploy/onscreens-server -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/onscreens-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:all:
-    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
+    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:prod:rollout:tripbot
       - k8s:prod:rollout:vlc-server
@@ -572,31 +586,39 @@ tasks:
       - k8s:prod:rollout:onscreens
 
   k8s:stage:rollout:tripbot:
-    desc: restart stage-1 tripbot so it re-pulls the image
+    desc: restart stage-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/tripbot-twitch -n stage-1
-      - kubectl rollout status deploy/tripbot-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:vlc-server:
-    desc: restart stage-1 vlc-server so it re-pulls the image
+    desc: restart stage-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/vlc-twitch -n stage-1
-      - kubectl rollout status deploy/vlc-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:obs:
-    desc: restart stage-1 obs so it re-pulls the image
+    desc: restart stage-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/obs-twitch -n stage-1
-      - kubectl rollout status deploy/obs-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:onscreens:
-    desc: restart stage-1 onscreens-server so it re-pulls the image
+    desc: restart stage-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/onscreens-twitch -n stage-1
-      - kubectl rollout status deploy/onscreens-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/onscreens-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:all:
-    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
+    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:stage:rollout:tripbot
       - k8s:stage:rollout:vlc-server
@@ -1983,7 +2005,7 @@ tasks:
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n development 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n development\` to bring the bot online with both identities."'
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n development\` to bring the bot online with both identities."'
 
   tripbot:prod:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against prod-1 back-to-back; sign in as tripbot4000 on the first browser tab, then adanalife_ on the second
@@ -2018,7 +2040,7 @@ tasks:
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n prod-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot -n prod-1\` to bring the bot online with both identities loaded."'
+      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot-twitch -n prod-1\` to bring the bot online with both identities loaded."'
 
   tripbot:stage:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4001 then adanalife_staging
