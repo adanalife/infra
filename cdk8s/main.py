@@ -64,12 +64,16 @@ if not only:
     # its own cluster in-cluster, so there's no cross-cluster wiring. No tailnet UI
     # (no tailscale-operator on the dev cluster); the UI rides a traefik Ingress at
     # argocd.dev.whereisdana.today (no TLS), reached at :9080 via the k3d port-map.
+    # selfHeal off: dev autosync still deploys git changes, but a hand `kubectl
+    # edit` sticks (Argo shows OutOfSync rather than stomping it) — dev is a
+    # scratch env for manual experimentation.
     ArgoCDChart(
         app,
         "argocd-k3d",
         envs=("development",),
         autosync_envs=("development",),
         autosync_holdouts=(),  # the prod OBS holdout is minipc-only
+        selfheal=False,
         notifications_secret=False,  # dev runs notifications.enabled=false
         tailscale_ui=False,
         lan_host=f"argocd.{load_env('development').dns_base}",
