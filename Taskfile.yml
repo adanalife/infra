@@ -539,32 +539,46 @@ tasks:
   # context-less `kubectl rollout` would target whichever namespace is
   # current, which is ambiguous. Each task bakes in `-n <namespace>` so the
   # right pods restart regardless of the operator's current kubeconfig ns.
+  #
+  # Workloads are per-platform (`<app>-<platform>`, e.g. tripbot-twitch),
+  # so PLATFORM selects which one to roll — default `twitch` (present in
+  # every env's steady state), override `PLATFORM=youtube` for the YouTube
+  # stack. `:all` rolls the default platform's four apps; pass PLATFORM= on
+  # the command line to roll a different platform's set.
   k8s:prod:rollout:tripbot:
-    desc: restart prod-1 tripbot so it re-pulls the image
+    desc: restart prod-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/tripbot -n prod-1
-      - kubectl rollout status deploy/tripbot -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:vlc-server:
-    desc: restart prod-1 vlc-server so it re-pulls the image
+    desc: restart prod-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/vlc-server -n prod-1
-      - kubectl rollout status deploy/vlc-server -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:obs:
-    desc: restart prod-1 obs so it re-pulls the image
+    desc: restart prod-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/obs -n prod-1
-      - kubectl rollout status deploy/obs -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:onscreens:
-    desc: restart prod-1 onscreens-server so it re-pulls the image
+    desc: restart prod-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/onscreens-server -n prod-1
-      - kubectl rollout status deploy/onscreens-server -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/onscreens-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:all:
-    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
+    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:prod:rollout:tripbot
       - k8s:prod:rollout:vlc-server
@@ -572,31 +586,39 @@ tasks:
       - k8s:prod:rollout:onscreens
 
   k8s:stage:rollout:tripbot:
-    desc: restart stage-1 tripbot so it re-pulls the image
+    desc: restart stage-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/tripbot-twitch -n stage-1
-      - kubectl rollout status deploy/tripbot-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:vlc-server:
-    desc: restart stage-1 vlc-server so it re-pulls the image
+    desc: restart stage-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/vlc-twitch -n stage-1
-      - kubectl rollout status deploy/vlc-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:obs:
-    desc: restart stage-1 obs so it re-pulls the image
+    desc: restart stage-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/obs-twitch -n stage-1
-      - kubectl rollout status deploy/obs-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:onscreens:
-    desc: restart stage-1 onscreens-server so it re-pulls the image
+    desc: restart stage-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/onscreens-twitch -n stage-1
-      - kubectl rollout status deploy/onscreens-twitch -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/onscreens-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:all:
-    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server)
+    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:stage:rollout:tripbot
       - k8s:stage:rollout:vlc-server
@@ -1273,37 +1295,49 @@ tasks:
       - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd
       - 'echo "Argo CD up in the argocd namespace (idle, monitor-only). Next: task gitops:apply to create the ApplicationSets + repo cred + UI Ingress, then browse argocd-prod.<tailnet>.ts.net. See gitops/README.md."'
 
-  # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
-  # obs-stream-key is `optional: true`, so the existence + content of that
-  # Secret IS the stream state. Either way we rollout-restart obs so the
-  # entrypoint re-reads STREAM_KEY at boot — Kubernetes doesn't propagate
-  # Secret changes to running pods' env vars.
+  # Streaming toggle for OBS. The OBS deployment's envFrom on the
+  # stream-key Secret is `optional: true`, so the existence + content of
+  # that Secret IS the stream state. Either way we rollout-restart obs so
+  # the entrypoint re-reads STREAM_KEY at boot — Kubernetes doesn't
+  # propagate Secret changes to running pods' env vars.
   #
-  # PROD is on-by-default and goes through ESO: the obs-stream-key
-  # ExternalSecret ships in the prod-1 apps unit (cdk8s -> dist/prod-1-apps.k8s.yaml),
-  # so Argo CD materializes the Secret on sync and OBS
-  # streams without a manual step. `obs:prod:stream:on` just re-applies that
-  # ExternalSecret (e.g. after an `:off`); `obs:prod:stream:off` deletes the
-  # ExternalSecret AND the Secret so ESO can't re-materialize it — the pause
-  # survives the refresh interval and lasts until the next apply/wipe.
+  # Workloads are per-platform (`obs-<platform>`), so PLATFORM selects which
+  # OBS to toggle — default `twitch`, override `PLATFORM=youtube`. The
+  # stream-key object name follows the obs.py convention: twitch keeps the
+  # shared base name `obs-stream-key`, every other platform gets a distinct
+  # `obs-<platform>-stream-key` (so a twitch stream:on can't clobber
+  # youtube's key); the SM container is `k8s/obs/<platform>-stream-key`.
   #
-  # STAGE is off-by-default and stays imperative: there's no stage
-  # ExternalSecret, so `obs:stage:stream:on` pulls STREAM_KEY from the
-  # adanalife-stage SM account and creates the Secret directly. That `:on`
-  # is env-prefixed because the key is sourced from a specific AWS account,
-  # NOT from whatever cluster kubectl points at — the AWS profile is the
-  # targeting, so it must be explicit, and the final echo surfaces both the
-  # source profile and the live kubectl context so a cluster/key mismatch is
-  # visible.
+  # PROD goes through ESO: the stream-key ExternalSecret ships inside the
+  # per-platform obs app dist (tripbot repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
+  # Argo-delivered), so a normal sync materializes the Secret and OBS streams
+  # with no manual step. `obs:prod:stream:on` re-applies just that
+  # ExternalSecret (yq-extracted from the obs dist, since it no longer lives
+  # in a standalone overlay file); `obs:prod:stream:off` deletes the
+  # ExternalSecret AND the Secret. The pause is durable because the
+  # ApplicationSet deliberately excludes prod-1 obs-twitch from automated
+  # selfHeal (see cdk8s argocd.k8s.yaml) — Argo won't re-create the deleted
+  # ExternalSecret until a manual sync (or `obs:prod:stream:on`).
+  #
+  # STAGE is off-by-default and stays imperative: `obs:stage:stream:on`
+  # pulls STREAM_KEY from the adanalife-stage SM account and creates the
+  # Secret directly. That `:on` is env-prefixed because the key is sourced
+  # from a specific AWS account, NOT from whatever cluster kubectl points at
+  # — the AWS profile is the targeting, so it must be explicit, and the
+  # final echo surfaces both the source profile and the live kubectl context
+  # so a cluster/key mismatch is visible.
   #
   # `:off` is exposed under both env namespaces; the shared internal task
   # deletes both the ExternalSecret (no-op in stage, which has none) and the
   # Secret in the current cluster — no AWS account needed. Run with
-  # NAMESPACE=stage-1 / NAMESPACE=prod-1 to override the per-task defaults.
+  # NAMESPACE=stage-1 / NAMESPACE=prod-1 + PLATFORM= to override the per-task
+  # defaults.
   obs:stage:stream:on:
-    desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
+    desc: "stream stage OBS (STREAM_KEY from the stage-1 SM account; override PLATFORM=, default twitch)"
     vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
       NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+      SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -1311,85 +1345,96 @@ tasks:
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
     cmds:
       - |
         set -euo pipefail
         sk=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
-          --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
-        kubectl create secret generic obs-stream-key \
+          --secret-id k8s/obs/{{.PLATFORM}}-stream-key --query SecretString --output text)
+        kubectl create secret generic {{.SECRET}} \
           --from-literal=STREAM_KEY="$sk" \
           --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
-      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
-      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming — key from adanalife-stage SM (→ adanalife_staging); namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS streaming ({{.PLATFORM}}) — key from adanalife-stage SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
-  # Prod streaming is on-by-default via the overlay's ExternalSecret, so
-  # this task only matters as the inverse of `:off`: re-apply the
-  # ExternalSecret, wait for ESO to materialize the Secret, then roll obs.
-  # No aws-vault — ESO reads the adanalife-prod account itself.
+  # Prod streaming is on-by-default via the obs app dist's ExternalSecret,
+  # so this task only matters as the inverse of `:off`: re-apply the
+  # ExternalSecret (extracted from the Argo-delivered obs dist), wait for ESO
+  # to materialize the Secret, then roll obs. No aws-vault — ESO reads the
+  # adanalife-prod account itself.
   obs:prod:stream:on:
-    desc: "resume prod OBS streaming (re-applies the obs-stream-key ExternalSecret; ESO pulls STREAM_KEY from the adanalife-prod SM account → adanalife_)"
+    desc: "resume prod OBS streaming (re-applies the stream-key ExternalSecret from the obs app dist; ESO pulls STREAM_KEY from the adanalife-prod SM account; override PLATFORM=, default twitch)"
     vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
       NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+      SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
+      OBS_DIST: '../tripbot/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
     preconditions:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: command -v yq >/dev/null
+        msg: "yq not found — install with `brew install yq`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
+      - sh: test -f {{.OBS_DIST}}
+        msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling tripbot checkout; is ~/adanalife/tripbot present + synthed?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
       - sh: kubectl get secretstore aws-secretsmanager -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "aws-secretsmanager SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
     cmds:
-      - kubectl apply -n {{.NAMESPACE}} -f k8s/apps/obs/overlays/prod-1/stream-key-external-secret.yaml
-      - kubectl wait --for=condition=Ready externalsecret/obs-stream-key -n {{.NAMESPACE}} --timeout=120s
-      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
-      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming — obs-stream-key materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - yq 'select(.kind == "ExternalSecret")' {{.OBS_DIST}} | kubectl apply -n {{.NAMESPACE}} -f -
+      - kubectl wait --for=condition=Ready externalsecret/{{.SECRET}} -n {{.NAMESPACE}} --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS streaming ({{.PLATFORM}}) — {{.SECRET}} materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
-  # Stop streaming, keep OBS running. Deletes the obs-stream-key
-  # ExternalSecret (if any — prod has one, stage doesn't) AND the
-  # obs-stream-key Secret, then restarts the pod so it boots in idle
-  # (VNC-only) mode — the container stays up, only the Twitch publish
-  # stops. Deleting the ExternalSecret first is what makes the pause
-  # durable in prod: otherwise ESO would re-materialize the Secret on its
-  # next refresh. The pause lasts until the next Argo sync of the prod-1
-  # apps unit (or a cluster wipe re-applies it). Exposed under both env namespaces
-  # for symmetry with the `:on` tasks; the work is env-agnostic (no AWS
-  # account — it only touches the local cluster), so both delegate to one
-  # shared implementation.
+  # Stop streaming, keep OBS running. Deletes the stream-key ExternalSecret
+  # (if any — prod has one, stage doesn't) AND the stream-key Secret, then
+  # restarts the pod so it boots in idle (VNC-only) mode — the container
+  # stays up, only the publish stops. Deleting the ExternalSecret first is
+  # what makes the pause durable in prod: otherwise ESO would re-materialize
+  # the Secret on its next refresh. The pause lasts until the next manual
+  # Argo sync of the obs app (or `obs:prod:stream:on`). Exposed under both
+  # env namespaces for symmetry with the `:on` tasks; the work is
+  # env-agnostic (no AWS account — it only touches the local cluster), so
+  # both delegate to one shared implementation.
   obs:stage:stream:off:
-    desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
+    desc: "stop OBS streaming (OBS stays up in idle/VNC mode; override PLATFORM=, default twitch)"
     cmds:
       - task: obs:stream:off:_run
         vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
           NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
 
   obs:prod:stream:off:
-    desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
+    desc: "stop OBS streaming (OBS stays up in idle/VNC mode; override PLATFORM=, default twitch)"
     cmds:
       - task: obs:stream:off:_run
         vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
           NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
 
   obs:stream:off:_run:
     internal: true
     requires:
-      vars: [NAMESPACE]
+      vars: [NAMESPACE, PLATFORM]
+    vars:
+      SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
     preconditions:
       - sh: command -v kubectl >/dev/null
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "obs Deployment not found in namespace {{.NAMESPACE}}"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
     cmds:
       # ExternalSecret first so ESO stops owning (and re-creating) the Secret.
-      - kubectl delete externalsecret obs-stream-key -n {{.NAMESPACE}} --ignore-not-found
-      - kubectl delete secret obs-stream-key -n {{.NAMESPACE}} --ignore-not-found
-      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
-      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
+      - kubectl delete externalsecret {{.SECRET}} -n {{.NAMESPACE}} --ignore-not-found
+      - kubectl delete secret {{.SECRET}} -n {{.NAMESPACE}} --ignore-not-found
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
       - 'echo "OBS idle (not streaming) — container still up; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   k8s:logs:
@@ -1405,14 +1450,16 @@ tasks:
   # when iterating without applying the local overlay). Backgrounded
   # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
   # find it. Re-running :up overwrites the PID file; if :down can't
-  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs"`.
+  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs-"`.
   obs:vnc:up:
-    desc: start a local kubectl port-forward to OBS VNC at localhost:5902
+    desc: start a local kubectl port-forward to OBS VNC at localhost:5902 (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # PID capture must happen in the same shell as the backgrounded process —
       # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/obs 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      - kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
       - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
 
   obs:vnc:down:
@@ -1428,52 +1475,58 @@ tasks:
         fi
 
   obs:browser:refresh:
-    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently)
+    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently; override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
 
   obs:media:restart:
-    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart
+    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-media-restart
 
   vlc:vnc:up:
-    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
+    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # PID capture must happen in the same shell as the backgrounded process —
       # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/vlc-server 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
+      - kubectl port-forward svc/vlc-{{.PLATFORM}} 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
       - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
 
   vlc:vnc:down:
@@ -1983,7 +2036,7 @@ tasks:
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n development 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n development\` to bring the bot online with both identities."'
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n development\` to bring the bot online with both identities."'
 
   tripbot:prod:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against prod-1 back-to-back; sign in as tripbot4000 on the first browser tab, then adanalife_ on the second
@@ -2018,7 +2071,7 @@ tasks:
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n prod-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot -n prod-1\` to bring the bot online with both identities loaded."'
+      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot-twitch -n prod-1\` to bring the bot online with both identities loaded."'
 
   tripbot:stage:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4001 then adanalife_staging
