@@ -492,9 +492,23 @@ tasks:
           # Pause Argo selfHeal so the override isn't reconciled back to :develop.
           kubectl patch application "development-$dep" -n argocd --type merge \
             -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}' >/dev/null
-          # Image + IfNotPresent in one strategic patch = one rollout.
+          # Any initContainer sharing the image (tripbot's `migrate`) needs the
+          # same override, or the pod gets stuck pulling :develop for the init
+          # step. Build an initContainers patch fragment for matching ones.
+          init_items=""
+          for ic in $(kubectl get "deploy/$dep" -n development \
+                        -o jsonpath='{range .spec.template.spec.initContainers[*]}{.name}={.image}{"\n"}{end}'); do
+            iname=${ic%%=*}; iimg=${ic#*=}
+            case "$iimg" in "$repo:"*)
+              init_items="${init_items}{\"name\":\"$iname\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}," ;;
+            esac
+          done
+          init_patch=""
+          [ -n "$init_items" ] && init_patch="\"initContainers\":[${init_items%,}],"
+          # Image + IfNotPresent for the main container (and matching init
+          # containers) in one strategic patch = one rollout.
           kubectl patch "deploy/$dep" -n development --type strategic \
-            -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"$ctr\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}]}}}}"
+            -p "{\"spec\":{\"template\":{\"spec\":{${init_patch}\"containers\":[{\"name\":\"$ctr\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}]}}}}"
           kubectl rollout status "deploy/$dep" -n development --timeout=180s
         done
         echo "running your local :dev-local build. revert to CI :develop with: task k8s:dev:sync"
