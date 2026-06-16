@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# dist/ — the synthesized app deploy units are COMMITTED as the GitOps source +
+# golden-file regression gate (a CI check asserts synth matches the committed
+# files). But the platform Helm RENDER (CDK8S_PLATFORM=1) is helm-rendered
+# (network, version-pinned, multi-MB) and regenerated on demand — keep it untracked.
+dist/platform-*.k8s.yaml
+dist/*-platform.k8s.yaml
+dist/*.log
+dist/.*
+# Exception: the Argo-native platform delivery is just small Application objects
+# (offline, no rendered charts), so it IS committed + golden-gated like the apps.
+!dist/platform-argo.k8s.yaml
+# Generated typed k8s constructs (cdk8s import). Regenerate with `cdk8s import`
+# (pinned to k8s API version in cdk8s.yaml). Gitignored to keep the tree
+# reviewable; CI/setup runs the import.
+imports/
+# Per-machine host-specific config injected at synth time — the real dashcam NFS
+# coords for `task k8s:<env>:dashcam-pv`. Host-specific, kept out of git (the
+# committed dist/ carries placeholders). Copy dashcam-nfs.local.env.example.
+dashcam-nfs.local.env

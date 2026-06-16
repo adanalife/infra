@@ -59,8 +59,7 @@ resource "aws_iam_user_policy_attachment" "eso_reader" {
 
 # PGP-encrypted secret access key for ESOSecretsReader. Decrypt via
 # `terraform output -raw eso_reader_secret | base64 -d | keybase pgp
-# decrypt` and feed into `task k8s:stage:bootstrap-secrets`. See
-# vault/infra/keybase-setup.md.
+# decrypt` and feed into `task k8s:stage:bootstrap-secrets`.
 #
 # Lives here (not in output.tf) because output.tf is symlinked from
 # prod-1, which has no eso.tf and would fail to validate.

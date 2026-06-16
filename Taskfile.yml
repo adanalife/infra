@@ -1,6 +1,148 @@
 version: '3'
 
+env:
+  # Colorize `kubectl diff` output. kubectl shells out to an external differ
+  # (default plain `diff -u -N`, no color); point it at a color-forcing one.
+  # --color=always (not auto) is required: Task captures the command's stdout,
+  # so the differ never sees a TTY and auto-detection would disable color.
+  # Both Apple/FreeBSD diff (macOS) and GNU diff (Linux mini-PC) support these
+  # flags, so this is portable across hosts.
+  KUBECTL_EXTERNAL_DIFF: diff -u -N --color=always
+
 tasks:
+  # ---------------------------------------------------------------------------
+  # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/), migrating off
+  # the Kustomize overlays. These are ADDITIVE: the live `k8s:<env>:apply` tasks
+  # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
+  # the safe read-only way to compare cdk8s output against the live cluster.
+  # ---------------------------------------------------------------------------
+  cdk8s:imports:
+    desc: Generate the typed k8s + CRD constructs (cdk8s import) into imports/ — gitignored, needed before synth/test on a fresh checkout
+    dir: cdk8s
+    # Skip if already generated (import is slow). Both dirs must exist: k8s is the
+    # core API, io/ holds the ESO + cert-manager CRD constructs (per cdk8s.yaml).
+    status:
+      - test -d imports/k8s
+      - test -d imports/io
+    cmds:
+      - mise exec -- uv run cdk8s import
+
+  cdk8s:synth:
+    desc: Synthesize infra's deploy units (offline) -> cdk8s/dist/<env>-{supporting,data}.k8s.yaml + argocd (the tripbot app/job manifests + dashcam-cv live in their own repos now)
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    cmds:
+      - mise exec -- uv run cdk8s synth
+
+  cdk8s:synth:platform:
+    desc: Synthesize apps + the platform Helm stack (needs helm + network)
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    env:
+      CDK8S_PLATFORM: "1"
+    cmds:
+      - mise exec -- uv run cdk8s synth
+
+  # The dashcam NFS PersistentVolume is host-specific bootstrap infra kept OUT of
+  # Argo (its own DashcamPVChart -> dist/<env>-dashcam-pv.k8s.yaml, not globbed by
+  # the apps/data ApplicationSets). These tasks synth it with the real NFS coords
+  # from the gitignored cdk8s/dashcam-nfs.local.env and apply just the PV — a
+  # once-per-cluster bootstrap, like seeding secrets. The matching PVC is Argo's
+  # (in the data unit) and binds to this PV by name.
+  k8s:stage:dashcam-pv:
+    desc: provision the stage-1 dashcam NFS PV (cluster-scoped, outside Argo) from cdk8s with real coords
+    cmds:
+      - task: k8s:_dashcam-pv:apply
+        vars: { ENV: stage-1 }
+
+  k8s:prod:dashcam-pv:
+    desc: provision the prod-1 dashcam NFS PV (cluster-scoped, outside Argo) from cdk8s with real coords
+    cmds:
+      - task: k8s:_dashcam-pv:apply
+        vars: { ENV: prod-1 }
+
+  k8s:_dashcam-pv:apply:
+    internal: true
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    preconditions:
+      - sh: test -f dashcam-nfs.local.env
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH"
+    cmds:
+      - |
+        set -euo pipefail
+        set -a; . ./dashcam-nfs.local.env; set +a
+        : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
+        : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+        # Synth via main.py directly (NOT `cdk8s synth`, which forces output=dist
+        # from cdk8s.yaml) so the real coords land in a throwaway dir, never the
+        # committed golden. Apply only the cluster-scoped PV.
+        CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
+        echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
+        kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
+
+  # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
+  # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.
+
+  cdk8s:test:
+    desc: Run the cdk8s unit + contract tests
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    cmds:
+      - mise exec -- uv run pytest -q
+
+  cdk8s:check:
+    desc: Assert the committed dist/ deploy units match a fresh synth (golden-file gate)
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    env:
+      NFS_SERVER: '<NFS server address>'
+      NFS_PATH: '<export path>'
+    cmds:
+      - mise exec -- uv run cdk8s synth
+      - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
+
+  # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
+  # live cluster (read-only; safe pre-cutover check). Output is colorized via the
+  # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
+  # when a diff exists, so `|| true` keeps Task from treating "there's a diff" as
+  # a failure. Point kubectl at the right context first.
+  # The tripbot APP manifests (per <env>-<component>-<platform>) moved to the
+  # tripbot repo's cdk8s; diff them there (`task cdk8s:{stage,prod}:diff` in
+  # ~/adanalife/tripbot). infra keeps only the data + supporting + dashcam units.
+
+  # cdk8s:dev:apply — bootstrap the development (k3d) DATA unit directly.
+  # dev's apps + supporting + identity are Argo-managed (the k3d Argo reads the
+  # tripbot repo @ develop); this just lays down the postgres + SecretStore unit
+  # that Argo's app sync depends on, before/independently of an Argo bootstrap.
+  # Pre-req: a running k3d cluster + `task k8s:dev:bootstrap-secrets` for the
+  # eso-aws-credentials Secret.
+  cdk8s:dev:apply:
+    desc: apply the synthesized development DATA unit (postgres + SecretStore) to the k3d cluster — apps come via the k3d Argo from the tripbot repo
+    dir: cdk8s
+    deps: [cdk8s:synth]
+    preconditions:
+      # Guard: k3d dev cluster only — never the minipc (Talos). Applying
+      # dev manifests against the minipc would collide with the live stage/prod
+      # workloads. (dir: cdk8s, so reach back up to the repo-root kubeconfig.)
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "refusing: cdk8s:dev:apply must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
+    cmds:
+      - kubectl apply -f dist/development-data.k8s.yaml
+
+  gitops:apply:
+    desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)
+    cmds:
+      - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
+
+  contract:sync:
+    desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
+    dir: cdk8s
+    cmds:
+      - cp ../../tripbot/pkg/contract/contract.json contract.json
+      - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
+
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
   tf:stage:apply:
@@ -112,28 +254,46 @@ tasks:
     cmds:
       - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
 
-  # Append the host's current public IP (via ifconfig.me) to the
-  # stage-1/allowlist-cidrs list in Secrets Manager, deduping with
-  # jq. Use this when your home IP rotates and you're locked out of
-  # tripbot.whalecore.com. terraform reads the updated value via
-  # data source on the next `task tf:stage:apply`. To remove stale
-  # entries or add a non-current CIDR, edit the secret directly:
-  #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-  #     --secret-id stage-1/allowlist-cidrs --secret-string '["X.X.X.X/32", ...]'
-  stage:allowlist:add-current-ip:
-    desc: append your current public IP to stage-1/allowlist-cidrs
+  # platform = env-agnostic config, i.e. things not owned by any specific
+  # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
+  # It has no account of its own — state/SM plumbing rides in the org-global
+  # core account, hence the adanalife-core profile; --no-session because it
+  # attaches IAM policies.
+  tf:platform:apply:
+    desc: terraform apply against platform
+    dir: terraform/platform
     cmds:
-      - |
-        ip=$(curl -fsS ifconfig.me) || { echo "could not detect public IP"; exit 1; }
-        cidr="$ip/32"
-        updated=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
-          --secret-id stage-1/allowlist-cidrs --query SecretString --output text \
-          | jq --arg c "$cidr" '. + [$c] | unique')
-        aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-          --secret-id stage-1/allowlist-cidrs --secret-string "$updated" >/dev/null
-        echo "allowlist-cidrs is now:"
-        echo "$updated" | jq .
-        echo "Run 'task tf:stage:apply' to apply."
+      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+
+  tf:platform:plan:
+    desc: terraform plan against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+
+  tf:platform:init:
+    desc: terraform init against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+
+  tf:platform:init:reconfigure:
+    desc: terraform init -reconfigure against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:platform:init:migrate:
+    desc: terraform init -migrate-state against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
+
+  tf:platform:destroy:
+    desc: terraform destroy against platform
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
 
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
@@ -149,9 +309,8 @@ tasks:
       - aws-vault login adanalife-core
 
   # GCP — single bootstrap helper today, used by the tripbot prod-1 Maps
-  # credential mint (see vault/tripbot/credentials.md → Google Maps section).
-  # If/when more GCP resources show up here, lift this to a hashicorp/google
-  # provider in terraform/prod-1/; the migration TODO lives in vault/infra/TODO.md.
+  # credential mint. If/when more GCP resources show up here, lift this to a
+  # hashicorp/google provider in terraform/prod-1/.
   # Pre-req: `gcloud auth login` once + billing attached to the target project.
   gcp:prod:mint-maps-key:
     desc: mint a fresh Maps API key on tripbot-prod (Geocoding + Maps JavaScript only) and print the keyString to stdout
@@ -189,90 +348,185 @@ tasks:
           --quiet
 
   # k3d cluster lifecycle. Tasks are env-prefixed (k8s:dev:* / k8s:prod:*)
-  # following the tf:stage:* / tf:prod:* pattern; the cluster name embedded
-  # in each k3d-config is host-based (adanalife-bees, adanalife-empty) so
-  # the cluster identity survives any future env-reassignment.
+  # following the tf:stage:* / tf:prod:* pattern. The cluster name embedded
+  # in k3d-config.yaml is env-based and machine-independent (adanalife-dev,
+  # context k3d-adanalife-dev) so the tooling is identical on any laptop —
+  # no host name (the old adanalife-bees) baked into the config.
   #
-  # Lifecycle verbs:
-  #   up      → create the cluster (first time)
-  #   down    → delete the cluster (full wipe)
-  #   stop    → suspend the cluster (containers down, definition + state preserved)
-  #   start   → resume a stopped cluster (counterpart to stop)
-  #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
-  #             deployed" sequence; each step delegates to its canonical task
+  # These k8s:dev:cluster:* tasks are the low-level cluster primitives:
+  #   cluster:up    → create the k3d cluster (just the cluster, no platform/apps)
+  #   cluster:down  → delete the cluster (full wipe)
+  #   cluster:stop  → suspend (containers down, definition + state preserved)
+  #   cluster:start → resume a stopped cluster (counterpart to stop)
+  #
+  # Day-to-day you want the higher-level verbs that wrap these:
+  #   k8s:dev:up      → cluster:up + platform:up + sync (cold-start to running)
+  #   k8s:dev:down    → cluster:down
+  #   k8s:dev:deploy  → build + import a local image and run it (APP=<app> for one)
+  #   k8s:dev:sync    → re-sync Argo apps / revert a local image to CI :develop
+  #   k8s:dev:status  → pods + running image tags + Argo health
   k8s:dev:cluster:up:
-    desc: "create the local k3d cluster on bees (development) — example video by default; pass DASHCAM_NAS=<host path> to also mount a real dashcam dir at /host/nas-dashcam for the development-nas overlay"
+    desc: "create the local k3d dev cluster — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
     cmds:
       # Development plays the committed example video (mounted at
       # /host/dashcam) by default — the 99% case. To stream a real dashcam
       # directory instead, pass its host path as DASHCAM_NAS=<path>; it's
-      # bind-mounted :ro at /host/nas-dashcam for the development-nas
-      # overlay (task k8s:dev:apply-nas). The path is a runtime arg so the
+      # bind-mounted :ro at /host/nas-dashcam. NOTE: the legacy development-nas
+      # overlay that consumed this mount is gone; cdk8s dev does not read it yet
+      # (known gap — wire it into cdk8s dev config). The path is a runtime arg so the
       # real footage location never gets committed. k3d bind-mounts are
       # fixed at create time, so this must be set on cluster:up, not apply.
       - |
         if [ -n "{{.DASHCAM_NAS}}" ]; then
           echo "mounting dashcam: {{.DASHCAM_NAS}} -> /host/nas-dashcam (:ro)"
-          k3d cluster create -c k8s/k3d-config.bees.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
+          k3d cluster create -c k8s/k3d-config.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
         else
-          k3d cluster create -c k8s/k3d-config.bees.yaml
+          k3d cluster create -c k8s/k3d-config.yaml
         fi
 
   k8s:dev:cluster:down:
-    desc: tear down the local k3d cluster on bees (delete; use k8s:dev:cluster:stop to suspend without wipe)
+    desc: tear down the local k3d dev cluster (delete; use k8s:dev:cluster:stop to suspend without wipe)
     cmds:
-      - k3d cluster delete adanalife-bees
+      - k3d cluster delete adanalife-dev
 
   k8s:dev:cluster:stop:
-    desc: suspend the local k3d cluster on bees (containers down, cluster definition + state preserved)
+    desc: suspend the local k3d dev cluster (containers down, cluster definition + state preserved)
     cmds:
-      - k3d cluster stop adanalife-bees
+      - k3d cluster stop adanalife-dev
 
   k8s:dev:cluster:start:
-    desc: resume a stopped local k3d cluster on bees (counterpart to k8s:dev:cluster:stop)
+    desc: resume a stopped local k3d dev cluster (counterpart to k8s:dev:cluster:stop)
     cmds:
-      - k3d cluster start adanalife-bees
+      - k3d cluster start adanalife-dev
 
-  k8s:dev:cluster:rebuild:
-    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + development app manifests. Each step is the canonical task; failures short-circuit the chain.
+  # The one-liner cold-start: create the cluster, install the platform stack +
+  # Argo CD (platform:up pulls in bootstrap-secrets as a dep), then Argo-sync
+  # the apps in dependency order. Each step is the canonical task; failures
+  # short-circuit the chain. Replaces the old cluster:rebuild (which ended in the
+  # now-superseded `cdk8s:dev:apply` — Argo owns the apps, so an imperative apply
+  # just fights it with an SSA field-ownership conflict).
+  k8s:dev:up:
+    desc: "cold-start the dev env from nothing: create cluster -> install platform + Argo -> sync apps"
+    aliases: ["k8s:dev:cluster:rebuild"]
     cmds:
       - task: k8s:dev:cluster:up
+        vars: { DASHCAM_NAS: '{{.DASHCAM_NAS}}' }
       - task: k8s:dev:platform:up
-      - task: k8s:dev:apply
+      - task: k8s:dev:sync
+
+  k8s:dev:down:
+    desc: "tear down the dev cluster (delegates to k8s:dev:cluster:down)"
+    cmds:
+      - task: k8s:dev:cluster:down
 
   # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
-  # cluster — its lifecycle is talosctl wipe-and-rebuild (see
-  # vault/infra/adanalife-minipc-bootstrap.md). The k8s:prod:* tasks below
-  # (bootstrap-secrets / platform:up / apply) target the live Talos cluster;
-  # there is no k8s:prod:cluster:* (the old k3d-on-empty tasks were vestigial
-  # and were dropped post-convergence).
+  # cluster — its lifecycle is talosctl wipe-and-rebuild. The k8s:prod:*
+  # tasks below (bootstrap-secrets / platform:up / apply) target the live
+  # Talos cluster; there is no k8s:prod:cluster:*.
 
-  k8s:import-images:
-    desc: build the tripbot/vlc/obs images and import them into the local cluster
+  # Build the dev app images locally, tag them :dev-local, and import them into
+  # the k3d dev cluster's image store. APP=tripbot|vlc|obs|onscreens builds just
+  # one; omit for all four. The committed manifests still pin CI's :develop so a
+  # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
+  # only for iterating on a LOCAL build.
+  k8s:dev:images:build:
+    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|vlc|obs|onscreens for one; default all four)"
     dir: ../tripbot
     cmds:
       # --project-directory + --env-file mirror bin/devenv so build contexts
       # resolve relative to the tripbot repo root and ${VAR} substitutions in
-      # the compose file pick up env.docker. Without these, compose resolves
-      # `context: .` against the compose file's dir and the build fails with
-      # `lstat .../infra/docker/infra: no such file or directory`.
-      #
-      # On arm64 hosts (Apple Silicon), layer docker-compose.arm64.yml so
-      # the OBS service builds from Dockerfile.arm64 (compiles OBS + CEF
-      # from source). Without it, the amd64 Dockerfile runs natively on
-      # arm64, the OBS PPA has no arm64 packages, and apt silently falls
-      # back to Ubuntu universe's obs-studio +dfsg build (CEF stripped),
-      # so browser_source silently fails at scene load. First arm64 build
-      # takes ~30 min for the CEF compile; cached thereafter.
+      # the compose file pick up env.docker. On arm64 (Apple Silicon) layer
+      # docker-compose.arm64.yml so OBS builds from Dockerfile.arm64 (compiles
+      # OBS + CEF from source — without it browser_source silently breaks at
+      # scene load). First arm64 OBS build is ~30min for the CEF compile; cached
+      # thereafter. Locally-built images are single-platform, so k3d image
+      # import works cleanly (unlike multi-arch registry pulls).
       - |
+        set -e
+        target="{{.APP}}"
+        # app : compose-service : image-repo
+        all="tripbot:tripbot:adanalife/tripbot \
+             vlc:vlc:adanalife/vlc \
+             obs:obs:adanalife/obs \
+             onscreens:onscreens-server:adanalife/onscreens-server"
         args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
-        case "$(uname -m)" in
-          arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;;
-        esac
-        docker compose $args build
-      - k3d image import adanalife/tripbot:latest --cluster=adanalife-bees
-      - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
-      - k3d image import adanalife/obs:latest --cluster=adanalife-bees
+        case "$(uname -m)" in arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;; esac
+        for row in $all; do
+          app=${row%%:*}; rest=${row#*:}; svc=${rest%%:*}; repo=${rest#*:}
+          { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
+          echo "==> build $repo  (compose service: $svc)"
+          docker compose $args build "$svc"
+          docker tag "$repo:latest" "$repo:dev-local"
+          k3d image import "$repo:dev-local" --cluster=adanalife-dev
+        done
+
+  # Run a locally-built image in the dev cluster: builds + imports :dev-local
+  # (via images:build), then points the live Deployment(s) at it. Pauses Argo
+  # selfHeal on the targeted app — the tripbot-apps ApplicationSet ignores
+  # syncPolicy diffs (ignoreApplicationDifferences), so the pause sticks — and
+  # flips imagePullPolicy to IfNotPresent so the imported image isn't evicted by
+  # a re-pull. Argo will show the app OutOfSync while you iterate; that's
+  # expected. Revert to CI :develop (and re-enable selfHeal) with k8s:dev:sync.
+  k8s:dev:deploy:
+    desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all four. Revert with k8s:dev:sync"
+    deps:
+      - task: k8s:dev:images:build
+        vars: { APP: '{{.APP}}' }
+    preconditions:
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
+    cmds:
+      - |
+        set -e
+        target="{{.APP}}"
+        # app : deployment : container : image-repo  (dev platform suffix = twitch;
+        # obs's container is named `obs`, the others `<app>-twitch`)
+        all="tripbot:tripbot-twitch:tripbot-twitch:adanalife/tripbot \
+             vlc:vlc-twitch:vlc-twitch:adanalife/vlc \
+             obs:obs-twitch:obs:adanalife/obs \
+             onscreens:onscreens-twitch:onscreens-twitch:adanalife/onscreens-server"
+        for row in $all; do
+          app=${row%%:*}; r=${row#*:}; dep=${r%%:*}; r=${r#*:}; ctr=${r%%:*}; repo=${r#*:}
+          { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
+          echo "==> deploy $repo:dev-local -> deploy/$dep (container $ctr)"
+          # Pause Argo selfHeal so the override isn't reconciled back to :develop.
+          kubectl patch application "development-$dep" -n argocd --type merge \
+            -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}' >/dev/null
+          # Any initContainer sharing the image (tripbot's `migrate`) needs the
+          # same override, or the pod gets stuck pulling :develop for the init
+          # step. Build an initContainers patch fragment for matching ones.
+          init_items=""
+          for ic in $(kubectl get "deploy/$dep" -n development \
+                        -o jsonpath='{range .spec.template.spec.initContainers[*]}{.name}={.image}{"\n"}{end}'); do
+            iname=${ic%%=*}; iimg=${ic#*=}
+            case "$iimg" in "$repo:"*)
+              init_items="${init_items}{\"name\":\"$iname\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}," ;;
+            esac
+          done
+          init_patch=""
+          [ -n "$init_items" ] && init_patch="\"initContainers\":[${init_items%,}],"
+          # Image + IfNotPresent for the main container (and matching init
+          # containers) in one strategic patch = one rollout.
+          kubectl patch "deploy/$dep" -n development --type strategic \
+            -p "{\"spec\":{\"template\":{\"spec\":{${init_patch}\"containers\":[{\"name\":\"$ctr\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}]}}}}"
+          kubectl rollout status "deploy/$dep" -n development --timeout=180s
+        done
+        echo "running your local :dev-local build. revert to CI :develop with: task k8s:dev:sync"
+
+  # Dev env at a glance: pods, the image tag each app is running (CI :develop vs
+  # local :dev-local), and Argo app sync/health.
+  k8s:dev:status:
+    desc: "dev env at a glance: pods + running image tags (:develop vs :dev-local) + Argo app health"
+    preconditions:
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
+    cmds:
+      - 'echo "== pods (development) =="'
+      - kubectl get pods -n development
+      - 'echo "== running images =="'
+      - kubectl get deploy -n development -o custom-columns='DEPLOY:.metadata.name,IMAGE:.spec.template.spec.containers[0].image,POLICY:.spec.template.spec.containers[0].imagePullPolicy'
+      - 'echo "== Argo apps =="'
+      - kubectl get applications -n argocd -o custom-columns='APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status' | grep -E 'APP|development-'
 
   # Restart an app deployment so its pods re-pull the image. Pairs with
   # `k8s:import-images` — after importing rebuilt images into k3d, restart
@@ -280,159 +534,122 @@ tasks:
   # imagePullPolicy: Always on these deployments (#411) means "rollout
   # restart" is sufficient; no need to bump tags or delete the cached image.
   #
-  # Env-prefixed per [[vault/decisions/env-prefixed-k8s-tasks]] because the
+  # Env-prefixed because the
   # mini-PC cluster co-tenants prod-1 + stage-1 in different namespaces — a
   # context-less `kubectl rollout` would target whichever namespace is
   # current, which is ambiguous. Each task bakes in `-n <namespace>` so the
   # right pods restart regardless of the operator's current kubeconfig ns.
+  #
+  # Workloads are per-platform (`<app>-<platform>`, e.g. tripbot-twitch),
+  # so PLATFORM selects which one to roll — default `twitch` (present in
+  # every env's steady state), override `PLATFORM=youtube` for the YouTube
+  # stack. `:all` rolls the default platform's four apps; pass PLATFORM= on
+  # the command line to roll a different platform's set.
   k8s:prod:rollout:tripbot:
-    desc: restart prod-1 tripbot so it re-pulls the image
+    desc: restart prod-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/tripbot -n prod-1
-      - kubectl rollout status deploy/tripbot -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:vlc-server:
-    desc: restart prod-1 vlc-server so it re-pulls the image
+    desc: restart prod-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/vlc-server -n prod-1
-      - kubectl rollout status deploy/vlc-server -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:obs:
-    desc: restart prod-1 obs so it re-pulls the image
+    desc: restart prod-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/obs -n prod-1
-      - kubectl rollout status deploy/obs -n prod-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n prod-1 --timeout=120s
+
+  k8s:prod:rollout:onscreens:
+    desc: restart prod-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
+    cmds:
+      - kubectl rollout restart deploy/onscreens-{{.PLATFORM}} -n prod-1
+      - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:all:
-    desc: restart all three prod-1 app deployments (tripbot + vlc-server + obs)
+    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:prod:rollout:tripbot
       - k8s:prod:rollout:vlc-server
       - k8s:prod:rollout:obs
+      - k8s:prod:rollout:onscreens
 
   k8s:stage:rollout:tripbot:
-    desc: restart stage-1 tripbot so it re-pulls the image
+    desc: restart stage-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/tripbot -n stage-1
-      - kubectl rollout status deploy/tripbot -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:vlc-server:
-    desc: restart stage-1 vlc-server so it re-pulls the image
+    desc: restart stage-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/vlc-server -n stage-1
-      - kubectl rollout status deploy/vlc-server -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:obs:
-    desc: restart stage-1 obs so it re-pulls the image
+    desc: restart stage-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
-      - kubectl rollout restart deploy/obs -n stage-1
-      - kubectl rollout status deploy/obs -n stage-1 --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n stage-1 --timeout=120s
+
+  k8s:stage:rollout:onscreens:
+    desc: restart stage-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
+    cmds:
+      - kubectl rollout restart deploy/onscreens-{{.PLATFORM}} -n stage-1
+      - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:all:
-    desc: restart all three stage-1 app deployments (tripbot + vlc-server + obs)
+    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:stage:rollout:tripbot
       - k8s:stage:rollout:vlc-server
       - k8s:stage:rollout:obs
+      - k8s:stage:rollout:onscreens
 
-  k8s:dev:rollout:tripbot:
-    desc: restart development tripbot so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/tripbot -n development
-      - kubectl rollout status deploy/tripbot -n development --timeout=120s
+  # NOTE: the dev rollout:* tasks were removed — they pointed at pre-per-platform
+  # deployment names (deploy/tripbot, not deploy/tripbot-twitch) so they no
+  # longer matched anything, and a bare restart under imagePullPolicy: Always
+  # just re-pulls CI's :develop. Use `task k8s:dev:deploy` to run a local build,
+  # `task k8s:dev:sync` to revert to CI images, and a plain
+  # `kubectl rollout restart deploy/<app>-twitch -n development` for a bare bounce.
 
-  k8s:dev:rollout:vlc-server:
-    desc: restart development vlc-server so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/vlc-server -n development
-      - kubectl rollout status deploy/vlc-server -n development --timeout=120s
+  # The app workloads for prod-1/stage-1 are delivered by Argo CD from
+  # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md) — there is no
+  # `k8s:{prod,stage}:apply` for apps anymore. dev (k3d) is likewise Argo-managed
+  # by its own in-cluster Argo (`task k8s:dev:argo:sync`). The legacy Kustomize app overlays (k8s/apps,
+  # k8s/overlays) are gone. What remains below is the stage env-PLATFORM install
+  # (external-dns + NATS), which has NOT cut over to cdk8s yet.
 
-  k8s:dev:rollout:obs:
-    desc: restart development obs so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/obs -n development
-      - kubectl rollout status deploy/obs -n development --timeout=120s
-
-  k8s:dev:rollout:all:
-    desc: restart all three development app deployments (tripbot + vlc-server + obs)
-    deps:
-      - k8s:dev:rollout:tripbot
-      - k8s:dev:rollout:vlc-server
-      - k8s:dev:rollout:obs
-
-  # The k8s:*:diff tasks below are server-side dry-run previews (read-only) of
-  # what the matching :apply would change. Each :apply runs its diff first so
-  # there's always a preview before the cluster is mutated. The diff is
-  # best-effort — `kubectl diff` exits non-zero when a diff exists (and on a
-  # missing cluster), so it's `|| true`'d to never abort the apply. Deliberately
-  # NOT a blocking confirmation prompt: k8s:dev:apply is called by other tasks
-  # (k8s:dev:cluster:up) and would deadlock a non-interactive run.
-
-  k8s:diff:
-    desc: preview (server-side dry-run) what k8s:apply would change on the local cluster
-    cmds:
-      - kubectl diff -k k8s/overlays/local || true
-
-  k8s:apply:
-    desc: apply the local app manifests to the cluster
-    cmds:
-      - task: k8s:diff
-      - kubectl apply -k k8s/overlays/local
-
-  k8s:dev:diff:
-    desc: preview (server-side dry-run) what k8s:dev:apply would change
-    cmds:
-      - kubectl diff -k k8s/overlays/development || true
-
-  k8s:dev:apply:
-    desc: apply development overlay (apps only — bring up cloudflared separately via k8s:dev:tunnel:up)
-    cmds:
-      - task: k8s:dev:diff
-      - kubectl apply -k k8s/overlays/development
-
-  k8s:dev:apply-nas:
-    desc: "apply development-nas overlay — vlc-server reads dashcam from /host/nas-dashcam (requires the cluster to have been created with DASHCAM_NAS=<host path> set; see k8s:dev:cluster:up)"
-    cmds:
-      - kubectl diff -k k8s/overlays/development-nas || true
-      - kubectl apply -k k8s/overlays/development-nas
-
-  k8s:prod:diff:
-    desc: preview (server-side dry-run) what k8s:prod:apply would change
-    cmds:
-      - kubectl diff -k k8s/overlays/prod-1 || true
-
-  k8s:prod:apply:
-    desc: apply prod-1 overlay (shared-secrets + postgres + vlc-server; tripbot/obs added when their prod-1 overlays land)
-    cmds:
-      - task: k8s:prod:diff
-      - kubectl apply -k k8s/overlays/prod-1
-
-  k8s:stage:diff:
-    desc: preview (server-side dry-run) what k8s:stage:apply would change
-    cmds:
-      - kubectl diff -k k8s/overlays/stage-1 || true
-
-  k8s:stage:apply:
-    desc: apply the stage-1 overlay (shared-secrets + postgres + tripbot + vlc-server + OBS) + stage external-dns into the mini-PC cluster
+  k8s:stage:platform-env:up:
+    desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
     deps: [k8s:stage:bootstrap-secrets]
-    preconditions:
-      - sh: test -f k8s/external-dns/stage-1/values.local.yml
-        msg: "k8s/external-dns/stage-1/values.local.yml missing — run `task k8s:stage:bootstrap-secrets` first"
     cmds:
-      - task: k8s:stage:diff
-      # Pre-reqs: task tf:stage:apply (postgres creds), task
-      # k8s:stage:bootstrap-secrets (stage ESO store + external-dns
-      # values.local), and a populated
-      # k8s/apps/vlc-server/overlays/stage-1/dashcam-nfs.local.yaml.
+      # Pre-req: task k8s:stage:bootstrap-secrets (stage ESO store + creds).
       #
-      # Stage reuses prod's SHARED platform stack (traefik / ESO operator /
-      # cert-manager controller / monitoring) — there is still no
-      # k8s:stage:platform:up. The one env-specific platform piece is
-      # external-dns: stage runs its OWN in stage-1-platform, reading the
-      # adanalife-stage account so it can write the stage.whereisdana.today
-      # zone (no cross-account). The namespaced cert-manager Issuers ship in
-      # the umbrella below.
-      - kubectl apply -k k8s/overlays/stage-1
+      # Stage reuses prod's SHARED cluster platform stack (traefik / ESO operator
+      # / cert-manager controller / monitoring). The env-specific platform pieces
+      # are external-dns + NATS, both in stage-1-platform. external-dns reads the
+      # adanalife-stage account so it can write the stage.whereisdana.today zone
+      # (no cross-account).
       # Stage external-dns (own instance, stage account, stage zone). The
       # kustomize apply creates stage-1-platform + its SecretStore +
       # ExternalSecret; the helm release name differs from prod's
@@ -445,78 +662,31 @@ tasks:
       - helm upgrade --install external-dns-stage external-dns/external-dns
           -n stage-1-platform
           -f k8s/external-dns/stage-1/config.yml
-          -f k8s/external-dns/stage-1/values.local.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns-stage -n stage-1-platform
       - 'echo "stage external-dns up in stage-1-platform. *.stage.whereisdana.today records now publish to the adanalife-stage zone."'
-
-  # Cloudflare Tunnel client. Opt-in: not part of `cluster:rebuild`
-  # nor `k8s:dev:apply`. Brings up the `cloudflared` namespace, seeds
-  # the tunnel-token Secret from terraform output, and applies the
-  # Deployment in one gesture.
-  #
-  # **development only** — there is no tunnel in prod-1.
-  #
-  # The status check makes re-runs cheap (no aws-vault / keybase
-  # reprompt). `task --force k8s:dev:tunnel:up` force-rotates the
-  # token if the underlying tunnel is recreated.
-  k8s:dev:tunnel:up:
-    desc: bring up the cloudflared tunnel client (namespace + token Secret + Deployment)
-    status:
-      - kubectl get secret cloudflared-secret -n cloudflared >/dev/null 2>&1
-      - kubectl get deploy cloudflared -n cloudflared >/dev/null 2>&1
-    preconditions:
-      - sh: command -v aws-vault >/dev/null
-        msg: "aws-vault not found — install with `brew install aws-vault`"
-      - sh: command -v kubectl >/dev/null
-        msg: "kubectl not found — install with `brew install kubectl`"
-      - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — run `task k8s:dev:cluster:up` first"
-    cmds:
-      # Ensure namespace exists before the secret lands in it. The
-      # kustomize apply below also declares the namespace; this is
-      # the cheap insurance for the secret create that runs first.
-      - kubectl create namespace cloudflared --dry-run=client -o yaml | kubectl apply -f -
-      - |
-        if kubectl get secret cloudflared-secret -n cloudflared >/dev/null 2>&1; then
-          echo "cloudflared-secret already present, skipping"
-        else
-          set -euo pipefail
-          token=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw cloudflared_tunnel_token)
-          kubectl create secret generic cloudflared-secret \
-            --namespace=cloudflared \
-            --from-literal=TUNNEL_TOKEN="$token" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          echo "applied cloudflared-secret Secret to cloudflared namespace"
-        fi
-      - kubectl apply -k k8s/platform/cloudflared/overlays/development
-      - kubectl wait --for=condition=Available --timeout=120s
-          deployment/cloudflared -n cloudflared
-      - echo "cloudflared up. Tunnel routes (terraform/stage-1/cloudflare-tunnel.tf) now have a client."
-
-  k8s:dev:tunnel:down:
-    desc: tear down the cloudflared tunnel client (Deployment + Secret + namespace)
-    preconditions:
-      - sh: command -v kubectl >/dev/null
-        msg: "kubectl not found — install with `brew install kubectl`"
-      - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster"
-    cmds:
-      # Deleting the namespace via the kustomize manifest sweeps the
-      # Deployment and the out-of-band Secret with it. --ignore-not-found
-      # keeps the task idempotent across repeat runs.
-      - kubectl delete -k k8s/platform/cloudflared/overlays/development --ignore-not-found
+      # NATS — pubsub substrate for inter-component messaging.
+      # Stage gets its OWN NATS install in stage-1-platform —
+      # namespace isolation from prod-1-platform's instance (rather than
+      # cross-env topic-name discipline). Same chart, same values shape;
+      # k8s/nats/stage-1/values.yml carries the (currently identical)
+      # per-env sizing. Helm release name `nats` is namespace-scoped, so
+      # no collision with prod's release of the same name.
+      - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+      - helm repo update nats
+      - helm upgrade --install nats nats/nats
+          --version 2.14.0
+          -n stage-1-platform --create-namespace
+          -f k8s/nats/values.yml
+          -f k8s/nats/stage-1/values.yml
+      - kubectl rollout status statefulset/nats -n stage-1-platform --timeout=120s
+      - 'echo "NATS up in stage-1-platform. Connect via nats://nats.stage-1-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n stage-1-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
 
   # Bootstrap the cluster Secrets that don't survive a recreate but
   # have to exist before the platform stack can come up:
   #
   #   - eso-aws-credentials   (external-secrets namespace) — ESOSecretsReader
   #     IAM access key for ESO to read SM. PGP-decrypted via keybase.
-  #
-  # The cloudflared tunnel token is bootstrapped separately by
-  # `k8s:dev:tunnel:up` so the tunnel stays opt-in (it's development-env-only
-  # only and will eventually be retired in favor of the
-  # external-dns/traefik HTTPS path).
   #
   # Comes from `task tf:<env>:apply` outputs and stays in a shell
   # variable only (never written to disk). Re-runs idempotently:
@@ -540,10 +710,21 @@ tasks:
         cur=$(grep -oE -- '--default-targets=[0-9.]+' k8s/external-dns/development/values.local.yml 2>/dev/null | cut -d= -f2)
         [ -n "$ip" ] && [ "$cur" = "$ip" ]
     preconditions:
+      # Guard: dev tasks target the k3d dev cluster ONLY. The minipc
+      # (stage/prod, Talos) is never a k3d context — and this task writes
+      # eso-aws-credentials into the SHARED external-secrets namespace with
+      # stage-account creds (dev borrows stage). Run against the minipc, it
+      # clobbers prod's external-secrets/eso-aws-credentials → the prod
+      # ClusterSecretStore feeds cert-manager's ClusterIssuer the wrong account
+      # → cross-account AssumeRole fails → no ClusterIssuer certs issue.
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "refusing: k8s:dev:* must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v aws-vault >/dev/null
-        msg: "aws-vault not found — install with `brew install aws-vault` (see infra/README.md)"
+        msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
-        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+        msg: "keybase not found — install with `brew install --cask keybase`, then log in"
+      - sh: keybase status >/dev/null 2>&1
+        msg: "keybase daemon not running (can't pgp-decrypt the ESO creds) — `open -a Keybase`, wait ~10s for the daemon, then retry"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: command -v curl >/dev/null
@@ -577,7 +758,7 @@ tasks:
           echo "applied eso-aws-credentials Secret to external-secrets + development namespaces"
         fi
       # external-dns values.local.yml: per-machine helm override holding
-      # the bees host's current LAN IP, fed to external-dns as
+      # the dev host's current LAN IP, fed to external-dns as
       # --default-targets so any Ingress without an explicit
       # external-dns.alpha.kubernetes.io/target annotation resolves to
       # this machine on the LAN. We publish the LAN IP (not the public
@@ -589,7 +770,7 @@ tasks:
       - |
         set -euo pipefail
         values_file=k8s/external-dns/development/values.local.yml
-        # The bees cluster is local k3d on this macOS host; publish its
+        # The dev cluster is local k3d on this macOS host; publish its
         # LAN IPv4 (en0 wifi, falling back to en1 ethernet). Route53 A
         # records can only point at v4 addresses. Always rewrite (rather
         # than skip-if-present) so a DHCP-rotated IP can't silently persist
@@ -601,7 +782,7 @@ tasks:
         fi
         prev=$(grep -oE -- '--default-targets=[0-9.]+' "$values_file" 2>/dev/null | cut -d= -f2 || true)
         cat > "$values_file" <<YAML
-        # Generated by \`task k8s:dev:bootstrap-secrets\` — bees host LAN IP
+        # Generated by \`task k8s:dev:bootstrap-secrets\` — dev host LAN IP
         # snapshot for external-dns --default-targets. Re-run the task
         # after a LAN-IP change, then \`task k8s:dev:platform:up\` to roll
         # the chart with the new value.
@@ -622,44 +803,43 @@ tasks:
           echo "$values_file already targets current LAN IP ($ip)"
         fi
 
-  # prod-1 sibling — same shape minus the cloudflared block (no tunnel
-  # in prod-1 in this pass). Reads from terraform/prod-1 via the
+  # prod-1 sibling — same shape. Reads from terraform/prod-1 via the
   # adanalife-prod aws-vault profile, writes the external-dns values
   # file into k8s/external-dns/prod-1/.
   k8s:prod:bootstrap-secrets:
-    desc: apply prod-1 ESO bootstrap Secret + write external-dns/traefik values.local.yml (no plaintext on disk)
+    desc: apply prod-1 ESO bootstrap Secret into prod-1 + prod-1-data + prod-1-platform + external-secrets (no plaintext on disk)
     status:
       - kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1
       - kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1
-      # Stale-target guard: re-run when either values.local.yml is missing OR
-      # its embedded target no longer matches the cluster's current node
-      # InternalIP, so a re-IP'd node doesn't silently persist a stale target.
-      - |
-        ip="${EXTERNAL_DNS_TARGET_IP:-$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)}"
-        edns=$(grep -oE -- '--default-targets=[0-9.]+' k8s/external-dns/prod-1/values.local.yml 2>/dev/null | cut -d= -f2)
-        traefik=$(grep -oE 'ip: [0-9.]+' k8s/traefik/values.local.yml 2>/dev/null | awk '{print $2}')
-        [ -n "$ip" ] && [ "$edns" = "$ip" ] && [ "$traefik" = "$ip" ]
+      - kubectl get secret eso-aws-credentials -n prod-1-data >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n prod-1-platform >/dev/null 2>&1
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
-        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+        msg: "keybase not found — install with `brew install --cask keybase`, then log in"
+      - sh: keybase status >/dev/null 2>&1
+        msg: "keybase daemon not running (can't pgp-decrypt the ESO creds) — `open -a Keybase`, wait ~10s for the daemon, then retry"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first (also the source of the node InternalIP target)"
+        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
-      # eso-aws-credentials goes in THREE namespaces (same prod-account
+      # eso-aws-credentials goes in FOUR namespaces (same prod-account
       # creds in all): external-secrets (for the aws-secretsmanager-cluster
       # ClusterSecretStore the kube-system platform components use), prod-1
-      # (for the namespaced aws-secretsmanager SecretStore the apps use), and
-      # prod-1-platform (for the namespaced store external-dns reads).
+      # (for the namespaced aws-secretsmanager SecretStore the apps use),
+      # prod-1-data (for the isolated DB namespace's store — postgres'
+      # ExternalSecret reads it), and prod-1-platform (the store external-dns
+      # reads).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1 --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace prod-1-data --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
         if kubectl get secret eso-aws-credentials -n external-secrets >/dev/null 2>&1 \
            && kubectl get secret eso-aws-credentials -n prod-1 >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n prod-1-data >/dev/null 2>&1 \
            && kubectl get secret eso-aws-credentials -n prod-1-platform >/dev/null 2>&1; then
           echo "eso-aws-credentials already present, skipping"
         else
@@ -667,62 +847,20 @@ tasks:
           ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          for ns in external-secrets prod-1 prod-1-platform; do
+          for ns in external-secrets prod-1 prod-1-data prod-1-platform; do
             kubectl create secret generic eso-aws-credentials \
               --namespace="$ns" \
               --from-literal=AWS_ACCESS_KEY_ID="$ak" \
               --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
               --dry-run=client -o yaml | kubectl apply -f -
           done
-          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-platform namespaces"
+          echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-data + prod-1-platform namespaces"
         fi
-      - |
-        set -euo pipefail
-        # adanalife-minipc is LAN-only by design (no public ingress yet), so
-        # external-dns publishes Route53 records at the node's LAN IP, and
-        # traefik stamps the same IP into managed Ingress statuses
-        # (ingressEndpoint.ip). Discover it from the node's InternalIP rather
-        # than hardcoding it in committed manifests — override with
-        # EXTERNAL_DNS_TARGET_IP=<ip> for non-default cases.
-        ip="${EXTERNAL_DNS_TARGET_IP:-$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')}"
-        [ -n "$ip" ] || { echo "could not determine node InternalIP — set EXTERNAL_DNS_TARGET_IP=<ip>"; exit 1; }
-
-        # Always rewrite both files (rather than skip-if-present) so a re-IP'd
-        # node can't silently persist a stale target across a re-run.
-        edns_file=k8s/external-dns/prod-1/values.local.yml
-        prev=$(grep -oE -- '--default-targets=[0-9.]+' "$edns_file" 2>/dev/null | cut -d= -f2 || true)
-        cat > "$edns_file" <<YAML
-        # Generated by \`task k8s:prod:bootstrap-secrets\` — LAN IP target for
-        # external-dns --default-targets, discovered from the node's InternalIP.
-        # Override via EXTERNAL_DNS_TARGET_IP; auto-rewritten when the node IP changes.
-        extraArgs:
-          - --default-targets=$ip
-          - --force-default-targets
-        YAML
-        if [ -n "$prev" ] && [ "$prev" != "$ip" ]; then
-          echo "rewrote $edns_file: default-targets $prev -> $ip (node IP changed; run \`task k8s:prod:platform:up\` to roll external-dns)"
-        else
-          echo "wrote $edns_file (default-targets=$ip)"
-        fi
-
-        traefik_file=k8s/traefik/values.local.yml
-        prev=$(grep -oE 'ip: [0-9.]+' "$traefik_file" 2>/dev/null | awk '{print $2}' || true)
-        cat > "$traefik_file" <<YAML
-        # Generated by \`task k8s:prod:bootstrap-secrets\` — the node's LAN IP,
-        # discovered from its InternalIP, for traefik's ingressEndpoint.ip.
-        # Traefik stamps this into every managed Ingress's status so external-dns
-        # publishes it without a per-Ingress target annotation. Override via
-        # EXTERNAL_DNS_TARGET_IP; auto-rewritten when the node IP changes.
-        providers:
-          kubernetesIngress:
-            ingressEndpoint:
-              ip: $ip
-        YAML
-        if [ -n "$prev" ] && [ "$prev" != "$ip" ]; then
-          echo "rewrote $traefik_file: ingressEndpoint.ip $prev -> $ip (node IP changed; run \`task k8s:prod:platform:up\` to roll traefik)"
-        else
-          echo "wrote $traefik_file (ingressEndpoint.ip=$ip)"
-        fi
+      # external-dns + traefik no longer carry a per-machine LAN-IP override:
+      # both target the stable pointer minipc.whereisdana.today (committed in
+      # k8s/external-dns/prod-1/config.yml + k8s/traefik/values.prod-1.yml), and
+      # the pointer is repointed in terraform/core on a physical-network move. So
+      # this task is now purely the ESO credential bootstrap.
 
   # Stage-1 ESO bootstrap on the mini-PC Talos cluster. Seeds the
   # adanalife-stage reader creds as eso-aws-credentials into BOTH stage-1
@@ -731,78 +869,58 @@ tasks:
   # external-dns reads). Stage does NOT touch external-secrets — prod owns
   # the cluster-scoped aws-secretsmanager-cluster store there. Isolation is
   # by AWS account (stage creds only read the stage account) AND by
-  # namespace (the stores are unreachable from prod). Also writes the
-  # stage external-dns values.local.yml (stage now has its OWN external-dns
-  # in stage-1-platform, reading the stage account). Point kubectl at
+  # namespace (the stores are unreachable from prod). Stage has its OWN
+  # external-dns in stage-1-platform (reading the stage account); it targets the
+  # stable minipc.whereisdana.today pointer from its committed config.yml, so
+  # this task no longer writes a per-machine values.local.yml. Point kubectl at
   # adanalife-minipc.
   k8s:stage:bootstrap-secrets:
-    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-platform + write stage external-dns values.local.yml (mini-PC cluster)
+    desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-data + stage-1-platform (mini-PC cluster)
     status:
       - kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1
+      - kubectl get secret eso-aws-credentials -n stage-1-data >/dev/null 2>&1
       - kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1
-      # Stale-target guard: re-run when the file is missing OR its embedded
-      # --default-targets no longer matches the resolved target IP (the
-      # EXTERNAL_DNS_TARGET_IP override or the 192.168.1.200 default).
-      - |
-        ip="${EXTERNAL_DNS_TARGET_IP:-192.168.1.200}"
-        cur=$(grep -oE -- '--default-targets=[0-9.]+' k8s/external-dns/stage-1/values.local.yml 2>/dev/null | cut -d= -f2)
-        [ "$cur" = "$ip" ]
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
-        msg: "keybase not found — install + log in per vault/infra/keybase-setup.md"
+        msg: "keybase not found — install with `brew install --cask keybase`, then log in"
+      - sh: keybase status >/dev/null 2>&1
+        msg: "keybase daemon not running (can't pgp-decrypt the ESO creds) — `open -a Keybase`, wait ~10s for the daemon, then retry"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
-      - sh: command -v curl >/dev/null
-        msg: "curl not found — required to fetch host public IP for external-dns default-targets"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
       - kubectl create namespace stage-1 --dry-run=client -o yaml | kubectl apply -f -
+      # stage-1-data: the isolated DB namespace (postgres + its SecretStore). Its
+      # ExternalSecret needs eso-aws-credentials here, same as the app namespace.
+      - kubectl create namespace stage-1-data --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace stage-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
         if kubectl get secret eso-aws-credentials -n stage-1 >/dev/null 2>&1 \
+           && kubectl get secret eso-aws-credentials -n stage-1-data >/dev/null 2>&1 \
            && kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1; then
-          echo "eso-aws-credentials already present in stage-1 + stage-1-platform, skipping"
+          echo "eso-aws-credentials already present in stage-1 + stage-1-data + stage-1-platform, skipping"
         else
           set -euo pipefail
           ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
           sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
-          for ns in stage-1 stage-1-platform; do
+          for ns in stage-1 stage-1-data stage-1-platform; do
             kubectl create secret generic eso-aws-credentials \
               --namespace="$ns" \
               --from-literal=AWS_ACCESS_KEY_ID="$ak" \
               --from-literal=AWS_SECRET_ACCESS_KEY="$sk" \
               --dry-run=client -o yaml | kubectl apply -f -
           done
-          echo "applied eso-aws-credentials Secret to stage-1 + stage-1-platform namespaces"
+          echo "applied eso-aws-credentials Secret to stage-1 + stage-1-data + stage-1-platform namespaces"
         fi
-      # The stage SecretStore (aws-secretsmanager, namespaced) ships in both
-      # the stage-1 umbrella and k8s/external-dns/stage-1.
-      - |
-        set -euo pipefail
-        values_file=k8s/external-dns/stage-1/values.local.yml
-        # adanalife-minipc is LAN-only; external-dns publishes the node's
-        # LAN IP. Override via EXTERNAL_DNS_TARGET_IP=<ip>. Always rewrite
-        # (rather than skip-if-present) so a changed target can't silently
-        # persist a stale --default-targets across a re-run.
-        ip="${EXTERNAL_DNS_TARGET_IP:-192.168.1.200}"
-        prev=$(grep -oE -- '--default-targets=[0-9.]+' "$values_file" 2>/dev/null | cut -d= -f2 || true)
-        cat > "$values_file" <<YAML
-        # Generated by \`task k8s:stage:bootstrap-secrets\` — LAN IP target
-        # for the stage external-dns --default-targets. Override default via
-        # EXTERNAL_DNS_TARGET_IP env var, or hand-edit this file.
-        extraArgs:
-          - --default-targets=$ip
-          - --force-default-targets
-        YAML
-        if [ -n "$prev" ] && [ "$prev" != "$ip" ]; then
-          echo "rewrote $values_file: default-targets $prev -> $ip (target changed; run \`task k8s:stage:apply\` to roll external-dns)"
-        else
-          echo "wrote $values_file (default-targets=$ip)"
-        fi
+      # stage external-dns no longer carries a per-machine LAN-IP override — it
+      # targets the stable pointer minipc.whereisdana.today (committed in
+      # k8s/external-dns/stage-1/config.yml), repointed in terraform/core on a
+      # physical-network move. So this task is now purely the ESO credential
+      # bootstrap.
 
   # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
   # into the local cluster. Idempotent — re-run after a cluster recreate or
@@ -812,8 +930,7 @@ tasks:
   #
   # k8s-monitoring requires the k8s/grafana-cloud-metrics-write SM value
   # to have been seeded out-of-band first; if it hasn't, the ExternalSecret
-  # materialization will fail and the helm install won't run. See
-  # vault/infra/grafana-cloud-bootstrap.md.
+  # materialization will fail and the helm install won't run.
   #
   # Traefik: the bundled k3s Traefik is disabled via --disable=traefik in
   # the k3d configs, so this task is the only thing that brings up an
@@ -832,9 +949,14 @@ tasks:
   # staging) ships in the cert-manager kustomize so the pipeline is
   # exercised even before any app Ingress requests a cert.
   k8s:dev:platform:up:
-    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the bees cluster
+    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the dev cluster
     deps: [k8s:dev:bootstrap-secrets]
     preconditions:
+      # Guard: k3d dev cluster only — never the minipc (Talos). See the
+      # k8s:dev:bootstrap-secrets precondition for why running dev against the
+      # minipc breaks prod's ClusterIssuer.
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "refusing: k8s:dev:* must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
@@ -850,6 +972,7 @@ tasks:
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
       - helm repo add jetstack https://charts.jetstack.io
       - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -912,11 +1035,86 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/development/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+      # NATS — pubsub substrate for inter-component messaging.
+      # Single-node, no JetStream, prom-exporter sidecar scraped by
+      # alloy-metrics via prometheus.io/* pod annotations. Lives in its
+      # own development-platform namespace mirroring stage-1-platform /
+      # prod-1-platform (see k8s/nats/values.yml for the phase-0 framing).
+      - helm upgrade --install nats nats/nats
+          --version 2.14.0
+          -n development-platform --create-namespace
+          -f k8s/nats/values.yml
+          -f k8s/nats/development/values.yml
+      - kubectl rollout status statefulset/nats -n development-platform --timeout=120s
+      - 'echo "NATS up in development-platform. Connect via nats://nats.development-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n development-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
+      # Argo CD on the k3d dev cluster — a SEPARATE in-cluster Argo managing ONLY
+      # the development env (no cross-cluster wiring: it reconciles development
+      # against this cluster's own API, same as the minipc Argo does for
+      # prod/stage). dev borrows the stage AWS account, so the repo deploy key must
+      # live at k8s/argocd/repo-ssh-key in the stage SM (the cluster-store reads
+      # it). Version pinned to match cdk8s/adanalife_k8s/helm_platform.py. UI via
+      # port-forward (no tailscale on the dev cluster). See gitops/README.md.
+      - helm repo add argo https://argoproj.github.io/argo-helm
+      - helm repo update argo
+      - helm upgrade --install argocd argo/argo-cd
+          --version 9.5.17
+          -n argocd --create-namespace
+          -f k8s/argo-cd/values.yml
+          -f k8s/argo-cd/values.k3d.yml
+      - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd
+      - kubectl apply -f cdk8s/dist/argocd-k3d.k8s.yaml
+      - 'echo "Argo CD up on the dev cluster (monitor-only). development Applications created. UI: http://argocd.dev.whereisdana.today:9080 (external-dns + traefik; port-forward svc/argocd-server as fallback). Next: task k8s:dev:argo:sync to bring up data -> supporting -> apps. If the repo Secret stays empty, seed k8s/argocd/repo-ssh-key in the stage SM. See gitops/README.md."'
+
+  # Sync the dev Argo Applications in dependency order, then kick the apps.
+  # data + supporting + identity are manual-sync (data is Prune=false forever —
+  # it can never auto-prune the DB); the apps autosync, but this kicks them so
+  # you don't wait for the next reconcile. Doubles as the "revert to CI :develop"
+  # gesture — it re-enables selfHeal on the app Applications (k8s:dev:deploy
+  # pauses it to pin a local :dev-local image) and re-syncs them to the
+  # committed manifest. Replaces clicking Sync in the UI.
+  k8s:dev:sync:
+    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps); also reverts a k8s:dev:deploy local-image override back to CI :develop"
+    aliases: ["k8s:dev:argo:sync"]
+    preconditions:
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
+      - sh: command -v argocd >/dev/null
+        msg: "argocd CLI not found — `brew install argocd`"
+    cmds:
+      # `argocd --core` talks to the cluster via the kubeconfig (no Argo server /
+      # login), but resolves argocd-cm from the CURRENT context's namespace — so
+      # point the context at argocd for the duration, then restore on exit.
+      - |
+        ns_prev=$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null)
+        trap 'kubectl config set-context --current --namespace="${ns_prev:-default}" >/dev/null 2>&1' EXIT
+        kubectl config set-context --current --namespace=argocd >/dev/null
+        set -e
+        # Stateful + supporting + identity land before the apps: tripbot won't
+        # start without its DB (data) or the identity ESO secrets
+        # (tripbot-database-creds / -twitch-creds / discord / maps).
+        argocd app sync development-data --core --timeout 300
+        argocd app wait development-data --core --health --timeout 300
+        argocd app sync development-supporting --core --timeout 300
+        argocd app wait development-supporting --core --health --timeout 300
+        argocd app sync development-tripbot-identity --core --timeout 300
+        argocd app wait development-tripbot-identity --core --health --timeout 300
+        # Apps: the tripbot-apps ApplicationSet template sets no labels, so a
+        # label selector matches nothing — enumerate the generated Applications
+        # by name instead. Re-enable selfHeal first so any k8s:dev:deploy
+        # :dev-local override reverts to the committed :develop on sync.
+        apps=$(argocd app list --core -o name | sed 's#^argocd/##' \
+                 | grep -E '^development-' \
+                 | grep -vE '^development-(data|supporting|tripbot-identity)$')
+        for a in $apps; do
+          kubectl patch application "$a" -n argocd --type merge \
+            -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}' >/dev/null
+        done
+        argocd app sync $apps --core --timeout 300
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
@@ -931,10 +1129,6 @@ tasks:
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
-      - sh: test -f k8s/external-dns/prod-1/values.local.yml
-        msg: "k8s/external-dns/prod-1/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
-      - sh: test -f k8s/traefik/values.local.yml
-        msg: "k8s/traefik/values.local.yml missing — run `task k8s:prod:bootstrap-secrets` first"
     cmds:
       # Cilium FIRST — it is the CNI + kube-proxy replacement (Talos installs
       # neither; see controlplane.patch.yaml). Until it's up the node is
@@ -950,8 +1144,7 @@ tasks:
       - kubectl wait --for=condition=Ready node --all --timeout=180s
       - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
       # local-path-provisioner — cluster storage backing. Must precede any
-      # PVC-consuming workload (postgres). Codified from the former manual
-      # bootstrap-runbook Phase 5.0 steps; see k8s/local-path-provisioner/prod-1.
+      # PVC-consuming workload (postgres). See k8s/local-path-provisioner/prod-1.
       - kubectl apply -k k8s/local-path-provisioner/prod-1
       - kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=120s
       - 'echo "local-path-provisioner up. StorageClass local-path available; local-path-retain comes from the postgres overlay."'
@@ -961,6 +1154,7 @@ tasks:
       - helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
       - helm repo add jetstack https://charts.jetstack.io
       - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
           -n external-secrets --create-namespace
@@ -990,10 +1184,9 @@ tasks:
           -n kube-system
           -f k8s/traefik/values.yml
           -f k8s/traefik/values.prod-1.yml
-          -f k8s/traefik/values.local.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/traefik -n kube-system
-      - 'echo "Traefik up on hostNetwork (binds 192.168.1.200:80/443 directly). App Ingresses (ingressClassName=traefik) will route through this."'
+      - 'echo "Traefik up on hostNetwork (binds the node LAN IP :80/443 directly). App Ingresses (ingressClassName=traefik) will route through this."'
       # Dashboard Ingress (traefik.prod.whereisdana.today, LAN-only). Plain
       # Ingress rather than the chart's IngressRoute so external-dns publishes
       # the Route53 record; DNS + cert reconcile once external-dns/cert-manager
@@ -1018,7 +1211,6 @@ tasks:
       - helm upgrade --install external-dns external-dns/external-dns
           -n prod-1-platform
           -f k8s/external-dns/prod-1/config.yml
-          -f k8s/external-dns/prod-1/values.local.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns -n prod-1-platform
       - 'echo "external-dns up in prod-1-platform. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
@@ -1057,11 +1249,24 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Has k8s/grafana-cloud-metrics-write been seeded in prod-1? See vault/infra/grafana-cloud-bootstrap.md."; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+      # NATS — pubsub substrate for inter-component messaging.
+      # Single-node, no JetStream, prom-exporter sidecar scraped by
+      # alloy-metrics via prometheus.io/* pod annotations. Lives in
+      # prod-1-platform (the env-platform namespace external-dns created
+      # above) so prod-1 stays app-only. Stage runs its own NATS in
+      # stage-1-platform via k8s:stage:platform-env:up — namespaces isolate the two.
+      - helm upgrade --install nats nats/nats
+          --version 2.14.0
+          -n prod-1-platform --create-namespace
+          -f k8s/nats/values.yml
+          -f k8s/nats/prod-1/values.yml
+      - kubectl rollout status statefulset/nats -n prod-1-platform --timeout=120s
+      - 'echo "NATS up in prod-1-platform. Connect via nats://nats.prod-1-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n prod-1-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
       # Intel GPU device plugin + XPU Manager. Plugin registers
       # gpu.intel.com/i915 (+ i915_monitoring) so OBS/vlc-server pods
       # can claim the iGPU as an extended resource without hostPath.
@@ -1074,38 +1279,65 @@ tasks:
       - kubectl apply -k k8s/intel-xpu-manager/prod-1
       - kubectl rollout status -n kube-system daemonset/intel-xpumanager --timeout=180s
       - 'echo "Intel GPU plugin + XPU Manager up. gpu.intel.com/i915 schedulable; xpum_* metrics scraping at <pod-ip>:29999."'
+      # Argo CD — the GitOps controller for the cdk8s app manifests. Installed as
+      # part of the platform bring-up so there's no manual `helm repo add`. Comes
+      # up idle (monitor-only); the ApplicationSets + repo cred + UI Ingress are
+      # applied separately via `task gitops:apply` (cdk8s/dist/argocd.k8s.yaml).
+      # Version pinned to match cdk8s/adanalife_k8s/helm_platform.py. See
+      # gitops/README.md. (When the platform itself cuts over to cdk8s, this
+      # step is superseded by PlatformChart's argo-cd component.)
+      - helm repo add argo https://argoproj.github.io/argo-helm
+      - helm repo update argo
+      - helm upgrade --install argocd argo/argo-cd
+          --version 9.5.17
+          -n argocd --create-namespace
+          -f k8s/argo-cd/values.yml
+      - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd
+      - 'echo "Argo CD up in the argocd namespace (idle, monitor-only). Next: task gitops:apply to create the ApplicationSets + repo cred + UI Ingress, then browse argocd-prod.<tailnet>.ts.net. See gitops/README.md."'
 
-  # Twitch streaming toggle for OBS. The OBS deployment's envFrom on
-  # obs-stream-key is `optional: true`, so the existence + content of that
-  # Secret IS the stream state. Either way we rollout-restart obs so the
-  # entrypoint re-reads STREAM_KEY at boot — Kubernetes doesn't propagate
-  # Secret changes to running pods' env vars.
+  # Streaming toggle for OBS. The OBS deployment's envFrom on the
+  # stream-key Secret is `optional: true`, so the existence + content of
+  # that Secret IS the stream state. Either way we rollout-restart obs so
+  # the entrypoint re-reads STREAM_KEY at boot — Kubernetes doesn't
+  # propagate Secret changes to running pods' env vars.
   #
-  # PROD is on-by-default and goes through ESO: the obs-stream-key
-  # ExternalSecret lives in the prod-1 overlay (stream-key-external-secret.yaml),
-  # so `task k8s:prod:apply` materializes the Secret on every bring-up and OBS
-  # streams without a manual step. `obs:prod:stream:on` just re-applies that
-  # ExternalSecret (e.g. after an `:off`); `obs:prod:stream:off` deletes the
-  # ExternalSecret AND the Secret so ESO can't re-materialize it — the pause
-  # survives the refresh interval and lasts until the next apply/wipe.
+  # Workloads are per-platform (`obs-<platform>`), so PLATFORM selects which
+  # OBS to toggle — default `twitch`, override `PLATFORM=youtube`. The
+  # stream-key object name follows the obs.py convention: twitch keeps the
+  # shared base name `obs-stream-key`, every other platform gets a distinct
+  # `obs-<platform>-stream-key` (so a twitch stream:on can't clobber
+  # youtube's key); the SM container is `k8s/obs/<platform>-stream-key`.
   #
-  # STAGE is off-by-default and stays imperative: there's no stage
-  # ExternalSecret, so `obs:stage:stream:on` pulls STREAM_KEY from the
-  # adanalife-stage SM account and creates the Secret directly. That `:on`
-  # is env-prefixed because the key is sourced from a specific AWS account,
-  # NOT from whatever cluster kubectl points at — the AWS profile is the
-  # targeting, so it must be explicit, and the final echo surfaces both the
-  # source profile and the live kubectl context so a cluster/key mismatch is
-  # visible.
+  # PROD goes through ESO: the stream-key ExternalSecret ships inside the
+  # per-platform obs app dist (tripbot repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
+  # Argo-delivered), so a normal sync materializes the Secret and OBS streams
+  # with no manual step. `obs:prod:stream:on` re-applies just that
+  # ExternalSecret (yq-extracted from the obs dist, since it no longer lives
+  # in a standalone overlay file); `obs:prod:stream:off` deletes the
+  # ExternalSecret AND the Secret. The pause is durable because the
+  # ApplicationSet deliberately excludes prod-1 obs-twitch from automated
+  # selfHeal (see cdk8s argocd.k8s.yaml) — Argo won't re-create the deleted
+  # ExternalSecret until a manual sync (or `obs:prod:stream:on`).
+  #
+  # STAGE is off-by-default and stays imperative: `obs:stage:stream:on`
+  # pulls STREAM_KEY from the adanalife-stage SM account and creates the
+  # Secret directly. That `:on` is env-prefixed because the key is sourced
+  # from a specific AWS account, NOT from whatever cluster kubectl points at
+  # — the AWS profile is the targeting, so it must be explicit, and the
+  # final echo surfaces both the source profile and the live kubectl context
+  # so a cluster/key mismatch is visible.
   #
   # `:off` is exposed under both env namespaces; the shared internal task
   # deletes both the ExternalSecret (no-op in stage, which has none) and the
   # Secret in the current cluster — no AWS account needed. Run with
-  # NAMESPACE=stage-1 / NAMESPACE=prod-1 to override the per-task defaults.
+  # NAMESPACE=stage-1 / NAMESPACE=prod-1 + PLATFORM= to override the per-task
+  # defaults.
   obs:stage:stream:on:
-    desc: "stream OBS to adanalife_staging (STREAM_KEY from the stage-1 SM account)"
+    desc: "stream stage OBS (STREAM_KEY from the stage-1 SM account; override PLATFORM=, default twitch)"
     vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
       NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+      SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
     preconditions:
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
@@ -1113,85 +1345,96 @@ tasks:
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
     cmds:
       - |
         set -euo pipefail
         sk=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
-          --secret-id k8s/obs/twitch-stream-key --query SecretString --output text)
-        kubectl create secret generic obs-stream-key \
+          --secret-id k8s/obs/{{.PLATFORM}}-stream-key --query SecretString --output text)
+        kubectl create secret generic {{.SECRET}} \
           --from-literal=STREAM_KEY="$sk" \
           --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
-      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
-      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming — key from adanalife-stage SM (→ adanalife_staging); namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS streaming ({{.PLATFORM}}) — key from adanalife-stage SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
-  # Prod streaming is on-by-default via the overlay's ExternalSecret, so
-  # this task only matters as the inverse of `:off`: re-apply the
-  # ExternalSecret, wait for ESO to materialize the Secret, then roll obs.
-  # No aws-vault — ESO reads the adanalife-prod account itself.
+  # Prod streaming is on-by-default via the obs app dist's ExternalSecret,
+  # so this task only matters as the inverse of `:off`: re-apply the
+  # ExternalSecret (extracted from the Argo-delivered obs dist), wait for ESO
+  # to materialize the Secret, then roll obs. No aws-vault — ESO reads the
+  # adanalife-prod account itself.
   obs:prod:stream:on:
-    desc: "resume prod OBS streaming (re-applies the obs-stream-key ExternalSecret; ESO pulls STREAM_KEY from the adanalife-prod SM account → adanalife_)"
+    desc: "resume prod OBS streaming (re-applies the stream-key ExternalSecret from the obs app dist; ESO pulls STREAM_KEY from the adanalife-prod SM account; override PLATFORM=, default twitch)"
     vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
       NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+      SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
+      OBS_DIST: '../tripbot/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
     preconditions:
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
+      - sh: command -v yq >/dev/null
+        msg: "yq not found — install with `brew install yq`"
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "obs Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
+      - sh: test -f {{.OBS_DIST}}
+        msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling tripbot checkout; is ~/adanalife/tripbot present + synthed?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
       - sh: kubectl get secretstore aws-secretsmanager -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "aws-secretsmanager SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
     cmds:
-      - kubectl apply -n {{.NAMESPACE}} -f k8s/apps/obs/overlays/prod-1/stream-key-external-secret.yaml
-      - kubectl wait --for=condition=Ready externalsecret/obs-stream-key -n {{.NAMESPACE}} --timeout=120s
-      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
-      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming — obs-stream-key materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - yq 'select(.kind == "ExternalSecret")' {{.OBS_DIST}} | kubectl apply -n {{.NAMESPACE}} -f -
+      - kubectl wait --for=condition=Ready externalsecret/{{.SECRET}} -n {{.NAMESPACE}} --timeout=120s
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
+      - 'echo "OBS streaming ({{.PLATFORM}}) — {{.SECRET}} materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
-  # Stop streaming, keep OBS running. Deletes the obs-stream-key
-  # ExternalSecret (if any — prod has one, stage doesn't) AND the
-  # obs-stream-key Secret, then restarts the pod so it boots in idle
-  # (VNC-only) mode — the container stays up, only the Twitch publish
-  # stops. Deleting the ExternalSecret first is what makes the pause
-  # durable in prod: otherwise ESO would re-materialize the Secret on its
-  # next refresh. The pause lasts until the next `task k8s:prod:apply` or
-  # cluster wipe re-applies the overlay. Exposed under both env namespaces
-  # for symmetry with the `:on` tasks; the work is env-agnostic (no AWS
-  # account — it only touches the local cluster), so both delegate to one
-  # shared implementation.
+  # Stop streaming, keep OBS running. Deletes the stream-key ExternalSecret
+  # (if any — prod has one, stage doesn't) AND the stream-key Secret, then
+  # restarts the pod so it boots in idle (VNC-only) mode — the container
+  # stays up, only the publish stops. Deleting the ExternalSecret first is
+  # what makes the pause durable in prod: otherwise ESO would re-materialize
+  # the Secret on its next refresh. The pause lasts until the next manual
+  # Argo sync of the obs app (or `obs:prod:stream:on`). Exposed under both
+  # env namespaces for symmetry with the `:on` tasks; the work is
+  # env-agnostic (no AWS account — it only touches the local cluster), so
+  # both delegate to one shared implementation.
   obs:stage:stream:off:
-    desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
+    desc: "stop OBS streaming (OBS stays up in idle/VNC mode; override PLATFORM=, default twitch)"
     cmds:
       - task: obs:stream:off:_run
         vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
           NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
 
   obs:prod:stream:off:
-    desc: "stop OBS streaming (OBS stays up in idle/VNC mode)"
+    desc: "stop OBS streaming (OBS stays up in idle/VNC mode; override PLATFORM=, default twitch)"
     cmds:
       - task: obs:stream:off:_run
         vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
           NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
 
   obs:stream:off:_run:
     internal: true
     requires:
-      vars: [NAMESPACE]
+      vars: [NAMESPACE, PLATFORM]
+    vars:
+      SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
     preconditions:
       - sh: command -v kubectl >/dev/null
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
-      - sh: kubectl get deploy obs -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "obs Deployment not found in namespace {{.NAMESPACE}}"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
     cmds:
       # ExternalSecret first so ESO stops owning (and re-creating) the Secret.
-      - kubectl delete externalsecret obs-stream-key -n {{.NAMESPACE}} --ignore-not-found
-      - kubectl delete secret obs-stream-key -n {{.NAMESPACE}} --ignore-not-found
-      - kubectl rollout restart deploy/obs -n {{.NAMESPACE}}
-      - kubectl rollout status deploy/obs -n {{.NAMESPACE}} --timeout=120s
+      - kubectl delete externalsecret {{.SECRET}} -n {{.NAMESPACE}} --ignore-not-found
+      - kubectl delete secret {{.SECRET}} -n {{.NAMESPACE}} --ignore-not-found
+      - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
+      - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
       - 'echo "OBS idle (not streaming) — container still up; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   k8s:logs:
@@ -1207,14 +1450,16 @@ tasks:
   # when iterating without applying the local overlay). Backgrounded
   # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
   # find it. Re-running :up overwrites the PID file; if :down can't
-  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs"`.
+  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs-"`.
   obs:vnc:up:
-    desc: start a local kubectl port-forward to OBS VNC at localhost:5902
+    desc: start a local kubectl port-forward to OBS VNC at localhost:5902 (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # PID capture must happen in the same shell as the backgrounded process —
       # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/obs 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      - kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
       - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
 
   obs:vnc:down:
@@ -1230,52 +1475,58 @@ tasks:
         fi
 
   obs:browser:refresh:
-    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently)
+    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently; override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
 
   obs:media:restart:
-    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart
+    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-media-restart
 
   vlc:vnc:up:
-    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
+    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # PID capture must happen in the same shell as the backgrounded process —
       # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/vlc-server 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
+      - kubectl port-forward svc/vlc-{{.PLATFORM}} 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
       - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
 
   vlc:vnc:down:
@@ -1295,8 +1546,7 @@ tasks:
   # secrets. They're SOPS-encrypted with the prod-1 KMS key
   # (alias/sops-talos-pki, terraform/prod-1/sops.tf) and committed as
   # talos/adanalife-minipc/*.sops.yaml; the plaintext stays gitignored.
-  # Bootstrap order + full workflow: vault/infra/adanalife-minipc-bootstrap.md
-  # Phase 4. Encrypted as opaque binary blobs because the configs are
+  # Encrypted as opaque binary blobs because the configs are
   # multi-document YAML (sops's native YAML store doesn't handle multi-doc).
   talos:minipc:secrets:decrypt:
     desc: decrypt the SOPS-sealed adanalife-minipc Talos PKI (+ tailscale patch) into gitignored plaintext
@@ -1319,7 +1569,7 @@ tasks:
             chmod 600 "$dst"
           done
         '
-      - 'echo "Talos secrets decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step (runbook Phase 4) before apply-config."'
+      - 'echo "Talos secrets decrypted. Regenerate controlplane.patched.yaml via the machineconfig patch step before apply-config."'
 
   talos:minipc:secrets:encrypt:
     desc: re-seal the adanalife-minipc Talos PKI (+ tailscale patch) to SOPS after regenerating/rotating it
@@ -1410,13 +1660,20 @@ tasks:
   # env is baked into the filename (stage-1-tripbot-<ts>.dump) so a stage dump
   # can never be confused with a prod one. Streams pg_dump -Fc out of postgres-0
   # reusing the pod's own POSTGRES_* creds (no credential handling here).
+  #
+  # frame_embeddings DATA is excluded (schema still ships): the CV vectors are
+  # derived + reproducible and GBs big — they'd dwarf the rest of the dump and
+  # corrupt over the tailnet proxy. Use :backup:vectors / :seed:vectors for them.
   tripbot:stage:db:backup:
-    desc: "dump stage-1 Postgres to a local file (OUT_DIR/stage-1-tripbot-<ts>.dump, default ./backups); on-demand, no S3"
+    desc: "dump stage-1 Postgres to a local file (OUT_DIR/stage-1-tripbot-<ts>.dump, default ./backups); excludes frame_embeddings data — see :backup:vectors"
     vars:
       OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      # postgres lives in the data namespace (stage-1-data) after the isolation
+      # move; override NS=stage-1 to dump from the pre-move (app-namespace) pod.
+      NS: '{{.NS | default "stage-1-data"}}'
     preconditions:
-      - sh: kubectl get pod postgres-0 -n stage-1 >/dev/null 2>&1
-        msg: "postgres-0 not found in stage-1 — bring the cluster + postgres up first"
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
     cmds:
       - mkdir -p {{.OUT_DIR}}
       - |
@@ -1426,8 +1683,8 @@ tasks:
         echo "Dumping stage-1 Postgres to ${out}"
         # Write to a .partial then rename, so a failed dump never leaves a
         # truncated file that `:restore` (newest-first) would later pick up.
-        kubectl exec -n stage-1 postgres-0 -- sh -c \
-          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+        kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --exclude-table-data=frame_embeddings -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB"' \
           > "${out}.partial"
         mv "${out}.partial" "$out"
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
@@ -1440,9 +1697,12 @@ tasks:
     desc: "restore stage-1 Postgres from a local dump (DUMP=path, default newest in OUT_DIR, ./backups) + clear stale migrate dirty flag"
     vars:
       OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      # postgres lives in the data namespace (stage-1-data) after the isolation
+      # move; override NS=stage-1 for a pre-move (app-namespace) restore.
+      NS: '{{.NS | default "stage-1-data"}}'
     preconditions:
-      - sh: kubectl get pod postgres-0 -n stage-1 >/dev/null 2>&1
-        msg: "postgres-0 not found in stage-1 — bring the cluster + postgres up first"
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
     cmds:
       - |
         set -euo pipefail
@@ -1453,13 +1713,13 @@ tasks:
         fi
         [ -f "$dump" ] || { echo "dump not found: $dump"; exit 1; }
         echo "Restoring stage-1 Postgres from ${dump}"
-        kubectl exec -i -n stage-1 postgres-0 -- sh -c \
+        kubectl exec -i -n {{.NS}} postgres-0 -- sh -c \
           'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
           < "$dump"
         echo "Restore complete."
       - |
         set -euo pipefail
-        psql() { kubectl exec -i -n stage-1 postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
+        psql() { kubectl exec -i -n {{.NS}} postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
         ver=$(psql "SELECT version FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         dirty=$(psql "SELECT dirty FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         echo "schema_migrations: version=$ver dirty=$dirty"
@@ -1468,12 +1728,159 @@ tasks:
           psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
           echo "cleared."
         fi
-      - 'echo "Next: kubectl rollout restart deploy/tripbot -n stage-1 — its migrate init re-applies any pending migrations."'
+      - 'echo "Next: kubectl rollout restart deploy/tripbot-twitch -n stage-1 — its migrate init re-applies any pending migrations."'
+
+  # Dedicated dump of JUST the dashcam-cv vector table (frame_embeddings),
+  # which the full-DB backup tasks deliberately exclude. The table is GBs big.
+  # It dumps in-pod, then streams the file out with `exec cat` (a single stdout
+  # stream) and verifies sha256 in-pod vs local.
+  #
+  # NOT `kubectl cp`: cp multiplexes a side stderr stream that closes abnormally
+  # (`websocket: close 1006`) partway through a large file over the apiserver
+  # proxy and SILENTLY TRUNCATES the copy — observed truncating this ~743 MB
+  # dump by 1–4 MB on every attempt, even on-LAN. `pg_restore --list` does NOT
+  # catch it (the custom-format TOC sits near the front of the file, so it reads
+  # fine while the data tail is missing). The sha256 check makes a corrupt
+  # transfer fail loudly instead of producing a bad backup. Same proxy hazard
+  # the prod-1 cutover runbook flagged as `tls: bad record MAC`.
+  tripbot:stage:db:backup:vectors:
+    desc: "dump ONLY the frame_embeddings table to a local file (OUT_DIR/stage-1-frame-embeddings-<ts>.dump, default ./backups); in-pod dump + exec-cat stream + sha256 verify"
+    vars:
+      OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      NS: '{{.NS | default "stage-1-data"}}'
+    preconditions:
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
+    cmds:
+      - mkdir -p {{.OUT_DIR}}
+      - |
+        set -euo pipefail
+        ts=$(date -u +%Y%m%d-%H%M%SZ)
+        out="{{.OUT_DIR}}/stage-1-frame-embeddings-${ts}.dump"
+        echo "Dumping frame_embeddings in-pod..."
+        kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --format=custom --table=frame_embeddings -h localhost -U "$POSTGRES_USER" "$POSTGRES_DB" > /tmp/frame-embeddings.dump'
+        # Stream out (single stdout stream) to a .partial, then verify sha256
+        # before promoting — a truncated transfer must never land as "$out".
+        echo "Streaming out to ${out} (exec cat)..."
+        kubectl exec -n {{.NS}} postgres-0 -- cat /tmp/frame-embeddings.dump > "${out}.partial"
+        want=$(kubectl exec -n {{.NS}} postgres-0 -- sha256sum /tmp/frame-embeddings.dump | awk '{print $1}')
+        got=$(shasum -a 256 "${out}.partial" | awk '{print $1}')
+        kubectl exec -n {{.NS}} postgres-0 -- rm -f /tmp/frame-embeddings.dump
+        if [ "$want" != "$got" ]; then
+          rm -f "${out}.partial"
+          echo "sha256 mismatch (in-pod $want != local $got) — transfer corrupt, retry"; exit 1
+        fi
+        mv "${out}.partial" "$out"
+        echo "OK: ${out} ($(du -h "$out" | cut -f1)) — sha256 $got verified"
+
+  # Seed frame_embeddings from a dedicated vector dump (the counterpart of
+  # :backup:vectors). Run AFTER the regular seed/restore — the table has an
+  # FK to videos(id). pg_restore --clean drops + recreates the table, so the
+  # HNSW index is bulk-rebuilt after the load.
+  #
+  # That bulk HNSW build is memory-hungry: at the default maintenance_work_mem it
+  # builds in-memory and OOM-killed the 1Gi-capped prod postgres, whose unclean
+  # crash then lost the local-path PVC (2026-06-15 outage). So we pin a small
+  # maintenance_work_mem (MAINT_WORK_MEM, default 128MB) + disable parallel maint
+  # workers, forcing pgvector's slower ON-DISK build, whose non-reclaimable memory
+  # stays well under 1Gi. Validated on stage's 1Gi postgres: peak pinned at the
+  # limit (reclaimable page cache), zero OOM. Raise MAINT_WORK_MEM for a faster
+  # build once postgres has the RAM headroom.
+  #
+  # The dump streams straight into pg_restore's stdin via `kubectl exec -i`
+  # (the same single-stream pattern as :prod:db:restore) — NOT `kubectl cp`
+  # into an in-pod temp file, which silently truncates a large transfer over
+  # the apiserver proxy (see :backup:vectors). No temp file, one stream.
+  # NS=prod-1-data seeds prod (the dump is env-agnostic — same videos table).
+  tripbot:stage:db:seed:vectors:
+    desc: "seed frame_embeddings from a local vector dump (DUMP=path, default newest stage-1-frame-embeddings-*.dump in OUT_DIR, ./backups); OOM-safe bounded HNSW build (MAINT_WORK_MEM=128MB); run after the videos seed; NS=prod-1-data for prod"
+    vars:
+      OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      NS: '{{.NS | default "stage-1-data"}}'
+      # Bounded HNSW-build memory — forces pgvector's on-disk build so the bulk
+      # CREATE INDEX can't OOM a memory-capped postgres. Raise once it has RAM.
+      MAINT_WORK_MEM: '{{.MAINT_WORK_MEM | default "128MB"}}'
+    preconditions:
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
+    cmds:
+      - |
+        set -euo pipefail
+        dump="{{.DUMP}}"
+        if [ -z "$dump" ]; then
+          dump=$(ls -1t {{.OUT_DIR}}/stage-1-frame-embeddings-*.dump 2>/dev/null | head -1 || true)
+          [ -n "$dump" ] || { echo "no vector dumps found in {{.OUT_DIR}}/ (stage-1-frame-embeddings-*.dump) — pass DUMP=<path>"; exit 1; }
+        fi
+        [ -f "$dump" ] || { echo "dump not found: $dump"; exit 1; }
+        echo "Restoring frame_embeddings into {{.NS}}/postgres-0 (drop + recreate + HNSW rebuild)..."
+        echo "  from ${dump} ($(du -h "$dump" | cut -f1))"
+        echo "  bounded build: maintenance_work_mem={{.MAINT_WORK_MEM}}, no parallel maint workers (slow but memory-safe)"
+        kubectl exec -i -n {{.NS}} postgres-0 -- sh -c \
+          'PGOPTIONS="-c maintenance_work_mem={{.MAINT_WORK_MEM}} -c max_parallel_maintenance_workers=0" PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+          < "$dump"
+        rows=$(kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" psql -tAq -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) FROM frame_embeddings;"')
+        orphans=$(kubectl exec -n {{.NS}} postgres-0 -- sh -c \
+          'PGPASSWORD="$POSTGRES_PASSWORD" psql -tAq -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) FROM frame_embeddings fe LEFT JOIN videos v ON v.id = fe.video_id WHERE v.id IS NULL;"')
+        echo "Restore complete: ${rows} rows, ${orphans} FK orphans (want 0 — nonzero means the videos seed doesn't match this dump)."
+
+  # Pin a local vector dump to the PERMANENT archive/ tier of the prod-1
+  # Postgres backup bucket — the off-site "somewhere safe" home for the
+  # frame_embeddings vectors, which the regular tiered DB backups exclude. The
+  # archive/ prefix has no lifecycle rule (lives forever, stays S3 Standard —
+  # no Glacier retrieval fee/latency). Stored there because stage has no bucket
+  # of its own and the vectors are env-agnostic canonical data (seed any env).
+  # ~743 MB → ~1.5¢/month to keep; :seed:vectors:fetch pulls it back (~5¢ egress).
+  tripbot:stage:db:backup:vectors:archive:
+    desc: "upload a local vector dump to s3://<bucket>/archive/ (permanent); DUMP=path, default newest stage-1-frame-embeddings-*.dump in OUT_DIR (./backups)"
+    vars:
+      OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      BUCKET: adanalife-prod-1-postgres-backups
+    cmds:
+      - |
+        set -euo pipefail
+        dump="{{.DUMP}}"
+        if [ -z "$dump" ]; then
+          dump=$(ls -1t {{.OUT_DIR}}/stage-1-frame-embeddings-*.dump 2>/dev/null | head -1 || true)
+          [ -n "$dump" ] || { echo "no vector dumps found in {{.OUT_DIR}}/ (stage-1-frame-embeddings-*.dump) — pass DUMP=<path>"; exit 1; }
+        fi
+        [ -f "$dump" ] || { echo "dump not found: $dump"; exit 1; }
+        key="archive/$(basename "$dump")"
+        echo "Uploading ${dump} ($(du -h "$dump" | cut -f1)) → s3://{{.BUCKET}}/${key}"
+        aws-vault exec adanalife-prod -- aws s3 cp "$dump" "s3://{{.BUCKET}}/${key}"
+        echo "Pinned to archive/ (permanent)."
+
+  # Fetch the canonical frame_embeddings vector dump from S3 archive/ into
+  # OUT_DIR so :seed:vectors (newest-first) picks it up — the reseed path for a
+  # fresh stage/dev (or prod) DB. DUMP_KEY=archive/<file> picks a specific dump;
+  # default = newest archive/stage-1-frame-embeddings-*.dump. Then run
+  # :seed:vectors (NS=prod-1-data for prod).
+  tripbot:stage:db:seed:vectors:fetch:
+    desc: "download the canonical frame_embeddings dump from S3 archive/ into OUT_DIR (./backups) for :seed:vectors; DUMP_KEY=archive/<file> picks a specific one"
+    vars:
+      OUT_DIR: '{{.OUT_DIR | default "./backups"}}'
+      BUCKET: adanalife-prod-1-postgres-backups
+    cmds:
+      - mkdir -p {{.OUT_DIR}}
+      - |
+        set -euo pipefail
+        key="{{.DUMP_KEY}}"
+        if [ -z "$key" ]; then
+          newest=$(aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/archive/" \
+            | awk '{print $4}' | grep '^stage-1-frame-embeddings-.*\.dump$' | sort | tail -1 || true)
+          [ -n "$newest" ] || { echo "no frame-embeddings dumps in s3://{{.BUCKET}}/archive/ — upload one with :backup:vectors:archive first"; exit 1; }
+          key="archive/$newest"
+        fi
+        out="{{.OUT_DIR}}/$(basename "$key")"
+        echo "Fetching s3://{{.BUCKET}}/${key} → ${out}"
+        aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/${key}" "$out"
+        echo "OK: ${out} ($(du -h "$out" | cut -f1))"
+        echo "Next: task tripbot:stage:db:seed:vectors  (NS=prod-1-data for prod)"
 
   # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
   # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
   # most recent S3 dump written by the postgres-backup CronJob (pg_dump -Fc).
-  # See vault/infra/adanalife-minipc-bootstrap.md "Wipe-and-rebuild loop".
   #
   # The CronJob (k8s/apps/postgres/overlays/prod-1/backup-cronjob.yaml) writes
   # to tiered prefixes under the bucket — see #584. Lifecycle rules vary by tier:
@@ -1494,6 +1901,40 @@ tasks:
           echo
         done
 
+  # On-demand prod-1 Postgres dump — runs the postgres-backup CronJob's script
+  # now (instead of waiting for the hourly schedule), for a "just in case before
+  # a risky op" snapshot. The one-shot Job lands in the hourly/ tier (expires at
+  # 2 days). Set ARCHIVE=true to also copy the resulting dump into the permanent
+  # archive/ tier (no lifecycle rule — lives forever), for snapshots worth
+  # keeping past the 2-day window.
+  tripbot:prod:db:backup:
+    desc: "run an on-demand prod-1 Postgres dump (lands in hourly/); ARCHIVE=true also pins it to the permanent archive/ tier"
+    vars:
+      BUCKET: adanalife-prod-1-postgres-backups
+      # postgres + its backup CronJob live in the data namespace (prod-1-data)
+      # after the isolation move; override NS=prod-1 for the pre-move location.
+      NS: '{{.NS | default "prod-1-data"}}'
+    preconditions:
+      - sh: kubectl get cronjob postgres-backup -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-backup CronJob not found in {{.NS}} — apply the data unit first (override NS= if postgres is elsewhere)"
+    cmds:
+      - |
+        set -euo pipefail
+        job="postgres-backup-manual-$(date +%Y%m%d-%H%M%S)"
+        echo "Creating one-shot backup Job ${job} from cronjob/postgres-backup..."
+        kubectl create job --from=cronjob/postgres-backup "${job}" -n {{.NS}}
+        echo "Waiting for ${job} to complete..."
+        kubectl wait --for=condition=complete "job/${job}" -n {{.NS}} --timeout=300s
+        kubectl logs "job/${job}" -n {{.NS}} --tail=20 || true
+        echo "Backup complete (written to s3://{{.BUCKET}}/hourly/)."
+        if [ "{{.ARCHIVE}}" = "true" ]; then
+          newest=$(aws-vault exec adanalife-prod -- aws s3 ls "s3://{{.BUCKET}}/hourly/" | sort | tail -1 | awk '{print $4}')
+          [ -n "$newest" ] || { echo "no dump found in hourly/ to pin"; exit 1; }
+          echo "Pinning hourly/${newest} → archive/${newest}"
+          aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/hourly/${newest}" "s3://{{.BUCKET}}/archive/${newest}"
+          echo "Pinned to archive/ (permanent)."
+        fi
+
   # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
   # env creds (no credential handling here). Then clears a stale
   # schema_migrations dirty flag if the dump carried one — the historical
@@ -1509,9 +1950,12 @@ tasks:
     desc: "restore prod-1 Postgres from an S3 dump (DUMP_KEY=tripbot/<ts>.dump, default newest) + clear stale migrate dirty flag"
     vars:
       BUCKET: adanalife-prod-1-postgres-backups
+      # postgres lives in the data namespace (prod-1-data) after the isolation
+      # move; override NS=prod-1 for a pre-move (app-namespace) restore.
+      NS: '{{.NS | default "prod-1-data"}}'
     preconditions:
-      - sh: kubectl get pod postgres-0 -n prod-1 >/dev/null 2>&1
-        msg: "postgres-0 not found in prod-1 — bring the cluster + postgres up first"
+      - sh: kubectl get pod postgres-0 -n {{.NS}} >/dev/null 2>&1
+        msg: "postgres-0 not found in {{.NS}} — bring the cluster + postgres up first (override NS= if postgres is elsewhere)"
     cmds:
       - |
         set -euo pipefail
@@ -1523,12 +1967,12 @@ tasks:
         fi
         echo "Restoring prod-1 Postgres from s3://{{.BUCKET}}/$key"
         aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/$key" - \
-          | kubectl exec -i -n prod-1 postgres-0 -- sh -c \
+          | kubectl exec -i -n {{.NS}} postgres-0 -- sh -c \
             'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
         echo "Restore complete."
       - |
         set -euo pipefail
-        psql() { kubectl exec -i -n prod-1 postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
+        psql() { kubectl exec -i -n {{.NS}} postgres-0 -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -tAq -h localhost -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""; }
         ver=$(psql "SELECT version FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         dirty=$(psql "SELECT dirty FROM schema_migrations LIMIT 1;" | tr -d '[:space:]')
         echo "schema_migrations: version=$ver dirty=$dirty"
@@ -1537,16 +1981,17 @@ tasks:
           psql "UPDATE schema_migrations SET dirty=false;" >/dev/null
           echo "cleared."
         fi
-      - 'echo "Next: kubectl rollout restart deploy/tripbot -n prod-1 — its migrate init re-applies any pending migrations."'
+      - 'echo "Next: kubectl rollout restart deploy/tripbot-twitch -n prod-1 — its migrate init re-applies any pending migrations."'
 
   tripbot:dev:db:seed:
     desc: run the one-shot ESO-wired seed Job in the development namespace; idempotent — skips if the videos table already has real rows
     aliases: [tripbot:db:seed]
     cmds:
-      # Same shared, env-agnostic Job as stage/prod (k8s/apps/tripbot/jobs/) —
-      # only the -n namespace differs.
+      # The seed Job is authored in the tripbot repo's cdk8s now (per-env, with
+      # the namespace baked in); applied from its committed dist in the sibling
+      # tripbot checkout (same source assumption as `task contract:sync`).
       - kubectl delete job tripbot-seed -n development --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/seed.yaml -n development
+      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-seed.k8s.yaml -n development
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
@@ -1561,7 +2006,7 @@ tasks:
       - kubectl logs job/tripbot-seed -n development
 
   tripbot:dev:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against development back-to-back; dev borrows the stage identity, so sign in as tripbot4000 then adanalife_staging
+    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against development back-to-back; dev uses the non-prod test bot, so sign in as tripbot4001 then adanalife_staging
     aliases: [tripbot:auth:bootstrap]
     cmds:
       - task: tripbot:dev:auth:bootstrap:bot
@@ -1570,13 +2015,14 @@ tasks:
   tripbot:dev:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token against development (development namespace); port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # Same shared, env-agnostic Job as stage/prod — only -n differs.
+      # Authored per-env in the tripbot repo's cdk8s; applied from its committed
+      # dist in the sibling tripbot checkout (same source as `task contract:sync`).
       - kubectl delete job tripbot-auth-bootstrap-bot -n development --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n development
+      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-bot.k8s.yaml -n development
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
+      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4001 (the non-prod test bot, NOT prod's tripbot4000)."
       - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n development 2>/dev/null || true
       - echo "Bot bootstrap complete — token written to dev Postgres."
 
@@ -1584,13 +2030,13 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token against development; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n development --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n development
+      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-broadcaster.k8s.yaml -n development
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n development 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n development\` to bring the bot online with both identities."'
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n development\` to bring the bot online with both identities."'
 
   tripbot:prod:auth:bootstrap:
     desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against prod-1 back-to-back; sign in as tripbot4000 on the first browser tab, then adanalife_ on the second
@@ -1601,14 +2047,13 @@ tasks:
   tripbot:prod:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token (chat:read/edit etc.) against prod-1; port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # The auth-bootstrap Jobs are deliberately NOT part of any umbrella
-      # overlay (would otherwise re-run every apply and burn each leg's
-      # 5min timeout). The shared, env-agnostic manifests at
-      # k8s/apps/tripbot/jobs/auth-bootstrap-{bot,broadcaster}.yaml envFrom
-      # the namespace's tripbot-config + the ESO Secrets, so the same files
-      # serve prod (prod-1 ns) and stage (stage-1 ns) — only -n differs.
+      # The auth-bootstrap Jobs are deliberately their own deploy unit (NOT in any
+      # app sync — they'd otherwise re-run every reconcile and burn each leg's
+      # 5min timeout). Authored per-env in the tripbot repo's cdk8s and envFrom the
+      # namespace's tripbot-config + ESO Secrets; applied from its committed dist
+      # in the sibling tripbot checkout (same source as `task contract:sync`).
       - kubectl delete job tripbot-auth-bootstrap-bot -n prod-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n prod-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-bot.k8s.yaml -n prod-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1
@@ -1620,16 +2065,16 @@ tasks:
     desc: bootstrap the BROADCASTER Twitch OAuth token (channel:read:subscriptions, moderator:read:followers, user:edit:broadcast) against prod-1; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n prod-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n prod-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-broadcaster.k8s.yaml -n prod-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n prod-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot -n prod-1\` to bring the bot online with both identities loaded."'
+      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot-twitch -n prod-1\` to bring the bot online with both identities loaded."'
 
   tripbot:stage:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4000 then adanalife_staging
+    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4001 then adanalife_staging
     cmds:
       - task: tripbot:stage:auth:bootstrap:bot
       - task: tripbot:stage:auth:bootstrap:broadcaster
@@ -1637,35 +2082,35 @@ tasks:
   tripbot:stage:auth:bootstrap:bot:
     desc: bootstrap the BOT Twitch OAuth token against stage-1 (stage-1 namespace); port-forwards 8080 so the browser callback reaches the pod
     cmds:
-      # Same shared, env-agnostic Job as prod (k8s/apps/tripbot/jobs/) —
-      # only the -n namespace differs. envFrom the stage-1 tripbot-config +
-      # the stage ESO Secrets.
+      # Authored per-env in the tripbot repo's cdk8s (envFrom the stage-1
+      # tripbot-config + the stage ESO Secrets); applied from its committed dist in
+      # the sibling tripbot checkout (same source as `task contract:sync`).
       - kubectl delete job tripbot-auth-bootstrap-bot -n stage-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-bot.yaml -n stage-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-bot.k8s.yaml -n stage-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
+      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4001 (the non-prod test bot, NOT prod's tripbot4000)."
       - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n stage-1 2>/dev/null || true
-      - echo "Bot bootstrap complete — tripbot4000 token written to stage Postgres."
+      - echo "Bot bootstrap complete — tripbot4001 token written to stage Postgres."
 
   tripbot:stage:auth:bootstrap:broadcaster:
     desc: bootstrap the BROADCASTER Twitch OAuth token against stage-1; required for subscriber/follower polling + real-time EventSub
     cmds:
       - kubectl delete job tripbot-auth-bootstrap-broadcaster -n stage-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/auth-bootstrap-broadcaster.yaml -n stage-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-broadcaster.k8s.yaml -n stage-1
       - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
       - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
       - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1
       - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
       - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n stage-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot -n stage-1\` to bring the bot online with both identities."'
+      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n stage-1\` to bring the bot online with both identities."'
 
   tripbot:stage:db:seed:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
     cmds:
       - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
-      - kubectl apply -f k8s/apps/tripbot/jobs/seed.yaml -n stage-1
+      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |

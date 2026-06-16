@@ -1,9 +1,8 @@
 # KEEP-IN-SYNC: terraform/{stage-1,prod-1}/providers.tf
 #
-# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
-# until the modules refactor lands (vault/infra/TODO.md). Any structural
-# change here SHOULD be mirrored to the sibling file unless the divergence
-# is the whole point of the change.
+# Stage-1 and prod-1 are intentionally near-identical until they're refactored
+# into shared modules. Any structural change here SHOULD be mirrored to the
+# sibling file unless the divergence is the whole point of the change.
 
 provider "aws" {
   alias  = "stage_1"

@@ -1,0 +1,390 @@
+{
+  "title": "06 — Twitch Chat Activity",
+  "uid": "twitch-chat-activity",
+  "tags": ["tripbot", "product", "twitch"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+
+  "templating": { "list": [ { "name": "platform", "label": "Platform", "type": "query", "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" }, "query": "label_values(target_info{service_namespace=\"tripbot\"}, service_platform)", "current": { "text": "All", "value": "$__all" }, "includeAll": true, "allValue": ".*", "multi": true, "refresh": 2, "sort": 1 }, { "name": "deployment_environment", "type": "query", "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" }, "query": "label_values(target_info{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}, deployment_environment)", "current": { "text": "prod-1", "value": "prod-1" }, "includeAll": true, "multi": false, "refresh": 2, "sort": 1 } ] },"panels": [
+    {
+      "id": 0,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "mode": "markdown",
+        "content": "These metrics populate when tripbot is logged into Twitch IRC and chat messages are flowing. If panels look empty, check `kubectl logs deploy/tripbot | grep -i twitch` — `login authentication failed` means the Twitch creds need refreshing. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate, `twitch_helix_errors_total{endpoint,status_code}` for silent-eviction-class incidents (see [tripbot#530](https://github.com/adanalife/tripbot/pull/530) for context). **Chat feed row** (added 2026-05-15): each PRIVMSG arrives as a Loki log record under `{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Subscribers",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 3, "w": 4, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (twitch_subscribers_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Followers",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 4, "y": 3, "w": 4, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (twitch_followers_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Messages / minute",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 8, "y": 3, "w": 4, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Commands / minute",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 3, "w": 4, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_commands_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Messages (24h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 16, "y": 3, "w": 4, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_chat_messages_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[24h]))" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Commands (24h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 20, "y": 3, "w": 4, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_chat_commands_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[24h]))" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Subscribers & followers over time",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (twitch_followers_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "followers [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment) (twitch_subscribers_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "subscribers [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true } }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Chat messages over time",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_chat_messages_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "msgs / min [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Commands over time (top 10)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, sum by (command, deployment_environment) (rate(tripbot_chat_commands_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m]))) * 60", "legendFormat": "{{command}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 50, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Top commands (1h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "topk(15, sum by (command, deployment_environment) (increase(tripbot_chat_commands_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[1h])))", "legendFormat": "{{command}} [{{deployment_environment}}]" }
+      ],
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Operations",
+      "gridPos": { "x": 0, "y": 35, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Events / min (login + logout)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 36, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_events_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Scoreboard writes / min",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 36, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Helix errors (5m)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 36, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(twitch_helix_errors_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m]))" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Command p95 (all)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 36, "w": 6, "h": 5 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))" , "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Command latency (p50 / p95 / p99)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 41, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50 [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99 [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Command p95 by command (top 10)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 41, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, histogram_quantile(0.95, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))))", "legendFormat": "{{command}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Login / logout rate",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 49, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (event, deployment_environment) (rate(tripbot_events_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{event}} / min [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Helix errors by endpoint and status",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 49, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (endpoint, status_code, deployment_environment) (rate(twitch_helix_errors_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status_code}}) [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Scoreboard writes by scoreboard",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 57, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (scoreboard, deployment_environment) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{scoreboard}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 21,
+      "type": "logs",
+      "title": "Chat feed (live)",
+      "description": "Twitch chat messages as they arrive, rendered as `username: message` for live-chat scannability. Emitted by pkg/chatbot/log/log.go as OTel log records under scope_name=\"twitch-chat\"; twitch.user and twitch.channel arrive as structured metadata.",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | service_platform=~\"$platform\" | scope_name=\"twitch-chat\" | line_format \"{{ __timestamp__ | date \\\"15:04:05\\\" }} {{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
+      ],
+      "options": {
+        "showTime": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "dedupStrategy": "none",
+        "enableLogDetails": false,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "showLogContextToggle": false
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Helix rate remaining",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(twitch_helix_rate_limit_remaining)"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 100,
+                "color": "yellow"
+              },
+              {
+                "value": 300,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Helix rate budget over time",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 65,
+        "w": 18,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(twitch_helix_rate_limit_remaining)",
+          "legendFormat": "remaining [{{deployment_environment}}]"
+        },
+        {
+          "refId": "B",
+          "expr": "max(twitch_helix_rate_limit_total)",
+          "legendFormat": "limit [{{deployment_environment}}]"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      }
+    }
+  ]
+}

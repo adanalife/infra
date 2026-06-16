@@ -43,8 +43,7 @@ data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
 
 # OTLP credentials for in-cluster OpenTelemetry exporters (prod tripbot,
 # vlc-server). Same shared Grafana Cloud stack as stage-1; the value held
-# here matches stage's container byte-for-byte. Per the
-# vault/decisions/observability-projects-by-component.md ADR, env separation
+# here matches stage's container byte-for-byte. Env separation
 # happens via deployment.environment on each event/metric/log, not via
 # duplicate access-policy tokens. Bootstrap = copy stage's value into prod's
 # container (see the Sentry block below for the for-loop pattern).
@@ -106,8 +105,7 @@ resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
 # Sentry
 # ============================================================================
 
-# Sentry DSNs for prod-1 tripbot + vlc-server. Per the
-# vault/decisions/observability-projects-by-component.md ADR, Sentry partitions
+# Sentry DSNs for prod-1 tripbot + vlc-server. Sentry partitions
 # by component (tripbot, vlc-server) with SENTRY_ENVIRONMENT distinguishing
 # stage from prod on the event itself — no separate prod projects.
 # Bootstrap = copy stage's values into prod's containers:
@@ -115,8 +113,7 @@ resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
 #     aws-vault exec "$profile" -- aws secretsmanager get-secret-value \
 #       --secret-id k8s/sentry-tripbot ...
 #   done
-# Verify cross-env parity with the SHA-256 hash check in
-# vault/tripbot/monitoring.md's Sentry section.
+# Verify cross-env parity by comparing SHA-256 hashes of the two envs' values.
 resource "aws_secretsmanager_secret" "sentry_tripbot" {
   name        = "k8s/sentry-tripbot"
   description = "Sentry DSN for the tripbot Go service. Consumed by pkg/errors via SENTRY_DSN env var."
@@ -151,8 +148,7 @@ resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
 
 # Twitch app credentials for prod-1 tripbot. Separate Twitch app from stage-1's
 # `tripbot-development` — likely `tripbot-production` once minted. Minting is
-# gated on the redirect-URI decision per vault/infra/TODO.md:54; container can
-# stay placeholder until then.
+# gated on the redirect-URI decision; container can stay placeholder until then.
 #
 # Bootstrap (once prod Twitch app exists):
 #   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
@@ -179,7 +175,6 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 # Google Maps API key for prod-1 tripbot. Separate key from stage-1's (same
 # GCP project, distinct API keys) so a leak in one env doesn't compromise the
 # other. Restricted to the Geocoding + Maps JavaScript APIs.
-# See vault/tripbot/credentials.md for minting / rotation.
 #
 # Bootstrap:
 #   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
@@ -192,6 +187,41 @@ resource "aws_secretsmanager_secret" "tripbot_google_maps_api_key" {
 
 resource "aws_secretsmanager_secret_version" "tripbot_google_maps_api_key" {
   secret_id     = aws_secretsmanager_secret.tripbot_google_maps_api_key.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
+# YouTube
+# ============================================================================
+
+# YouTube OAuth client credentials (Web-application client in the tripbot-prod
+# GCP project) for the prod tripbot-youtube platform instance. The OAuth client
+# is console-created — terraform can't manage user-consent OAuth clients (see
+# google.tf header). One SM secret holding YOUTUBE_CLIENT_ID +
+# YOUTUBE_CLIENT_SECRET; YOUTUBE_CHANNEL_ID should be included in prod to pin
+# the bot to the production channel identity (so a token minted against the
+# test channel can't be stored — pkg/youtube treats the pin as optional).
+#
+# Materializes into the tripbot-youtube-creds k8s Secret via an ExternalSecret
+# emitted by the cdk8s Tripbot construct when the env's platforms include
+# youtube, envFrom'd into the tripbot-youtube Deployment. Container can stay
+# placeholder until the prod GCP OAuth client is minted.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/youtube-creds \
+#     --secret-string '{"YOUTUBE_CLIENT_ID":"...","YOUTUBE_CLIENT_SECRET":"...","YOUTUBE_CHANNEL_ID":"..."}'
+resource "aws_secretsmanager_secret" "tripbot_youtube_creds" {
+  name        = "k8s/tripbot/youtube-creds"
+  description = "YouTube OAuth client credentials for tripbot (prod-1). Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID. Consumed by pkg/youtube (live-chat OAuth flow)."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_youtube_creds" {
+  secret_id     = aws_secretsmanager_secret.tripbot_youtube_creds.id
   secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
 
   lifecycle {
@@ -216,25 +246,26 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
 }
 
 # ============================================================================
-# Discord alerts webhook — SHARED VALUE with stage-1/discord-alerts-webhook
+# Discord alerts webhook — SHARED VALUE with the stage account
 # ============================================================================
 #
-# The same Discord webhook URL is stored in BOTH AWS accounts because the two
-# consumers live in different accounts and can't cross-read:
-#   - prod (this file, k8s/tripbot/discord-alerts-webhook) — consumed at
-#     runtime by tripbot's reportCmd via the tripbot-discord-alerts-webhook
-#     ExternalSecret in k8s/apps/tripbot/base/.
-#   - stage (stage-1/secrets.tf, stage-1/discord-alerts-webhook) — consumed
-#     terraform-side by grafana_contact_point in grafana-alerts.tf.
+# The same Discord webhook URL is stored in BOTH AWS accounts under the same SM
+# name (k8s/tripbot/discord-alerts-webhook) because the consumers live in
+# different accounts and can't cross-read:
+#   - prod (this file) — consumed at runtime by tripbot's reportCmd via the
+#     tripbot-discord-alerts-webhook ExternalSecret in k8s/apps/tripbot/base/.
+#   - stage (stage-1/secrets.tf) — same SM name, consumed by both that
+#     ExternalSecret (tripbot !report) AND grafana_contact_point in
+#     grafana-alerts.tf (terraform-side infra alerts).
 #
 # Populate BOTH with the same URL after `task tf:{stage,prod}:apply`:
 #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id stage-1/discord-alerts-webhook --secret-string '<URL>'
+#     --secret-id k8s/tripbot/discord-alerts-webhook --secret-string '<URL>'
 #   aws-vault exec adanalife-prod  -- aws secretsmanager put-secret-value \
 #     --secret-id k8s/tripbot/discord-alerts-webhook --secret-string '<URL>'
 resource "aws_secretsmanager_secret" "discord_alerts_webhook" {
   name        = "k8s/tripbot/discord-alerts-webhook"
-  description = "Discord webhook for tripbot reportCmd. Same value as stage-1/discord-alerts-webhook in adanalife-stage."
+  description = "Discord webhook for tripbot reportCmd. Same value as k8s/tripbot/discord-alerts-webhook in adanalife-stage."
 }
 
 resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
@@ -245,9 +276,53 @@ resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
   }
 }
 
+# Discord bot token for the production tripbot Discord session (pkg/discord).
+# Consumed at runtime via the tripbot-discord-bot-token ExternalSecret in
+# k8s/apps/tripbot/base/. pkg/discord skips startup cleanly while this is
+# the placeholder string, so the bot stays gated off after this resource
+# lands and only flips on after `aws secretsmanager put-secret-value` and
+# setting DISCORD_GUILD_ID in the prod ConfigMap.
+resource "aws_secretsmanager_secret" "tripbot_discord_bot_token" {
+  name        = "k8s/tripbot/discord-bot-token"
+  description = "Discord bot token for the production tripbot Discord session."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_discord_bot_token" {
+  secret_id     = aws_secretsmanager_secret.tripbot_discord_bot_token.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # ============================================================================
 # CI lifecycle grants
 # ============================================================================
+
+# ============================================================================
+# tripbot-console
+# ============================================================================
+
+# GHCR pull token for the private tripbot-console image. The console repo is
+# private, so its image is too; ESO renders this into the `ghcr-pull`
+# dockerconfigjson Secret each env's console Deployment pulls through.
+# Bootstrap (fine-grained GitHub token, read:packages on the package):
+#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot-console/ghcr-pull-token \
+#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
+resource "aws_secretsmanager_secret" "tripbot_console_ghcr_pull" {
+  name        = "k8s/tripbot-console/ghcr-pull-token"
+  description = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_console_ghcr_pull" {
+  secret_id     = aws_secretsmanager_secret.tripbot_console_ghcr_pull.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
 
 # Bulk GetSecretValue for SM containers terraform refreshes during plan.
 # See stage-1/secrets.tf for the rationale and matching shape.
@@ -265,10 +340,22 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
+      aws_secretsmanager_secret.tripbot_youtube_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.postgres_backup_s3.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
+      aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
+      aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
+      # prod-only — Argo CD repo deploy key (defined in argocd.tf, which exists
+      # only in prod-1). Folded into this bulk read grant rather than a standalone
+      # policy because CITerraformRole is at AWS's hard cap of 10 managed policies
+      # per role; this is a read grant with the same actions as the rest of the
+      # list, so it's a natural fit. This is the one intended divergence from the
+      # KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has no Argo CD).
+      aws_secretsmanager_secret.argocd_repo_ssh_key.arn,
+      aws_secretsmanager_secret.argocd_repo_ssh_key_console.arn,
+      aws_secretsmanager_secret.argocd_repo_ssh_key_video_pipeline.arn,
     ]
   }
 }

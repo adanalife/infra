@@ -6,7 +6,7 @@
 # side resources (IAM users, providers, locals, dashboards) but no longer
 # declare SM containers themselves.
 #
-# Per-secret pattern (from vault/decisions/secrets-manager-for-tf-providers.md):
+# Per-secret pattern:
 #   - `aws_secretsmanager_secret`     — container, terraform-managed.
 #   - `aws_secretsmanager_secret_version` with `lifecycle.ignore_changes =
 #     [secret_string]` so the placeholder doesn't clobber out-of-band updates.
@@ -246,7 +246,7 @@ resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
 # tripbot config marks it `required:"true"`, so the bot won't boot without
 # it. Per-env keys (stage and prod are separate API keys in the same GCP
 # project, restricted to the Geocoding + Maps JavaScript APIs) for bounded
-# blast radius. See vault/tripbot/credentials.md for minting / rotation.
+# blast radius.
 #
 # Materializes into a k8s Secret via an ExternalSecret resource owned by
 # k8s/apps/tripbot/overlays/local/, envFrom'd into the Deployment.
@@ -262,6 +262,39 @@ resource "aws_secretsmanager_secret" "tripbot_google_maps_api_key" {
 
 resource "aws_secretsmanager_secret_version" "tripbot_google_maps_api_key" {
   secret_id     = aws_secretsmanager_secret.tripbot_google_maps_api_key.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
+# YouTube
+# ============================================================================
+
+# YouTube OAuth client credentials (Web-application client in the tripbot-stage
+# GCP project) for the tripbot-youtube platform instance. The OAuth client is
+# console-created — terraform can't manage user-consent OAuth clients (see
+# google.tf header). One SM secret holding YOUTUBE_CLIENT_ID +
+# YOUTUBE_CLIENT_SECRET; YOUTUBE_CHANNEL_ID may be added to the same JSON to pin
+# the bot to a specific channel identity (pkg/youtube treats it as optional).
+#
+# Materializes into the tripbot-youtube-creds k8s Secret via an ExternalSecret
+# emitted by the cdk8s Tripbot construct when the env's platforms include
+# youtube, envFrom'd into the tripbot-youtube Deployment.
+#
+# Bootstrap:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot/youtube-creds \
+#     --secret-string '{"YOUTUBE_CLIENT_ID":"...","YOUTUBE_CLIENT_SECRET":"..."}'
+resource "aws_secretsmanager_secret" "tripbot_youtube_creds" {
+  name        = "k8s/tripbot/youtube-creds"
+  description = "YouTube OAuth client credentials for tripbot (stage-1). Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID. Consumed by pkg/youtube (live-chat OAuth flow)."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_youtube_creds" {
+  secret_id     = aws_secretsmanager_secret.tripbot_youtube_creds.id
   secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
 
   lifecycle {
@@ -296,27 +329,48 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
   depends_on = [aws_iam_role_policy_attachment.ci_terraform_twitch_stream_key_manage]
 }
 
-# ============================================================================
-# Discord alerts webhook — SHARED VALUE with k8s/tripbot/discord-alerts-webhook
-# ============================================================================
-#
-# The same Discord webhook URL is stored in BOTH AWS accounts because the two
-# consumers live in different accounts and can't cross-read:
-#   - stage (this file, stage-1/discord-alerts-webhook) — consumed
-#     terraform-side by grafana_contact_point in grafana-alerts.tf so the
-#     Grafana Cloud notification policy can route alerts to Discord.
-#   - prod (prod-1/secrets.tf, k8s/tripbot/discord-alerts-webhook) — consumed
-#     at runtime by tripbot's reportCmd via the tripbot-discord-alerts-webhook
-#     ExternalSecret in k8s/apps/tripbot/base/.
-#
-# Populate BOTH with the same URL after `task tf:{stage,prod}:apply`:
+# YouTube RTMPS ingest key for the semi-private staging channel (the YouTube
+# analog of adanalife_staging — its own "ADL Staging" Brand Account). Same shape
+# as k8s_obs_twitch_stream_key: container only, value seeded out-of-band, read at
+# runtime by ESO once obs-youtube streams (the k8s/obs/ name prefix is inside the
+# ESOSecretsReader read scope, k8s/*). CI lifecycle granted narrowly below.
+# Populate out-of-band (terraform-via-CI never sees the value):
 #   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id stage-1/discord-alerts-webhook --secret-string '<URL>'
-#   aws-vault exec adanalife-prod  -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/obs/youtube-stream-key --secret-string "$STREAM_KEY"
+# Get the key from YouTube Studio (the staging Brand Account) → Go live → Stream.
+# Container only — keeping the version out of terraform state means CI never
+# refreshes it (no GetSecretValue grant required) and a CITerraformRole
+# compromise can't read the stream key.
+resource "aws_secretsmanager_secret" "k8s_obs_youtube_stream_key" {
+  name        = "k8s/obs/youtube-stream-key"
+  description = "YouTube RTMPS stream key for the staging channel. Consumed by OBS via ESO. Rotate from YouTube Studio, then put-secret-value here."
+
+  depends_on = [aws_iam_role_policy_attachment.ci_terraform_youtube_stream_key_manage]
+}
+
+# ============================================================================
+# Discord alerts webhook
+# ============================================================================
+#
+# One webhook URL, one SM container, two consumers in this account:
+#   - Grafana Cloud contact point (grafana-alerts.tf, terraform-side) — routes
+#     infra monitoring alerts to Discord. Reads the value at plan via the data
+#     source below.
+#   - tripbot's !report command (pkg/chatbot reportCmd) — posts viewer reports
+#     to Discord at runtime, via the tripbot-discord-alerts-webhook ExternalSecret
+#     in k8s/apps/tripbot/base/ (shared across all envs).
+#
+# Named under k8s/* so in-cluster ESO can read it (ESO's read scope is k8s/*);
+# terraform reads it too via the ci_terraform_secrets_read grant below. The same
+# value also lives at k8s/tripbot/discord-alerts-webhook in adanalife-prod
+# (prod-1/secrets.tf) — separate account, can't cross-read.
+#
+# Populate after `task tf:stage:apply`:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
 #     --secret-id k8s/tripbot/discord-alerts-webhook --secret-string '<URL>'
 resource "aws_secretsmanager_secret" "discord_alerts_webhook" {
-  name        = "stage-1/discord-alerts-webhook"
-  description = "Discord webhook for Grafana Cloud contact point. Same value as k8s/tripbot/discord-alerts-webhook in adanalife-prod."
+  name        = "k8s/tripbot/discord-alerts-webhook"
+  description = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command. Same value as k8s/tripbot/discord-alerts-webhook in adanalife-prod."
 }
 
 resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
@@ -332,9 +386,127 @@ data "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
   depends_on = [aws_secretsmanager_secret_version.discord_alerts_webhook]
 }
 
+# ntfy webhook URL for the Grafana independent critical-alert contact point.
+# Receives severity=critical firings (escalation) + the notification-delivery-
+# failure alert, so a dead Discord webhook can't black-hole the page. Grafana-
+# only (deliberately NOT under k8s/* — in-cluster ESO has no reason to read it).
+# Populate after `task tf:stage:apply`:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/ntfy-critical-webhook --secret-string '<URL>'
+resource "aws_secretsmanager_secret" "ntfy_critical_webhook" {
+  name        = "stage-1/ntfy-critical-webhook"
+  description = "ntfy webhook URL for the Grafana independent critical-alert contact point."
+}
+
+resource "aws_secretsmanager_secret_version" "ntfy_critical_webhook" {
+  secret_id     = aws_secretsmanager_secret.ntfy_critical_webhook.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "ntfy_critical_webhook" {
+  secret_id  = aws_secretsmanager_secret.ntfy_critical_webhook.id
+  depends_on = [aws_secretsmanager_secret_version.ntfy_critical_webhook]
+}
+
+# healthchecks.io ping URL for the Grafana alerting deadman switch. An always-
+# firing rule pings this on the repeat interval; if the pings stop (Grafana
+# Cloud outage, eval engine stuck, egress dead, API token lapsed), healthchecks
+# notifies via its own independent channel — the one signal that survives the
+# whole Grafana pipeline being down. Grafana-only. Populate after apply:
+#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
+#     --secret-id stage-1/healthchecks-deadman-ping --secret-string '<URL>'
+resource "aws_secretsmanager_secret" "healthchecks_deadman_ping" {
+  name        = "stage-1/healthchecks-deadman-ping"
+  description = "healthchecks.io ping URL for the Grafana alerting deadman switch."
+}
+
+resource "aws_secretsmanager_secret_version" "healthchecks_deadman_ping" {
+  secret_id     = aws_secretsmanager_secret.healthchecks_deadman_ping.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+data "aws_secretsmanager_secret_version" "healthchecks_deadman_ping" {
+  secret_id  = aws_secretsmanager_secret.healthchecks_deadman_ping.id
+  depends_on = [aws_secretsmanager_secret_version.healthchecks_deadman_ping]
+}
+
+# Discord bot token for the staging tripbot Discord session (pkg/discord).
+# Consumed at runtime via the tripbot-discord-bot-token ExternalSecret in
+# k8s/apps/tripbot/base/; pkg/discord skips startup cleanly when this is
+# still the placeholder string, so leaving it unpopulated keeps the bot
+# gated off without blocking apply.
+resource "aws_secretsmanager_secret" "tripbot_discord_bot_token" {
+  name        = "k8s/tripbot/discord-bot-token"
+  description = "Discord bot token for the staging tripbot Discord session."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_discord_bot_token" {
+  secret_id     = aws_secretsmanager_secret.tripbot_discord_bot_token.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # ============================================================================
 # CI lifecycle grants
 # ============================================================================
+
+# ============================================================================
+# tripbot-console
+# ============================================================================
+
+# GHCR pull token for the private tripbot-console image. The console repo is
+# private, so its image is too; ESO renders this into the `ghcr-pull`
+# dockerconfigjson Secret each env's console Deployment pulls through.
+# Bootstrap (fine-grained GitHub token, read:packages on the package):
+#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/tripbot-console/ghcr-pull-token \
+#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
+resource "aws_secretsmanager_secret" "tripbot_console_ghcr_pull" {
+  name        = "k8s/tripbot-console/ghcr-pull-token"
+  description = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
+}
+
+resource "aws_secretsmanager_secret_version" "tripbot_console_ghcr_pull" {
+  secret_id     = aws_secretsmanager_secret.tripbot_console_ghcr_pull.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ============================================================================
+# video-pipeline
+# ============================================================================
+
+# GHCR pull token for the private video-pipeline image (the dashcam-cv embed
+# workload). The repo is private, so its image is too; ESO renders this into the
+# `ghcr-pull` dockerconfigjson Secret the workload's pods pull through.
+# Bootstrap (fine-grained GitHub token, read:packages on the package):
+#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/video-pipeline/ghcr-pull-token \
+#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
+resource "aws_secretsmanager_secret" "video_pipeline_ghcr_pull" {
+  name        = "k8s/video-pipeline/ghcr-pull-token"
+  description = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
+}
+
+resource "aws_secretsmanager_secret_version" "video_pipeline_ghcr_pull" {
+  secret_id     = aws_secretsmanager_secret.video_pipeline_ghcr_pull.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
 
 # Allow CITerraformRole to read the SM secrets that terraform itself touches
 # at plan time. ReadOnlyAccess (already attached) excludes
@@ -361,9 +533,15 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
+      aws_secretsmanager_secret.tripbot_youtube_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
       aws_secretsmanager_secret.tripbot_db_credentials.arn,
       aws_secretsmanager_secret.discord_alerts_webhook.arn,
+      aws_secretsmanager_secret.ntfy_critical_webhook.arn,
+      aws_secretsmanager_secret.healthchecks_deadman_ping.arn,
+      aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
+      aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
+      aws_secretsmanager_secret.video_pipeline_ghcr_pull.arn,
     ]
   }
 }
@@ -412,6 +590,33 @@ resource "aws_iam_policy" "ci_terraform_twitch_stream_key_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_twitch_stream_key_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_twitch_stream_key_manage.arn
+}
+
+# k8s/obs/youtube-stream-key
+data "aws_iam_policy_document" "ci_terraform_youtube_stream_key_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UntagResource",
+      "secretsmanager:UpdateSecret",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/obs/youtube-stream-key-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_youtube_stream_key_manage" {
+  name        = "AllowCITerraformManageStage1YoutubeStreamKey"
+  description = "Lifecycle access for CITerraformRole to the k8s/obs/youtube-stream-key SM secret in stage-1 (container only — value seeded out-of-band)."
+  policy      = data.aws_iam_policy_document.ci_terraform_youtube_stream_key_manage.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_youtube_stream_key_manage" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_youtube_stream_key_manage.arn
 }
 
 # k8s/grafana-cloud-metrics-write

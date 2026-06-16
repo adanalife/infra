@@ -1,0 +1,80 @@
+# k3d cluster config for the local `development` environment.
+#
+# Bring up with:  task k8s:dev:cluster:up
+# Tear down with: task k8s:dev:cluster:down
+#
+# Cluster name is env-based and machine-independent: `adanalife-dev` on
+# every laptop. (This supersedes the old host-based scheme — `adanalife-bees`
+# / `adanalife-empty` — which baked a specific machine into the tooling and
+# was confusing on a fresh box. A laptop dev cluster doesn't flip envs, so a
+# fixed `adanalife-dev` name + context is clearer and portable.)
+#
+# This is the only k3d config for development — it mounts the committed
+# example video and is what `task k8s:dev:cluster:up` always uses. To
+# stream a real dashcam directory instead, pass DASHCAM_NAS=<host path>
+# to cluster:up; the task adds a :ro `/host/nas-dashcam` bind-mount via a
+# `--volume` CLI flag (k3d merges it with this config), keeping the real
+# footage path out of git. (Note: the legacy development-nas overlay that
+# consumed this mount is gone; cdk8s dev doesn't read it yet.)
+#
+# Host ports 9080/9443 are bound to the cluster's load-balancer so that
+# *.dev.whereisdana.today URLs (managed by external-dns in development
+# mode) can hit traefik directly.
+# High ports (9080/9443) instead of standard 80/443 because Colima
+# can't forward privileged ports (<1024) to the host without sudo;
+# test URLs include the port suffix until a router/CDN translates
+# 443 → host:9443. Other ports (VNC, RTSP, traefik dashboard, etc.)
+# are reachable ad-hoc via `kubectl port-forward svc/<name> <local>:<remote>`.
+# Re-run `task k8s:dev:cluster:down && task k8s:dev:cluster:up` to apply
+# port-mapping changes to an existing cluster.
+#
+# Notes for future EKS port:
+#   - Helm-installed traefik (ingress) IS portable — same Ingress
+#     manifests will work on prod traefik unchanged. See k8s/traefik/.
+#   - Bundled servicelb / klipper-lb is k3d/k3s-only. On EKS,
+#     LoadBalancer services are fulfilled by AWS ELB instead. The
+#     Service manifests don't change; only the implementation underneath
+#     does.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: adanalife-dev
+
+servers: 1
+agents: 0
+
+# Mount host paths into the k3d node so pod hostPath volumes can reach
+# them. k3d nodes are themselves containers, so without this the host
+# filesystem isn't visible to pods.
+#
+# The development-nas overlay reads from an additional `/host/nas-dashcam`
+# mount. That entry is omitted here because the source path is
+# host-specific; it's added at create time via `task k8s:dev:cluster:up
+# DASHCAM_NAS=<host path>` when you intend to apply the development-nas
+# overlay.
+volumes:
+  - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
+    nodeFilters:
+      - server:*
+
+# Disable k3s's bundled Traefik. We install traefik/traefik via helm
+# in `task k8s:dev:platform:up` instead, so the full chart's CRDs (default
+# IngressClass, dashboard wiring, prometheus metrics) are available
+# without the HelmChartConfig customization dance the bundled chart
+# requires.
+options:
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+
+# Map host ports onto the bundled klipper-lb so external traffic can
+# reach traefik. See header comment for port-choice rationale.
+ports:
+  - port: 9080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 9443:443
+    nodeFilters:
+      - loadbalancer

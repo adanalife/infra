@@ -11,7 +11,6 @@
 # single mini-PC Talos cluster, which stage-1 will later co-tenant rather than
 # run its own control plane.
 #
-# Workflow + bootstrap order: vault/infra/adanalife-minipc-bootstrap.md Phase 4.
 # Encrypt/decrypt via `task talos:minipc:secrets:{encrypt,decrypt}`.
 
 resource "aws_kms_key" "sops_talos_pki" {

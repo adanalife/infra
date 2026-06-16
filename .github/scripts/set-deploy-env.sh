@@ -11,6 +11,13 @@ case "$1" in
     AWS_ACCESS_KEY_ID="${CI_CORE_AWS_ACCESS_KEY_ID}"
     AWS_SECRET_ACCESS_KEY="${CI_CORE_AWS_SECRET_ACCESS_KEY}"
     ;;
+  terraform/platform)
+    # platform is env-agnostic and has no account of its own; its state/SM
+    # plumbing rides in the org-global core account
+    DEPLOY_ENV=platform
+    AWS_ACCESS_KEY_ID="${CI_CORE_AWS_ACCESS_KEY_ID}"
+    AWS_SECRET_ACCESS_KEY="${CI_CORE_AWS_SECRET_ACCESS_KEY}"
+    ;;
   terraform/prod-1)
     DEPLOY_ENV=prod
     AWS_ACCESS_KEY_ID="${CI_PROD_AWS_ACCESS_KEY_ID}"

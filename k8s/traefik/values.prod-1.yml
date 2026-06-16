@@ -1,16 +1,15 @@
 # Prod-1 traefik override — layered on top of values.yml via
 # `helm upgrade --install ... -f values.yml -f values.prod-1.yml`.
-# Stage-1 (bees / k3d) uses just values.yml.
+# dev (k3d) uses just values.yml.
 #
 # Talos has no LoadBalancer controller of its own; hostNetwork binds
 # traefik directly to the node's IP on 80/443. MetalLB is the
-# eventual alternative once a second node lands — see
-# vault/infra/TODO.md. Trade-offs of this shape:
+# eventual alternative once a second node lands. Trade-offs of this shape:
 #   - single replica only (host ports can't coexist)
 #   - second node needs revisiting (MetalLB or DaemonSet)
 #   - traefik Service EXTERNAL-IP stays <pending> (no controller fills it)
 #
-# TODO[vault/infra/TODO.md#traefik-non-root]: drop runAsUser: 0 +
+# TODO: drop runAsUser: 0 +
 # NET_BIND_SERVICE — instead route inbound :80/:443 through the
 # router's port-forward to high ports on the node, run traefik
 # unprivileged.
@@ -52,30 +51,30 @@ securityContext:
 service:
   type: LoadBalancer
 
-# Make external-dns able to publish a target for every traefik-managed Ingress
-# WITHOUT a per-Ingress `external-dns.alpha.kubernetes.io/target` annotation.
-# external-dns reads its target from Ingress.status.loadBalancer.ingress[].ip;
-# something has to write that. values.yml enables `publishedService`, which
-# copies it from the traefik Service's status — but on the minipc the Service
-# is LoadBalancer with EXTERNAL-IP <pending> forever (no LB controller; traffic
-# flows through hostNetwork above), so there's nothing to copy and the status
-# stays empty. Point traefik at the node's LAN IP directly instead (via
-# ingressEndpoint.ip): it then stamps that IP into every managed Ingress's
-# status, and external-dns picks it up natively.
+# Stamp a stable ingress endpoint into every traefik-managed Ingress's
+# status.loadBalancer: the LAN pointer minipc.whereisdana.today (a CNAME in the
+# whereisdana.today apex zone — see terraform/core/minipc-dns.tf).
 #
-# `ip` and `publishedService` are mutually exclusive ingress-endpoint sources,
-# so disable the (no-op here) publishedService copy inherited from values.yml.
-# Dev/k3d keeps publishedService (klipper-lb fills the Service IP there) by not
-# layering this file.
+# This is now COSMETIC: external-dns runs with --force-default-targets (see
+# k8s/external-dns/prod-1/config.yml), so it ignores whatever traefik stamps and
+# always publishes the same pointer. We set the matching stable hostname here so
+# the Ingress ADDRESS column agrees and nothing carries the node's raw IP. (It
+# used to be the node's LAN IP, discovered from the InternalIP and written to a
+# gitignored values.local.yml — which silently grabbed the Tailscale interface
+# once; the stable pointer removes that whole per-machine discovery.)
 #
-# ingressEndpoint.ip itself is NOT pinned here — the node's LAN IP is
-# host-specific, so it's discovered from the node's InternalIP and written to
-# the gitignored k8s/traefik/values.local.yml by `task k8s:prod:bootstrap-secrets`,
-# layered onto this file at helm-install time. See values.local.yml.example.
+# `hostname` and `publishedService` are mutually exclusive ingress-endpoint
+# sources, so disable the (no-op here) publishedService copy inherited from
+# values.yml — on the minipc the traefik Service is LoadBalancer with EXTERNAL-IP
+# <pending> forever (no LB controller; traffic flows through hostNetwork above),
+# so it would copy nothing anyway. Dev/k3d keeps publishedService (klipper-lb
+# fills the Service IP there) by not layering this file.
 providers:
   kubernetesIngress:
     publishedService:
       enabled: false
+    ingressEndpoint:
+      hostname: minipc.whereisdana.today
 
 # Override the chart default of 8000/8443 to bind real 80/443 under
 # hostNetwork.

@@ -14,7 +14,7 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
         args: [--allow-multiple-documents]
-      - id: check-merge-conflict
+      - id: check-json
       - id: check-executables-have-shebangs
 
       # Cross platform
@@ -27,10 +27,52 @@ repos:
         args: ['--allow-missing-credentials']
       - id: detect-private-key
 
-      # - id: debug-statements
-      # - id: double-quote-string-fixer
-      # - id: name-tests-test
- #
+  # Python lint + format for the cdk8s authoring layer. Mirrors super-linter's
+  # PYTHON_RUFF / PYTHON_RUFF_FORMAT so the same issues are caught locally before
+  # push — both point at .github/linters/.ruff.toml (line-length 88) so the two
+  # agree. rev pinned to super-linter's ruff (0.15.8). Only cdk8s/ has Python.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.8
+    hooks:
+      - id: ruff-check
+        args: [--config, .github/linters/.ruff.toml]
+        files: ^cdk8s/.*\.py$
+      - id: ruff-format
+        args: [--config, .github/linters/.ruff.toml]
+        files: ^cdk8s/.*\.py$
+
+  # Markdown lint. Mirrors super-linter's MARKDOWN pass (same
+  # .github/linters/.markdown-lint.yml config) so doc nits like MD031
+  # (blanks-around-fences) are caught locally before push, not in CI.
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        args: [--config, .github/linters/.markdown-lint.yml]
+
+  # Secrets: broad scan layered on top of the narrow detect-aws-credentials
+  # / detect-private-key checks above. Sub-second. Uses the same allowlist as
+  # super-linter's GITLEAKS pass (.github/linters/.gitleaks.toml) so the two
+  # agree on what's a false positive.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: [--config, .github/linters/.gitleaks.toml]
+
+  # GitHub Actions workflow linting — fast, and catches the kind of
+  # workflow breakage super-linter's actionlint pass would.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  # Shell script linting (bootstrap.sh, .github/scripts/, etc.).
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.105.0
     hooks:

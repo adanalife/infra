@@ -142,9 +142,7 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_ip_allow" {
   # keep plans clean; trade-off is `task stage:allowlist:add-current-ip`
   # no longer pushes allowlist edits via apply (Cloudflare-side
   # allowlist freezes at whatever was last applied). Acceptable
-  # because the tunnel is post-launch superseded by Tailscale and
-  # slated for removal — see the "Rip the Cloudflare Tunnel
-  # infrastructure" highpri TODO in vault/infra/TODO.md.
+  # because the tunnel is superseded by Tailscale and slated for removal.
   lifecycle {
     ignore_changes = [include]
   }

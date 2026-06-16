@@ -67,13 +67,17 @@ machine:
     net.ipv4.ip_forward: "1"
     net.ipv6.conf.all.forwarding: "1"
   # Extra cert SANs so kubectl/talosctl can reach the API by the node's Tailscale
-  # identity, not just 192.168.1.200 — works from any tailnet device with no
-  # subnet route, and survives the Maine move (the tailnet name/IP are
-  # location-independent; the LAN IP is not). machine.certSANs covers the Talos
-  # API (apid); cluster.apiServer.certSANs (below) covers kube-apiserver. The IP
-  # is the current tailscale0 address; the MagicDNS name is the stable anchor.
+  # identity or the stable LAN-DNS pointer, not just 192.168.1.200 — works from
+  # any tailnet device with no subnet route, and survives the Maine move (the
+  # tailnet name/IP and the LAN-DNS pointer are location-independent; the LAN IP
+  # is not). machine.certSANs covers the Talos API (apid); cluster.apiServer.certSANs
+  # (below) covers kube-apiserver. The IP is the current tailscale0 address; the
+  # MagicDNS name and minipc.whereisdana.today are the stable anchors.
+  # minipc.whereisdana.today is the same Route53 pointer the adanalife-rpi5
+  # worker uses as its control-plane endpoint (see worker.patch.yaml).
   certSANs:
     - adanalife-minipc.tail020deb.ts.net
+    - minipc.whereisdana.today
     - 100.71.27.106
   # Disk encryption DEFERRED (2026-05-20). TPM-sealed LUKS2 (systemDiskEncryption
   # with `tpm: {}`) requires a Talos SecureBoot image: it needs the PCR signing
@@ -83,7 +87,7 @@ machine:
   # — hit empirically on the first wipe. Re-add once we move to a SecureBoot
   # image + UEFI Secure Boot (+ key enrollment). Until then, at-rest protection
   # is physical security; the S3 postgres dump + the SOPS-stashed PKI are the
-  # recovery path. Follow-up tracked in vault/infra/TODO.md.
+  # recovery path.
 
 cluster:
   allowSchedulingOnControlPlanes: true
@@ -97,12 +101,15 @@ cluster:
   # explicitly so the dependency is visible.
   discovery:
     enabled: true
-  # kube-apiserver serving-cert SANs for Tailscale-native kubectl (see
-  # machine.certSANs above). Lets `server: https://adanalife-minipc.tail020deb.ts.net:6443`
-  # verify TLS from any tailnet device.
+  # kube-apiserver serving-cert SANs for Tailscale-native kubectl + the LAN-DNS
+  # pointer (see machine.certSANs above). Lets
+  # `server: https://adanalife-minipc.tail020deb.ts.net:6443` verify TLS from any
+  # tailnet device, and — load-bearing — lets the adanalife-rpi5 worker's kubelet
+  # verify the apiserver when it connects via https://minipc.whereisdana.today:6443.
   apiServer:
     certSANs:
       - adanalife-minipc.tail020deb.ts.net
+      - minipc.whereisdana.today
       - 100.71.27.106
 ---
 apiVersion: v1alpha1

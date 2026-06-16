@@ -18,11 +18,17 @@
 #   resource that XPU Manager (see intel-xpu-manager/prod-1/) claims to
 #   read GPU telemetry off all devices on the node.
 #
-#   `-shared-dev-num=4` tells the plugin to advertise 4 virtual instances
-#   of the single physical iGPU so multiple pods (OBS + vlc-server,
-#   plus future siblings) can each claim one and share the device.
-#   The Iris Xe handles concurrent VAAPI clients fine — desktop Linux
-#   runs Firefox + VLC + OBS sharing the same iGPU every day.
+#   `-shared-dev-num=8` advertises 8 virtual instances of the single
+#   physical iGPU so multiple pods (OBS + vlc-server in prod-1 and
+#   stage-1 twitch, plus stage-1's youtube pair — 6 steady-state
+#   claims) can share the device, with headroom for RollingUpdate
+#   rollouts that briefly surge a 7th or 8th pod alongside the
+#   existing claim. The Iris Xe handles concurrent VAAPI clients
+#   fine — desktop Linux runs Firefox + VLC + OBS sharing the same
+#   iGPU every day. Was 4 (= 1+1+1+1 with no surge headroom; the
+#   2026-05-28 vlc-server rollout stuck Pending on the missing 5th
+#   slot), then 6; bumped to 8 when stage's youtube platform stack
+#   (vlc-youtube + obs-youtube) added claims 5-6.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -40,4 +46,4 @@ patches:
         path: /spec/template/spec/containers/0/args
         value:
           - -enable-monitoring
-          - -shared-dev-num=4
+          - -shared-dev-num=8

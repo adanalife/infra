@@ -53,6 +53,15 @@ resource "grafana_folder" "tripbot" {
   title = "TripBot"
 }
 
+# Experimental dashboards that demo visualization techniques — heatmaps,
+# state timelines, Paretos, direct labeling, small multiples — on real
+# tripbot/vlc data. Once a technique earns its keep the panel is
+# promoted into one of the canonical dashboards in the TripBot folder
+# and the experiment retired.
+resource "grafana_folder" "lab" {
+  title = "Lab"
+}
+
 # Each dashboard JSON file uses sentinel datasource UIDs that the
 # `dashboard()` helper below swaps for the real per-stack UIDs at apply
 # time. Sentinels (not Grafana's own ${DS_FOO} __inputs syntax) so
@@ -63,21 +72,25 @@ resource "grafana_folder" "tripbot" {
 #   __DS_LOKI__        →  loki DS uid
 #   __DS_TEMPO__       →  tempo DS uid
 locals {
+  # Filenames carry no sort-order number — ordering lives in each dashboard's
+  # title ("NN — Name"), which is what Grafana sorts on. This keeps a reorder
+  # to a one-line title edit instead of a file rename + state move. Listed
+  # here in display order for readability only (a set is unordered).
   dashboard_files = toset([
-    "00-launch-stream-at-a-glance",
-    "01-stream-health-vlc-server-to-obs",
-    "02-service-health-tripbot",
-    "03-service-health-vlc-server",
-    "04-service-health-onscreens-server",
-    "05-twitch-chat-activity",
-    "06-logs-and-errors",
-    "07-go-runtime",
-    "08-postgres-pool",
-    "09-tripbot-to-vlc-traffic",
-    "10-http-routes",
-    "11-application-latency-commands-and-db",
-    "12-platform-services",
-    "13-igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "launch-stream-at-a-glance",
+    "stream-health-vlc-server-to-obs",
+    "service-health-tripbot",
+    "service-health-vlc-server",
+    "service-health-onscreens-server",
+    "igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "twitch-chat-activity",
+    "logs-and-errors",
+    "go-runtime",
+    "postgres-pool",
+    "tripbot-to-vlc-traffic",
+    "http-routes",
+    "application-latency-commands-and-db",
+    "platform-services",
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}
@@ -101,6 +114,27 @@ resource "grafana_dashboard" "tripbot" {
   # of the full JSON diff — the dashboards are dashboards-as-code from the
   # files in ./grafana-dashboards/, and the noisy multi-thousand-line diffs
   # drown out everything else in the plan.
+  config_json = sensitive(replace(
+    replace(
+      replace(
+        file("${path.module}/grafana-dashboards/${each.key}.json"),
+        "__DS_PROMETHEUS__", local.dashboard_substitutions["__DS_PROMETHEUS__"]
+      ),
+      "__DS_LOKI__", local.dashboard_substitutions["__DS_LOKI__"]
+    ),
+    "__DS_TEMPO__", local.dashboard_substitutions["__DS_TEMPO__"]
+  ))
+}
+
+locals {
+  lab_dashboard_files = toset([
+    "visualization-lab",
+  ])
+}
+
+resource "grafana_dashboard" "lab" {
+  for_each = local.lab_dashboard_files
+  folder   = grafana_folder.lab.uid
   config_json = sensitive(replace(
     replace(
       replace(

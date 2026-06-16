@@ -1,0 +1,12 @@
+# development NATS overrides. Layers on top of k8s/nats/values.yml.
+#
+# Tiny footprint. The k3d cluster is laptop-resident, so even
+# smaller than the mini-PC envs.
+
+container:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
