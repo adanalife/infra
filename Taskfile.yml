@@ -1450,14 +1450,16 @@ tasks:
   # when iterating without applying the local overlay). Backgrounded
   # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
   # find it. Re-running :up overwrites the PID file; if :down can't
-  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs"`.
+  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs-"`.
   obs:vnc:up:
-    desc: start a local kubectl port-forward to OBS VNC at localhost:5902
+    desc: start a local kubectl port-forward to OBS VNC at localhost:5902 (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # PID capture must happen in the same shell as the backgrounded process —
       # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/obs 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      - kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
       - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
 
   obs:vnc:down:
@@ -1473,52 +1475,58 @@ tasks:
         fi
 
   obs:browser:refresh:
-    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently)
+    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently; override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
 
   obs:media:restart:
-    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart
+    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs >/dev/null 2>&1
-        msg: "obs Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-media-restart
 
   vlc:vnc:up:
-    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903
+    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
+    vars:
+      PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # PID capture must happen in the same shell as the backgrounded process —
       # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/vlc-server 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
+      - kubectl port-forward svc/vlc-{{.PLATFORM}} 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
       - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
 
   vlc:vnc:down:
