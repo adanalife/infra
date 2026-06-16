@@ -112,7 +112,7 @@ tasks:
   # tripbot repo's cdk8s; diff them there (`task cdk8s:{stage,prod}:diff` in
   # ~/adanalife/tripbot). infra keeps only the data + supporting + dashcam units.
 
-  # cdk8s:dev:apply — bootstrap the development (k3d/bees) DATA unit directly.
+  # cdk8s:dev:apply — bootstrap the development (k3d) DATA unit directly.
   # dev's apps + supporting + identity are Argo-managed (the k3d Argo reads the
   # tripbot repo @ develop); this just lays down the postgres + SecretStore unit
   # that Argo's app sync depends on, before/independently of an Argo bootstrap.
@@ -123,11 +123,11 @@ tasks:
     dir: cdk8s
     deps: [cdk8s:synth]
     preconditions:
-      # Guard: bees (k3d) dev cluster only — never the minipc (Talos). Applying
+      # Guard: k3d dev cluster only — never the minipc (Talos). Applying
       # dev manifests against the minipc would collide with the live stage/prod
       # workloads. (dir: cdk8s, so reach back up to the repo-root kubeconfig.)
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
-        msg: "refusing: cdk8s:dev:apply must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
+        msg: "refusing: cdk8s:dev:apply must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
     cmds:
       - kubectl apply -f dist/development-data.k8s.yaml
 
@@ -348,19 +348,25 @@ tasks:
           --quiet
 
   # k3d cluster lifecycle. Tasks are env-prefixed (k8s:dev:* / k8s:prod:*)
-  # following the tf:stage:* / tf:prod:* pattern; the cluster name embedded
-  # in each k3d-config is host-based (adanalife-bees, adanalife-empty) so
-  # the cluster identity survives any future env-reassignment.
+  # following the tf:stage:* / tf:prod:* pattern. The cluster name embedded
+  # in k3d-config.yaml is env-based and machine-independent (adanalife-dev,
+  # context k3d-adanalife-dev) so the tooling is identical on any laptop —
+  # no host name (the old adanalife-bees) baked into the config.
   #
-  # Lifecycle verbs:
-  #   up      → create the cluster (first time)
-  #   down    → delete the cluster (full wipe)
-  #   stop    → suspend the cluster (containers down, definition + state preserved)
-  #   start   → resume a stopped cluster (counterpart to stop)
-  #   rebuild → up + platform:up + apply, the canonical "cold-start to fully
-  #             deployed" sequence; each step delegates to its canonical task
+  # These k8s:dev:cluster:* tasks are the low-level cluster primitives:
+  #   cluster:up    → create the k3d cluster (just the cluster, no platform/apps)
+  #   cluster:down  → delete the cluster (full wipe)
+  #   cluster:stop  → suspend (containers down, definition + state preserved)
+  #   cluster:start → resume a stopped cluster (counterpart to stop)
+  #
+  # Day-to-day you want the higher-level verbs that wrap these:
+  #   k8s:dev:up      → cluster:up + platform:up + sync (cold-start to running)
+  #   k8s:dev:down    → cluster:down
+  #   k8s:dev:deploy  → build + import a local image and run it (APP=<app> for one)
+  #   k8s:dev:sync    → re-sync Argo apps / revert a local image to CI :develop
+  #   k8s:dev:status  → pods + running image tags + Argo health
   k8s:dev:cluster:up:
-    desc: "create the local k3d cluster on bees (development) — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
+    desc: "create the local k3d dev cluster — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
     cmds:
       # Development plays the committed example video (mounted at
       # /host/dashcam) by default — the 99% case. To stream a real dashcam
@@ -373,64 +379,154 @@ tasks:
       - |
         if [ -n "{{.DASHCAM_NAS}}" ]; then
           echo "mounting dashcam: {{.DASHCAM_NAS}} -> /host/nas-dashcam (:ro)"
-          k3d cluster create -c k8s/k3d-config.bees.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
+          k3d cluster create -c k8s/k3d-config.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
         else
-          k3d cluster create -c k8s/k3d-config.bees.yaml
+          k3d cluster create -c k8s/k3d-config.yaml
         fi
 
   k8s:dev:cluster:down:
-    desc: tear down the local k3d cluster on bees (delete; use k8s:dev:cluster:stop to suspend without wipe)
+    desc: tear down the local k3d dev cluster (delete; use k8s:dev:cluster:stop to suspend without wipe)
     cmds:
-      - k3d cluster delete adanalife-bees
+      - k3d cluster delete adanalife-dev
 
   k8s:dev:cluster:stop:
-    desc: suspend the local k3d cluster on bees (containers down, cluster definition + state preserved)
+    desc: suspend the local k3d dev cluster (containers down, cluster definition + state preserved)
     cmds:
-      - k3d cluster stop adanalife-bees
+      - k3d cluster stop adanalife-dev
 
   k8s:dev:cluster:start:
-    desc: resume a stopped local k3d cluster on bees (counterpart to k8s:dev:cluster:stop)
+    desc: resume a stopped local k3d dev cluster (counterpart to k8s:dev:cluster:stop)
     cmds:
-      - k3d cluster start adanalife-bees
+      - k3d cluster start adanalife-dev
 
-  k8s:dev:cluster:rebuild:
-    desc: Full bees-cluster rebuild — cluster + platform helm charts (which triggers ESO bootstrap secrets as a dep) + cdk8s development app manifests. Each step is the canonical task; failures short-circuit the chain.
+  # The one-liner cold-start: create the cluster, install the platform stack +
+  # Argo CD (platform:up pulls in bootstrap-secrets as a dep), then Argo-sync
+  # the apps in dependency order. Each step is the canonical task; failures
+  # short-circuit the chain. Replaces the old cluster:rebuild (which ended in the
+  # now-superseded `cdk8s:dev:apply` — Argo owns the apps, so an imperative apply
+  # just fights it with an SSA field-ownership conflict).
+  k8s:dev:up:
+    desc: "cold-start the dev env from nothing: create cluster -> install platform + Argo -> sync apps"
+    aliases: ["k8s:dev:cluster:rebuild"]
     cmds:
       - task: k8s:dev:cluster:up
+        vars: { DASHCAM_NAS: '{{.DASHCAM_NAS}}' }
       - task: k8s:dev:platform:up
-      - task: cdk8s:dev:apply
+      - task: k8s:dev:sync
+
+  k8s:dev:down:
+    desc: "tear down the dev cluster (delegates to k8s:dev:cluster:down)"
+    cmds:
+      - task: k8s:dev:cluster:down
 
   # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
   # cluster — its lifecycle is talosctl wipe-and-rebuild. The k8s:prod:*
   # tasks below (bootstrap-secrets / platform:up / apply) target the live
   # Talos cluster; there is no k8s:prod:cluster:*.
 
-  k8s:import-images:
-    desc: build the tripbot/vlc/obs images and import them into the local cluster
+  # Build the dev app images locally, tag them :dev-local, and import them into
+  # the k3d dev cluster's image store. APP=tripbot|vlc|obs|onscreens builds just
+  # one; omit for all four. The committed manifests still pin CI's :develop so a
+  # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
+  # only for iterating on a LOCAL build.
+  k8s:dev:images:build:
+    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|vlc|obs|onscreens for one; default all four)"
     dir: ../tripbot
     cmds:
       # --project-directory + --env-file mirror bin/devenv so build contexts
       # resolve relative to the tripbot repo root and ${VAR} substitutions in
-      # the compose file pick up env.docker. Without these, compose resolves
-      # `context: .` against the compose file's dir and the build fails with
-      # `lstat .../infra/docker/infra: no such file or directory`.
-      #
-      # On arm64 hosts (Apple Silicon), layer docker-compose.arm64.yml so
-      # the OBS service builds from Dockerfile.arm64 (compiles OBS + CEF
-      # from source). Without it, the amd64 Dockerfile runs natively on
-      # arm64, the OBS PPA has no arm64 packages, and apt silently falls
-      # back to Ubuntu universe's obs-studio +dfsg build (CEF stripped),
-      # so browser_source silently fails at scene load. First arm64 build
-      # takes ~30 min for the CEF compile; cached thereafter.
+      # the compose file pick up env.docker. On arm64 (Apple Silicon) layer
+      # docker-compose.arm64.yml so OBS builds from Dockerfile.arm64 (compiles
+      # OBS + CEF from source — without it browser_source silently breaks at
+      # scene load). First arm64 OBS build is ~30min for the CEF compile; cached
+      # thereafter. Locally-built images are single-platform, so k3d image
+      # import works cleanly (unlike multi-arch registry pulls).
       - |
+        set -e
+        target="{{.APP}}"
+        # app : compose-service : image-repo
+        all="tripbot:tripbot:adanalife/tripbot \
+             vlc:vlc:adanalife/vlc \
+             obs:obs:adanalife/obs \
+             onscreens:onscreens-server:adanalife/onscreens-server"
         args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
-        case "$(uname -m)" in
-          arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;;
-        esac
-        docker compose $args build
-      - k3d image import adanalife/tripbot:latest --cluster=adanalife-bees
-      - k3d image import adanalife/vlc:latest --cluster=adanalife-bees
-      - k3d image import adanalife/obs:latest --cluster=adanalife-bees
+        case "$(uname -m)" in arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;; esac
+        for row in $all; do
+          app=${row%%:*}; rest=${row#*:}; svc=${rest%%:*}; repo=${rest#*:}
+          { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
+          echo "==> build $repo  (compose service: $svc)"
+          docker compose $args build "$svc"
+          docker tag "$repo:latest" "$repo:dev-local"
+          k3d image import "$repo:dev-local" --cluster=adanalife-dev
+        done
+
+  # Run a locally-built image in the dev cluster: builds + imports :dev-local
+  # (via images:build), then points the live Deployment(s) at it. Pauses Argo
+  # selfHeal on the targeted app — the tripbot-apps ApplicationSet ignores
+  # syncPolicy diffs (ignoreApplicationDifferences), so the pause sticks — and
+  # flips imagePullPolicy to IfNotPresent so the imported image isn't evicted by
+  # a re-pull. Argo will show the app OutOfSync while you iterate; that's
+  # expected. Revert to CI :develop (and re-enable selfHeal) with k8s:dev:sync.
+  k8s:dev:deploy:
+    desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all four. Revert with k8s:dev:sync"
+    deps:
+      - task: k8s:dev:images:build
+        vars: { APP: '{{.APP}}' }
+    preconditions:
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
+    cmds:
+      - |
+        set -e
+        target="{{.APP}}"
+        # app : deployment : container : image-repo  (dev platform suffix = twitch;
+        # obs's container is named `obs`, the others `<app>-twitch`)
+        all="tripbot:tripbot-twitch:tripbot-twitch:adanalife/tripbot \
+             vlc:vlc-twitch:vlc-twitch:adanalife/vlc \
+             obs:obs-twitch:obs:adanalife/obs \
+             onscreens:onscreens-twitch:onscreens-twitch:adanalife/onscreens-server"
+        for row in $all; do
+          app=${row%%:*}; r=${row#*:}; dep=${r%%:*}; r=${r#*:}; ctr=${r%%:*}; repo=${r#*:}
+          { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
+          echo "==> deploy $repo:dev-local -> deploy/$dep (container $ctr)"
+          # Pause Argo selfHeal so the override isn't reconciled back to :develop.
+          kubectl patch application "development-$dep" -n argocd --type merge \
+            -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}' >/dev/null
+          # Any initContainer sharing the image (tripbot's `migrate`) needs the
+          # same override, or the pod gets stuck pulling :develop for the init
+          # step. Build an initContainers patch fragment for matching ones.
+          init_items=""
+          for ic in $(kubectl get "deploy/$dep" -n development \
+                        -o jsonpath='{range .spec.template.spec.initContainers[*]}{.name}={.image}{"\n"}{end}'); do
+            iname=${ic%%=*}; iimg=${ic#*=}
+            case "$iimg" in "$repo:"*)
+              init_items="${init_items}{\"name\":\"$iname\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}," ;;
+            esac
+          done
+          init_patch=""
+          [ -n "$init_items" ] && init_patch="\"initContainers\":[${init_items%,}],"
+          # Image + IfNotPresent for the main container (and matching init
+          # containers) in one strategic patch = one rollout.
+          kubectl patch "deploy/$dep" -n development --type strategic \
+            -p "{\"spec\":{\"template\":{\"spec\":{${init_patch}\"containers\":[{\"name\":\"$ctr\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}]}}}}"
+          kubectl rollout status "deploy/$dep" -n development --timeout=180s
+        done
+        echo "running your local :dev-local build. revert to CI :develop with: task k8s:dev:sync"
+
+  # Dev env at a glance: pods, the image tag each app is running (CI :develop vs
+  # local :dev-local), and Argo app sync/health.
+  k8s:dev:status:
+    desc: "dev env at a glance: pods + running image tags (:develop vs :dev-local) + Argo app health"
+    preconditions:
+      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
+    cmds:
+      - 'echo "== pods (development) =="'
+      - kubectl get pods -n development
+      - 'echo "== running images =="'
+      - kubectl get deploy -n development -o custom-columns='DEPLOY:.metadata.name,IMAGE:.spec.template.spec.containers[0].image,POLICY:.spec.template.spec.containers[0].imagePullPolicy'
+      - 'echo "== Argo apps =="'
+      - kubectl get applications -n argocd -o custom-columns='APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status' | grep -E 'APP|development-'
 
   # Restart an app deployment so its pods re-pull the image. Pairs with
   # `k8s:import-images` — after importing rebuilt images into k3d, restart
@@ -507,42 +603,17 @@ tasks:
       - k8s:stage:rollout:obs
       - k8s:stage:rollout:onscreens
 
-  k8s:dev:rollout:tripbot:
-    desc: restart development tripbot so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/tripbot -n development
-      - kubectl rollout status deploy/tripbot -n development --timeout=120s
-
-  k8s:dev:rollout:vlc-server:
-    desc: restart development vlc-server so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/vlc-server -n development
-      - kubectl rollout status deploy/vlc-server -n development --timeout=120s
-
-  k8s:dev:rollout:obs:
-    desc: restart development obs so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/obs -n development
-      - kubectl rollout status deploy/obs -n development --timeout=120s
-
-  k8s:dev:rollout:onscreens:
-    desc: restart development onscreens-server so it re-pulls the image
-    cmds:
-      - kubectl rollout restart deploy/onscreens-server -n development
-      - kubectl rollout status deploy/onscreens-server -n development --timeout=120s
-
-  k8s:dev:rollout:all:
-    desc: restart all four development app deployments (tripbot + vlc-server + obs + onscreens-server)
-    deps:
-      - k8s:dev:rollout:tripbot
-      - k8s:dev:rollout:vlc-server
-      - k8s:dev:rollout:obs
-      - k8s:dev:rollout:onscreens
+  # NOTE: the dev rollout:* tasks were removed — they pointed at pre-per-platform
+  # deployment names (deploy/tripbot, not deploy/tripbot-twitch) so they no
+  # longer matched anything, and a bare restart under imagePullPolicy: Always
+  # just re-pulls CI's :develop. Use `task k8s:dev:deploy` to run a local build,
+  # `task k8s:dev:sync` to revert to CI images, and a plain
+  # `kubectl rollout restart deploy/<app>-twitch -n development` for a bare bounce.
 
   # The app workloads for prod-1/stage-1 are delivered by Argo CD from
   # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md) — there is no
-  # `k8s:{prod,stage}:apply` for apps anymore. dev (bees, not Argo-managed) uses
-  # `task cdk8s:dev:apply`. The legacy Kustomize app overlays (k8s/apps,
+  # `k8s:{prod,stage}:apply` for apps anymore. dev (k3d) is likewise Argo-managed
+  # by its own in-cluster Argo (`task k8s:dev:argo:sync`). The legacy Kustomize app overlays (k8s/apps,
   # k8s/overlays) are gone. What remains below is the stage env-PLATFORM install
   # (external-dns + NATS), which has NOT cut over to cdk8s yet.
 
@@ -617,7 +688,7 @@ tasks:
         cur=$(grep -oE -- '--default-targets=[0-9.]+' k8s/external-dns/development/values.local.yml 2>/dev/null | cut -d= -f2)
         [ -n "$ip" ] && [ "$cur" = "$ip" ]
     preconditions:
-      # Guard: dev tasks target the bees (k3d) dev cluster ONLY. The minipc
+      # Guard: dev tasks target the k3d dev cluster ONLY. The minipc
       # (stage/prod, Talos) is never a k3d context — and this task writes
       # eso-aws-credentials into the SHARED external-secrets namespace with
       # stage-account creds (dev borrows stage). Run against the minipc, it
@@ -625,11 +696,13 @@ tasks:
       # ClusterSecretStore feeds cert-manager's ClusterIssuer the wrong account
       # → cross-account AssumeRole fails → no ClusterIssuer certs issue.
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
-        msg: "refusing: k8s:dev:* must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
+        msg: "refusing: k8s:dev:* must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
         msg: "keybase not found — install with `brew install --cask keybase`, then log in"
+      - sh: keybase status >/dev/null 2>&1
+        msg: "keybase daemon not running (can't pgp-decrypt the ESO creds) — `open -a Keybase`, wait ~10s for the daemon, then retry"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: command -v curl >/dev/null
@@ -663,7 +736,7 @@ tasks:
           echo "applied eso-aws-credentials Secret to external-secrets + development namespaces"
         fi
       # external-dns values.local.yml: per-machine helm override holding
-      # the bees host's current LAN IP, fed to external-dns as
+      # the dev host's current LAN IP, fed to external-dns as
       # --default-targets so any Ingress without an explicit
       # external-dns.alpha.kubernetes.io/target annotation resolves to
       # this machine on the LAN. We publish the LAN IP (not the public
@@ -675,7 +748,7 @@ tasks:
       - |
         set -euo pipefail
         values_file=k8s/external-dns/development/values.local.yml
-        # The bees cluster is local k3d on this macOS host; publish its
+        # The dev cluster is local k3d on this macOS host; publish its
         # LAN IPv4 (en0 wifi, falling back to en1 ethernet). Route53 A
         # records can only point at v4 addresses. Always rewrite (rather
         # than skip-if-present) so a DHCP-rotated IP can't silently persist
@@ -687,7 +760,7 @@ tasks:
         fi
         prev=$(grep -oE -- '--default-targets=[0-9.]+' "$values_file" 2>/dev/null | cut -d= -f2 || true)
         cat > "$values_file" <<YAML
-        # Generated by \`task k8s:dev:bootstrap-secrets\` — bees host LAN IP
+        # Generated by \`task k8s:dev:bootstrap-secrets\` — dev host LAN IP
         # snapshot for external-dns --default-targets. Re-run the task
         # after a LAN-IP change, then \`task k8s:dev:platform:up\` to roll
         # the chart with the new value.
@@ -723,6 +796,8 @@ tasks:
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
         msg: "keybase not found — install with `brew install --cask keybase`, then log in"
+      - sh: keybase status >/dev/null 2>&1
+        msg: "keybase daemon not running (can't pgp-decrypt the ESO creds) — `open -a Keybase`, wait ~10s for the daemon, then retry"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
@@ -788,6 +863,8 @@ tasks:
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
         msg: "keybase not found — install with `brew install --cask keybase`, then log in"
+      - sh: keybase status >/dev/null 2>&1
+        msg: "keybase daemon not running (can't pgp-decrypt the ESO creds) — `open -a Keybase`, wait ~10s for the daemon, then retry"
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: kubectl cluster-info >/dev/null 2>&1
@@ -850,14 +927,14 @@ tasks:
   # staging) ships in the cert-manager kustomize so the pipeline is
   # exercised even before any app Ingress requests a cert.
   k8s:dev:platform:up:
-    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the bees cluster
+    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the dev cluster
     deps: [k8s:dev:bootstrap-secrets]
     preconditions:
-      # Guard: bees (k3d) dev cluster only — never the minipc (Talos). See the
+      # Guard: k3d dev cluster only — never the minipc (Talos). See the
       # k8s:dev:bootstrap-secrets precondition for why running dev against the
       # minipc breaks prod's ClusterIssuer.
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
-        msg: "refusing: k8s:dev:* must target the bees (k3d) dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-bees` (or `task k8s:dev:cluster:up`) first."
+        msg: "refusing: k8s:dev:* must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
@@ -971,15 +1048,19 @@ tasks:
       - kubectl apply -f cdk8s/dist/argocd-k3d.k8s.yaml
       - 'echo "Argo CD up on the dev cluster (monitor-only). development Applications created. UI: http://argocd.dev.whereisdana.today:9080 (external-dns + traefik; port-forward svc/argocd-server as fallback). Next: task k8s:dev:argo:sync to bring up data -> supporting -> apps. If the repo Secret stays empty, seed k8s/argocd/repo-ssh-key in the stage SM. See gitops/README.md."'
 
-  # Sync the dev Argo Applications in dependency order. data + supporting are
-  # manual-sync (data is Prune=false forever — it can never auto-prune the DB);
-  # the apps autosync, but this kicks them so you don't wait for the next reconcile.
-  # Replaces clicking Sync in the UI / the manual `argocd app sync` dance.
-  k8s:dev:argo:sync:
-    desc: "sync the dev Argo apps in order (data -> supporting -> apps) via argocd --core"
+  # Sync the dev Argo Applications in dependency order, then kick the apps.
+  # data + supporting + identity are manual-sync (data is Prune=false forever —
+  # it can never auto-prune the DB); the apps autosync, but this kicks them so
+  # you don't wait for the next reconcile. Doubles as the "revert to CI :develop"
+  # gesture — it re-enables selfHeal on the app Applications (k8s:dev:deploy
+  # pauses it to pin a local :dev-local image) and re-syncs them to the
+  # committed manifest. Replaces clicking Sync in the UI.
+  k8s:dev:sync:
+    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps); also reverts a k8s:dev:deploy local-image override back to CI :develop"
+    aliases: ["k8s:dev:argo:sync"]
     preconditions:
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
-        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-bees) first."
+        msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
       - sh: command -v argocd >/dev/null
         msg: "argocd CLI not found — `brew install argocd`"
     cmds:
@@ -991,11 +1072,27 @@ tasks:
         trap 'kubectl config set-context --current --namespace="${ns_prev:-default}" >/dev/null 2>&1' EXIT
         kubectl config set-context --current --namespace=argocd >/dev/null
         set -e
+        # Stateful + supporting + identity land before the apps: tripbot won't
+        # start without its DB (data) or the identity ESO secrets
+        # (tripbot-database-creds / -twitch-creds / discord / maps).
         argocd app sync development-data --core --timeout 300
         argocd app wait development-data --core --health --timeout 300
         argocd app sync development-supporting --core --timeout 300
         argocd app wait development-supporting --core --health --timeout 300
-        argocd app sync -l argocd.argoproj.io/application-set-name=tripbot-apps --core --timeout 300
+        argocd app sync development-tripbot-identity --core --timeout 300
+        argocd app wait development-tripbot-identity --core --health --timeout 300
+        # Apps: the tripbot-apps ApplicationSet template sets no labels, so a
+        # label selector matches nothing — enumerate the generated Applications
+        # by name instead. Re-enable selfHeal first so any k8s:dev:deploy
+        # :dev-local override reverts to the committed :develop on sync.
+        apps=$(argocd app list --core -o name | sed 's#^argocd/##' \
+                 | grep -E '^development-' \
+                 | grep -vE '^development-(data|supporting|tripbot-identity)$')
+        for a in $apps; do
+          kubectl patch application "$a" -n argocd --type merge \
+            -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}' >/dev/null
+        done
+        argocd app sync $apps --core --timeout 300
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should

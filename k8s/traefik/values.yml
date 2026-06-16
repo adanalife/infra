@@ -25,7 +25,7 @@ ingressClass:
   isDefaultClass: true
 
 # Expose the API + dashboard. --api.insecure=true means no auth on
-# the dashboard. On dev (bees/k3d) it's port-forward only:
+# the dashboard. On dev (k3d) it's port-forward only:
 # `kubectl port-forward deploy/traefik 8080:8080`. On prod (minipc) it's
 # reachable LAN-only at traefik.prod.whereisdana.today via a plain Ingress
 # (k8s/traefik/prod-1/dashboard-ingress.yaml) — a basic-auth middleware

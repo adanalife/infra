@@ -137,7 +137,12 @@ class Postgres(Construct):
         # --- container ---
         container = k8s.Container(
             name=NAME,
-            image="pgvector/pgvector:pg16",
+            # GHCR mirror, not Docker Hub — a cold dev (k3d) bringup pulled this
+            # node-side from Hub in ~10min under the account-wide rate limit
+            # (stage/prod cache it once so they never feel it; ephemeral dev eats
+            # it every bringup). The mirror is the weekly-refreshed copy from the
+            # ghcr-base-image-mirrors decision; GHCR isn't rate-limited.
+            image="ghcr.io/adanalife/mirror/pgvector:pg16",
             security_context=k8s.SecurityContext(allow_privilege_escalation=False),
             ports=[k8s.ContainerPort(name="postgres", container_port=PORT)],
             env_from=[

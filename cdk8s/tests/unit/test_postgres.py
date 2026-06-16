@@ -69,7 +69,7 @@ def test_headless_service_matches_render():
 
 def test_container_spec_matches_render():
     c = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["containers"][0]
-    assert c["image"] == "pgvector/pgvector:pg16"
+    assert c["image"] == "ghcr.io/adanalife/mirror/pgvector:pg16"
     assert c["securityContext"]["allowPrivilegeEscalation"] is False
     assert c["ports"][0] == {"name": "postgres", "containerPort": 5432}
     assert c["envFrom"][0]["secretRef"]["name"] == "postgres-secret"

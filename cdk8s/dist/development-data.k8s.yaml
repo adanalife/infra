@@ -75,7 +75,7 @@ spec:
         - envFrom:
             - secretRef:
                 name: postgres-secret
-          image: pgvector/pgvector:pg16
+          image: ghcr.io/adanalife/mirror/pgvector:pg16
           livenessProbe:
             exec:
               command:
