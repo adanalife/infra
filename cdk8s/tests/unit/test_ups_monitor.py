@@ -43,17 +43,32 @@ def _deploy(objs):
     )
 
 
+def _script(objs):
+    cm = next(
+        o
+        for o in objs
+        if o["kind"] == "ConfigMap" and o["metadata"]["name"] == "ups-monitor"
+    )
+    return cm["data"]["nutread.py"]
+
+
 # --- the observe-only guard: no path from this pod to a node reboot ---
 
 
-def test_command_is_read_only_and_has_no_shutdown_path():
-    container = _deploy(_synth())["spec"]["template"]["spec"]["containers"][0]
-    script = "".join(container["args"])
-    assert "upsc" in script  # it reads status...
-    # ...and there is NO way to act on that status. If arming (stage 2) ever lands
-    # here instead of behind the storage gate, this fails loudly.
+def test_reader_is_read_only_and_has_no_shutdown_path():
+    objs = _synth()
+    script = _script(objs)
+    assert "GET VAR" in script  # it reads status...
+    # ...and there is NO way to act on it — not on the node, not on the UPS. If
+    # arming (stage 2) ever lands here instead of behind the storage gate, or a
+    # UPS write command sneaks in, this fails loudly.
     assert "talosctl" not in script
     assert "shutdown" not in script.lower()
+    assert "INSTCMD" not in script  # never issues a UPS command
+    assert "SET VAR" not in script
+    # the container runs only the mounted reader
+    container = _deploy(objs)["spec"]["template"]["spec"]["containers"][0]
+    assert container["command"] == ["python3", "/app/nutread.py"]
 
 
 def test_security_context_forbids_privilege_and_host_access():
