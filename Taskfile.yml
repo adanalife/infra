@@ -1143,6 +1143,19 @@ tasks:
       - kubectl -n kube-system rollout status daemonset/cilium --timeout=180s
       - kubectl wait --for=condition=Ready node --all --timeout=180s
       - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
+      # metrics-server — backs `kubectl top` + the HPA metrics API. Talos
+      # doesn't bundle it (k3s does, hence dev k3d has it and this step is
+      # prod-only). --kubelet-insecure-tls in values.yml works around Talos's
+      # self-signed kubelet serving certs. No deps beyond a Ready node.
+      - helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+      - helm repo update metrics-server
+      - helm upgrade --install metrics-server metrics-server/metrics-server
+          --version 3.13.1
+          -n kube-system
+          -f k8s/metrics-server/values.yml
+      - kubectl wait --for=condition=Available --timeout=120s
+          deployment/metrics-server -n kube-system
+      - 'echo "metrics-server up. kubectl top nodes/pods now works on the minipc."'
       # local-path-provisioner — cluster storage backing. Must precede any
       # PVC-consuming workload (postgres). See k8s/local-path-provisioner/prod-1.
       - kubectl apply -k k8s/local-path-provisioner/prod-1

@@ -46,6 +46,7 @@ REPOS = {
     "grafana": "https://grafana.github.io/helm-charts",
     "prometheus-community": "https://prometheus-community.github.io/helm-charts",
     "cilium": "https://helm.cilium.io",
+    "metrics-server": "https://kubernetes-sigs.github.io/metrics-server/",
     "nats": "https://nats-io.github.io/k8s/helm/charts/",
     "tailscale": "https://pkgs.tailscale.com/helmcharts",
     "argo": "https://argoproj.github.io/argo-helm",
@@ -68,6 +69,7 @@ VERSIONS = {
     "k8s-monitoring": "4.1.4",
     "prometheus-node-exporter": "4.55.0",
     "cilium": "1.19.4",
+    "metrics-server": "3.13.1",  # app v0.8.1 — Talos-only (k3s bundles its own)
     "nats": "2.14.0",  # already pinned in the legacy task
     "tailscale-operator": "1.98.3",  # already pinned in the legacy task
     "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
@@ -131,6 +133,21 @@ def cluster_components(
                 "kube-system",
                 value_files=("cilium/values.yml",),
                 argo=False,
+            )
+        )
+        # metrics-server — backs `kubectl top` + the HPA metrics API. Talos
+        # doesn't bundle it (k3s does, so the k3d dev cluster already has it);
+        # minipc-only. --kubelet-insecure-tls in values.yml works around Talos's
+        # self-signed kubelet serving certs. Cleanly Argo-manageable (no
+        # host-coupled values), unlike the bootstrap-floor charts above.
+        components.append(
+            HelmComponent(
+                "metrics-server",
+                "metrics-server",
+                "metrics-server",
+                "metrics-server",
+                "kube-system",
+                value_files=("metrics-server/values.yml",),
             )
         )
 
