@@ -7,34 +7,43 @@ anyway), so this pod is a NUT *client*: it talks to the Synology's upsd over the
 LAN (TCP 3493) and reacts to battery state.
 
 Synology's network-UPS-server requires the client to authenticate even for status
-reads — an anonymous `upsc` gets `Error: Access denied` (confirmed on the live
-NAS, #761/#762). The creds are Synology's fixed, unchangeable public defaults
-(user `monuser`, password `secret`), documented everywhere and good only for
-reading UPS status on the LAN, so they're not a real secret — they live inline
-below rather than in ESO. Pod traffic to the NAS is masqueraded by Cilium to the
-minipc node IP (192.168.40.111), which is the IP allowlisted on the Synology.
+reads — an anonymous `upsc` gets `Error: Access denied`. The creds are Synology's
+fixed, unchangeable public defaults (user `monuser`, password `secret`), good only
+for reading UPS status on the LAN, so they're inline rather than in ESO. Pod
+traffic to the NAS is masqueraded by Cilium to the minipc node IP
+(192.168.40.111), the IP allowlisted on the Synology.
 
-STAGE 1 (this file): OBSERVE-ONLY. A tiny stdlib-socket NUT client that logs in,
-does `GET VAR ups ups.status` (+ charge/runtime), and logs every transition
-(ONLINE -> ONBATT -> LOWBATT). It *only reads* — there is no shutdown command, no
-`talosctl`, no Talos PKI, no privileged/hostPID — so it physically cannot reboot
-the node. That matters: the prod postgres still lives on an ephemeral local-path
-volume, and a reboot loses it, so arming an auto-shutdown now would be the very
-failure we're guarding against. This stage verifies the minipc<->Synology NUT
-wiring safely. It logs the raw server response on any error, so a misconfig
-surfaces in the pod logs rather than silently.
+The reader (stdlib socket) logs in, does `GET VAR ups ups.status` (+ charge /
+runtime), logs every transition, and — STAGE 2 — triggers a graceful node
+shutdown when the battery is genuinely about to die.
 
-STAGE 2 (later, gated on durable prod storage): add a real shutdown trigger — on
-a sustained `OB LB` (on-battery + low-battery), run `talosctl shutdown --nodes
-192.168.40.111` for a graceful poweroff before the battery dies. That needs a
-tightly-scoped talosconfig Secret mounted in, and is a deliberate change plus the
-manual Argo sync.
+STAGE 1 (shipped): observe-only logging.
 
-A raw-socket reader (vs `upsmon`) keeps stage 1 dead simple and observe-only by
-construction: there's no shutdown machinery to disarm, it runs unprivileged on a
-read-only rootfs as a non-root user, and the NUT wire protocol is a handful of
-newline-delimited commands. `upsmon` (with its proper FSD handling) is the
-natural choice when stage 2 arms the shutdown.
+STAGE 2 (this file): the graceful-shutdown trigger — on a sustained on-battery +
+low-battery condition (`OB LB`, or estimated runtime below RUNTIME_THRESHOLD),
+confirmed over CONFIRM_POLLS consecutive fast polls, run
+`talosctl shutdown --nodes <node>` so the node powers off cleanly before the
+battery dies. A clean shutdown protects etcd + the Talos STATE/OS partition from
+hard-power-cut corruption (the kind of unclean crash that caused the 2026-06-15
+outage), so the node comes back cleanly. Note it does NOT save the prod postgres
+data while that DB is on an ephemeral local-path volume — durable storage is the
+separate fix that protects the data; this protects the cluster.
+
+**Disarmed by default.** `DRY_RUN=true` (the committed default) makes the trigger
+*log* the shutdown command it would run instead of executing it, and the
+talosconfig Secret mount is optional (absent until armed) — so even a sync can't
+power anything off. Plus the Argo Application is manual-sync. Three independent
+gates. Arming is a deliberate, separate act (see the arming runbook in the PR /
+the README): provision the scoped talosconfig (Secret `ups-talosconfig`), then
+flip `DRY_RUN=false`. The shutdown credential is a talosconfig minted with the
+`os:operator` role (the narrowest Talos role that permits shutdown — no
+config-write/admin), reaching the Talos API at <node>:50000.
+
+A raw-socket reader (vs `upsmon`) keeps the trigger logic explicit and auditable:
+it only ever reads UPS vars, and the single action it can take is the one
+`talosctl shutdown` call, gated by DRY_RUN. It runs unprivileged on a read-only
+rootfs as a non-root user; `talosctl` is fetched by an initContainer (the Python
+image doesn't ship it) into a shared volume.
 """
 
 from __future__ import annotations
@@ -53,24 +62,59 @@ NUT_PORT = "3493"
 NUT_UPS = "ups"
 NUT_USER = "monuser"
 NUT_PASS = "secret"  # Synology's fixed public default — not a real secret
-POLL_INTERVAL = "30"  # seconds between status reads
+POLL_INTERVAL = "30"  # seconds between reads on utility power
+POLL_INTERVAL_ONBATTERY = "10"  # faster reads while on battery (quicker reaction)
+# The minipc Talos node — the control-plane / etcd / DB node this shuts down. The
+# rpi5 worker isn't on this UPS, so it's deliberately out of scope.
+TALOS_NODE = "192.168.40.111"
+RUNTIME_THRESHOLD = "120"  # shut down once estimated runtime drops below this (s)
+CONFIRM_POLLS = "2"  # require the trigger condition this many polls in a row
+TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
+TALOSCTL_PATH = "/opt/talos/talosctl"  # placed by the initContainer
+# Disarmed by default — DRY_RUN logs the shutdown it WOULD run. Arming = flip to
+# "false" (plus provisioning the talosconfig Secret). See the module docstring.
+DRY_RUN = "true"
 # python:3.14-alpine — current latest stable, multi-arch (minipc is amd64). The
-# reader is pure stdlib (socket), so no NUT package or pip install is needed.
-# Pulled from Docker Hub: a single long-lived pod pulls once and caches, so the
-# per-image rate limit that drives the GHCR-mirror ADR doesn't bite here. (If the
-# minipc ever feels Hub limits, mirror to ghcr.io/adanalife/mirror/ per
-# vault/decisions/ghcr-base-image-mirrors.md and repoint.)
+# reader is pure stdlib, so no NUT package or pip install is needed.
 IMAGE = "python:3.14-alpine"
+# Pinned to the cluster's Talos version (1.13.2). The initContainer fetches the
+# client binary at pod start (the Python image doesn't ship it); a single
+# long-lived pod fetches once. amd64 — the minipc's arch.
+TALOSCTL_VERSION = "v1.13.2"
+TALOSCTL_URL = (
+    f"https://github.com/siderolabs/talos/releases/download/{TALOSCTL_VERSION}"
+    "/talosctl-linux-amd64"
+)
+# The Secret (provisioned at arming time via ESO from SM k8s/ups/talosconfig)
+# holding the os:operator-scoped talosconfig. Mounted OPTIONALLY — absent until
+# armed, so DRY_RUN deploys need no credential.
+TALOSCONFIG_SECRET = "ups-talosconfig"
 
-# The observe-only reader. Authenticates (USERNAME/PASSWORD), reads ups.status +
-# battery vars via `GET VAR`, logs every change. It NEVER issues a write/command
-# (no INSTCMD/SET), so it cannot affect the UPS or the node. On any error it logs
-# the raw server response, so a misconfig (wrong creds, wrong UPS name, ACL) is
-# visible in the pod logs. Verified locally against a mock NUT auth server.
+# initContainer: fetch the pinned talosctl into the shared volume. stdlib urllib
+# (the same Python image), so no extra tooling. Verified-by-pin, not checksum —
+# acceptable for a LAN safety daemon; revisit if supply-chain hardening is wanted.
+_FETCH_TALOSCTL = """\
+import os
+import urllib.request
+
+url = os.environ["TALOSCTL_URL"]
+dst = os.environ["TALOSCTL_PATH"]
+print(f"fetching {url}", flush=True)
+urllib.request.urlretrieve(url, dst)
+os.chmod(dst, 0o755)
+print(f"talosctl -> {dst}", flush=True)
+"""
+
+# The reader. Authenticates, reads ups.status + battery vars, logs every change,
+# and on a sustained on-battery + low-battery (or low-runtime) condition runs the
+# graceful shutdown — UNLESS DRY_RUN, in which case it only logs the command it
+# would run. It issues at most one shutdown. Verified locally against a mock NUT
+# server (auth + an on-battery/low-battery scenario).
 _READER = """\
 import datetime
 import os
 import socket
+import subprocess
 import time
 
 SERVER = os.environ.get("NUT_SERVER", "127.0.0.1")
@@ -78,7 +122,14 @@ PORT = int(os.environ.get("NUT_PORT", "3493"))
 UPS = os.environ.get("NUT_UPS", "ups")
 USER = os.environ.get("NUT_USER", "")
 PASSWORD = os.environ.get("NUT_PASS", "")
-INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
+POLL_OK = int(os.environ.get("POLL_INTERVAL", "30"))
+POLL_OB = int(os.environ.get("POLL_INTERVAL_ONBATTERY", "10"))
+RUNTIME_FLOOR = int(os.environ.get("RUNTIME_THRESHOLD", "120"))
+CONFIRM = int(os.environ.get("CONFIRM_POLLS", "2"))
+NODE = os.environ.get("TALOS_NODE", "")
+TALOSCONFIG = os.environ.get("TALOSCONFIG", "/talos/talosconfig")
+TALOSCTL = os.environ.get("TALOSCTL", "/opt/talos/talosctl")
+DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
 VARS = ("ups.status", "battery.charge", "battery.runtime")
 
 
@@ -97,55 +148,76 @@ def query():
             return rf.readline().strip()
 
         if USER:
-            r = cmd(f"USERNAME {USER}")
-            if not r.startswith("OK"):
-                raise RuntimeError(f"USERNAME rejected: {r}")
-            r = cmd(f"PASSWORD {PASSWORD}")
-            if not r.startswith("OK"):
-                raise RuntimeError(f"PASSWORD rejected: {r}")
+            if not cmd(f"USERNAME {USER}").startswith("OK"):
+                raise RuntimeError("USERNAME rejected")
+            if not cmd(f"PASSWORD {PASSWORD}").startswith("OK"):
+                raise RuntimeError("PASSWORD rejected")
         out = {}
         for var in VARS:
             r = cmd(f"GET VAR {UPS} {var}")
-            out[var] = r.split('"')[1] if r.startswith("VAR ") and '"' in r else f"<{r}>"
-        try:
-            cmd("LOGOUT")
-        except Exception:
-            pass
+            out[var] = r.split('"')[1] if r.startswith("VAR ") and '"' in r else ""
         return out
     finally:
         sock.close()
 
 
+def shutdown_cmd():
+    return [TALOSCTL, "--talosconfig", TALOSCONFIG, "shutdown", "--nodes", NODE]
+
+
 log(
-    f"ups-monitor: OBSERVE-ONLY — reading {UPS}@{SERVER}:{PORT} as "
-    f"'{USER or '(anon)'}' every {INTERVAL}s (read-only; no node-control capability)"
+    f"ups-monitor STAGE 2 — graceful shutdown on OB+LB or runtime<{RUNTIME_FLOOR}s "
+    f"(confirmed {CONFIRM}x). DRY_RUN={DRY_RUN} NODE={NODE or '(unset)'}"
 )
-last = None
+confirm = 0
+triggered = False
 while True:
+    interval = POLL_OK
     try:
         v = query()
-        status = v.get("ups.status", "?")
+        status = v.get("ups.status", "")
+        tokens = status.split()
+        on_batt = "OB" in tokens
+        low_batt = "LB" in tokens
+        rt = v.get("battery.runtime", "")
+        runtime = int(rt) if rt.isdigit() else None
         line = (
-            f"ups.status={status} charge={v.get('battery.charge', '?')}% "
-            f"runtime={v.get('battery.runtime', '?')}s"
+            f"ups.status={status or '?'} charge={v.get('battery.charge') or '?'}% "
+            f"runtime={rt or '?'}s"
         )
+        if on_batt:
+            interval = POLL_OB
+            runtime_low = runtime is not None and runtime < RUNTIME_FLOOR
+            confirm = confirm + 1 if (low_batt or runtime_low) else 0
+            if confirm >= CONFIRM and not triggered:
+                reason = "OB+LB" if low_batt else f"runtime<{RUNTIME_FLOOR}s"
+                cmd_str = " ".join(shutdown_cmd())
+                if DRY_RUN or not NODE:
+                    log(f"!! TRIGGER ({reason}) x{confirm} — DRY_RUN, would run: {cmd_str}")
+                else:
+                    log(f"!! TRIGGER ({reason}) x{confirm} — ARMED, running: {cmd_str}")
+                    triggered = True
+                    try:
+                        r = subprocess.run(
+                            shutdown_cmd(), capture_output=True, text=True, timeout=60
+                        )
+                        log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
+                    except Exception as e:
+                        log(f"talosctl FAILED: {e}")
+        else:
+            confirm = 0
+        log(line + (f" [on-battery confirm={confirm}/{CONFIRM}]" if on_batt else ""))
     except Exception as e:
-        status = f"UNREACHABLE: {e}"
-        line = f"ups.status={status}"
-    if status != last:
-        log(f"CHANGED: '{last}' -> {line}")
-        last = status
-    else:
-        log(line)
-    time.sleep(INTERVAL)
+        log(f"ups.status=UNREACHABLE: {e}")
+    time.sleep(interval)
 """
 
 
 class UpsMonitor(Construct):
-    """The observe-only NUT-client Deployment + its reader ConfigMap.
-    Cluster-singleton (one minipc, one UPS) in its own `ups` namespace —
-    env-agnostic, so it's authored once and delivered by a dedicated Argo
-    Application (see constructs/argocd.py)."""
+    """The NUT-client UPS monitor + its reader ConfigMap. Cluster-singleton (one
+    minipc, one UPS) in its own `ups` namespace — env-agnostic, authored once and
+    delivered by a dedicated Argo Application (see constructs/argocd.py).
+    DISARMED by default (DRY_RUN + optional cert mount + manual sync)."""
 
     def __init__(self, scope: Construct, id: str = NAME):
         super().__init__(scope, id)
@@ -156,7 +228,32 @@ class UpsMonitor(Construct):
             self,
             "reader",
             metadata=k8s.ObjectMeta(name=NAME, namespace=NAMESPACE, labels=labels),
-            data={"nutread.py": _READER},
+            data={"nutread.py": _READER, "fetch-talosctl.py": _FETCH_TALOSCTL},
+        )
+
+        # Shared security floor for both containers: non-root, no privilege, no
+        # writable rootfs, all caps dropped. The pod can do exactly two things —
+        # read UPS vars and (when armed) make one talosctl Shutdown call.
+        secctx = k8s.SecurityContext(
+            allow_privilege_escalation=False,
+            run_as_non_root=True,
+            run_as_user=65534,  # nobody
+            read_only_root_filesystem=True,
+            capabilities=k8s.Capabilities(drop=["ALL"]),
+        )
+        script_mount = k8s.VolumeMount(name="script", mount_path="/app", read_only=True)
+        bin_mount = k8s.VolumeMount(name="talosctl", mount_path="/opt/talos")
+
+        init = k8s.Container(
+            name="fetch-talosctl",
+            image=IMAGE,
+            command=["python3", "/app/fetch-talosctl.py"],
+            env=[
+                k8s.EnvVar(name="TALOSCTL_URL", value=TALOSCTL_URL),
+                k8s.EnvVar(name="TALOSCTL_PATH", value=TALOSCTL_PATH),
+            ],
+            security_context=secctx,
+            volume_mounts=[script_mount, bin_mount],
         )
 
         container = k8s.Container(
@@ -170,28 +267,36 @@ class UpsMonitor(Construct):
                 k8s.EnvVar(name="NUT_USER", value=NUT_USER),
                 k8s.EnvVar(name="NUT_PASS", value=NUT_PASS),
                 k8s.EnvVar(name="POLL_INTERVAL", value=POLL_INTERVAL),
+                k8s.EnvVar(
+                    name="POLL_INTERVAL_ONBATTERY", value=POLL_INTERVAL_ONBATTERY
+                ),
+                k8s.EnvVar(name="TALOS_NODE", value=TALOS_NODE),
+                k8s.EnvVar(name="RUNTIME_THRESHOLD", value=RUNTIME_THRESHOLD),
+                k8s.EnvVar(name="CONFIRM_POLLS", value=CONFIRM_POLLS),
+                k8s.EnvVar(name="TALOSCONFIG", value=TALOSCONFIG_PATH),
+                k8s.EnvVar(name="TALOSCTL", value=TALOSCTL_PATH),
+                # The single arming gate in the pod spec. "true" = log-only.
+                k8s.EnvVar(name="DRY_RUN", value=DRY_RUN),
+                k8s.EnvVar(name="HOME", value="/tmp"),
             ],
-            # A pure network reader: no root, no privilege, no writable rootfs,
-            # no host namespaces. This security floor is itself the observe-only
-            # guarantee — there's no path from here to a node reboot. (Python
-            # doesn't cache bytecode for a directly-run script, so a read-only
-            # rootfs + read-only script mount need nothing writable.)
-            security_context=k8s.SecurityContext(
-                allow_privilege_escalation=False,
-                run_as_non_root=True,
-                run_as_user=65534,  # nobody
-                read_only_root_filesystem=True,
-                capabilities=k8s.Capabilities(drop=["ALL"]),
-            ),
+            security_context=secctx,
             resources=k8s.ResourceRequirements(
                 requests={
                     "cpu": k8s.Quantity.from_string("10m"),
                     "memory": k8s.Quantity.from_string("32Mi"),
                 },
-                limits={"memory": k8s.Quantity.from_string("64Mi")},
+                # Headroom for talosctl (a ~50MB Go binary) when it runs.
+                limits={"memory": k8s.Quantity.from_string("128Mi")},
             ),
             volume_mounts=[
-                k8s.VolumeMount(name="script", mount_path="/app", read_only=True)
+                script_mount,
+                k8s.VolumeMount(
+                    name="talosctl", mount_path="/opt/talos", read_only=True
+                ),
+                k8s.VolumeMount(
+                    name="talosconfig", mount_path="/talos", read_only=True
+                ),
+                k8s.VolumeMount(name="home", mount_path="/tmp"),
             ],
         )
 
@@ -208,14 +313,32 @@ class UpsMonitor(Construct):
                     metadata=k8s.ObjectMeta(labels=sel),
                     spec=k8s.PodSpec(
                         security_context=k8s.PodSecurityContext(
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
+                            # Group-own the emptyDirs so the non-root user can write
+                            # the fetched talosctl + $HOME.
+                            fs_group=65534,
                         ),
+                        init_containers=[init],
                         containers=[container],
                         volumes=[
                             k8s.Volume(
                                 name="script",
                                 config_map=k8s.ConfigMapVolumeSource(name=NAME),
-                            )
+                            ),
+                            k8s.Volume(
+                                name="talosctl", empty_dir=k8s.EmptyDirVolumeSource()
+                            ),
+                            k8s.Volume(
+                                name="home", empty_dir=k8s.EmptyDirVolumeSource()
+                            ),
+                            # OPTIONAL: absent until arming provisions the Secret, so
+                            # DRY_RUN deploys need no credential.
+                            k8s.Volume(
+                                name="talosconfig",
+                                secret=k8s.SecretVolumeSource(
+                                    secret_name=TALOSCONFIG_SECRET, optional=True
+                                ),
+                            ),
                         ],
                     ),
                 ),
