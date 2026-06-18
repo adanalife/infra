@@ -23,6 +23,7 @@ from adanalife_k8s.charts import (
     DataChart,
     PlatformArgoChart,
     SupportingChart,
+    UpsMonitorChart,
 )
 from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
@@ -78,11 +79,17 @@ if not only:
         tailscale_ui=False,
         lan_host=f"argocd.{load_env('development').dns_base}",
         lan_tls=False,
+        ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
     )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
     # charts). MONITOR-ONLY until adopted; see gitops/README.md.
     PlatformArgoChart(app, "platform-argo")
+    # UPS monitor (observe-only NUT client) — cluster-singleton in the `ups`
+    # namespace, env-agnostic. Delivered by a minipc-only Argo Application (the
+    # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
+    # NUT server). See constructs/ups_monitor.py.
+    UpsMonitorChart(app, "ups-monitor")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

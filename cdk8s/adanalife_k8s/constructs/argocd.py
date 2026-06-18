@@ -218,6 +218,7 @@ class ArgoCD(Construct):
         lan_host: str | None = LAN_HOST,
         lan_tls: bool = True,
         notifications_secret: bool = True,
+        ups_monitor: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -258,7 +259,10 @@ class ArgoCD(Construct):
             name=INFRA_PROJECT,
             description="shared cluster infrastructure (postgres data + supporting), from the infra repo",
             source_repos=[REPO_URL],
-            namespaces=_project_namespaces(self.envs),
+            # + the UPS monitor's `ups` namespace on the minipc (the singleton
+            # Application below rides the infra project — same repo, same project).
+            namespaces=_project_namespaces(self.envs)
+            + (["ups"] if ups_monitor else []),
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS],
         )
         if self.console_envs:
@@ -351,6 +355,25 @@ class ArgoCD(Construct):
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
+        # The UPS monitor (observe-only NUT client) — a cluster-SINGLETON, not
+        # per-env, so it's a one-element set with static templates (no .env). It's
+        # minipc-only: the k3d dev Argo passes ups_monitor=False because that
+        # cluster can't reach the Synology NUT server. MANUAL sync (no automated
+        # block) is deliberate — arming it later (the talosctl-shutdown flip) must
+        # be a hand sync, never auto-deployed on merge. CreateNamespace=true so
+        # Argo owns the `ups` namespace (no imperative bootstrap step needed).
+        if ups_monitor:
+            self._application_set(
+                id="appset-ups-monitor",
+                name="ups-monitor",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="ups-monitor",
+                include_tmpl="ups-monitor.k8s.yaml",
+                dest_ns_tmpl="ups",
+                prune_disabled=False,
+                create_namespace=True,
+            )
         # The cross-repo console unit: one Application per env, sourcing the
         # PRIVATE tripbot-console repo's committed dist (per-env revision —
         # stage follows develop, prod follows master). Same autosync posture
@@ -475,6 +498,7 @@ class ArgoCD(Construct):
         selfheal: bool = True,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
+        create_namespace: bool = False,
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
@@ -491,9 +515,12 @@ class ArgoCD(Construct):
         `selfheal=False` keeps autosync but stops Argo reverting live drift, so a
         hand-edit sticks — used on the throwaway k3d dev instance."""
         sync_options = [
-            "CreateNamespace=false",  # namespaces owned by bootstrap
-            "ServerSideApply=true",
-        ]  # adopt live objects by name on sync
+            # Env namespaces are owned by bootstrap (CreateNamespace=false); a
+            # singleton with its own namespace (the UPS monitor's `ups`) opts into
+            # Argo owning it instead.
+            "CreateNamespace=true" if create_namespace else "CreateNamespace=false",
+            "ServerSideApply=true",  # adopt live objects by name on sync
+        ]
         if prune_disabled:
             sync_options.append("Prune=false")  # never delete stateful resources
 

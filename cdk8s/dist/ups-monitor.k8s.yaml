@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: ups-monitor
+    app.kubernetes.io/part-of: infra
+  name: ups-monitor
+  namespace: ups
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ups-monitor
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: ups-monitor
+    spec:
+      containers:
+        - args:
+            - |
+              set -u
+              echo "ups-monitor: OBSERVE-ONLY — polling ${NUT_UPS}@${NUT_SERVER}:${NUT_PORT} every ${POLL_INTERVAL}s (read-only; no node-control capability)"
+              TARGET="${NUT_UPS}@${NUT_SERVER}:${NUT_PORT}"
+              last=""
+              while true; do
+                if status="$(upsc "$TARGET" ups.status 2>&1)"; then
+                  charge="$(upsc "$TARGET" battery.charge 2>/dev/null || echo '?')"
+                  runtime="$(upsc "$TARGET" battery.runtime 2>/dev/null || echo '?')"
+                else
+                  status="UNREACHABLE: ${status}"
+                  charge="?"; runtime="?"
+                fi
+                ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                if [ "$status" != "$last" ]; then
+                  echo "${ts} ups.status CHANGED: '${last:-<none>}' -> '${status}' (charge=${charge}% runtime=${runtime}s)"
+                  last="$status"
+                else
+                  echo "${ts} ups.status=${status} charge=${charge}% runtime=${runtime}s"
+                fi
+                sleep "${POLL_INTERVAL}"
+              done
+          command:
+            - /bin/sh
+            - -c
+          env:
+            - name: NUT_SERVER
+              value: 192.168.40.100
+            - name: NUT_PORT
+              value: "3493"
+            - name: NUT_UPS
+              value: ups
+            - name: POLL_INTERVAL
+              value: "30"
+          image: instantlinux/nut-upsd:2.8.3-r4
+          name: ups-monitor
+          resources:
+            limits:
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

@@ -37,6 +37,8 @@ spec:
       namespace: prod-1-data
     - server: https://kubernetes.default.svc
       namespace: stage-1-data
+    - server: https://kubernetes.default.svc
+      namespace: ups
   clusterResourceWhitelist:
     - group: ""
       kind: PersistentVolume
@@ -331,6 +333,59 @@ spec:
           - CreateNamespace=false
           - ServerSideApply=true
           - Prune=false
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: ups-monitor
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - {}
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: ups-monitor
+    spec:
+      project: infra
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: master
+        path: cdk8s/dist
+        directory:
+          include: ups-monitor.k8s.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: ups
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
