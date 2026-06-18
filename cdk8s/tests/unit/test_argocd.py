@@ -19,6 +19,7 @@ _DEV = dict(
     tailscale_ui=False,
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
+    ups_monitor=False,  # dev can't reach the Synology NUT server
 )
 
 
