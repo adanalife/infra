@@ -13,6 +13,7 @@ spec:
     - https://grafana.github.io/helm-charts
     - https://helm.cilium.io
     - https://kubernetes-sigs.github.io/external-dns/
+    - https://kubernetes-sigs.github.io/metrics-server/
     - https://nats-io.github.io/k8s/helm/charts/
     - https://pkgs.tailscale.com/helmcharts
     - https://prometheus-community.github.io/helm-charts
@@ -26,6 +27,38 @@ spec:
   namespaceResourceWhitelist:
     - group: "*"
       kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://kubernetes-sigs.github.io/metrics-server/
+      chart: metrics-server
+      targetRevision: 3.13.1
+      helm:
+        releaseName: metrics-server
+        valueFiles:
+          - $values/k8s/metrics-server/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
