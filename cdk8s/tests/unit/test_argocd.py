@@ -119,7 +119,14 @@ def test_per_repo_projects_scope_to_one_repo_each():
     kinds = lambda n: {  # noqa: E731
         c["kind"] for c in _project(objs, n)["spec"]["clusterResourceWhitelist"]
     }
-    assert kinds("infra") == {"PersistentVolume", "StorageClass", "PriorityClass"}
+    # minipc default includes the UPS monitor, whose CreateNamespace=true sync
+    # needs Namespace permitted here (see test_ups_monitor for the dev exclusion).
+    assert kinds("infra") == {
+        "PersistentVolume",
+        "StorageClass",
+        "PriorityClass",
+        "Namespace",
+    }
     assert kinds("tripbot") == {"PriorityClass"}
     assert kinds("video-pipeline") == {"PriorityClass"}
     assert kinds("tripbot-console") == set()

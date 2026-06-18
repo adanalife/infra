@@ -1,3 +1,84 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: ups-monitor
+    app.kubernetes.io/part-of: infra
+  name: ups-monitor
+  namespace: ups
+data:
+  nutread.py: |
+    import datetime
+    import os
+    import socket
+    import time
+
+    SERVER = os.environ.get("NUT_SERVER", "127.0.0.1")
+    PORT = int(os.environ.get("NUT_PORT", "3493"))
+    UPS = os.environ.get("NUT_UPS", "ups")
+    USER = os.environ.get("NUT_USER", "")
+    PASSWORD = os.environ.get("NUT_PASS", "")
+    INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
+    VARS = ("ups.status", "battery.charge", "battery.runtime")
+
+
+    def log(msg):
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        print(f"{ts} {msg}", flush=True)
+
+
+    def query():
+        sock = socket.create_connection((SERVER, PORT), timeout=10)
+        try:
+            rf = sock.makefile("r", encoding="utf-8", newline="\n")
+
+            def cmd(line):
+                sock.sendall((line + "\n").encode())
+                return rf.readline().strip()
+
+            if USER:
+                r = cmd(f"USERNAME {USER}")
+                if not r.startswith("OK"):
+                    raise RuntimeError(f"USERNAME rejected: {r}")
+                r = cmd(f"PASSWORD {PASSWORD}")
+                if not r.startswith("OK"):
+                    raise RuntimeError(f"PASSWORD rejected: {r}")
+            out = {}
+            for var in VARS:
+                r = cmd(f"GET VAR {UPS} {var}")
+                out[var] = r.split('"')[1] if r.startswith("VAR ") and '"' in r else f"<{r}>"
+            try:
+                cmd("LOGOUT")
+            except Exception:
+                pass
+            return out
+        finally:
+            sock.close()
+
+
+    log(
+        f"ups-monitor: OBSERVE-ONLY — reading {UPS}@{SERVER}:{PORT} as "
+        f"'{USER or '(anon)'}' every {INTERVAL}s (read-only; no node-control capability)"
+    )
+    last = None
+    while True:
+        try:
+            v = query()
+            status = v.get("ups.status", "?")
+            line = (
+                f"ups.status={status} charge={v.get('battery.charge', '?')}% "
+                f"runtime={v.get('battery.runtime', '?')}s"
+            )
+        except Exception as e:
+            status = f"UNREACHABLE: {e}"
+            line = f"ups.status={status}"
+        if status != last:
+            log(f"CHANGED: '{last}' -> {line}")
+            last = status
+        else:
+            log(line)
+        time.sleep(INTERVAL)
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,32 +100,9 @@ spec:
         app: ups-monitor
     spec:
       containers:
-        - args:
-            - |
-              set -u
-              echo "ups-monitor: OBSERVE-ONLY — polling ${NUT_UPS}@${NUT_SERVER}:${NUT_PORT} every ${POLL_INTERVAL}s (read-only; no node-control capability)"
-              TARGET="${NUT_UPS}@${NUT_SERVER}:${NUT_PORT}"
-              last=""
-              while true; do
-                if status="$(upsc "$TARGET" ups.status 2>&1)"; then
-                  charge="$(upsc "$TARGET" battery.charge 2>/dev/null || echo '?')"
-                  runtime="$(upsc "$TARGET" battery.runtime 2>/dev/null || echo '?')"
-                else
-                  status="UNREACHABLE: ${status}"
-                  charge="?"; runtime="?"
-                fi
-                ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                if [ "$status" != "$last" ]; then
-                  echo "${ts} ups.status CHANGED: '${last:-<none>}' -> '${status}' (charge=${charge}% runtime=${runtime}s)"
-                  last="$status"
-                else
-                  echo "${ts} ups.status=${status} charge=${charge}% runtime=${runtime}s"
-                fi
-                sleep "${POLL_INTERVAL}"
-              done
-          command:
-            - /bin/sh
-            - -c
+        - command:
+            - python3
+            - /app/nutread.py
           env:
             - name: NUT_SERVER
               value: 192.168.40.100
@@ -52,16 +110,20 @@ spec:
               value: "3493"
             - name: NUT_UPS
               value: ups
+            - name: NUT_USER
+              value: monuser
+            - name: NUT_PASS
+              value: secret
             - name: POLL_INTERVAL
               value: "30"
-          image: instantlinux/nut-upsd:2.8.3-r4
+          image: python:3.14-alpine
           name: ups-monitor
           resources:
             limits:
               memory: 64Mi
             requests:
               cpu: 10m
-              memory: 16Mi
+              memory: 32Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -70,6 +132,14 @@ spec:
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 65534
+          volumeMounts:
+            - mountPath: /app
+              name: script
+              readOnly: true
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      volumes:
+        - configMap:
+            name: ups-monitor
+          name: script
