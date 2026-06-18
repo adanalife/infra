@@ -64,6 +64,7 @@ VIDEO_PIPELINE_PROJECT = "video-pipeline"
 PV = {"group": "", "kind": "PersistentVolume"}
 STORAGE_CLASS = {"group": "storage.k8s.io", "kind": "StorageClass"}
 PRIORITY_CLASS = {"group": "scheduling.k8s.io", "kind": "PriorityClass"}
+NAMESPACE_KIND = {"group": "", "kind": "Namespace"}
 IN_CLUSTER = "https://kubernetes.default.svc"
 # The minipc Argo manages these envs in-cluster. development runs its OWN Argo on
 # the k3d dev cluster (a separate install reconciling development against that
@@ -263,7 +264,12 @@ class ArgoCD(Construct):
             # Application below rides the infra project — same repo, same project).
             namespaces=_project_namespaces(self.envs)
             + (["ups"] if ups_monitor else []),
-            cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS],
+            # + Namespace when the UPS monitor rides this project: its
+            # CreateNamespace=true sync creates the `ups` namespace as a PreSync
+            # resource, which is itself gated by this whitelist (a missing entry
+            # here is what failed the first ups-monitor sync — #761).
+            cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
+            + ([NAMESPACE_KIND] if ups_monitor else []),
         )
         if self.console_envs:
             self._app_project(

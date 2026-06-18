@@ -112,6 +112,9 @@ def test_minipc_emits_ups_monitor_application_manual_sync():
         if o["kind"] == "AppProject" and o["metadata"]["name"] == "infra"
     )
     assert "ups" in {d["namespace"] for d in infra["spec"]["destinations"]}
+    # CreateNamespace=true creates the `ups` Namespace as a PreSync resource, so
+    # the project must permit it — the omission that failed the first sync (#761).
+    assert "Namespace" in {c["kind"] for c in infra["spec"]["clusterResourceWhitelist"]}
 
 
 def test_dev_omits_ups_monitor():
@@ -127,3 +130,6 @@ def test_dev_omits_ups_monitor():
         if o["kind"] == "AppProject" and o["metadata"]["name"] == "infra"
     )
     assert "ups" not in {d["namespace"] for d in infra["spec"]["destinations"]}
+    assert "Namespace" not in {
+        c["kind"] for c in infra["spec"]["clusterResourceWhitelist"]
+    }
