@@ -7,10 +7,21 @@ metadata:
   name: ups-monitor
   namespace: ups
 data:
+  fetch-talosctl.py: |
+    import os
+    import urllib.request
+
+    url = os.environ["TALOSCTL_URL"]
+    dst = os.environ["TALOSCTL_PATH"]
+    print(f"fetching {url}", flush=True)
+    urllib.request.urlretrieve(url, dst)
+    os.chmod(dst, 0o755)
+    print(f"talosctl -> {dst}", flush=True)
   nutread.py: |
     import datetime
     import os
     import socket
+    import subprocess
     import time
 
     SERVER = os.environ.get("NUT_SERVER", "127.0.0.1")
@@ -18,7 +29,14 @@ data:
     UPS = os.environ.get("NUT_UPS", "ups")
     USER = os.environ.get("NUT_USER", "")
     PASSWORD = os.environ.get("NUT_PASS", "")
-    INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
+    POLL_OK = int(os.environ.get("POLL_INTERVAL", "30"))
+    POLL_OB = int(os.environ.get("POLL_INTERVAL_ONBATTERY", "10"))
+    RUNTIME_FLOOR = int(os.environ.get("RUNTIME_THRESHOLD", "120"))
+    CONFIRM = int(os.environ.get("CONFIRM_POLLS", "2"))
+    NODE = os.environ.get("TALOS_NODE", "")
+    TALOSCONFIG = os.environ.get("TALOSCONFIG", "/talos/talosconfig")
+    TALOSCTL = os.environ.get("TALOSCTL", "/opt/talos/talosctl")
+    DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
     VARS = ("ups.status", "battery.charge", "battery.runtime")
 
 
@@ -37,47 +55,68 @@ data:
                 return rf.readline().strip()
 
             if USER:
-                r = cmd(f"USERNAME {USER}")
-                if not r.startswith("OK"):
-                    raise RuntimeError(f"USERNAME rejected: {r}")
-                r = cmd(f"PASSWORD {PASSWORD}")
-                if not r.startswith("OK"):
-                    raise RuntimeError(f"PASSWORD rejected: {r}")
+                if not cmd(f"USERNAME {USER}").startswith("OK"):
+                    raise RuntimeError("USERNAME rejected")
+                if not cmd(f"PASSWORD {PASSWORD}").startswith("OK"):
+                    raise RuntimeError("PASSWORD rejected")
             out = {}
             for var in VARS:
                 r = cmd(f"GET VAR {UPS} {var}")
-                out[var] = r.split('"')[1] if r.startswith("VAR ") and '"' in r else f"<{r}>"
-            try:
-                cmd("LOGOUT")
-            except Exception:
-                pass
+                out[var] = r.split('"')[1] if r.startswith("VAR ") and '"' in r else ""
             return out
         finally:
             sock.close()
 
 
+    def shutdown_cmd():
+        return [TALOSCTL, "--talosconfig", TALOSCONFIG, "shutdown", "--nodes", NODE]
+
+
     log(
-        f"ups-monitor: OBSERVE-ONLY — reading {UPS}@{SERVER}:{PORT} as "
-        f"'{USER or '(anon)'}' every {INTERVAL}s (read-only; no node-control capability)"
+        f"ups-monitor STAGE 2 — graceful shutdown on OB+LB or runtime<{RUNTIME_FLOOR}s "
+        f"(confirmed {CONFIRM}x). DRY_RUN={DRY_RUN} NODE={NODE or '(unset)'}"
     )
-    last = None
+    confirm = 0
+    triggered = False
     while True:
+        interval = POLL_OK
         try:
             v = query()
-            status = v.get("ups.status", "?")
+            status = v.get("ups.status", "")
+            tokens = status.split()
+            on_batt = "OB" in tokens
+            low_batt = "LB" in tokens
+            rt = v.get("battery.runtime", "")
+            runtime = int(rt) if rt.isdigit() else None
             line = (
-                f"ups.status={status} charge={v.get('battery.charge', '?')}% "
-                f"runtime={v.get('battery.runtime', '?')}s"
+                f"ups.status={status or '?'} charge={v.get('battery.charge') or '?'}% "
+                f"runtime={rt or '?'}s"
             )
+            if on_batt:
+                interval = POLL_OB
+                runtime_low = runtime is not None and runtime < RUNTIME_FLOOR
+                confirm = confirm + 1 if (low_batt or runtime_low) else 0
+                if confirm >= CONFIRM and not triggered:
+                    reason = "OB+LB" if low_batt else f"runtime<{RUNTIME_FLOOR}s"
+                    cmd_str = " ".join(shutdown_cmd())
+                    if DRY_RUN or not NODE:
+                        log(f"!! TRIGGER ({reason}) x{confirm} — DRY_RUN, would run: {cmd_str}")
+                    else:
+                        log(f"!! TRIGGER ({reason}) x{confirm} — ARMED, running: {cmd_str}")
+                        triggered = True
+                        try:
+                            r = subprocess.run(
+                                shutdown_cmd(), capture_output=True, text=True, timeout=60
+                            )
+                            log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
+                        except Exception as e:
+                            log(f"talosctl FAILED: {e}")
+            else:
+                confirm = 0
+            log(line + (f" [on-battery confirm={confirm}/{CONFIRM}]" if on_batt else ""))
         except Exception as e:
-            status = f"UNREACHABLE: {e}"
-            line = f"ups.status={status}"
-        if status != last:
-            log(f"CHANGED: '{last}' -> {line}")
-            last = status
-        else:
-            log(line)
-        time.sleep(INTERVAL)
+            log(f"ups.status=UNREACHABLE: {e}")
+        time.sleep(interval)
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -116,11 +155,27 @@ spec:
               value: secret
             - name: POLL_INTERVAL
               value: "30"
+            - name: POLL_INTERVAL_ONBATTERY
+              value: "10"
+            - name: TALOS_NODE
+              value: 192.168.40.111
+            - name: RUNTIME_THRESHOLD
+              value: "120"
+            - name: CONFIRM_POLLS
+              value: "2"
+            - name: TALOSCONFIG
+              value: /talos/talosconfig
+            - name: TALOSCTL
+              value: /opt/talos/talosctl
+            - name: DRY_RUN
+              value: "true"
+            - name: HOME
+              value: /tmp
           image: python:3.14-alpine
           name: ups-monitor
           resources:
             limits:
-              memory: 64Mi
+              memory: 128Mi
             requests:
               cpu: 10m
               memory: 32Mi
@@ -136,10 +191,52 @@ spec:
             - mountPath: /app
               name: script
               readOnly: true
+            - mountPath: /opt/talos
+              name: talosctl
+              readOnly: true
+            - mountPath: /talos
+              name: talosconfig
+              readOnly: true
+            - mountPath: /tmp
+              name: home
+      initContainers:
+        - command:
+            - python3
+            - /app/fetch-talosctl.py
+          env:
+            - name: TALOSCTL_URL
+              value: https://github.com/siderolabs/talos/releases/download/v1.13.2/talosctl-linux-amd64
+            - name: TALOSCTL_PATH
+              value: /opt/talos/talosctl
+          image: python:3.14-alpine
+          name: fetch-talosctl
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+          volumeMounts:
+            - mountPath: /app
+              name: script
+              readOnly: true
+            - mountPath: /opt/talos
+              name: talosctl
       securityContext:
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       volumes:
         - configMap:
             name: ups-monitor
           name: script
+        - emptyDir: {}
+          name: talosctl
+        - emptyDir: {}
+          name: home
+        - name: talosconfig
+          secret:
+            optional: true
+            secretName: ups-talosconfig

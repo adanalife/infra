@@ -52,23 +52,55 @@ def _script(objs):
     return cm["data"]["nutread.py"]
 
 
-# --- the observe-only guard: no path from this pod to a node reboot ---
+def _container(objs):
+    return _deploy(objs)["spec"]["template"]["spec"]["containers"][0]
 
 
-def test_reader_is_read_only_and_has_no_shutdown_path():
-    objs = _synth()
-    script = _script(objs)
-    assert "GET VAR" in script  # it reads status...
-    # ...and there is NO way to act on it — not on the node, not on the UPS. If
-    # arming (stage 2) ever lands here instead of behind the storage gate, or a
-    # UPS write command sneaks in, this fails loudly.
-    assert "talosctl" not in script
-    assert "shutdown" not in script.lower()
-    assert "INSTCMD" not in script  # never issues a UPS command
-    assert "SET VAR" not in script
-    # the container runs only the mounted reader
-    container = _deploy(objs)["spec"]["template"]["spec"]["containers"][0]
-    assert container["command"] == ["python3", "/app/nutread.py"]
+def _env(objs):
+    return {e["name"]: e.get("value") for e in _container(objs)["env"]}
+
+
+# --- the disarmed-by-default guard: three independent gates keep stage 2 from
+#     powering off the node until it's deliberately armed ---
+
+
+def test_disarmed_by_default_dry_run():
+    # Gate 1: the committed manifest ships DRY_RUN=true (log-only).
+    assert _env(_synth())["DRY_RUN"] == "true"
+
+
+def test_talosconfig_mount_is_optional():
+    # Gate 2: the credential mount is optional, so a DRY_RUN deploy needs no cert
+    # and can't even reach a real talosconfig until arming provisions the Secret.
+    vols = _deploy(_synth())["spec"]["template"]["spec"]["volumes"]
+    tc = next(v for v in vols if v["name"] == "talosconfig")
+    assert tc["secret"]["optional"] is True
+    assert tc["secret"]["secretName"] == "ups-talosconfig"
+
+
+def test_shutdown_is_confirmed_and_dry_run_gated():
+    script = _script(_synth())
+    assert "GET VAR" in script  # still a reader at heart
+    # the one action it can take is a single talosctl Shutdown...
+    assert "shutdown" in script
+    # ...behind a confirm-counter (no acting on a single flaky read)...
+    assert "CONFIRM" in script and "confirm >= CONFIRM" in script
+    # ...and behind DRY_RUN: the subprocess.run is only reached when NOT dry-run.
+    assert "DRY_RUN" in script
+    pre = script.split("subprocess.run")[0]
+    assert "if DRY_RUN" in pre  # the dry-run branch is checked before executing
+    # never issues a UPS-side write command
+    assert "INSTCMD" not in script and "SET VAR" not in script
+
+
+def test_targets_only_the_minipc_node():
+    assert _env(_synth())["TALOS_NODE"] == "192.168.40.111"
+
+
+def test_initcontainer_fetches_pinned_talosctl():
+    init = _deploy(_synth())["spec"]["template"]["spec"]["initContainers"][0]
+    url = next(e["value"] for e in init["env"] if e["name"] == "TALOSCTL_URL")
+    assert "v1.13.2" in url and "talosctl-linux-amd64" in url
 
 
 def test_security_context_forbids_privilege_and_host_access():
