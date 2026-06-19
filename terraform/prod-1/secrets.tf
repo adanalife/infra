@@ -328,7 +328,7 @@ resource "aws_secretsmanager_secret_version" "tripbot_console_ghcr_pull" {
 # platform-gateway
 # ============================================================================
 
-# GHCR pull token for the private platform-gateway image (the twitch-api
+# GHCR pull token for the private platform-gateway image (the gateway-twitch
 # gateway). The repo is private, so its image is too; ESO renders this into the
 # platform-gateway-ghcr-pull dockerconfigjson Secret the gateway Deployment
 # pulls through. Bootstrap (fine-grained GitHub token, read:packages):
