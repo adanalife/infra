@@ -70,6 +70,26 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_video_pipeline
   }
 }
 
+# Read-only deploy key for the private platform-gateway repo — another Argo
+# source (the twitch-api gateway's cdk8s/dist lives there). Same bootstrap dance:
+#   ssh-keygen -t ed25519 -N "" -C argocd-platform-gateway -f argocd_platform_gateway
+#   gh repo deploy-key add argocd_platform_gateway.pub -R adanalife/platform-gateway --title "Argo CD (read-only)"
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/argocd/repo-ssh-key-platform-gateway --secret-string file://argocd_platform_gateway
+#   rm argocd_platform_gateway argocd_platform_gateway.pub
+resource "aws_secretsmanager_secret" "argocd_repo_ssh_key_platform_gateway" {
+  name        = "k8s/argocd/repo-ssh-key-platform-gateway"
+  description = "Read-only SSH deploy key for Argo CD to clone the private platform-gateway repo. Consumed via ESO into the argocd-repo-platform-gateway repository Secret. Value set out-of-band (see argocd.tf header)."
+}
+
+resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_platform_gateway" {
+  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key_platform_gateway.id
+  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # CI read grant — `terraform plan` refreshes this container + its placeholder
 # version, so CITerraformRole needs GetSecretValue/DescribeSecret on it. This
 # secret's ARN is folded into secrets.tf's bulk `ci_terraform_secrets_read`
