@@ -57,6 +57,7 @@ TRIPBOT_PROJECT = "tripbot"
 INFRA_PROJECT = "infra"
 CONSOLE_PROJECT = "tripbot-console"
 VIDEO_PIPELINE_PROJECT = "video-pipeline"
+PLATFORM_GATEWAY_PROJECT = "platform-gateway"
 # The cluster-scoped kinds each project's apps create. Scoped per project from
 # the dist each repo emits: tripbot's identity unit + video-pipeline each declare
 # the prod-stream PriorityClass; infra's data/supporting use a StorageClass and
@@ -117,6 +118,12 @@ CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
 VIDEO_PIPELINE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-video-pipeline"
 VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
+# The private platform-gateway repo — another cross-repo source (same split as
+# the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
+# per env). Delivers the twitch-api gateway instance; both prod + stage run it.
+PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
+PLATFORM_GATEWAY_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-platform-gateway"
+PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -240,6 +247,12 @@ class ArgoCD(Construct):
         self.video_pipeline_envs = tuple(
             e for e in envs if e in VIDEO_PIPELINE_REVISIONS
         )
+        # Envs whose platform-gateway (cross-repo) unit this Argo delivers — both
+        # prod-1 + stage-1 run twitch-api; empty on the k3d dev instance (no
+        # private-repo deploy key; a dev instance runs locally via `task`).
+        self.platform_gateway_envs = tuple(
+            e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
+        )
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -291,6 +304,17 @@ class ArgoCD(Construct):
                 source_repos=[VIDEO_PIPELINE_REPO_URL],
                 namespaces=list(self.video_pipeline_envs),
                 cluster_resources=[PRIORITY_CLASS],
+            )
+        if self.platform_gateway_envs:
+            self._app_project(
+                id="project-platform-gateway",
+                name=PLATFORM_GATEWAY_PROJECT,
+                description="platform-API gateway (twitch-api), from the private platform-gateway repo",
+                source_repos=[PLATFORM_GATEWAY_REPO_URL],
+                # App namespace only — the gateway needs no data-namespace access
+                # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
+                namespaces=list(self.platform_gateway_envs),
+                cluster_resources=[],
             )
         # ApplicationSets, one Application each per unit. The apps set is
         # per-COMPONENT (one Application per <env>-<component>-<platform> →
@@ -423,6 +447,27 @@ class ArgoCD(Construct):
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
+        # The cross-repo platform-gateway unit: one Application per env, sourcing
+        # the PRIVATE platform-gateway repo's committed dist (<env>.k8s.yaml —
+        # the twitch-api instance). Per-env revision (stage→develop, prod→master),
+        # same autosync posture as the apps/console sets.
+        if self.platform_gateway_envs:
+            self._application_set(
+                id="appset-platform-gateway",
+                name="platform-gateway",
+                project=PLATFORM_GATEWAY_PROJECT,
+                elements=[
+                    {"env": e, "revision": PLATFORM_GATEWAY_REVISIONS[e]}
+                    for e in self.platform_gateway_envs
+                ],
+                app_name_tmpl="{{.env}}-platform-gateway",
+                include_tmpl="{{.env}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                selfheal=self._selfheal,
+                repo_url=PLATFORM_GATEWAY_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
         # traefik/LAN Ingress is published on every cluster with a DNS host —
         # external-dns publishes the record either way; the dev cluster reaches it
@@ -445,6 +490,13 @@ class ArgoCD(Construct):
                 name="argocd-repo-video-pipeline",
                 url=VIDEO_PIPELINE_REPO_URL,
                 sm_key=VIDEO_PIPELINE_REPO_SM_KEY,
+            )
+        if self.platform_gateway_envs:
+            self._repo_external_secret(
+                id="repo-secret-platform-gateway",
+                name="argocd-repo-platform-gateway",
+                url=PLATFORM_GATEWAY_REPO_URL,
+                sm_key=PLATFORM_GATEWAY_REPO_SM_KEY,
             )
         # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
         # skips the webhook secret too.

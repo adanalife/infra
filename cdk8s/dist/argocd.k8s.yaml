@@ -95,6 +95,25 @@ spec:
       kind: "*"
 ---
 apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-gateway
+  namespace: argocd
+spec:
+  description: platform-API gateway (twitch-api), from the private platform-gateway repo
+  sourceRepos:
+    - git@github.com:adanalife/platform-gateway.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: tripbot-apps
@@ -533,6 +552,70 @@ spec:
           selfHeal: true
     {{- end }}
 ---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-gateway
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            revision: master
+          - env: stage-1
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-platform-gateway"
+    spec:
+      project: platform-gateway
+      source:
+        repoURL: git@github.com:adanalife/platform-gateway.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -651,6 +734,33 @@ spec:
         sshPrivateKey: "{{ .sshPrivateKey }}"
         type: git
         url: git@github.com:adanalife/video-pipeline.git
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-repo-platform-gateway
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: k8s/argocd/repo-ssh-key-platform-gateway
+      secretKey: sshPrivateKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secretsmanager-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-repo-platform-gateway
+    template:
+      data:
+        sshPrivateKey: "{{ .sshPrivateKey }}"
+        type: git
+        url: git@github.com:adanalife/platform-gateway.git
       engineVersion: v2
       metadata:
         labels:

@@ -98,6 +98,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "infra": ["git@github.com:adanalife/infra.git"],
         "tripbot-console": ["git@github.com:adanalife/tripbot-console.git"],
         "video-pipeline": ["git@github.com:adanalife/video-pipeline.git"],
+        "platform-gateway": ["git@github.com:adanalife/platform-gateway.git"],
     }
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
         want_repos
@@ -112,6 +113,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("tripbot-data", "infra"),
         ("tripbot-console", "tripbot-console"),
         ("video-pipeline", "video-pipeline"),
+        ("platform-gateway", "platform-gateway"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
     # cluster-resource whitelists are scoped to what each repo's dist actually
@@ -130,6 +132,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     assert kinds("tripbot") == {"PriorityClass"}
     assert kinds("video-pipeline") == {"PriorityClass"}
     assert kinds("tripbot-console") == set()
+    assert kinds("platform-gateway") == set()
     # destinations are scoped to the namespaces each project's apps target. The
     # console reaches into the isolated data namespace too (read-only RBAC for
     # the live status views), so its project must permit both — tripbot apps and
@@ -145,6 +148,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "stage-1-data",
     }
     assert dests("video-pipeline") == {"stage-1"}
+    assert dests("platform-gateway") == {"prod-1", "stage-1"}
 
 
 def test_minipc_apps_autosync_except_prod_obs():
@@ -186,11 +190,13 @@ def test_notifications_secret_minipc_only():
     def names(objs):
         return {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
 
-    # minipc: infra + console + video-pipeline repo creds + the notifications webhook
+    # minipc: infra + console + video-pipeline + platform-gateway repo creds + the
+    # notifications webhook
     assert names(_synth()) == {
         "argocd-repo-infra",
         "argocd-repo-tripbot-console",
         "argocd-repo-video-pipeline",
+        "argocd-repo-platform-gateway",
         "argocd-notifications",
     }
     # dev runs notifications.enabled=false, so no webhook secret there
@@ -210,6 +216,23 @@ def test_video_pipeline_appset_stage_only_cross_repo():
     # dev cluster carries no private-repo deploy key, so no video-pipeline unit
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "video-pipeline")
+
+
+def test_platform_gateway_appset_both_envs_cross_repo():
+    objs = _synth()
+    pg = _appset(objs, "platform-gateway")
+    revs = {
+        e["env"]: e["revision"] for e in pg["spec"]["generators"][0]["list"]["elements"]
+    }
+    # both prod + stage run twitch-api; prod pins master, stage floats develop
+    assert revs == {"prod-1": "master", "stage-1": "develop"}
+    src = pg["spec"]["template"]["spec"]["source"]
+    assert src["repoURL"] == "git@github.com:adanalife/platform-gateway.git"
+    assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
+    assert "automated" in pg["spec"]["templatePatch"]  # autosyncs like the others
+    # dev cluster carries no private-repo deploy key, so no platform-gateway unit
+    with pytest.raises(StopIteration):
+        _appset(_synth(**_DEV), "platform-gateway")
 
 
 def test_data_appset_never_prunes_either_variant():
