@@ -92,6 +92,15 @@ AUTOSYNC_ENVS = ("stage-1", "prod-1")
 # to it stay a deliberate manual sync (pick the quiet moment), while the rest of
 # prod autosyncs.
 AUTOSYNC_HOLDOUTS = (("prod-1", "obs-twitch"),)
+# Envs whose apps autosync but with selfHeal OFF — Argo still deploys git/dist
+# changes, but it won't revert hand/console live edits, so a manual `kubectl
+# scale` (or a console start/stop button) sticks. Stage only: it's where
+# components are scaled up/down by hand to keep the minipc free for prod + the
+# shared transcode job. prod must always match git, so it keeps selfHeal on.
+# Paired with unmanaged replicas in the tripbot deploy manifests (stage omits
+# spec.replicas via EnvConfig.manual_replicas), so an autosync on a develop
+# merge doesn't reset a scaled-down component either.
+SELFHEAL_OFF_ENVS = ("stage-1",)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
 # Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
@@ -333,6 +342,7 @@ class ArgoCD(Construct):
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
             selfheal=self._selfheal,
+            selfheal_off_envs=SELFHEAL_OFF_ENVS,
             # Source repo + revision are per-element (see _app_elements): every env
             # reads the tripbot repo at its own revision (prod→master, else develop).
             repo_url="{{.repo}}",
@@ -554,6 +564,7 @@ class ArgoCD(Construct):
         automated_envs: tuple[str, ...] = (),
         automated_holdouts: tuple[tuple[str, str], ...] = (),
         selfheal: bool = True,
+        selfheal_off_envs: tuple[str, ...] = (),
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
         create_namespace: bool = False,
@@ -670,14 +681,27 @@ class ArgoCD(Construct):
                 ]
                 held = f"(or {' '.join(clauses)})" if len(clauses) > 1 else clauses[0]
                 cond = f"and ({cond}) (not {held})"
+            # selfHeal is per-env when selfheal_off_envs is set: those envs render
+            # selfHeal:false (a hand/console live edit sticks); the rest follow the
+            # instance `selfheal`. Otherwise it's the static instance value.
+            if selfheal and selfheal_off_envs:
+                off_test = " ".join(f'(eq .env "{e}")' for e in selfheal_off_envs)
+                off_cond = f"or {off_test}" if len(selfheal_off_envs) > 1 else off_test
+                selfheal_block = (
+                    "{{- if " + off_cond + " }}\n"
+                    "      selfHeal: false\n"
+                    "{{- else }}\n"
+                    "      selfHeal: true\n"
+                    "{{- end }}\n"
+                )
+            else:
+                selfheal_block = f"      selfHeal: {'true' if selfheal else 'false'}\n"
             appset_spec["templatePatch"] = (
                 "{{- if " + cond + " }}\n"
                 "spec:\n"
                 "  syncPolicy:\n"
                 "    automated:\n"
-                "      prune: true\n"
-                f"      selfHeal: {'true' if selfheal else 'false'}\n"
-                "{{- end }}\n"
+                "      prune: true\n" + selfheal_block + "{{- end }}\n"
             )
         appset = cdk8s.ApiObject(
             self,

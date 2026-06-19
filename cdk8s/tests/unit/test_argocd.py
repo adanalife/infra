@@ -159,7 +159,11 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert '(eq .env "prod-1")' in patch
     # ...except prod OBS, carved back out (a sync restarts the live stream)
     assert '(not (and (eq .env "prod-1") (eq .app "obs-twitch")))' in patch
-    # minipc selfHeals (prod/stage must match git) — unlike the dev instance
+    # selfHeal is per-env: stage is OFF (a hand/console scale sticks so
+    # components can be parked at 0 to free the minipc), prod stays ON (the live
+    # stream must match git). Both branches render in the goTemplate conditional.
+    assert '{{- if (eq .env "stage-1") }}' in patch
+    assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
