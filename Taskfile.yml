@@ -1487,25 +1487,51 @@ tasks:
           echo "No OBS VNC port-forward PID file found — nothing to stop"
         fi
 
-  obs:browser:refresh:
-    desc: Refresh all OBS browser sources via websocket (k8s; port-forwards 4455 transiently; override PLATFORM=, default twitch)
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
+  # Refresh all OBS browser sources via obs-websocket — reloads each
+  # browser_source's page no-cache (the programmatic equivalent of "Refresh
+  # cache of current page"), e.g. after an onscreens-server template change so
+  # OBS picks up the new markup instead of rendering a stale cached page.
+  # obs-websocket binds localhost inside the pod, so we port-forward 4455
+  # transiently and pull the websocket password from the obs ConfigMap.
+  #
+  # Env-prefixed (like obs:{prod,stage}:stream:off) so the namespace is explicit
+  # on the co-tenant mini-PC rather than inherited from the current kubeconfig
+  # namespace. PLATFORM selects the workload (default twitch).
+  obs:prod:browser:refresh:
+    desc: refresh all prod-1 OBS browser sources via websocket (override PLATFORM=, default twitch)
+    cmds:
+      - task: obs:browser:refresh:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+
+  obs:stage:browser:refresh:
+    desc: refresh all stage-1 OBS browser sources via websocket (override PLATFORM=, default twitch)
+    cmds:
+      - task: obs:browser:refresh:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+
+  obs:browser:refresh:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM]
     preconditions:
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
-      - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
-        msg: "obs-{{.PLATFORM}} Deployment not found — is the cluster up?"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
     cmds:
       - |
         set -eo pipefail
-        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 >/dev/null 2>&1 &
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
         PF=$!
         cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
         trap cleanup EXIT
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
-        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
 
