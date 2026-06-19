@@ -157,6 +157,22 @@ spec:
             app: obs-youtube
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
+          - env: stage-1
+            app: tripbot-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
+          - env: stage-1
+            app: vlc-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
+          - env: stage-1
+            app: onscreens-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
+          - env: stage-1
+            app: obs-twitch
+            repo: https://github.com/adanalife/tripbot.git
+            revision: develop
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -202,7 +218,11 @@ spec:
       syncPolicy:
         automated:
           prune: true
+    {{- if (eq .env "stage-1") }}
+          selfHeal: false
+    {{- else }}
           selfHeal: true
+    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1

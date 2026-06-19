@@ -208,14 +208,15 @@ ENVS: dict[str, EnvConfig] = {
         # prod follows once the stage burn-in + dual-iGPU-encode validation
         # pass.
         #
-        # twitch is OFF here for the duration of the burn-in: running both
-        # stage stacks (8 pods, 4 iGPU claims) alongside prod made the prod
-        # twitch stream stutter on 2026-06-11 — the stage twitch pair never
-        # streamed (no stage stream key exists), but its VLC decode + OBS
-        # render still contended for the shared iGPU. Budget is two live
-        # streams total: prod-twitch + stage-youtube. Re-add "twitch" when
-        # the burn-in ends.
-        platforms=("youtube",),
+        # twitch is back ON (2026-06-19) to test the platform-gateway end to
+        # end: stage tripbot-twitch routes its Helix calls through twitch-api.
+        # The 2026-06-11 prod-stutter that forced twitch OFF here was the stage
+        # twitch *VLC decode + OBS render* contending for the shared iGPU — so
+        # only tripbot-twitch (no GPU) is meant to run; vlc/obs/onscreens-twitch
+        # stay scaled to 0 (stage selfHeal is off + replicas are unmanaged, so a
+        # hand/console scale sticks). Budget is still two live streams total:
+        # prod-twitch + stage-youtube.
+        platforms=("youtube", "twitch"),
         # Guardrail from the same incident: cap what stage can request in
         # aggregate, so "accidentally scaled up too many stage deployments"
         # parks pods Unschedulable instead of crowding prod off the node.
