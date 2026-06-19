@@ -228,7 +228,7 @@ def test_platform_gateway_appset_both_envs_cross_repo():
     revs = {
         e["env"]: e["revision"] for e in pg["spec"]["generators"][0]["list"]["elements"]
     }
-    # both prod + stage run twitch-api; prod pins master, stage floats develop
+    # both prod + stage run gateway-twitch; prod pins master, stage floats develop
     assert revs == {"prod-1": "master", "stage-1": "develop"}
     src = pg["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "git@github.com:adanalife/platform-gateway.git"

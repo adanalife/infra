@@ -100,7 +100,7 @@ metadata:
   name: platform-gateway
   namespace: argocd
 spec:
-  description: platform-API gateway (twitch-api), from the private platform-gateway repo
+  description: platform-API gateway (gateway-twitch), from the private platform-gateway repo
   sourceRepos:
     - git@github.com:adanalife/platform-gateway.git
   destinations:

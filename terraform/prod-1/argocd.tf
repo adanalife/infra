@@ -71,7 +71,7 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_video_pipeline
 }
 
 # Read-only deploy key for the private platform-gateway repo — another Argo
-# source (the twitch-api gateway's cdk8s/dist lives there). Same bootstrap dance:
+# source (the gateway-twitch gateway's cdk8s/dist lives there). Same bootstrap dance:
 #   ssh-keygen -t ed25519 -N "" -C argocd-platform-gateway -f argocd_platform_gateway
 #   gh repo deploy-key add argocd_platform_gateway.pub -R adanalife/platform-gateway --title "Argo CD (read-only)"
 #   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \

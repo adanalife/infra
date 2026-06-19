@@ -129,7 +129,7 @@ VIDEO_PIPELINE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-video-pipeline"
 VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
 # The private platform-gateway repo — another cross-repo source (same split as
 # the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
-# per env). Delivers the twitch-api gateway instance; both prod + stage run it.
+# per env). Delivers the gateway-twitch instance; both prod + stage run it.
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
@@ -257,7 +257,7 @@ class ArgoCD(Construct):
             e for e in envs if e in VIDEO_PIPELINE_REVISIONS
         )
         # Envs whose platform-gateway (cross-repo) unit this Argo delivers — both
-        # prod-1 + stage-1 run twitch-api; empty on the k3d dev instance (no
+        # prod-1 + stage-1 run gateway-twitch; empty on the k3d dev instance (no
         # private-repo deploy key; a dev instance runs locally via `task`).
         self.platform_gateway_envs = tuple(
             e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
@@ -318,7 +318,7 @@ class ArgoCD(Construct):
             self._app_project(
                 id="project-platform-gateway",
                 name=PLATFORM_GATEWAY_PROJECT,
-                description="platform-API gateway (twitch-api), from the private platform-gateway repo",
+                description="platform-API gateway (gateway-twitch), from the private platform-gateway repo",
                 source_repos=[PLATFORM_GATEWAY_REPO_URL],
                 # App namespace only — the gateway needs no data-namespace access
                 # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
@@ -459,7 +459,7 @@ class ArgoCD(Construct):
             )
         # The cross-repo platform-gateway unit: one Application per env, sourcing
         # the PRIVATE platform-gateway repo's committed dist (<env>.k8s.yaml —
-        # the twitch-api instance). Per-env revision (stage→develop, prod→master),
+        # the gateway-twitch instance). Per-env revision (stage→develop, prod→master),
         # same autosync posture as the apps/console sets.
         if self.platform_gateway_envs:
             self._application_set(

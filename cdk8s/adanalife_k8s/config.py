@@ -209,7 +209,7 @@ ENVS: dict[str, EnvConfig] = {
         # pass.
         #
         # twitch is back ON (2026-06-19) to test the platform-gateway end to
-        # end: stage tripbot-twitch routes its Helix calls through twitch-api.
+        # end: stage tripbot-twitch routes its Helix calls through gateway-twitch.
         # The 2026-06-11 prod-stutter that forced twitch OFF here was the stage
         # twitch *VLC decode + OBS render* contending for the shared iGPU — so
         # only tripbot-twitch (no GPU) is meant to run; vlc/obs/onscreens-twitch
