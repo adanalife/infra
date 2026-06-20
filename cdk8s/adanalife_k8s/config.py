@@ -160,7 +160,12 @@ ENVS: dict[str, EnvConfig] = {
         # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
         # take years of irreplaceable data.
         data_namespace="prod-1-data",
-        platforms=("twitch",),
+        # youtube is staged here so Argo creates the prod-youtube Applications,
+        # but the tripbot repo renders that stack at replicas=0 (parked_platforms)
+        # until stage-youtube is shut down and prod-youtube is turned on — the
+        # minipc never runs two youtube stacks at once. This list is the Argo
+        # fan-out contract; it must match the platforms tripbot's cdk8s emits.
+        platforms=("twitch", "youtube"),
         # The live stream always wins: prod app pods outrank default-priority
         # co-tenants (stage, dashcam-cv), and the encode/decode pair carries
         # real CPU requests so contention can't starve it (20-core node; the
