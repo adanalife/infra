@@ -61,6 +61,22 @@ tasks:
       - task: k8s:_dashcam-pv:apply
         vars: { ENV: prod-1 }
 
+  # Populate the node-local dashcam corpus cache from NFS (the NFS<->local serving
+  # toggle). Requires dashcam_local_enabled for the env (so the vlc-dashcam-local
+  # PVC exists). Re-runnable: the copy skips clips already present, so a second run
+  # only fills gaps. Watch: kubectl -n <env> logs -f job/dashcam-localize
+  k8s:stage:dashcam-localize:
+    desc: copy the stage-1 dashcam corpus NFS -> node-local PVC (the one-shot localize Job)
+    cmds:
+      - task: k8s:_dashcam-localize:apply
+        vars: { ENV: stage-1 }
+
+  k8s:prod:dashcam-localize:
+    desc: copy the prod-1 dashcam corpus NFS -> node-local PVC (the one-shot localize Job)
+    cmds:
+      - task: k8s:_dashcam-localize:apply
+        vars: { ENV: prod-1 }
+
   k8s:_dashcam-pv:apply:
     internal: true
     dir: cdk8s
@@ -81,6 +97,32 @@ tasks:
         CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
         echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
         kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
+
+  k8s:_dashcam-localize:apply:
+    internal: true
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    preconditions:
+      - sh: test -f dashcam-nfs.local.env
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH"
+    cmds:
+      - |
+        set -euo pipefail
+        set -a; . ./dashcam-nfs.local.env; set +a
+        : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
+        : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+        # Synth via main.py directly (real coords land in a throwaway dir, never the
+        # committed golden — same as dashcam-pv). The localize Job only renders when
+        # the env has dashcam_local_enabled; if the file is absent, that's the hint.
+        CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
+        f="$out/{{.ENV}}-dashcam-localize.k8s.yaml"
+        test -f "$f" || { echo "no localize Job for {{.ENV}} — set dashcam_local_enabled=True for it in config.py first"; exit 1; }
+        # Jobs are largely immutable, so clear any prior run before re-applying.
+        kubectl -n {{.ENV}} delete job dashcam-localize --ignore-not-found
+        echo "Applying {{.ENV}} dashcam localize Job (NFS -> node-local PVC, outside Argo)"
+        kubectl apply -f "$f"
+        echo "Watch: kubectl -n {{.ENV}} logs -f job/dashcam-localize"
 
   # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
   # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.

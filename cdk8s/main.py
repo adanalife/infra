@@ -19,6 +19,7 @@ from cdk8s import App
 
 from adanalife_k8s.charts import (
     ArgoCDChart,
+    DashcamLocalizeChart,
     DashcamPVChart,
     DataChart,
     PlatformArgoChart,
@@ -51,6 +52,12 @@ for name in targets:
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
         DashcamPVChart(app, f"{name}-dashcam-pv", env=env)
+    # The NFS->local corpus copy Job (only when an env adopts local serving) — also
+    # host-specific + outside Argo, its own dist/<env>-dashcam-localize.k8s.yaml
+    # applied via `task k8s:<env>:dashcam-localize`. The matching vlc-dashcam-local
+    # PVC is emitted alongside the NFS PVC (DataChart/SupportingChart).
+    if env.dashcam_local_enabled:
+        DashcamLocalizeChart(app, f"{name}-dashcam-localize", env=env)
     # The dashcam-cv vector-fill workload moved to the video-pipeline repo (it owns
     # its own cdk8s/dist now); Argo delivers it cross-repo via the video-pipeline
     # ApplicationSet (see constructs/argocd.py).

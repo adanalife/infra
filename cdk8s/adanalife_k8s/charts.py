@@ -16,7 +16,12 @@ from cdk8s import Chart
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.dashcam import emit_dashcam_pv, emit_dashcam_pvc
+from adanalife_k8s.constructs.dashcam import (
+    emit_dashcam_local_pvc,
+    emit_dashcam_localize_job,
+    emit_dashcam_pv,
+    emit_dashcam_pvc,
+)
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
@@ -54,6 +59,9 @@ class SupportingChart(Chart):
         # lives here in the app namespace. (Co-located envs keep it in DataChart.)
         if env.data_isolated:
             emit_dashcam_pvc(self, env)
+            # The node-local corpus cache rides alongside the NFS PVC, same
+            # namespace (no-op unless dashcam_local_enabled).
+            emit_dashcam_local_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -107,6 +115,9 @@ class DataChart(Chart):
         #     in a different namespace. ---
         if not env.data_isolated:
             emit_dashcam_pvc(self, env)
+            # The node-local corpus cache rides alongside the NFS PVC, same
+            # namespace (no-op unless dashcam_local_enabled).
+            emit_dashcam_local_pvc(self, env)
 
 
 class DashcamPVChart(Chart):
@@ -123,6 +134,19 @@ class DashcamPVChart(Chart):
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
+
+
+class DashcamLocalizeChart(Chart):
+    """The one-shot Job that copies the NFS corpus onto the node-local cache PVC —
+    host-specific (carries the NFS coords), so it's kept OUT of Argo in its own
+    dist/<env>-dashcam-localize.k8s.yaml (globbed by no ApplicationSet, same as
+    DashcamPVChart) and applied on demand via `task k8s:<env>:dashcam-localize` with
+    the real coords injected at synth. Rendered only when dashcam_local_enabled, so
+    it never lands in dist for an env that hasn't adopted local serving."""
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        emit_dashcam_localize_job(self, env)
 
 
 class UpsMonitorChart(Chart):
