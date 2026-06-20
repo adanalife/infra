@@ -56,10 +56,12 @@ class EnvConfig:
     )
     nfs_server: str = ""  # dashcam NFS export (nfs mode); from $NFS_SERVER at synth
     nfs_path: str = ""  # dashcam NFS path; from the $nfs_path_env var at synth
-    # Which env var supplies this env's dashcam path. Defaults to the shared
-    # $NFS_PATH (the airing export); stage overrides it so it can stream the
-    # regenerated corpus while prod stays on the airing corpus. Falls back to
-    # $NFS_PATH when the override is unset, so the golden render is unchanged.
+    # Which env var supplies this env's dashcam path. Both nfs envs now read the
+    # shared $NFS_PATH, which points at the canonical regenerated _opt/clips
+    # corpus (smaller, +faststart, fixes the corrupt airing clips). The override
+    # mechanism stays generic — it let stage stream _opt while prod stayed on the
+    # airing _all export during the regen — but no env diverges today. Falls back
+    # to $NFS_PATH when an override is unset, so the golden render is unchanged.
     nfs_path_env: str = "NFS_PATH"
     nfs_pv_name: str = (
         "vlc-dashcam-nfs"  # PVs bind 1:1 — stage needs its own (vlc-dashcam-nfs-stage)
@@ -152,6 +154,8 @@ ENVS: dict[str, EnvConfig] = {
         postgres_storage_class="local-path-retain",
         postgres_backup=True,
         external_dns_role_arn=_PROD_ROLE,
+        # Streams the shared $NFS_PATH — now the canonical regenerated _opt/clips
+        # corpus, cut over from the airing _all export once the regen completed.
         nfs_pv_name="vlc-dashcam-nfs",
         # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
         # take years of irreplaceable data.
@@ -193,11 +197,10 @@ ENVS: dict[str, EnvConfig] = {
         postgres_storage_class="local-path",
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
-        # Stage streams the regenerated _opt corpus (set STAGE_NFS_PATH in the
-        # gitignored dashcam-nfs.local.env); unset → falls back to the airing
-        # export, same as prod. No viewers on stage, so an in-progress corpus is
-        # fine to point at.
-        nfs_path_env="STAGE_NFS_PATH",
+        # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
+        # same as prod — the corpus regen is complete, so the temporary
+        # STAGE_NFS_PATH override that let stage run ahead on the in-progress
+        # corpus has collapsed. Stage keeps its own PV name (PVs bind 1:1).
         # Stage rehearses DB-in-its-own-namespace: postgres + its SecretStore land
         # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
         # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
@@ -287,10 +290,11 @@ def load_env(name: str) -> EnvConfig:
     # dashcam-nfs.local.yaml); thread them in from the environment at synth so
     # they never get committed. Placeholders match the legacy .example render.
     if env.dashcam_mode == "nfs":
-        # Each env reads its own path var (stage = STAGE_NFS_PATH so it can stream
-        # the regenerated corpus), falling back to the shared $NFS_PATH airing
-        # export — so an unset override renders identically to before (and the
-        # committed golden keeps the placeholder).
+        # Each env reads its own path var, falling back to the shared $NFS_PATH
+        # (now the canonical regenerated _opt/clips corpus) — so an unset override
+        # renders identically to before (and the committed golden keeps the
+        # placeholder). No env overrides today; the mechanism stays for the next
+        # time one env needs to run ahead of another on a fresh corpus.
         nfs_path = os.environ.get(env.nfs_path_env) or os.environ.get(
             "NFS_PATH", "<export path>"
         )

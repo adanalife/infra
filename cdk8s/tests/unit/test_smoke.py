@@ -10,18 +10,17 @@ def test_all_envs_load():
         assert load_env(name).name == name
 
 
-def test_stage_dashcam_path_overrides_without_touching_prod(monkeypatch):
-    """STAGE_NFS_PATH repoints only stage's dashcam mount (so it can stream the
-    regenerated corpus); prod always reads the shared NFS_PATH airing export, and
-    an unset override leaves stage on NFS_PATH too."""
+def test_dashcam_envs_converge_on_shared_path(monkeypatch):
+    """Both prod and stage read the shared NFS_PATH (now the canonical regenerated
+    _opt/clips corpus) — the temporary STAGE_NFS_PATH override that let stage run
+    ahead during the regen has been retired, so it no longer repoints stage. The
+    per-env override mechanism stays generic (config.py nfs_path_env) for the next
+    time one env needs to diverge."""
     monkeypatch.setenv("NFS_SERVER", "nas")
-    monkeypatch.setenv("NFS_PATH", "/airing/_all")
-    monkeypatch.delenv("STAGE_NFS_PATH", raising=False)
-    assert load_env("stage-1").nfs_path == "/airing/_all"  # unset → shared export
-
-    monkeypatch.setenv("STAGE_NFS_PATH", "/regen/_opt/clips")
-    assert load_env("stage-1").nfs_path == "/regen/_opt/clips"  # stage flips
-    assert load_env("prod-1").nfs_path == "/airing/_all"  # prod never does
+    monkeypatch.setenv("NFS_PATH", "/regen/_opt/clips")
+    monkeypatch.setenv("STAGE_NFS_PATH", "/somewhere/else")  # retired → no effect
+    assert load_env("prod-1").nfs_path == "/regen/_opt/clips"
+    assert load_env("stage-1").nfs_path == "/regen/_opt/clips"
 
 
 def test_dashcam_golden_render_uses_placeholders(monkeypatch):
