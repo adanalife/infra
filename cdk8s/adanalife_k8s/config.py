@@ -66,6 +66,21 @@ class EnvConfig:
     nfs_pv_name: str = (
         "vlc-dashcam-nfs"  # PVs bind 1:1 — stage needs its own (vlc-dashcam-nfs-stage)
     )
+    # --- node-local dashcam corpus (the NFS<->local serving toggle) -------------
+    # When True, a node-local `vlc-dashcam-local` PVC (local-path, on the minipc)
+    # is emitted beside the NFS PVC, and the one-shot copy Job (DashcamLocalizeChart)
+    # is rendered. It's the durable corpus *cache* — vlc can serve the stream off
+    # local NVMe instead of the NAS. The cache persists across the mount flip, so
+    # toggling vlc back to NFS never discards it; the NFS PVC always stays defined
+    # as the instant fallback while the local copy is (re)populated. Which source
+    # vlc actually mounts is the tripbot repo's `dashcam_source` flag — this flag
+    # only governs whether the local PVC + copy Job exist. Off by default (golden
+    # render unchanged). To adopt local serving on an env: flip this on, apply, run
+    # `task k8s:<env>:dashcam-localize`, then point vlc at it (dashcam_source=local).
+    dashcam_local_enabled: bool = False
+    # Size of the node-local corpus PVC. The regenerated _opt/clips corpus is
+    # ~630 GB; this leaves headroom without crowding the other local-path PVCs.
+    dashcam_local_size: str = "700Gi"
     # Streaming platforms present in this env (obs instances). twitch everywhere;
     # youtube currently stage-only while the bot side is built out.
     platforms: tuple[str, ...] = ("twitch",)
