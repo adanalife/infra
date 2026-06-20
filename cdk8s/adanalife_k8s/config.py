@@ -152,6 +152,7 @@ ENVS: dict[str, EnvConfig] = {
         name="prod-1",
         namespace="prod-1",
         cluster="minipc",
+        dashcam_local_enabled=True,  # serve the corpus off the minipc's local NVMe
         aws_account="adanalife-prod",
         image_tag="latest",
         dns_base="prod.whereisdana.today",
