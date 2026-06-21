@@ -1,4 +1,4 @@
-name: Check for infrastructure drift
+name: terraform-drift
 
 on:
   schedule:
