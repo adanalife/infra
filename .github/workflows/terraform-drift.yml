@@ -2,8 +2,8 @@ name: Check for infrastructure drift
 
 on:
   schedule:
-    # every morning
-    - cron:  "0 8 * * *"
+    # every Monday morning
+    - cron:  "0 8 * * 1"
   pull_request:
     paths:
       - '.github/workflows/terraform-drift.yml'
