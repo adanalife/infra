@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dashcam-localize
+  namespace: prod-1
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      containers:
+        - command:
+            - sh
+            - -c
+            - |
+              set -eu
+              SRC=/nfs
+              DST=/local
+              mkdir -p "$DST"
+              total=$(find "$SRC" -maxdepth 1 -type f -name '*.MP4' | wc -l)
+              echo "dashcam-localize: $total clip(s) on NFS -> $DST (workers=$WORKERS)"
+              find "$SRC" -maxdepth 1 -type f -name '*.MP4' -printf '%f\n' | xargs -P "$WORKERS" -I{} sh -c '
+                f="$1"
+                src="/nfs/$f"
+                dst="/local/$f"
+                if [ -f "$dst" ] && [ "$(stat -c%s "$src")" = "$(stat -c%s "$dst")" ]; then exit 0; fi
+                cp "$src" "/local/.$f.partial" && mv "/local/.$f.partial" "$dst"
+              ' _ {}
+              echo "dashcam-localize done: $(find "$DST" -maxdepth 1 -type f -name '*.MP4' | wc -l) clip(s) local"
+          env:
+            - name: WORKERS
+              value: "8"
+          image: ghcr.io/adanalife/mirror/ubuntu:24.04
+          name: localize
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - mountPath: /nfs
+              name: nfs
+              readOnly: true
+            - mountPath: /local
+              name: local
+      nodeSelector:
+        kubernetes.io/hostname: adanalife-minipc
+      priorityClassName: dashcam-cv-low
+      restartPolicy: Never
+      volumes:
+        - name: nfs
+          nfs:
+            path: <export path>
+            readOnly: true
+            server: <NFS server address>
+        - name: local
+          persistentVolumeClaim:
+            claimName: vlc-dashcam-local

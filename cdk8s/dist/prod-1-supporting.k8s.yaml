@@ -149,3 +149,16 @@ spec:
       storage: 1Ti
   storageClassName: ""
   volumeName: vlc-dashcam-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vlc-dashcam-local
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 700Gi
+  storageClassName: local-path

@@ -105,7 +105,7 @@ find "$SRC" -maxdepth 1 -type f -name '*.MP4' -printf '%f\\n' | xargs -P "$WORKE
   cp "$src" "/local/.$f.partial" && mv "/local/.$f.partial" "$dst"
 ' _ {}
 echo "dashcam-localize done: $(find "$DST" -maxdepth 1 -type f -name '*.MP4' | wc -l) clip(s) local"
-"""
+""".lstrip("\n")  # no leading blank line → cdk8s won't emit a trailing-whitespace row
 
 
 def emit_dashcam_local_pvc(scope: Construct, env: EnvConfig) -> None:
