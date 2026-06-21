@@ -142,6 +142,20 @@ resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
   }
 }
 
+resource "aws_secretsmanager_secret" "sentry_onscreens_server" {
+  name        = "k8s/sentry-onscreens-server"
+  description = "Sentry DSN for the onscreens-server Go service. Consumed by pkg/errors via SENTRY_DSN env var."
+}
+
+resource "aws_secretsmanager_secret_version" "sentry_onscreens_server" {
+  secret_id     = aws_secretsmanager_secret.sentry_onscreens_server.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Sentry DSNs for the split-out services that run in prod — one project per
 # component (observability-projects-by-component ADR), env separated by the
 # SENTRY_ENVIRONMENT tag (same DSN seeded into stage + prod). Each materializes
@@ -397,6 +411,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.grafana_cloud_api.arn,
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
+      aws_secretsmanager_secret.sentry_onscreens_server.arn,
       aws_secretsmanager_secret.sentry_platform_gateway.arn,
       aws_secretsmanager_secret.sentry_tripbot_console.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
