@@ -52,6 +52,23 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
+  name: sentry-onscreens-server
+  namespace: prod-1
+spec:
+  dataFrom:
+    - extract:
+        key: k8s/sentry-onscreens-server
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-secretsmanager
+  target:
+    creationPolicy: Owner
+    name: sentry-onscreens-server
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
   name: cert-manager-aws-credentials
   namespace: prod-1
 spec:
