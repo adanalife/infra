@@ -142,6 +142,39 @@ resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
   }
 }
 
+# Sentry DSNs for the split-out services that run in prod — one project per
+# component (observability-projects-by-component ADR), env separated by the
+# SENTRY_ENVIRONMENT tag (same DSN seeded into stage + prod). Each materializes
+# via an ExternalSecret owned by the app's own cdk8s, envFrom'd as SENTRY_DSN.
+# video-pipeline is stage-only today, so its container lives in stage-1 only.
+resource "aws_secretsmanager_secret" "sentry_platform_gateway" {
+  name        = "k8s/sentry-platform-gateway"
+  description = "Sentry DSN for the platform-gateway service. Consumed via the SENTRY_DSN env var."
+}
+
+resource "aws_secretsmanager_secret_version" "sentry_platform_gateway" {
+  secret_id     = aws_secretsmanager_secret.sentry_platform_gateway.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret" "sentry_tripbot_console" {
+  name        = "k8s/sentry-tripbot-console"
+  description = "Sentry DSN for the tripbot-console service. Consumed via the SENTRY_DSN env var."
+}
+
+resource "aws_secretsmanager_secret_version" "sentry_tripbot_console" {
+  secret_id     = aws_secretsmanager_secret.sentry_tripbot_console.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # ============================================================================
 # Twitch
 # ============================================================================
@@ -364,6 +397,8 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.grafana_cloud_api.arn,
       aws_secretsmanager_secret.sentry_tripbot.arn,
       aws_secretsmanager_secret.sentry_vlc_server.arn,
+      aws_secretsmanager_secret.sentry_platform_gateway.arn,
+      aws_secretsmanager_secret.sentry_tripbot_console.arn,
       aws_secretsmanager_secret.tripbot_twitch_creds.arn,
       aws_secretsmanager_secret.tripbot_youtube_creds.arn,
       aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
