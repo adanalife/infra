@@ -1257,3 +1257,120 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 }
+
+# Gateway health — the per-platform API gateway sits on tripbot's critical path
+# (every Helix / Data-API call routes through it). Two complementary prod-scoped
+# signals: the consumer-side reachability gauge tripbot emits (catches "the bot
+# can't reach the gateway") and an absent() canary on the gateway's own scraped
+# liveness gauge (catches "the gateway process is gone"). Both critical.
+resource "grafana_rule_group" "gateway_health" {
+  name             = "gateway-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Gateway: unreachable from tripbot"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "tripbot can't reach the platform-gateway"
+      description = "tripbot_gateway_up has been 0 for 5m on prod-1 — tripbot's gateway calls are failing at the transport layer (connection refused, timeout, DNS), so Helix/Data-API-backed features (live status, audience, chat send) are degraded. Check the gateway pods (crashloop? OOM? all replicas down?), the in-namespace Service, and any NetworkPolicy. Distinct from the gateway-side absent canary, which fires when the gateway stops reporting entirely."
+    }
+    labels = {
+      severity = "critical"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(tripbot_gateway_up{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name           = "Gateway: prod metrics absent (lost visibility)"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "No platform_gateway_up from prod-1 for 5m"
+      description = "platform_gateway_up{namespace=\"prod-1\"} has been absent for 5m — the gateway isn't being scraped, so its process-liveness signal is gone. Usually means every gateway pod in prod-1 is down (crashloop/OOM/evicted) or the scrape pipeline broke. Check `kubectl get pods -n prod-1 | grep gateway`. Paired with the consumer-side 'unreachable from tripbot' rule above; no_data is OK because a present series makes absent() return nothing."
+    }
+    labels = {
+      severity = "critical"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "absent(platform_gateway_up{namespace=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
