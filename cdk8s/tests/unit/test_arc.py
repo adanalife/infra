@@ -56,15 +56,18 @@ def test_arc_runners_namespace_is_privileged_for_dind():
     assert "labels" not in ns["arc-systems"]["metadata"]
 
 
-def test_arc_runner_quota_guards_the_shared_pi():
+def test_arc_runner_limitrange_bounds_containers():
+    # A LimitRange (not a ResourceQuota) so ARC's resource-less injected dind /
+    # init-dind-externals containers get defaults instead of being quota-rejected,
+    # while still capping per-container CPU/memory to protect the shared rpi5.
     objs = _synth(ArcChart)
-    quota = next(iter(_by_kind(objs, "ResourceQuota")))
-    assert quota["metadata"]["namespace"] == "arc-runners"
-    hard = quota["spec"]["hard"]
-    # caps both CPU and memory so a build burst can't starve stage-1 on the node
-    assert {"requests.cpu", "limits.cpu", "requests.memory", "limits.memory"} <= set(
-        hard
-    )
+    assert not _by_kind(objs, "ResourceQuota")  # the quota was the bug — gone
+    lr = next(iter(_by_kind(objs, "LimitRange")))
+    assert lr["metadata"]["namespace"] == "arc-runners"
+    item = lr["spec"]["limits"][0]
+    assert item["type"] == "Container"
+    assert item["default"]["cpu"] and item["default"]["memory"]
+    assert item["defaultRequest"]["cpu"] and item["defaultRequest"]["memory"]
 
 
 def test_arc_github_app_secret_reads_the_cluster_store():
