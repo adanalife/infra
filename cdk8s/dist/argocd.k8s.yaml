@@ -118,6 +118,23 @@ spec:
       kind: "*"
 ---
 apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: obs
+  namespace: argocd
+spec:
+  description: OBS streaming encoder (live stream), from the public obs repo
+  sourceRepos:
+    - https://github.com/adanalife/obs.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: tripbot-apps
@@ -174,10 +191,6 @@ spec:
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
           - env: stage-1
-            app: obs-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: develop
-          - env: stage-1
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
@@ -187,10 +200,6 @@ spec:
             revision: develop
           - env: stage-1
             app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: develop
-          - env: stage-1
-            app: obs-twitch
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
   ignoreApplicationDifferences:
@@ -702,6 +711,69 @@ spec:
             - .spec.volumeClaimTemplates[]?.kind
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: obs
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: stage-1
+            app: obs
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-obs"
+    spec:
+      project: obs
+      source:
+        repoURL: https://github.com/adanalife/obs.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-obs-*.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
     spec:
       syncPolicy:
         automated:
