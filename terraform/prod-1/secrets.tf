@@ -396,6 +396,31 @@ resource "aws_secretsmanager_secret_version" "platform_gateway_ghcr_pull" {
   }
 }
 
+# ============================================================================
+# ARC (self-hosted GitHub Actions runners)
+# ============================================================================
+
+# GitHub App credentials the runner scale set registers with (and the gh-hosted
+# fallback probe lists runners with). Materialized in-cluster by the
+# arc-github-app ExternalSecret (cdk8s constructs/arc.py) via the cluster store,
+# which reads this prod account. Seed the real value out of band:
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/arc/github-app \
+#     --secret-string file:///tmp/arc-github-app.json
+resource "aws_secretsmanager_secret" "arc_github_app" {
+  name        = "k8s/arc/github-app"
+  description = "GitHub App credentials for the self-hosted runner controller (ARC). Keys: github_app_id, github_app_installation_id, github_app_private_key. Consumed via ESO into the arc-github-app Secret."
+}
+
+resource "aws_secretsmanager_secret_version" "arc_github_app" {
+  secret_id     = aws_secretsmanager_secret.arc_github_app.id
+  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Bulk GetSecretValue for SM containers terraform refreshes during plan.
 # See stage-1/secrets.tf for the rationale and matching shape.
 data "aws_iam_policy_document" "ci_terraform_secrets_read" {
@@ -423,6 +448,7 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
       aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
       aws_secretsmanager_secret.platform_gateway_ghcr_pull.arn,
+      aws_secretsmanager_secret.arc_github_app.arn,
       # prod-only — Argo CD repo deploy keys (defined in argocd.tf, which exists
       # only in prod-1). Folded into this bulk read grant rather than a standalone
       # policy because CITerraformRole is at AWS's hard cap of 10 managed policies
