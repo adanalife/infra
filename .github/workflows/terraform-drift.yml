@@ -2,11 +2,16 @@ name: Check for infrastructure drift
 
 on:
   schedule:
-    # every morning
-    - cron:  "0 8 * * *"
+    # every Monday morning
+    - cron:  "0 8 * * 1"
   pull_request:
     paths:
       - '.github/workflows/terraform-drift.yml'
+
+permissions:
+  contents: read
+  # GCP Workload Identity Federation (stage-1 / prod-1 google provider auth)
+  id-token: write
 
 jobs:
   check_drift:
@@ -15,6 +20,9 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     strategy:
+      # Don't let one workspace's drift cancel the others — mirror terraform.yml
+      # so a prod-1 failure doesn't take stage-1's check down with it.
+      fail-fast: false
       matrix:
         terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
     name: Check for drift of terraform configuration
@@ -35,6 +43,34 @@ jobs:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: CITerraformRole
+      # stage-1 / prod-1 carry a google provider that authenticates keyless via
+      # Workload Identity Federation (GitHub OIDC -> the per-project terraform
+      # SA), so the drift check needs the same GCP auth the plan workflow does —
+      # without it `terraform plan` fails resolving GCP ADC. core has no google
+      # provider, so it skips this. Mirrors terraform.yml's plan job.
+      - name: GCP WIF target
+        if: matrix.terraform-dirs == 'terraform/stage-1' || matrix.terraform-dirs == 'terraform/prod-1'
+        run: |
+          case "${{ matrix.terraform-dirs }}" in
+            terraform/prod-1)
+              echo "WIF_PROVIDER=projects/876608406330/locations/global/workloadIdentityPools/github/providers/github" >> "$GITHUB_ENV"
+              echo "WIF_SA=terraform@tripbot-prod.iam.gserviceaccount.com" >> "$GITHUB_ENV" ;;
+            terraform/stage-1)
+              echo "WIF_PROVIDER=projects/574760983858/locations/global/workloadIdentityPools/github/providers/github" >> "$GITHUB_ENV"
+              echo "WIF_SA=terraform@tripbot-stage.iam.gserviceaccount.com" >> "$GITHUB_ENV" ;;
+          esac
+          echo "TF_VAR_gcp_impersonate=false" >> "$GITHUB_ENV"
+      - name: GCP auth (WIF)
+        id: gcp_auth
+        if: matrix.terraform-dirs == 'terraform/stage-1' || matrix.terraform-dirs == 'terraform/prod-1'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SA }}
+          token_format: access_token
+      - name: Export GCP token for terraform
+        if: steps.gcp_auth.outcome == 'success'
+        run: echo "GOOGLE_OAUTH_ACCESS_TOKEN=${{ steps.gcp_auth.outputs.access_token }}" >> "$GITHUB_ENV"
       - name: Check for drift
         uses: dflook/terraform-check@v2
         with:
