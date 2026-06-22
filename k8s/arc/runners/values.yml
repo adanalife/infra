@@ -9,6 +9,15 @@ githubConfigSecret: arc-github-app
 
 runnerScaleSetName: arc-arm64-tripbot
 
+# Pin the controller's ServiceAccount explicitly. The chart otherwise
+# auto-discovers it via a cluster lookup, which returns empty under Argo's
+# `helm template` rendering (no live lookups) and fails the manifest with
+# "No gha-rs-controller deployment found". Names the arc-controller release's
+# SA in arc-systems.
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-controller-gha-rs-controller
+
 # minRunners: 1 keeps one warm runner ALWAYS registered. This is load-bearing
 # for the seamless gh-hosted fallback: the picker job probes the GitHub runners
 # API for an online runner with this scale set's label, and at minRunners:0 the
