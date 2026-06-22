@@ -157,17 +157,22 @@ def test_per_repo_projects_scope_to_one_repo_each():
 def test_minipc_apps_autosync_except_prod_obs():
     objs = _synth()
     patch = _appset(objs, "tripbot-apps")["spec"]["templatePatch"]
-    # both minipc envs are automated...
+    # both minipc envs are automated in tripbot-apps...
     assert '(eq .env "stage-1")' in patch
     assert '(eq .env "prod-1")' in patch
-    # ...except prod OBS, carved back out (a sync restarts the live stream)
-    assert '(not (and (eq .env "prod-1") (eq .app "obs-twitch")))' in patch
+    # ...and tripbot-apps no longer carries ANY obs unit — OBS is delivered by the
+    # obs repo's own appset now (OBS_REVISIONS), so there's no obs carve-out here.
+    assert "obs" not in patch
     # selfHeal is per-env: stage is OFF (a hand/console scale sticks so
     # components can be parked at 0 to free the minipc), prod stays ON (the live
     # stream must match git). Both branches render in the goTemplate conditional.
     assert '{{- if (eq .env "stage-1") }}' in patch
     assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
+    # the live-encoder holdout moved with OBS to the obs appset: prod-1 obs is a
+    # deliberate manual sync (a sync restarts the live stream), the rest autosync.
+    obs_patch = _appset(objs, "obs")["spec"]["templatePatch"]
+    assert '(not (and (eq .env "prod-1") (eq .app "obs")))' in obs_patch
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
