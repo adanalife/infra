@@ -136,14 +136,24 @@ PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
 # its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
 # repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
-# no _repo_external_secret below). OBS_REVISIONS is the single source of truth
-# for the progressive cutover: an env listed here is delivered by the obs repo's
-# own ApplicationSet AND excluded from tripbot-apps' obs generation (so the two
-# never co-manage the same obs-* resources). Stage first; add "prod-1": "master"
-# to cut prod over (prod obs is already an AUTOSYNC_HOLDOUT — a deliberate sync).
+# no _repo_external_secret below).
+#
+# Two sets drive a SAFE (adopt-first) cutover, deliberately decoupled so prod's
+# live stream isn't dropped:
+#   * OBS_REVISIONS        — envs the obs repo's ApplicationSet delivers (the new
+#                            {{.env}}-obs Application runs here).
+#   * OBS_RETIRED_FROM_TRIPBOT — envs whose obs is REMOVED from tripbot-apps.
+# An env joins OBS_REVISIONS first: its new {{.env}}-obs Application is created and
+# adopts the running pods (ServerSideApply, by name) — a manual sync for prod (the
+# AUTOSYNC_HOLDOUT below), so the live stream restarts once, deliberately. ONLY
+# after that adoption does the env join OBS_RETIRED_FROM_TRIPBOT, so removing the
+# old per-platform tripbot Application can't cascade-delete the (now re-owned)
+# pods. Steady state: the two sets match. Stage is fully cut over (in both); prod
+# is mid-cutover (in OBS_REVISIONS, retired in the follow-up PR once adopted).
 OBS_PROJECT = "obs"
 OBS_REPO_URL = "https://github.com/adanalife/obs.git"
-OBS_REVISIONS = {"stage-1": "develop"}
+OBS_REVISIONS = {"stage-1": "develop", "prod-1": "master"}
+OBS_RETIRED_FROM_TRIPBOT = ("stage-1",)  # + "prod-1" after prod-1-obs is adopted
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -208,10 +218,12 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
         revision = TRIPBOT_REVISIONS[env_name]
         for platform in load_env(env_name).platforms:
             for comp in TRIPBOT_COMPONENTS:
-                # OBS for a cut-over env is delivered by the standalone obs repo's
-                # own ApplicationSet (OBS_REVISIONS), not tripbot's — skip it here
-                # so the two never co-manage the same obs-* resources.
-                if comp == "obs" and env_name in OBS_REVISIONS:
+                # OBS for a RETIRED env is delivered by the standalone obs repo's
+                # own ApplicationSet, not tripbot's — skip it here. Lags
+                # OBS_REVISIONS during a prod cutover (the new app adopts first;
+                # see the OBS_* block) so removing it can't cascade-delete the
+                # still-running pods before the obs app owns them.
+                if comp == "obs" and env_name in OBS_RETIRED_FROM_TRIPBOT:
                     continue
                 elements.append(
                     {
@@ -548,7 +560,9 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 # prod obs restarts the live stream on any pod-template change, so
-                # it's a deliberate manual sync (no-op until prod-1 joins OBS_REVISIONS).
+                # prod-1-obs is held out of autosync — it's created OutOfSync and
+                # adopted by a deliberate manual sync (the registry swap restarts
+                # the stream once, at a quiet moment).
                 automated_holdouts=(("prod-1", "obs"),),
                 selfheal=self._selfheal,
                 repo_url=OBS_REPO_URL,
