@@ -143,7 +143,21 @@ PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # to cut prod over (prod obs is already an AUTOSYNC_HOLDOUT — a deliberate sync).
 OBS_PROJECT = "obs"
 OBS_REPO_URL = "https://github.com/adanalife/obs.git"
+# Whole-env cutover: every obs-* platform for the env is delivered by the obs
+# repo's appset and excluded from tripbot-apps.
 OBS_REVISIONS = {"stage-1": "develop"}
+# Per-(env, platform) cutover: just that one platform's obs instance moves to the
+# obs repo while the env's OTHER platforms stay in tripbot-apps. prod-youtube
+# cuts over to the new repo while prod-twitch (the live stream) keeps its
+# in-tripbot OBS build untouched — so we never restart the live twitch encoder
+# to bring up youtube. The generated Application name ({{.env}}-obs-{{.platform}})
+# equals the old tripbot-apps one, but they can't co-manage the same Deployment:
+# the dist change removes the tripbot-apps element and adds the obs-platform one
+# atomically, and prod obs-youtube is PARKED (replicas=0) at that moment, so the
+# handoff drops a parked resource and carries no live-stream risk. The new
+# Application is a manual-sync holdout (created OutOfSync; deliberately synced to
+# bring the stream up).
+OBS_PLATFORM_REVISIONS = {("prod-1", "youtube"): "master"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -208,10 +222,16 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
         revision = TRIPBOT_REVISIONS[env_name]
         for platform in load_env(env_name).platforms:
             for comp in TRIPBOT_COMPONENTS:
-                # OBS for a cut-over env is delivered by the standalone obs repo's
-                # own ApplicationSet (OBS_REVISIONS), not tripbot's — skip it here
-                # so the two never co-manage the same obs-* resources.
-                if comp == "obs" and env_name in OBS_REVISIONS:
+                # OBS delivered by the standalone obs repo's appset — skip it here
+                # so the two never co-manage the same obs-* resources. Whole-env
+                # cutover (OBS_REVISIONS) drops every platform; per-platform
+                # cutover (OBS_PLATFORM_REVISIONS) drops just that one platform's
+                # obs while the env's others stay in tripbot-apps (prod-twitch
+                # keeps its in-tripbot OBS; only prod-youtube moves).
+                if comp == "obs" and (
+                    env_name in OBS_REVISIONS
+                    or (env_name, platform) in OBS_PLATFORM_REVISIONS
+                ):
                     continue
                 elements.append(
                     {
@@ -283,6 +303,19 @@ class ArgoCD(Construct):
         # instead of tripbot's cdk8s — the progressive cutover set. Empty on the
         # k3d dev instance (dev OBS stays in tripbot-apps).
         self.obs_envs = tuple(e for e in envs if e in OBS_REVISIONS)
+        # Per-platform obs cutovers this Argo delivers: (env, platform, revision)
+        # for each OBS_PLATFORM_REVISIONS entry whose env this instance manages.
+        self.obs_platform_cuts = tuple(
+            (e, p, rev) for (e, p), rev in OBS_PLATFORM_REVISIONS.items() if e in envs
+        )
+        # Every env the obs AppProject must allow as a destination: whole-env
+        # cutovers plus any env with only a per-platform cut (e.g. prod-1, whose
+        # twitch obs stays in tripbot-apps but youtube obs moves here).
+        self.obs_project_envs = tuple(
+            dict.fromkeys(
+                self.obs_envs + tuple(e for (e, _p, _r) in self.obs_platform_cuts)
+            )
+        )
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -347,14 +380,14 @@ class ArgoCD(Construct):
                 namespaces=list(self.platform_gateway_envs),
                 cluster_resources=[],
             )
-        if self.obs_envs:
+        if self.obs_project_envs:
             self._app_project(
                 id="project-obs",
                 name=OBS_PROJECT,
                 description="OBS streaming encoder (live stream), from the public obs repo",
                 source_repos=[OBS_REPO_URL],
                 # App namespace only — OBS creates nothing cluster-scoped.
-                namespaces=list(self.obs_envs),
+                namespaces=list(self.obs_project_envs),
                 cluster_resources=[],
             )
         # ApplicationSets, one Application each per unit. The apps set is
@@ -550,6 +583,32 @@ class ArgoCD(Construct):
                 # prod obs restarts the live stream on any pod-template change, so
                 # it's a deliberate manual sync (no-op until prod-1 joins OBS_REVISIONS).
                 automated_holdouts=(("prod-1", "obs"),),
+                selfheal=self._selfheal,
+                repo_url=OBS_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
+        if self.obs_platform_cuts:
+            # Per-platform obs cutover: one Application per (env, platform) cut,
+            # named {{.env}}-obs-{{.platform}} (e.g. prod-1-obs-youtube) and
+            # globbing only that platform's manifest — so the env's OTHER obs
+            # platforms keep coming from tripbot-apps (prod-1-obs-twitch, the live
+            # stream, is untouched). Same OBS project + manual-sync holdout for
+            # prod as the whole-env set.
+            self._application_set(
+                id="appset-obs-platform",
+                name="obs-platform",
+                project=OBS_PROJECT,
+                elements=[
+                    {"env": e, "app": f"obs-{p}", "revision": rev}
+                    for (e, p, rev) in self.obs_platform_cuts
+                ],
+                app_name_tmpl="{{.env}}-{{.app}}",
+                include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                # prod obs-youtube restarts the live stream on any pod-template
+                # change, so it's a deliberate manual sync.
+                automated_holdouts=(("prod-1", "obs-youtube"),),
                 selfheal=self._selfheal,
                 repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",

@@ -129,6 +129,8 @@ spec:
   destinations:
     - server: https://kubernetes.default.svc
       namespace: stage-1
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
   clusterResourceWhitelist: []
   namespaceResourceWhitelist:
     - group: "*"
@@ -172,10 +174,6 @@ spec:
             revision: master
           - env: prod-1
             app: onscreens-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: master
-          - env: prod-1
-            app: obs-youtube
             repo: https://github.com/adanalife/tripbot.git
             revision: master
           - env: stage-1
@@ -774,6 +772,69 @@ spec:
             - .spec.volumeClaimTemplates[]?.kind
   templatePatch: |
     {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: obs-platform
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            app: obs-youtube
+            revision: master
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-{{.app}}"
+    spec:
+      project: obs
+      source:
+        repoURL: https://github.com/adanalife/obs.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-{{.app}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs-youtube"))) }}
     spec:
       syncPolicy:
         automated:
