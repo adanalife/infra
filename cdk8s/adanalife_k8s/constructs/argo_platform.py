@@ -52,6 +52,7 @@ from adanalife_k8s.helm_platform import (
     HelmComponent,
     REPOS,
     VERSIONS,
+    arc_components,
     cluster_components,
     env_components,
 )
@@ -84,6 +85,13 @@ class ArgoPlatform(Construct):
             for comp in env_components(load_env(env_name)):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+
+        # ARC (self-hosted GHA runners on the rpi5) — controller + arm64 runner
+        # scale set. OCI charts, cluster-scoped install (one controller for the
+        # minipc); the supporting namespaces/quota/secret are a separate deploy
+        # unit (constructs/arc.py).
+        for comp in arc_components():
+            self._application(comp.release, comp, comp.namespace)
 
     def _project(self):
         proj = cdk8s.ApiObject(
