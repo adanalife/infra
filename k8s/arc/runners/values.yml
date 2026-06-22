@@ -1,8 +1,11 @@
-# gha-runner-scale-set — one arm64 runner pool registered to the tripbot repo,
-# pinned to the rpi5. Absorbs the frequent arm64 Docker build legs that were
-# burning 2x-billed ubuntu-24.04-arm minutes (release-development.yml +
-# release.yml). The workflows target it with `runs-on: arc-arm64-tripbot`.
-githubConfigUrl: https://github.com/adanalife/tripbot
+# gha-runner-scale-set — one arm64 runner pool pinned to the rpi5, registered at
+# the ADANALIFE ORG so any repo can target it with `runs-on: arc-arm64-tripbot`
+# (tripbot, tripbot-console, platform-gateway, …). Absorbs the native-arm64
+# image build legs that were burning 2x-billed ubuntu-24.04-arm minutes / slow
+# QEMU. Org registration needs the ARC GitHub App granted org "Self-hosted
+# runners: read/write" and installed on the consuming repos. (Name keeps the
+# -tripbot suffix for historical continuity; it's just a label now.)
+githubConfigUrl: https://github.com/adanalife
 # Pre-existing Secret materialized by the arc-github-app ExternalSecret
 # (constructs/arc.py). Holds the GitHub App triple ARC registers with.
 githubConfigSecret: arc-github-app
