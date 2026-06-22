@@ -43,6 +43,19 @@ def test_arc_unit_emits_both_namespaces():
     }
 
 
+def test_arc_runners_namespace_is_privileged_for_dind():
+    # dind runs a privileged sidecar; the cluster-wide baseline PodSecurity would
+    # reject it without this exemption. The controller ns stays unlabeled.
+    ns = {
+        n["metadata"]["name"]: n for n in _synth(ArcChart) if n["kind"] == "Namespace"
+    }
+    assert (
+        ns["arc-runners"]["metadata"]["labels"]["pod-security.kubernetes.io/enforce"]
+        == "privileged"
+    )
+    assert "labels" not in ns["arc-systems"]["metadata"]
+
+
 def test_arc_runner_quota_guards_the_shared_pi():
     objs = _synth(ArcChart)
     quota = next(iter(_by_kind(objs, "ResourceQuota")))

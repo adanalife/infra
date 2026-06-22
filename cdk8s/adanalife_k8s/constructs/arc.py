@@ -51,13 +51,27 @@ class Arc(Construct):
     def __init__(self, scope: Construct, id: str = "arc"):
         super().__init__(scope, id)
 
+        # arc-runners hosts the runner pods + their dind sidecar (a privileged
+        # Docker daemon), which the cluster-wide PodSecurity `baseline` Talos
+        # enforces would reject — so label the namespace `privileged` to exempt
+        # it (same escape hatch as local-path-storage / monitoring-host). The
+        # controller (arc-systems) is an ordinary Deployment, no exemption.
+        ns_labels = {
+            RUNNERS_NS: {
+                "pod-security.kubernetes.io/enforce": "privileged",
+                "pod-security.kubernetes.io/warn": "privileged",
+            },
+        }
         for ns in (SYSTEMS_NS, RUNNERS_NS):
+            meta: dict = {"name": ns}
+            if ns in ns_labels:
+                meta["labels"] = ns_labels[ns]
             cdk8s.ApiObject(
                 self,
                 f"ns-{ns}",
                 api_version="v1",
                 kind="Namespace",
-                metadata={"name": ns},
+                metadata=meta,
             )
 
         # Guard the shared rpi5: cap what the runner namespace can claim so a
