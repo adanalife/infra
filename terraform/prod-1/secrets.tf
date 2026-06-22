@@ -292,6 +292,22 @@ resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
   depends_on = [aws_iam_role_policy_attachment.ci_terraform_twitch_stream_key_manage]
 }
 
+# YouTube RTMPS ingest key for the adanalife (production) channel — the prod
+# analog of the staging key (k8s/obs/youtube-stream-key in adanalife-stage).
+# Same shape as k8s_obs_twitch_stream_key: container only, value seeded
+# out-of-band, read at runtime by ESO once obs-youtube streams (the k8s/obs/
+# name prefix is inside the ESOSecretsReader read scope, k8s/*). CI lifecycle
+# granted narrowly below. Bootstrap when prod YouTube goes live:
+#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
+#     --secret-id k8s/obs/youtube-stream-key --secret-string "$STREAM_KEY"
+# Get the key from YouTube Studio (the production channel) → Go live → Stream.
+resource "aws_secretsmanager_secret" "k8s_obs_youtube_stream_key" {
+  name        = "k8s/obs/youtube-stream-key"
+  description = "YouTube RTMPS stream key for adanalife (production). Consumed by OBS via ESO. Rotate from YouTube Studio, then put-secret-value here."
+
+  depends_on = [aws_iam_role_policy_attachment.ci_terraform_youtube_stream_key_manage]
+}
+
 # ============================================================================
 # Discord alerts webhook — SHARED VALUE with the stage account
 # ============================================================================
@@ -501,6 +517,33 @@ resource "aws_iam_policy" "ci_terraform_twitch_stream_key_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_twitch_stream_key_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_twitch_stream_key_manage.arn
+}
+
+# k8s/obs/youtube-stream-key
+data "aws_iam_policy_document" "ci_terraform_youtube_stream_key_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UntagResource",
+      "secretsmanager:UpdateSecret",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/obs/youtube-stream-key-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ci_terraform_youtube_stream_key_manage" {
+  name        = "AllowCITerraformManageProd1YoutubeStreamKey"
+  description = "Lifecycle access for CITerraformRole to the k8s/obs/youtube-stream-key SM secret in prod-1 (container only — value seeded out-of-band)."
+  policy      = data.aws_iam_policy_document.ci_terraform_youtube_stream_key_manage.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_terraform_youtube_stream_key_manage" {
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = aws_iam_policy.ci_terraform_youtube_stream_key_manage.arn
 }
 
 # k8s/grafana-cloud-metrics-write
