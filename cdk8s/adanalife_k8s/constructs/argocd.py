@@ -133,6 +133,17 @@ VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+# The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
+# its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
+# repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
+# no _repo_external_secret below). OBS_REVISIONS is the single source of truth
+# for the progressive cutover: an env listed here is delivered by the obs repo's
+# own ApplicationSet AND excluded from tripbot-apps' obs generation (so the two
+# never co-manage the same obs-* resources). Stage first; add "prod-1": "master"
+# to cut prod over (prod obs is already an AUTOSYNC_HOLDOUT — a deliberate sync).
+OBS_PROJECT = "obs"
+OBS_REPO_URL = "https://github.com/adanalife/obs.git"
+OBS_REVISIONS = {"stage-1": "develop"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -197,6 +208,11 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
         revision = TRIPBOT_REVISIONS[env_name]
         for platform in load_env(env_name).platforms:
             for comp in TRIPBOT_COMPONENTS:
+                # OBS for a cut-over env is delivered by the standalone obs repo's
+                # own ApplicationSet (OBS_REVISIONS), not tripbot's — skip it here
+                # so the two never co-manage the same obs-* resources.
+                if comp == "obs" and env_name in OBS_REVISIONS:
+                    continue
                 elements.append(
                     {
                         "env": env_name,
@@ -263,6 +279,10 @@ class ArgoCD(Construct):
         self.platform_gateway_envs = tuple(
             e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
         )
+        # Envs whose OBS is delivered from the standalone (public) obs repo
+        # instead of tripbot's cdk8s — the progressive cutover set. Empty on the
+        # k3d dev instance (dev OBS stays in tripbot-apps).
+        self.obs_envs = tuple(e for e in envs if e in OBS_REVISIONS)
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -325,6 +345,16 @@ class ArgoCD(Construct):
                 # App namespace only — the gateway needs no data-namespace access
                 # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
                 namespaces=list(self.platform_gateway_envs),
+                cluster_resources=[],
+            )
+        if self.obs_envs:
+            self._app_project(
+                id="project-obs",
+                name=OBS_PROJECT,
+                description="OBS streaming encoder (live stream), from the public obs repo",
+                source_repos=[OBS_REPO_URL],
+                # App namespace only — OBS creates nothing cluster-scoped.
+                namespaces=list(self.obs_envs),
                 cluster_resources=[],
             )
         # ApplicationSets, one Application each per unit. The apps set is
@@ -498,6 +528,30 @@ class ArgoCD(Construct):
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
+        if self.obs_envs:
+            # One Application per env, each managing both platforms via the
+            # include glob ({{.env}}-obs-twitch + -youtube). Distinct name
+            # ({{.env}}-obs) from the old per-platform tripbot-apps Applications,
+            # so the cutover can adopt-then-remove without a name collision.
+            self._application_set(
+                id="appset-obs",
+                name="obs",
+                project=OBS_PROJECT,
+                elements=[
+                    {"env": e, "app": "obs", "revision": OBS_REVISIONS[e]}
+                    for e in self.obs_envs
+                ],
+                app_name_tmpl="{{.env}}-obs",
+                include_tmpl="{{.env}}-obs-*.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                # prod obs restarts the live stream on any pod-template change, so
+                # it's a deliberate manual sync (no-op until prod-1 joins OBS_REVISIONS).
+                automated_holdouts=(("prod-1", "obs"),),
+                selfheal=self._selfheal,
+                repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The

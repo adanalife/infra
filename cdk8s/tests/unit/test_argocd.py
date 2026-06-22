@@ -100,6 +100,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "tripbot-console": ["git@github.com:adanalife/tripbot-console.git"],
         "video-pipeline": ["git@github.com:adanalife/video-pipeline.git"],
         "platform-gateway": ["git@github.com:adanalife/platform-gateway.git"],
+        "obs": ["https://github.com/adanalife/obs.git"],
     }
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
         want_repos
@@ -115,6 +116,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("tripbot-console", "tripbot-console"),
         ("video-pipeline", "video-pipeline"),
         ("platform-gateway", "platform-gateway"),
+        ("obs", "obs"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
     # cluster-resource whitelists are scoped to what each repo's dist actually
