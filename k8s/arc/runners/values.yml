@@ -1,0 +1,50 @@
+# gha-runner-scale-set — one arm64 runner pool registered to the tripbot repo,
+# pinned to the rpi5. Absorbs the frequent arm64 Docker build legs that were
+# burning 2x-billed ubuntu-24.04-arm minutes (release-development.yml +
+# release.yml). The workflows target it with `runs-on: arc-arm64-tripbot`.
+githubConfigUrl: https://github.com/adanalife/tripbot
+# Pre-existing Secret materialized by the arc-github-app ExternalSecret
+# (constructs/arc.py). Holds the GitHub App triple ARC registers with.
+githubConfigSecret: arc-github-app
+
+runnerScaleSetName: arc-arm64-tripbot
+
+# minRunners: 1 keeps one warm runner ALWAYS registered. This is load-bearing
+# for the seamless gh-hosted fallback: the picker job probes the GitHub runners
+# API for an online runner with this scale set's label, and at minRunners:0 the
+# pool registers zero runners at idle — the probe would read "offline" even on a
+# healthy Pi. One warm runner makes "online runner exists" a true health signal
+# (and removes cold-start latency on the common path). maxRunners:2 caps the
+# burst so the 4-core Pi can't be swamped (also bounded by the namespace quota).
+minRunners: 1
+maxRunners: 2
+
+# dind: each ephemeral runner gets a Docker daemon sidecar, so the existing
+# `docker buildx` / `docker compose` build steps work unchanged — and arm64
+# builds run NATIVELY on the Pi (no QEMU). The chart injects the dind sidecar;
+# we only override the runner container below.
+containerMode:
+  type: dind
+
+template:
+  spec:
+    # Only the arm64 Pi carries this arch label; the toleration clears its taint
+    # (verify the exact key against the live node before first sync —
+    # `kubectl get node <pi> -o jsonpath='{.spec.taints}'`).
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    tolerations:
+      - key: dana.lol/rpi5
+        operator: Exists
+        effect: NoSchedule
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
