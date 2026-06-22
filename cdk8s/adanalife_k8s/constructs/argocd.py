@@ -148,7 +148,10 @@ OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # excluded from tripbot-apps. prod-1 joined on a planned-downtime cutover (the
 # live twitch encoder restarts onto the obs-repo image) — youtube was already
 # on the obs repo, so the whole-env app adopts it cleanly and only twitch moves.
-OBS_REVISIONS = {"stage-1": "develop", "prod-1": "master"}
+# development joined last so tripbot can drop its obs construct entirely: the obs
+# repo emits development-obs-twitch.k8s.yaml at develop, and the dev k3d Argo
+# fetches the public obs repo over anonymous HTTPS (no deploy key) like the minipc.
+OBS_REVISIONS = {"stage-1": "develop", "prod-1": "master", "development": "develop"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -285,8 +288,8 @@ class ArgoCD(Construct):
             e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
         )
         # Envs whose OBS is delivered from the standalone (public) obs repo
-        # instead of tripbot's cdk8s — the progressive cutover set. Empty on the
-        # k3d dev instance (dev OBS stays in tripbot-apps).
+        # instead of tripbot's cdk8s — now every env, including the k3d dev
+        # instance (the obs repo is public, so dev fetches it anonymously).
         self.obs_envs = tuple(e for e in envs if e in OBS_REVISIONS)
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a

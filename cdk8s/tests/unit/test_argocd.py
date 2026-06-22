@@ -71,12 +71,14 @@ def test_dev_is_development_only_with_traefik_ui():
         ing["metadata"]["annotations"]["external-dns.alpha.kubernetes.io/hostname"]
         == "argocd.dev.whereisdana.today"
     )
-    # dev runs only the per-repo tripbot + infra projects (no console/video-pipeline)
+    # dev runs the per-repo tripbot + infra projects, plus obs (the public obs
+    # repo delivers dev OBS now) — but no console/video-pipeline (private repos).
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == {
         "tripbot",
         "infra",
+        "obs",
     }
-    for name in ("tripbot", "infra"):
+    for name in ("tripbot", "infra", "obs"):
         assert {
             d["namespace"] for d in _project(objs, name)["spec"]["destinations"]
         } == {"development"}
