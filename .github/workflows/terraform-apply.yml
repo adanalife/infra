@@ -1,4 +1,4 @@
-name: Apply Terraform
+name: terraform-apply
 
 on:
   # trigger with PR comment

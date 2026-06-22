@@ -14,7 +14,7 @@
 # short-lived installation tokens via actions/create-github-app-token —
 # GITHUB_TOKEN can't be used for those jobs because commits/PRs it creates
 # never trigger workflow runs, and cross-repo dispatch needs real auth.
-# Consumers: infra cdk8s.yml (auto-synth push-back), infra bump-prs.yml
+# Consumers: infra cdk8s-synth.yml (auto-synth push-back), infra bump-prs.yml
 # (prod version-bump PRs), tripbot release.yml (repository_dispatch to infra).
 
 provider "github" {

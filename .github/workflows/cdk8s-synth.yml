@@ -1,4 +1,4 @@
-name: cdk8s
+name: cdk8s-synth
 
 # Lints + tests the Python cdk8s authoring layer: synth must succeed and the
 # unit + contract tests pass. No cluster needed — `cdk8s synth` is offline.
