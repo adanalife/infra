@@ -305,7 +305,7 @@ resource "aws_secretsmanager_secret" "k8s_obs_youtube_stream_key" {
   name        = "k8s/obs/youtube-stream-key"
   description = "YouTube RTMPS stream key for adanalife (production). Consumed by OBS via ESO. Rotate from YouTube Studio, then put-secret-value here."
 
-  depends_on = [aws_iam_role_policy_attachment.ci_terraform_youtube_stream_key_manage]
+  depends_on = [aws_iam_role_policy.ci_terraform_youtube_stream_key_manage]
 }
 
 # ============================================================================
@@ -535,15 +535,14 @@ data "aws_iam_policy_document" "ci_terraform_youtube_stream_key_manage" {
   }
 }
 
-resource "aws_iam_policy" "ci_terraform_youtube_stream_key_manage" {
-  name        = "AllowCITerraformManageProd1YoutubeStreamKey"
-  description = "Lifecycle access for CITerraformRole to the k8s/obs/youtube-stream-key SM secret in prod-1 (container only — value seeded out-of-band)."
-  policy      = data.aws_iam_policy_document.ci_terraform_youtube_stream_key_manage.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_youtube_stream_key_manage" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_youtube_stream_key_manage.arn
+# Inline (not a managed policy + attachment) because CITerraformRole is at the
+# 10-managed-policies-per-role quota — an 11th attachment fails LimitExceeded.
+# Inline role policies don't count against that quota. Mirrors the existing
+# ci_terraform_tailscale_secrets inline grant on the same role (tailscale.tf).
+resource "aws_iam_role_policy" "ci_terraform_youtube_stream_key_manage" {
+  name   = "AllowCITerraformManageProd1YoutubeStreamKey"
+  role   = aws_iam_role.ci_terraform.id
+  policy = data.aws_iam_policy_document.ci_terraform_youtube_stream_key_manage.json
 }
 
 # k8s/grafana-cloud-metrics-write
