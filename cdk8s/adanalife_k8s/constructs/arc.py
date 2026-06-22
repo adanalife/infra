@@ -74,28 +74,33 @@ class Arc(Construct):
                 metadata=meta,
             )
 
-        # Guard the shared rpi5: cap what the runner namespace can claim so a
-        # concurrent build can't pinch CPU/memory from the stage-1 pods on the
-        # node. Sized for minRunners:1 warm + a 2nd burst runner, each a runner
-        # container + dind sidecar.
-        quota = cdk8s.ApiObject(
+        # Guard the shared rpi5: bound each runner container so a build can't
+        # OOM/CPU-starve the stage-1 pods on the node. A LimitRange (not a
+        # ResourceQuota) is the right tool here — ARC injects `dind` +
+        # `init-dind-externals` containers that declare no resources, and a
+        # CPU/memory ResourceQuota rejects any pod whose containers don't all set
+        # requests+limits. The LimitRange instead *supplies* defaults to those
+        # injected containers (and caps per-container memory); maxRunners in the
+        # chart values bounds concurrency. dind (where `docker build` actually
+        # runs) gets the headroom; the runner agent sits well under the default.
+        limits = cdk8s.ApiObject(
             self,
-            "runner-quota",
+            "runner-limits",
             api_version="v1",
-            kind="ResourceQuota",
-            metadata={"name": "arc-runners-quota", "namespace": RUNNERS_NS},
+            kind="LimitRange",
+            metadata={"name": "arc-runners-limits", "namespace": RUNNERS_NS},
         )
-        quota.add_json_patch(
+        limits.add_json_patch(
             cdk8s.JsonPatch.add(
                 "/spec",
                 {
-                    "hard": {
-                        "requests.cpu": "1",
-                        "requests.memory": "1Gi",
-                        "limits.cpu": "3",
-                        "limits.memory": "5Gi",
-                        "pods": "4",
-                    }
+                    "limits": [
+                        {
+                            "type": "Container",
+                            "defaultRequest": {"cpu": "250m", "memory": "512Mi"},
+                            "default": {"cpu": "2", "memory": "4Gi"},
+                        }
+                    ]
                 },
             )
         )
