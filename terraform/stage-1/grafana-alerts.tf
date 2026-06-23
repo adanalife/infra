@@ -12,6 +12,13 @@
 
 locals {
   alert_eval_interval_seconds = 60
+
+  // Streaming platforms with a per-platform vlc-server/OBS stack (twitch,
+  // youtube, …). Drives the dynamic per-platform "stream metrics absent"
+  // canary below — add a platform here when it gets its own encoder and it
+  // gains lost-visibility coverage automatically. The other stream-health
+  // rules self-scale via `by (service_platform)` and don't need this list.
+  stream_platforms = ["twitch", "youtube"]
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -519,7 +526,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(rate(vlc_player_lost_pictures{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(vlc_player_lost_pictures{service_name=\"vlc-server\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -573,7 +580,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -634,7 +641,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(rate(obs_render_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(obs_render_skipped_frames{service_name=\"vlc-server\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -688,7 +695,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(rate(obs_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(obs_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -757,7 +764,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(avg_over_time(rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=\"prod-1\"}[5m])[1h:1m]))"
+        expr          = "max by (service_platform) (avg_over_time(rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=\"prod-1\"}[5m])[1h:1m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -810,7 +817,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_stream_output_congestion{service_name=\"vlc-server\"})"
+        expr          = "max by (service_platform, deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -838,64 +845,80 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // Visibility canary: every other stream-health rule uses no_data_state=OK, so
-  // if prod vlc-server stops emitting entirely (pod crash, broken OTLP push) they
-  // all go quiet instead of firing — "lost all visibility" looks identical to
-  // "healthy". absent() flips that into an explicit page. no_data_state=OK is
-  // correct here: when the series IS present (healthy), absent() returns nothing,
-  // which Grafana sees as no-data for ref A — that's the OK case. exec_err=Alerting
-  // so a datasource error (also a visibility loss) still pages. Note this is
-  // distinct from streaming=0 (intentional dark), which still emits the series.
-  rule {
-    name           = "OBS: prod stream metrics absent (lost visibility)"
-    for            = "5m"
-    condition      = "C"
-    no_data_state  = "OK"
-    exec_err_state = "Alerting"
+  // Visibility canary, one per platform: every other stream-health rule uses
+  // no_data_state=OK, so if a prod vlc-server stops emitting entirely (pod
+  // crash, broken OTLP push) they all go quiet instead of firing — "lost all
+  // visibility" looks identical to "healthy". absent() flips that into an
+  // explicit page. no_data_state=OK is correct here: when the series IS present
+  // (healthy), absent() returns nothing, which Grafana sees as no-data for ref
+  // A — that's the OK case. exec_err=Alerting so a datasource error (also a
+  // visibility loss) still pages. Distinct from streaming=0 (intentional dark),
+  // which still emits the series.
+  //
+  // One rule per platform because absent() can't be grouped — a single
+  // absent(obs_streaming_active{prod-1}) only fires when EVERY platform is gone,
+  // so a single-encoder outage (e.g. youtube vlc-server crashes while twitch is
+  // up) would slip through. Generated from local.stream_platforms so new
+  // platforms get coverage automatically.
+  //
+  // DEPLOY ORDER: each rule matches service_platform="<p>", a label that only
+  // exists once tripbot stamps it on the datapoints (adanalife/tripbot#983).
+  // Until that ships + a vlc-server release rolls out, these queries match no
+  // series → absent()=1 → false page. Apply this group only AFTER the
+  // service_platform label is live in prod.
+  dynamic "rule" {
+    for_each = toset(local.stream_platforms)
+    content {
+      name           = "OBS: ${rule.value} stream metrics absent (lost visibility)"
+      for            = "5m"
+      condition      = "C"
+      no_data_state  = "OK"
+      exec_err_state = "Alerting"
 
-    annotations = {
-      summary     = "No obs_streaming_active from prod vlc-server for 5m"
-      description = "obs_streaming_active{deployment_environment=\"prod-1\"} has been absent for 5m — vlc-server isn't reporting, so every other stream-health rule is blind. Check the prod vlc-server pod (crashloop? OOM?) and the OTLP push path (pkg/telemetry). This is a lost-visibility page, not a stream-state page."
-    }
-    labels = {
-      severity = "critical"
-      service  = "vlc-server"
-    }
+      annotations = {
+        summary     = "No obs_streaming_active from prod ${rule.value} vlc-server for 5m"
+        description = "obs_streaming_active{deployment_environment=\"prod-1\", service_platform=\"${rule.value}\"} has been absent for 5m — the ${rule.value} vlc-server isn't reporting, so every other stream-health rule is blind for that platform. Check the prod ${rule.value} vlc-server pod (crashloop? OOM?) and the OTLP push path (pkg/telemetry). This is a lost-visibility page, not a stream-state page."
+      }
+      labels = {
+        severity = "critical"
+        service  = "vlc-server"
+      }
 
-    data {
-      ref_id = "A"
-      relative_time_range {
-        from = 300
-        to   = 0
+      data {
+        ref_id = "A"
+        relative_time_range {
+          from = 300
+          to   = 0
+        }
+        datasource_uid = data.grafana_data_source.prometheus.uid
+        model = jsonencode({
+          refId         = "A"
+          expr          = "absent(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\", service_platform=\"${rule.value}\"})"
+          instant       = true
+          intervalMs    = 60000
+          maxDataPoints = 43200
+        })
       }
-      datasource_uid = data.grafana_data_source.prometheus.uid
-      model = jsonencode({
-        refId         = "A"
-        expr          = "absent(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
-        instant       = true
-        intervalMs    = 60000
-        maxDataPoints = 43200
-      })
-    }
-    data {
-      ref_id         = "C"
-      datasource_uid = "__expr__"
-      relative_time_range {
-        from = 0
-        to   = 0
+      data {
+        ref_id         = "C"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          refId      = "C"
+          type       = "threshold"
+          expression = "A"
+          conditions = [{
+            type      = "query"
+            evaluator = { type = "gt", params = [0] }
+            operator  = { type = "and" }
+            query     = { params = ["A"] }
+            reducer   = { type = "last", params = [] }
+          }]
+        })
       }
-      model = jsonencode({
-        refId      = "C"
-        type       = "threshold"
-        expression = "A"
-        conditions = [{
-          type      = "query"
-          evaluator = { type = "gt", params = [0] }
-          operator  = { type = "and" }
-          query     = { params = ["A"] }
-          reducer   = { type = "last", params = [] }
-        }]
-      })
     }
   }
 
@@ -907,8 +930,8 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "OBS stream output is reconnecting"
-      description = "obs-websocket reports the stream output has been in the reconnecting state for over 1m."
+      summary     = "OBS {{ $labels.service_platform }} stream output is reconnecting"
+      description = "obs-websocket reports the {{ $labels.service_platform }} stream output has been in the reconnecting state for over 1m."
     }
     labels = {
       severity = "critical"
@@ -924,7 +947,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_stream_output_reconnecting{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
+        expr          = "max by (service_platform) (obs_stream_output_reconnecting{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -971,8 +994,8 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Prod OBS has not been streaming for 10m"
-      description = "obs_streaming_active{deployment_environment=\"prod-1\"} has been 0 for 10m — OBS is not broadcasting (stopped, crashed, or never resumed after a restart) and viewers see nothing. If this is planned downtime, add a Grafana silence for this rule. Otherwise check OBS (the obs-twitch pod / OBS WebSocket) and start the stream. Distinct from the silent-disconnect alert, which is OBS streaming while Twitch shows offline."
+      summary     = "Prod {{ $labels.service_platform }} OBS has not been streaming for 10m"
+      description = "obs_streaming_active{deployment_environment=\"prod-1\", service_platform=\"{{ $labels.service_platform }}\"} has been 0 for 10m — the {{ $labels.service_platform }} OBS is not broadcasting (stopped, crashed, or never resumed after a restart) and viewers see nothing. If this is planned downtime, add a Grafana silence for this rule. Otherwise check OBS (the obs-{{ $labels.service_platform }} pod / OBS WebSocket) and start the stream. Distinct from the silent-disconnect alert, which is OBS streaming while the platform shows offline."
     }
     labels = {
       severity = "critical"
@@ -988,7 +1011,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
+        expr          = "max by (service_platform) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1026,6 +1049,13 @@ resource "grafana_rule_group" "stream_health" {
   // cooldown). This alert fires regardless of the watchdog so we know
   // immediately, not after 3 minutes of detection lag + restart sequence.
   //
+  // Twitch-only: the OBS side is scoped to service_platform="twitch" because
+  // the only liveness signal we have is tripbot_twitch_channel_live (Twitch).
+  // Without that scope, max(obs_streaming_active) would span every platform, so
+  // the youtube encoder streaming would mask or fake a twitch silent-disconnect.
+  // A youtube equivalent needs a tripbot_youtube_channel_live metric first (the
+  // youtube stream is currently unlisted/botless) — tracked separately.
+  //
   // Expression: max() drops all labels so we can subtract across services
   // (obs_streaming_active is on vlc-server, tripbot_twitch_channel_live is
   // on tripbot). 1 = silent disconnect; 0 = aligned; -1 = harmless inverse
@@ -1055,7 +1085,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\"}) - max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        expr          = "max(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\", service_platform=\"twitch\"}) - max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
