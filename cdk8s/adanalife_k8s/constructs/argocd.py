@@ -535,6 +535,12 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
+                # selfHeal off on stage so a hand `kubectl scale gateway-* 0`
+                # sticks (the minipc gets freed for prod by hand) — same posture
+                # as the tripbot apps set. Paired with the stage gateways omitting
+                # spec.replicas (platform-gateway EnvConfig.manual_replicas), so an
+                # autosync on a develop merge doesn't reset a scaled-down gateway.
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
