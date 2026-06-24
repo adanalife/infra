@@ -1286,6 +1286,128 @@ resource "grafana_rule_group" "stream_health" {
       })
     }
   }
+
+  // Background-audio dead air — the Twitch music bed (Groove Salad Classic /
+  // SomaFM) is not playing. tripbot's audio-fallback watchdog swaps the source
+  // onto the local Car Hum bed when SomaFM drops, and the local file plays
+  // immediately, so obs_background_audio_playing returns to 1 within ~1m of any
+  // SomaFM blip. Sustained 0 for 5m therefore means the source is genuinely
+  // silent AND the fallback didn't restore it (fallback file missing, OBS
+  // WebSocket wedged, watchdog dead) — real dead air on a 24/7 stream, so
+  // critical. Twitch-only: the metric is emitted by tripbot, which only runs
+  // the watchdog Twitch-side. no_data=OK so it stays quiet until tripbot#993
+  // ships the metric. Silence in Grafana during planned audio-off stretches.
+  rule {
+    name           = "OBS: Twitch background audio dead air (not playing)"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Twitch background audio has not been playing for 5m"
+      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m — the Twitch music bed (Groove Salad Classic) is silent and the audio-fallback watchdog has NOT restored audio via the local Car Hum bed. Viewers hear dead air. Check the obs-twitch pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart the obs-twitch deploy. See vault tripbot/obs/gotchas.md."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // SomaFM down a while — informational. The fallback keeps audible Car Hum on
+  // air, so this isn't dead air (the dead-air rule above covers that); it's a
+  // heads-up that the stream has been on the local bed instead of the intended
+  // music for 20m, i.e. SomaFM's edge has been unreachable for a sustained
+  // stretch. Warning → Discord, not a page. for=20m so a brief SomaFM blip the
+  // fallback rides through doesn't notify.
+  rule {
+    name           = "OBS: Twitch on SomaFM fallback bed for 20m"
+    for            = "20m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Twitch background audio has been on the Car Hum fallback for 20m"
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m — SomaFM's edge has been unreachable, so the stream is on the local Car Hum bed instead of the SomaFM music. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
+    }
+    labels = {
+      severity = "warning"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 # Gateway health — the per-platform API gateway sits on tripbot's critical path

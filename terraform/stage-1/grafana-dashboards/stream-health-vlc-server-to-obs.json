@@ -213,6 +213,170 @@
         { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_average_frame_render_time_ms{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Background audio (Twitch · SomaFM → Car Hum fallback)",
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Background audio",
+      "description": "1 when the Twitch music bed (Groove Salad Classic) is playing, 0 when its OBS media state is ended/stopped/errored. Twitch-only (tripbot), not platform-labeled.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "audio" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "SILENT", "color": "red" }, "1": { "text": "PLAYING", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "Source",
+      "description": "Which bed is on air: the normal SomaFM source, or the local Car Hum fallback the watchdog swaps in when SomaFM is unreachable.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "source" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "SomaFM", "color": "green" }, "1": { "text": "CAR HUM (fallback)", "color": "yellow" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "SomaFM edge",
+      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(somafm_reachable{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "Source swaps (1h)",
+      "description": "Background-audio source swaps in the last hour (to_fallback + to_somafm). Any to_fallback swap means SomaFM dropped.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(obs_background_audio_swaps_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "swaps/1h" }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none", "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Background audio level (peak dBFS)",
+      "description": "Peak output level of the Twitch background bed, floored at -60. Sustained ≈ -60 is dead air; recorded only while the volume meter is fresh, so gaps mean the meter subscription dropped (not silence).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "min(obs_background_audio_level_db{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "peak dBFS" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none", "decimals": 1, "min": -60, "max": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": -50 }
+          ]},
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Background audio state (playing / fallback / SomaFM reachable)",
+      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "playing" },
+        { "refId": "B", "expr": "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "on fallback" },
+        { "refId": "C", "expr": "max(somafm_reachable{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm reachable" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "on fallback" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "playing" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      }
     }
   ]
 }
