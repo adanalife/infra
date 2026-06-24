@@ -283,7 +283,7 @@
       "id": 43,
       "type": "stat",
       "title": "SomaFM edge",
-      "description": "Result of the watchdog's last SomaFM edge probe — UP when the ice4 edge served stream bytes, DOWN when it timed out / sent nothing.",
+      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
       "targets": [
