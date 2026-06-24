@@ -191,110 +191,110 @@ tasks:
     desc: terraform apply against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:stage:plan:
     desc: terraform plan against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:stage:init:
     desc: terraform init against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:stage:init:reconfigure:
     desc: terraform init -reconfigure against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:stage:init:migrate:
     desc: terraform init -migrate-state against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:stage:destroy:
     desc: terraform destroy against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   tf:prod:apply:
     desc: terraform apply against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:prod:plan:
     desc: terraform plan against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:prod:init:
     desc: terraform init against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:prod:init:reconfigure:
     desc: terraform init -reconfigure against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:prod:init:migrate:
     desc: terraform init -migrate-state against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:prod:destroy:
     desc: terraform destroy against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   # Core uses --no-session because session tokens can't make IAM changes.
   tf:core:apply:
     desc: terraform apply against core (no session token; IAM changes need full creds)
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:core:plan:
     desc: terraform plan against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:core:init:
     desc: terraform init against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:core:init:reconfigure:
     desc: terraform init -reconfigure against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:core:init:migrate:
     desc: terraform init -migrate-state against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:core:destroy:
     desc: terraform destroy against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   # platform = env-agnostic config, i.e. things not owned by any specific
   # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
@@ -305,37 +305,37 @@ tasks:
     desc: terraform apply against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:platform:plan:
     desc: terraform plan against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:platform:init:
     desc: terraform init against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:platform:init:reconfigure:
     desc: terraform init -reconfigure against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:platform:init:migrate:
     desc: terraform init -migrate-state against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:platform:destroy:
     desc: terraform destroy against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
@@ -787,8 +787,8 @@ tasks:
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
-          ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
-          sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
+          ak=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
           for ns in external-secrets development; do
             kubectl create secret generic eso-aws-credentials \
@@ -886,8 +886,8 @@ tasks:
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
-          ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
-          sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
+          ak=$(aws-vault exec adanalife-prod -- mise exec -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-prod -- mise exec -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
           for ns in external-secrets prod-1 prod-1-data prod-1-platform; do
             kubectl create secret generic eso-aws-credentials \
@@ -946,8 +946,8 @@ tasks:
           echo "eso-aws-credentials already present in stage-1 + stage-1-data + stage-1-platform, skipping"
         else
           set -euo pipefail
-          ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
-          sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
+          ak=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
           for ns in stage-1 stage-1-data stage-1-platform; do
             kubectl create secret generic eso-aws-credentials \
