@@ -35,7 +35,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
         env:
           CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
@@ -91,7 +91,7 @@ jobs:
         terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: terraform validate
         uses: dflook/terraform-validate@v2
         with:
@@ -104,7 +104,7 @@ jobs:
         terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: terraform fmt
         uses: dflook/terraform-fmt-check@v2
         with:
