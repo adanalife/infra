@@ -44,10 +44,6 @@ provider "google" {
   impersonate_service_account = var.gcp_impersonate ? "terraform@${var.gcp_project}.iam.gserviceaccount.com" : null
 }
 
-data "google_project" "this" {
-  project_id = var.gcp_project
-}
-
 # ---------------------------------------------------------------------------
 # Delegated terraform identity
 # ---------------------------------------------------------------------------
