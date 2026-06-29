@@ -296,6 +296,74 @@ class ArgoCD(Construct):
         # cut-over env.
         self.tripbot_apps_envs = tuple(e for e in envs if e in TRIPBOT_APPS_ENVS)
 
+        # The private cross-repo sources (console, video-pipeline, platform-
+        # gateway) all share ONE shape: a per-repo AppProject, a per-env
+        # ApplicationSet sourcing the repo's committed dist (<env>.k8s.yaml at the
+        # env's revision), and a `repository` ExternalSecret materialized from the
+        # repo's deploy key in SM. They differ only by project / name / url /
+        # sm_key / revisions and which envs they target, so they're driven from
+        # this one descriptor list — looped over in three places below (the
+        # AppProject, ApplicationSet, and ExternalSecret sections), each loop in
+        # the original per-source order so the synthesized dist is byte-identical.
+        # (obs is a fourth cross-repo source but a DIFFERENT shape: public — no
+        # repo Secret — with a glob include + a per-env holdout, so it stays
+        # inline rather than joining this list.)
+        cross_repo_sources = [
+            {
+                "envs": self.console_envs,
+                "revisions": CONSOLE_REVISIONS,
+                "repo_url": CONSOLE_REPO_URL,
+                "sm_key": CONSOLE_REPO_SM_KEY,
+                "project": CONSOLE_PROJECT,
+                "project_id": "project-console",
+                "project_description": "tripbot-console admin dashboard, from the private tripbot-console repo",
+                # The console deploys into its app namespace AND the isolated data
+                # namespace (read-only RBAC for the live status views), so it needs
+                # both destinations like the infra project does.
+                "namespaces": _project_namespaces(self.console_envs),
+                "cluster_resources": [],
+                "appset_id": "appset-console",
+                "appset_name": "tripbot-console",
+                "app_name_tmpl": "{{.env}}-console",
+                "secret_id": "repo-secret-console",
+                "secret_name": "argocd-repo-tripbot-console",
+            },
+            {
+                "envs": self.video_pipeline_envs,
+                "revisions": VIDEO_PIPELINE_REVISIONS,
+                "repo_url": VIDEO_PIPELINE_REPO_URL,
+                "sm_key": VIDEO_PIPELINE_REPO_SM_KEY,
+                "project": VIDEO_PIPELINE_PROJECT,
+                "project_id": "project-video-pipeline",
+                "project_description": "dashcam video-pipeline workloads, from the private video-pipeline repo",
+                "namespaces": list(self.video_pipeline_envs),
+                "cluster_resources": [PRIORITY_CLASS],
+                "appset_id": "appset-video-pipeline",
+                "appset_name": "video-pipeline",
+                "app_name_tmpl": "{{.env}}-video-pipeline",
+                "secret_id": "repo-secret-video-pipeline",
+                "secret_name": "argocd-repo-video-pipeline",
+            },
+            {
+                "envs": self.platform_gateway_envs,
+                "revisions": PLATFORM_GATEWAY_REVISIONS,
+                "repo_url": PLATFORM_GATEWAY_REPO_URL,
+                "sm_key": PLATFORM_GATEWAY_REPO_SM_KEY,
+                "project": PLATFORM_GATEWAY_PROJECT,
+                "project_id": "project-platform-gateway",
+                "project_description": "platform-API gateway (gateway-twitch), from the private platform-gateway repo",
+                # App namespace only — the gateway needs no data-namespace access
+                # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
+                "namespaces": list(self.platform_gateway_envs),
+                "cluster_resources": [],
+                "appset_id": "appset-platform-gateway",
+                "appset_name": "platform-gateway",
+                "app_name_tmpl": "{{.env}}-platform-gateway",
+                "secret_id": "repo-secret-platform-gateway",
+                "secret_name": "argocd-repo-platform-gateway",
+            },
+        ]
+
         # One AppProject per source repo. console/video-pipeline only on the
         # cluster(s) that actually run those envs (empty -> skip the project).
         self._app_project(
@@ -323,38 +391,19 @@ class ArgoCD(Construct):
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
             + ([NAMESPACE_KIND] if (ups_monitor or arc) else []),
         )
-        if self.console_envs:
-            self._app_project(
-                id="project-console",
-                name=CONSOLE_PROJECT,
-                description="tripbot-console admin dashboard, from the private tripbot-console repo",
-                source_repos=[CONSOLE_REPO_URL],
-                # The console deploys into its app namespace AND the isolated
-                # data namespace (read-only RBAC for the live status views), so
-                # it needs both destinations like the infra project does.
-                namespaces=_project_namespaces(self.console_envs),
-                cluster_resources=[],
-            )
-        if self.video_pipeline_envs:
-            self._app_project(
-                id="project-video-pipeline",
-                name=VIDEO_PIPELINE_PROJECT,
-                description="dashcam video-pipeline workloads, from the private video-pipeline repo",
-                source_repos=[VIDEO_PIPELINE_REPO_URL],
-                namespaces=list(self.video_pipeline_envs),
-                cluster_resources=[PRIORITY_CLASS],
-            )
-        if self.platform_gateway_envs:
-            self._app_project(
-                id="project-platform-gateway",
-                name=PLATFORM_GATEWAY_PROJECT,
-                description="platform-API gateway (gateway-twitch), from the private platform-gateway repo",
-                source_repos=[PLATFORM_GATEWAY_REPO_URL],
-                # App namespace only — the gateway needs no data-namespace access
-                # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
-                namespaces=list(self.platform_gateway_envs),
-                cluster_resources=[],
-            )
+        # The three private cross-repo AppProjects, in the original per-source
+        # order (console, video-pipeline, platform-gateway). Each only on the
+        # cluster(s) actually running those envs (empty -> skip the project).
+        for src in cross_repo_sources:
+            if src["envs"]:
+                self._app_project(
+                    id=src["project_id"],
+                    name=src["project"],
+                    description=src["project_description"],
+                    source_repos=[src["repo_url"]],
+                    namespaces=src["namespaces"],
+                    cluster_resources=src["cluster_resources"],
+                )
         if self.obs_envs:
             self._app_project(
                 id="project-obs",
@@ -474,70 +523,31 @@ class ArgoCD(Construct):
                 dest_ns_tmpl="arc-runners",
                 prune_disabled=False,
             )
-        # The cross-repo console unit: one Application per env, sourcing the
-        # PRIVATE tripbot-console repo's committed dist (per-env revision —
-        # stage follows develop, prod follows master). Same autosync posture
-        # as the apps set.
-        if self.console_envs:
-            self._application_set(
-                id="appset-console",
-                name="tripbot-console",
-                project=CONSOLE_PROJECT,
-                elements=[
-                    {"env": e, "revision": CONSOLE_REVISIONS[e]}
-                    for e in self.console_envs
-                ],
-                app_name_tmpl="{{.env}}-console",
-                include_tmpl="{{.env}}.k8s.yaml",
-                prune_disabled=False,
-                automated_envs=autosync_envs,
-                selfheal=self._selfheal,
-                repo_url=CONSOLE_REPO_URL,
-                target_revision_tmpl="{{.revision}}",
-            )
-        # The cross-repo video-pipeline unit: one Application per env, sourcing the
-        # PRIVATE video-pipeline repo's committed dist. The include is the exact
-        # <env>.k8s.yaml (the persistent dashcam-cv workload) — the sibling
-        # <env>-jobs.k8s.yaml one-shots are deliberately NOT globbed, so reconciles
-        # never re-run them. Same autosync posture as the apps/console sets.
-        if self.video_pipeline_envs:
-            self._application_set(
-                id="appset-video-pipeline",
-                name="video-pipeline",
-                project=VIDEO_PIPELINE_PROJECT,
-                elements=[
-                    {"env": e, "revision": VIDEO_PIPELINE_REVISIONS[e]}
-                    for e in self.video_pipeline_envs
-                ],
-                app_name_tmpl="{{.env}}-video-pipeline",
-                include_tmpl="{{.env}}.k8s.yaml",
-                prune_disabled=False,
-                automated_envs=autosync_envs,
-                selfheal=self._selfheal,
-                repo_url=VIDEO_PIPELINE_REPO_URL,
-                target_revision_tmpl="{{.revision}}",
-            )
-        # The cross-repo platform-gateway unit: one Application per env, sourcing
-        # the PRIVATE platform-gateway repo's committed dist (<env>.k8s.yaml —
-        # the gateway-twitch instance). Per-env revision (stage→develop, prod→master),
-        # same autosync posture as the apps/console sets.
-        if self.platform_gateway_envs:
-            self._application_set(
-                id="appset-platform-gateway",
-                name="platform-gateway",
-                project=PLATFORM_GATEWAY_PROJECT,
-                elements=[
-                    {"env": e, "revision": PLATFORM_GATEWAY_REVISIONS[e]}
-                    for e in self.platform_gateway_envs
-                ],
-                app_name_tmpl="{{.env}}-platform-gateway",
-                include_tmpl="{{.env}}.k8s.yaml",
-                prune_disabled=False,
-                automated_envs=autosync_envs,
-                selfheal=self._selfheal,
-                repo_url=PLATFORM_GATEWAY_REPO_URL,
-                target_revision_tmpl="{{.revision}}",
-            )
+        # The cross-repo units: one Application per env, sourcing the PRIVATE
+        # repo's committed dist (<env>.k8s.yaml, per-env revision — stage follows
+        # develop, prod follows master). Same autosync posture as the apps set.
+        # Same per-source order as the AppProjects above (console, video-pipeline,
+        # platform-gateway). The include is the exact <env>.k8s.yaml — for
+        # video-pipeline that means the persistent dashcam-cv workload, with its
+        # sibling <env>-jobs.k8s.yaml one-shots deliberately NOT globbed so
+        # reconciles never re-run them.
+        for src in cross_repo_sources:
+            if src["envs"]:
+                self._application_set(
+                    id=src["appset_id"],
+                    name=src["appset_name"],
+                    project=src["project"],
+                    elements=[
+                        {"env": e, "revision": src["revisions"][e]} for e in src["envs"]
+                    ],
+                    app_name_tmpl=src["app_name_tmpl"],
+                    include_tmpl="{{.env}}.k8s.yaml",
+                    prune_disabled=False,
+                    automated_envs=autosync_envs,
+                    selfheal=self._selfheal,
+                    repo_url=src["repo_url"],
+                    target_revision_tmpl="{{.revision}}",
+                )
         if self.obs_envs:
             # One Application per env, each managing both platforms via the
             # include glob ({{.env}}-obs-twitch + -youtube). Distinct name
@@ -571,27 +581,17 @@ class ArgoCD(Construct):
         if lan_host:
             self._lan_ingress(lan_host, tls=lan_tls)
         self._repo_external_secret()
-        if self.console_envs:
-            self._repo_external_secret(
-                id="repo-secret-console",
-                name="argocd-repo-tripbot-console",
-                url=CONSOLE_REPO_URL,
-                sm_key=CONSOLE_REPO_SM_KEY,
-            )
-        if self.video_pipeline_envs:
-            self._repo_external_secret(
-                id="repo-secret-video-pipeline",
-                name="argocd-repo-video-pipeline",
-                url=VIDEO_PIPELINE_REPO_URL,
-                sm_key=VIDEO_PIPELINE_REPO_SM_KEY,
-            )
-        if self.platform_gateway_envs:
-            self._repo_external_secret(
-                id="repo-secret-platform-gateway",
-                name="argocd-repo-platform-gateway",
-                url=PLATFORM_GATEWAY_REPO_URL,
-                sm_key=PLATFORM_GATEWAY_REPO_SM_KEY,
-            )
+        # The per-repo `repository` ExternalSecrets for the private cross-repo
+        # sources, in the same per-source order (console, video-pipeline,
+        # platform-gateway). Each materialized from that repo's deploy key in SM.
+        for src in cross_repo_sources:
+            if src["envs"]:
+                self._repo_external_secret(
+                    id=src["secret_id"],
+                    name=src["secret_name"],
+                    url=src["repo_url"],
+                    sm_key=src["sm_key"],
+                )
         # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
         # skips the webhook secret too.
         if notifications_secret:
