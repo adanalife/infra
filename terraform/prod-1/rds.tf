@@ -41,7 +41,7 @@ resource "aws_db_instance" "tripbot" {
 resource "aws_security_group" "allow_postgres" {
   name        = "allow-postgres"
   description = "This group allows Postgres connections"
-  vpc_id      = module.default_vpc.vpc_id
+  vpc_id      = aws_default_vpc.default.id
 
   #TODO: associate an elastic IP
   ingress {
