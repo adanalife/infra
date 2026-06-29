@@ -71,7 +71,7 @@ repos:
     hooks:
       - id: actionlint
 
-  # Shell script linting (bootstrap.sh, .github/scripts/, etc.).
+  # Shell script linting (.github/scripts/, etc.).
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:

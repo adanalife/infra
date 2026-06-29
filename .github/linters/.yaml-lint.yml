@@ -7,8 +7,8 @@
 #
 # - line-length: k8s manifests routinely have long literal blocks
 #   (image SHAs, base64 secret data, env-var values). Don't fight them.
-# - indentation: kustomize manifests, GHA workflows, and dynamic-dns
-#   pod specs each use slightly different sequence-indent styles
+# - indentation: kustomize manifests and GHA workflows each use
+#   slightly different sequence-indent styles
 #   (`  -` under a key vs `-` flush). Not worth a sweep; allow either.
 # - comments / comments-indentation: `#TODO:` / `#NOTE:` style without
 #   a leading space and inline comments next to keys are common.
