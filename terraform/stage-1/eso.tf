@@ -46,6 +46,20 @@ resource "aws_iam_policy" "allow_eso_read_k8s_secrets" {
           "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/*",
         ]
       },
+      # SSM Parameter Store analogue (SM → SSM migration, phase 1): same k8s/*
+      # read scope. Decryption of SecureString values rides the AWS-managed
+      # aws/ssm KMS key, which needs no explicit kms grant.
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/*",
+        ]
+      },
     ]
   })
 }

@@ -636,6 +636,57 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       aws_secretsmanager_secret.platform_gateway_ghcr_pull.arn,
     ]
   }
+
+  # --- SSM Parameter Store (SM → SSM migration, phase 1) ---
+  #
+  # Terraform reads managed aws_ssm_parameter values (ssm:GetParameter) during
+  # plan refresh, and CI applies need parameter lifecycle. Read is granted
+  # account-wide MINUS an explicit Deny on the sensitive container-only
+  # parameters — the SSM analogue of "no GetSecretValue on stream keys" above.
+  # The Deny is load-bearing: AWS's ReadOnlyAccess (already attached to
+  # CITerraformRole) includes broad ssm:Get*, so without it CI could read
+  # every SecureString in the account. Folded into this policy document (not
+  # new managed policies) because CITerraformRole is at AWS's
+  # 10-managed-policies-per-role cap.
+  statement {
+    sid = "SSMParameterRead"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/*",
+    ]
+  }
+
+  statement {
+    sid    = "SSMDenySensitiveParameterRead"
+    effect = "Deny"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath",
+      "ssm:GetParameterHistory",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/obs/*",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
+    ]
+  }
+
+  statement {
+    sid = "SSMParameterLifecycle"
+    actions = [
+      "ssm:PutParameter",
+      "ssm:DeleteParameter",
+      "ssm:AddTagsToResource",
+      "ssm:RemoveTagsFromResource",
+      "ssm:ListTagsForResource",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/*",
+    ]
+  }
 }
 
 resource "aws_iam_policy" "ci_terraform_secrets_read" {
@@ -806,4 +857,87 @@ resource "aws_iam_policy" "ci_terraform_postgres_credentials_manage" {
 resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_credentials_manage" {
   role       = aws_iam_role.ci_terraform.name
   policy_arn = aws_iam_policy.ci_terraform_postgres_credentials_manage.arn
+}
+
+# ============================================================================
+# SSM Parameter Store mirrors — SM → SSM migration, phase 1
+# ============================================================================
+#
+# Secrets Manager bills $0.40/secret/month; standard-tier SSM parameters are
+# free. Migration plan:
+#   phase 1 (this section): create a /<name> parameter alongside every SM
+#     container above, then copy the live values with bin/migrate-sm-to-ssm.sh
+#     (run once per account, AFTER apply — it needs the parameters to exist).
+#   phase 2: point ESO (SecretStores here + ExternalSecrets here and in the
+#     app repos) at ParameterStore, with the /-prefixed keys.
+#   phase 3: swap terraform's plan-time data sources to data.aws_ssm_parameter
+#     and delete the SM containers (their per-secret docs move into this
+#     section's map entries).
+#
+# Until phase 3, the SM blocks above stay authoritative for per-secret
+# documentation (bootstrap commands, consumers, key layout). Same conventions:
+# out-of-band values use a placeholder + ignore_changes; terraform-owned
+# values are written directly.
+#
+# Deliberately NOT mirrored as terraform resources:
+#   - k8s/obs/twitch-stream-key, k8s/obs/youtube-stream-key,
+#     k8s/grafana-cloud-metrics-write — a terraform-managed aws_ssm_parameter
+#     is read (ssm:GetParameter) during refresh, so managing these would hand
+#     CI their values; the SM design deliberately kept CI away from them. The
+#     migration script creates them, and the SSMDenySensitiveParameterRead
+#     statement in ci_terraform_secrets_read keeps CI locked out.
+#   - k8s/external-dns/aws-credentials — never terraform-managed on the SM
+#     side either (seeded by hand from the PGP-encrypted eso/external-dns
+#     outputs); the migration script copies it.
+
+locals {
+  # parameter name (sans leading /) => description
+  ssm_mirror_parameters = {
+    "stage-1/cloudflare-api-token"         = "Cloudflare API token used by the cloudflare provider."
+    "stage-1/allowlist-cidrs"              = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
+    "stage-1/grafana-cloud-api"            = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
+    "stage-1/ntfy-critical-webhook"        = "ntfy webhook URL for the Grafana independent critical-alert contact point."
+    "stage-1/healthchecks-deadman-ping"    = "healthchecks.io ping URL for the Grafana alerting deadman switch."
+    "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
+    "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-vlc-server"                = "Sentry DSN for the vlc-server Go service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-onscreens-server"          = "Sentry DSN for the onscreens-server Go service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-platform-gateway"          = "Sentry DSN for the platform-gateway service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-tripbot-console"           = "Sentry DSN for the tripbot-console service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-video-pipeline"            = "Sentry DSN for the video-pipeline batch jobs. Consumed via the SENTRY_DSN env var."
+    "k8s/tripbot/twitch-creds"             = "Twitch app credentials for tripbot. Keys: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET."
+    "k8s/tripbot/google-maps-api-key"      = "Google Maps API key for tripbot. Key holds GOOGLE_MAPS_API_KEY."
+    "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
+    "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
+    "k8s/tripbot/discord-bot-token"        = "Discord bot token for the staging tripbot Discord session."
+    "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
+    "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
+    "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
+  }
+}
+
+resource "aws_ssm_parameter" "mirror" {
+  for_each = local.ssm_mirror_parameters
+
+  name        = "/${each.key}"
+  description = each.value
+  type        = "SecureString"
+  value       = "placeholder — set via bin/migrate-sm-to-ssm.sh"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# k8s/postgres/credentials — terraform owns the value, same random_pet
+# password as the SM version resource above.
+resource "aws_ssm_parameter" "tripbot_db_credentials" {
+  name        = "/k8s/postgres/credentials"
+  description = "Postgres credentials for tripbot in stage-1 on adanalife-minipc."
+  type        = "SecureString"
+  value = jsonencode({
+    user     = "tripbot"
+    password = random_pet.tripbot_db_password.id
+    db       = "tripbot"
+  })
 }

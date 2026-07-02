@@ -170,3 +170,18 @@ resource "aws_secretsmanager_secret_version" "postgres_backup_s3" {
     S3_BUCKET             = aws_s3_bucket.postgres_backups.bucket
   })
 }
+
+# --- SSM Parameter Store mirror (SM → SSM migration, phase 1) ---
+# See the migration header in secrets.tf. Terraform owns the value — same
+# credentials as the SM version above.
+resource "aws_ssm_parameter" "postgres_backup_s3" {
+  name        = "/k8s/postgres/backup-s3-credentials"
+  description = "Backup credentials for postgres CronJob on adanalife-minipc."
+  type        = "SecureString"
+  value = jsonencode({
+    AWS_ACCESS_KEY_ID     = aws_iam_access_key.postgres_backup.id
+    AWS_SECRET_ACCESS_KEY = aws_iam_access_key.postgres_backup.secret
+    AWS_DEFAULT_REGION    = var.region
+    S3_BUCKET             = aws_s3_bucket.postgres_backups.bucket
+  })
+}

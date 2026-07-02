@@ -38,6 +38,23 @@ data "aws_secretsmanager_secret_version" "github_automation_app_key" {
   secret_id = aws_secretsmanager_secret.github_automation_app_key.id
 }
 
+# --- SSM Parameter Store mirror (SM → SSM migration, phase 1) ---
+#
+# See the migration header in stage-1/secrets.tf. Standard-tier parameters
+# are free ($0.40/secret/month for SM); phase 3 swaps the data source above
+# to data.aws_ssm_parameter and deletes the SM container. Value copied by
+# bin/migrate-sm-to-ssm.sh (run AFTER apply).
+resource "aws_ssm_parameter" "github_automation_app_key" {
+  name        = "/platform/github-automation-app-private-key"
+  description = "Private key (PEM) for the adanalife-automation GitHub App. Read by the github terraform provider (app_auth) and fanned out to repo Actions secrets so workflows can mint installation tokens."
+  type        = "SecureString"
+  value       = "placeholder — set via bin/migrate-sm-to-ssm.sh"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # ============================================================================
 # CI read grant — GetSecretValue for the SM containers terraform refreshes
 # during plan. Scoped to specific ARNs so CI can't read other secrets in the
@@ -58,6 +75,32 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
     ]
     resources = [
       aws_secretsmanager_secret.github_automation_app_key.arn,
+    ]
+  }
+
+  # SSM analogue (SM → SSM migration, phase 1): terraform reads the managed
+  # aws_ssm_parameter value via ssm:GetParameter during plan refresh.
+  statement {
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+    ]
+    resources = [
+      aws_ssm_parameter.github_automation_app_key.arn,
+    ]
+  }
+
+  # CI applies need parameter lifecycle on the mirror, too.
+  statement {
+    actions = [
+      "ssm:PutParameter",
+      "ssm:DeleteParameter",
+      "ssm:AddTagsToResource",
+      "ssm:RemoveTagsFromResource",
+      "ssm:ListTagsForResource",
+    ]
+    resources = [
+      aws_ssm_parameter.github_automation_app_key.arn,
     ]
   }
 }
