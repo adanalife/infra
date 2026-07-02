@@ -255,3 +255,40 @@ resource "aws_iam_role_policy" "ci_terraform_tailscale_secrets" {
   role   = aws_iam_role.ci_terraform.id
   policy = data.aws_iam_policy_document.ci_terraform_tailscale_secrets.json
 }
+
+# --- SSM Parameter Store mirrors (SM → SSM migration, phase 1) ---
+#
+# See the migration header in secrets.tf. Kept here next to the SM originals
+# (not in secrets.tf's mirror map) for the same KEEP-IN-SYNC reasoning as the
+# containers themselves. CI read/lifecycle rides the account-wide SSM
+# statements in secrets.tf's ci_terraform_secrets_read.
+
+resource "aws_ssm_parameter" "tailscale_api_key" {
+  name        = "/prod-1/tailscale-api-key"
+  description = "Tailscale API access token for the tailscale Terraform provider."
+  type        = "SecureString"
+  value       = "placeholder — set via bin/migrate-sm-to-ssm.sh"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# Terraform owns the value — same OAuth client as the SM version above.
+resource "aws_ssm_parameter" "tailscale_operator_oauth" {
+  name        = "/k8s/tailscale/operator-oauth"
+  description = "Tailscale K8s operator OAuth client credentials. Consumed by the operator via ESO."
+  type        = "SecureString"
+  value = jsonencode({
+    client_id     = tailscale_oauth_client.operator.id
+    client_secret = tailscale_oauth_client.operator.key
+  })
+}
+
+# Terraform owns the value — same tailnet key as the SM version above.
+resource "aws_ssm_parameter" "tailscale_node_authkey" {
+  name        = "/prod-1/tailscale-node-authkey"
+  description = "Reusable tag:k8s auth key for the adanalife-minipc Talos node. Re-sealed into the SOPS machine-config patch (not consumed via ESO)."
+  type        = "SecureString"
+  value       = tailscale_tailnet_key.node.key
+}

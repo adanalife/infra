@@ -102,3 +102,32 @@ resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_platform_gatew
 #
 # Runtime read access (the actual GetSecretValue at reconcile time) is ESO's, not
 # CI's — covered by the eso_reader `k8s/*` wildcard in eso.tf.
+
+# --- SSM Parameter Store mirrors (SM → SSM migration, phase 1) ---
+#
+# See the migration header in secrets.tf. Kept here next to the SM originals
+# (not in secrets.tf's mirror map) for the same KEEP-IN-SYNC reasoning as the
+# containers themselves. CI read/lifecycle rides the account-wide SSM
+# statements in secrets.tf's ci_terraform_secrets_read.
+
+locals {
+  argocd_ssm_mirror_parameters = {
+    "k8s/argocd/repo-ssh-key"                  = "Read-only SSH deploy key for Argo CD to clone the infra repo. Consumed via ESO into the argocd-repo-infra repository Secret."
+    "k8s/argocd/repo-ssh-key-console"          = "Read-only SSH deploy key for Argo CD to clone the private tripbot-console repo. Consumed via ESO into the argocd-repo-tripbot-console repository Secret."
+    "k8s/argocd/repo-ssh-key-video-pipeline"   = "Read-only SSH deploy key for Argo CD to clone the private video-pipeline repo. Consumed via ESO into the argocd-repo-video-pipeline repository Secret."
+    "k8s/argocd/repo-ssh-key-platform-gateway" = "Read-only SSH deploy key for Argo CD to clone the private platform-gateway repo. Consumed via ESO into the argocd-repo-platform-gateway repository Secret."
+  }
+}
+
+resource "aws_ssm_parameter" "argocd_mirror" {
+  for_each = local.argocd_ssm_mirror_parameters
+
+  name        = "/${each.key}"
+  description = each.value
+  type        = "SecureString"
+  value       = "placeholder — set via bin/migrate-sm-to-ssm.sh"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
