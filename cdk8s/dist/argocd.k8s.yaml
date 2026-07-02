@@ -828,12 +828,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key
+        key: /k8s/argocd/repo-ssh-key
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-infra
@@ -855,12 +855,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key-console
+        key: /k8s/argocd/repo-ssh-key-console
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-tripbot-console
@@ -882,12 +882,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key-video-pipeline
+        key: /k8s/argocd/repo-ssh-key-video-pipeline
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-video-pipeline
@@ -909,12 +909,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key-platform-gateway
+        key: /k8s/argocd/repo-ssh-key-platform-gateway
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-platform-gateway
@@ -936,12 +936,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/tripbot/discord-alerts-webhook
+        key: /k8s/tripbot/discord-alerts-webhook
       secretKey: discord-webhook-url
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-notifications-secret

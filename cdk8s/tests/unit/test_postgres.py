@@ -146,7 +146,7 @@ def test_external_secret_on_eso_envs():
         assert (
             es["spec"]["target"]["template"]["data"]["POSTGRES_USER"] == "{{ .user }}"
         )
-        assert es["spec"]["secretStoreRef"]["name"] == "aws-secretsmanager"
+        assert es["spec"]["secretStoreRef"]["name"] == "aws-parameterstore"
         props = {d["remoteRef"]["property"] for d in es["spec"]["data"]}
         assert props == {"user", "password", "db"}
         # the local Secret must NOT appear on eso envs

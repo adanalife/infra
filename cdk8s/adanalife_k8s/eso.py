@@ -33,7 +33,10 @@ import imports.io.external_secrets as esx
 # The store every app ExternalSecret references — namespaced, identical in
 # every env (isolation is structural: a namespaced store is unreachable
 # cross-namespace; the backing eso-aws-credentials decides the AWS account).
-DEFAULT_STORE = ("aws-secretsmanager", "SecretStore")
+# ParameterStore since the SM → SSM migration (phase 2 — see the migration
+# header in terraform/stage-1/secrets.tf); remoteRef keys are the SM names
+# with a leading slash.
+DEFAULT_STORE = ("aws-parameterstore", "SecretStore")
 
 _STORE_KIND = {
     "SecretStore": esx.ExternalSecretSpecSecretStoreRefKind.SECRET_STORE,
@@ -59,43 +62,53 @@ class ESData:
 def secret_store(
     scope: Construct, id: str = "secret-store", *, namespace: str | None = None
 ):
-    """Per-namespace `aws-secretsmanager` SecretStore. Byte-identical across
-    envs (the in-namespace eso-aws-credentials routes to the right account)."""
-    store = cdk8s.ApiObject(
-        scope,
-        id,
-        api_version="external-secrets.io/v1",
-        kind="SecretStore",
-        metadata={
-            "name": "aws-secretsmanager",
-            **({"namespace": namespace} if namespace else {}),
-        },
-    )
-    store.add_json_patch(
-        cdk8s.JsonPatch.add(
-            "/spec",
-            {
-                "provider": {
-                    "aws": {
-                        "service": "SecretsManager",
-                        "region": "us-east-1",
-                        "auth": {
-                            "secretRef": {
-                                "accessKeyIDSecretRef": {
-                                    "name": "eso-aws-credentials",
-                                    "key": "AWS_ACCESS_KEY_ID",
-                                },
-                                "secretAccessKeySecretRef": {
-                                    "name": "eso-aws-credentials",
-                                    "key": "AWS_SECRET_ACCESS_KEY",
-                                },
-                            }
-                        },
-                    }
-                },
+    """Per-namespace SecretStores. Byte-identical across envs (the in-namespace
+    eso-aws-credentials routes to the right account).
+
+    Emits BOTH the `aws-parameterstore` store (what everything here references
+    since the SM → SSM migration) and the legacy `aws-secretsmanager` store —
+    cross-repo consumers (the tripbot/console/gateway/video-pipeline dists)
+    still reference the latter until their key flips land, then it retires
+    with the SM containers (phase 3)."""
+    for name, service, obj_id in (
+        ("aws-parameterstore", "ParameterStore", f"{id}-parameterstore"),
+        ("aws-secretsmanager", "SecretsManager", id),
+    ):
+        store = cdk8s.ApiObject(
+            scope,
+            obj_id,
+            api_version="external-secrets.io/v1",
+            kind="SecretStore",
+            metadata={
+                "name": name,
+                **({"namespace": namespace} if namespace else {}),
             },
         )
-    )
+        store.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "provider": {
+                        "aws": {
+                            "service": service,
+                            "region": "us-east-1",
+                            "auth": {
+                                "secretRef": {
+                                    "accessKeyIDSecretRef": {
+                                        "name": "eso-aws-credentials",
+                                        "key": "AWS_ACCESS_KEY_ID",
+                                    },
+                                    "secretAccessKeySecretRef": {
+                                        "name": "eso-aws-credentials",
+                                        "key": "AWS_SECRET_ACCESS_KEY",
+                                    },
+                                }
+                            },
+                        }
+                    },
+                },
+            )
+        )
     return store
 
 

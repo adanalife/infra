@@ -1,6 +1,25 @@
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
+  name: aws-parameterstore
+  namespace: stage-1-data
+spec:
+  provider:
+    aws:
+      service: ParameterStore
+      region: us-east-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:
+            name: eso-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKeySecretRef:
+            name: eso-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
   name: aws-secretsmanager
   namespace: stage-1-data
 spec:
@@ -28,7 +47,7 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: aws-secretsmanager
+    name: aws-parameterstore
     kind: SecretStore
   target:
     name: postgres-secret
@@ -41,15 +60,15 @@ spec:
   data:
     - secretKey: user
       remoteRef:
-        key: k8s/postgres/credentials
+        key: /k8s/postgres/credentials
         property: user
     - secretKey: password
       remoteRef:
-        key: k8s/postgres/credentials
+        key: /k8s/postgres/credentials
         property: password
     - secretKey: db
       remoteRef:
-        key: k8s/postgres/credentials
+        key: /k8s/postgres/credentials
         property: db
 ---
 apiVersion: apps/v1
