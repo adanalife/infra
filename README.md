@@ -2,15 +2,16 @@
 
 Infrastructure-as-code for [A Dana Life](https://dana.lol): terraform for the
 cloud accounts (AWS, GCP, Cloudflare, Tailscale, GitHub), cdk8s + Argo CD for
-the Kubernetes app manifests, and a Taskfile that ties the workflows together.
+the Kubernetes platform and supporting manifests (app manifests live in each
+app's own repo), and a Taskfile that ties the workflows together.
 
 ## running kubernetes locally (development)
 
 Dev app stack (postgres + tripbot + vlc-server + obs + onscreens-server) on a
 local k3d cluster (`adanalife-dev`). The infra manifests are authored in cdk8s
 (`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`;
-the tripbot app manifests live in the tripbot repo and are delivered by dev's
-own in-cluster Argo CD. The k3d cluster config is at `k8s/k3d-config.yaml`.
+the tripbot app manifests live in the tripbot repo (obs manifests in the obs
+repo) and are delivered by dev's own in-cluster Argo CD. The k3d cluster config is at `k8s/k3d-config.yaml`.
 
 > prod-1/stage-1 app workloads are delivered by Argo CD from `cdk8s/dist/`
 > instead — see `gitops/README.md`.
@@ -63,6 +64,6 @@ the dev k3d cluster is local-only.
 
 The bundled traefik handles the tripbot Ingress in-cluster; the bundled
 servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared
-by the app manifests. Both are k3s-only — on EKS the same Ingress works
-against prod traefik unchanged, and LoadBalancer services are fulfilled by
-AWS ELB.
+by the app manifests. Both are k3s-only — stage-1/prod-1 co-tenant a bare-metal
+Talos cluster on a mini-PC with no LoadBalancer controller; traefik there runs
+on hostNetwork, binding the node's LAN IP :80/:443.
