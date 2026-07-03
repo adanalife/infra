@@ -542,6 +542,14 @@ resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
 }
 
 # --- Per-secret lifecycle grants ---
+#
+# ponytail: these per-secret CI grants are near-identical and could be
+# consolidated — either a for_each over a {secret => put_value} map (plan-neutral
+# via moved{} blocks), or merged into ONE managed policy with grouped statements,
+# which would also relieve the 10-managed-policy-per-role cap that forced the
+# youtube grant below to be an inline aws_iam_role_policy. Deferred 2026-06-29
+# (ponytail-audit) — the duplication is tolerable and a merge is a destroy/create
+# on prod IAM, so it's not worth the apply risk yet.
 
 # k8s/obs/twitch-stream-key
 data "aws_iam_policy_document" "ci_terraform_twitch_stream_key_manage" {

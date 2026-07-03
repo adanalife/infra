@@ -707,6 +707,14 @@ resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
 # own narrow policy. The `-*` ARN suffix handles AWS's auto-appended 6-char
 # random ID, which the CreateSecret IAM check evaluates against the to-be-
 # created ARN.
+#
+# ponytail: these per-secret CI grants are near-identical and could be
+# consolidated — either a for_each over a {secret => put_value} map (plan-neutral
+# via moved{} blocks), or merged into ONE managed policy with grouped statements.
+# Deferred 2026-06-29 (ponytail-audit) — the duplication is tolerable and a merge
+# is a destroy/create on IAM, so it's not worth the apply risk yet. (Prod-1's
+# copy of this section also notes the 10-managed-policy cap, which doesn't bite
+# stage's smaller grant set.)
 
 # k8s/obs/twitch-stream-key
 data "aws_iam_policy_document" "ci_terraform_twitch_stream_key_manage" {
