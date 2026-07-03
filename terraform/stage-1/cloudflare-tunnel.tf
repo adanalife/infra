@@ -31,7 +31,7 @@ resource "cloudflare_zone" "stage_1" {
 # Secrets Manager so the home IP can rotate without a code change.
 # Edit via `task stage:allowlist:add-current-ip`.
 locals {
-  allowlist_cidrs = jsondecode(data.aws_secretsmanager_secret_version.stage_1_allowlist_cidrs.secret_string)
+  allowlist_cidrs = jsondecode(data.aws_ssm_parameter.stage_1_allowlist_cidrs.value)
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this

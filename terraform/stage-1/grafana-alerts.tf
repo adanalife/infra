@@ -33,7 +33,7 @@ resource "grafana_contact_point" "discord_alerts" {
   name = "discord-alerts"
 
   discord {
-    url                     = data.aws_secretsmanager_secret_version.discord_alerts_webhook.secret_string
+    url                     = data.aws_ssm_parameter.discord_alerts_webhook.value
     use_discord_username    = false // use the webhook's configured username
     disable_resolve_message = false
   }
@@ -49,7 +49,7 @@ resource "grafana_contact_point" "ntfy_critical" {
   name = "ntfy-critical"
 
   webhook {
-    url                     = data.aws_secretsmanager_secret_version.ntfy_critical_webhook.secret_string
+    url                     = data.aws_ssm_parameter.ntfy_critical_webhook.value
     http_method             = "POST"
     disable_resolve_message = false
   }
@@ -64,7 +64,7 @@ resource "grafana_contact_point" "healthchecks_deadman" {
   name = "healthchecks-deadman"
 
   webhook {
-    url                     = data.aws_secretsmanager_secret_version.healthchecks_deadman_ping.secret_string
+    url                     = data.aws_ssm_parameter.healthchecks_deadman_ping.value
     http_method             = "POST"
     disable_resolve_message = true // every POST is just a ping; resolve pings add nothing
   }

@@ -28,7 +28,7 @@ variable "production_branch" {
 # bootstrap flow. Lives here (not providers.tf) so prod-1's symlink
 # to providers.tf doesn't inherit a provider it has no resources for.
 provider "cloudflare" {
-  api_token = data.aws_secretsmanager_secret_version.cloudflare_api_token.secret_string
+  api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
 
 resource "cloudflare_pages_project" "stage_1" {

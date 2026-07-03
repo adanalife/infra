@@ -152,28 +152,9 @@ resource "aws_iam_user_policy" "postgres_backup" {
   policy = data.aws_iam_policy_document.postgres_backup.json
 }
 
-# --- SM container (value owned by terraform) ---
-
-resource "aws_secretsmanager_secret" "postgres_backup_s3" {
-  name        = "k8s/postgres/backup-s3-credentials"
-  description = "Backup credentials for postgres CronJob on adanalife-minipc."
-
-  depends_on = [aws_iam_role_policy_attachment.ci_terraform_postgres_backup_s3_manage]
-}
-
-resource "aws_secretsmanager_secret_version" "postgres_backup_s3" {
-  secret_id = aws_secretsmanager_secret.postgres_backup_s3.id
-  secret_string = jsonencode({
-    AWS_ACCESS_KEY_ID     = aws_iam_access_key.postgres_backup.id
-    AWS_SECRET_ACCESS_KEY = aws_iam_access_key.postgres_backup.secret
-    AWS_DEFAULT_REGION    = var.region
-    S3_BUCKET             = aws_s3_bucket.postgres_backups.bucket
-  })
-}
-
-# --- SSM Parameter Store mirror (SM → SSM migration, phase 1) ---
-# See the migration header in secrets.tf. Terraform owns the value — same
-# credentials as the SM version above.
+# --- SSM parameter (value owned by terraform) ---
+# ESO materializes it into the postgres-backup-s3 Secret the backup CronJob
+# envFroms. CI read/lifecycle rides secrets.tf's account-wide SSM statements.
 resource "aws_ssm_parameter" "postgres_backup_s3" {
   name        = "/k8s/postgres/backup-s3-credentials"
   description = "Backup credentials for postgres CronJob on adanalife-minipc."
