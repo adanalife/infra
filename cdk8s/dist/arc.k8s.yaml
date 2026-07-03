@@ -34,10 +34,10 @@ metadata:
 spec:
   dataFrom:
     - extract:
-        key: k8s/arc/github-app
+        key: /k8s/arc/github-app
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     name: arc-github-app

@@ -107,16 +107,16 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # lives under the prod subdomain alongside the apps (vlc-twitch.prod...) and the
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
-REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
-# Discord webhook for the notifications controller — deliberately the SAME SM
-# container tripbot's reportCmd and the Grafana alerts read (one channel, one
+REPO_SM_KEY = "/k8s/argocd/repo-ssh-key"
+# Discord webhook for the notifications controller — deliberately the SAME
+# parameter tripbot's reportCmd and the Grafana alerts read (one channel, one
 # webhook, already seeded in both accounts), not a new argocd-scoped secret.
-NOTIFICATIONS_SM_KEY = "k8s/tripbot/discord-alerts-webhook"
+NOTIFICATIONS_SM_KEY = "/k8s/tripbot/discord-alerts-webhook"
 # The private tripbot-console repo — Argo's second source. Its cdk8s/dist
 # deploy units (one <env>.k8s.yaml per env) live in that repo, per the split
 # design: the console repo owns its own deployment; infra owns everything else.
 CONSOLE_REPO_URL = "git@github.com:adanalife/tripbot-console.git"
-CONSOLE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-console"
+CONSOLE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-console"
 # Per-env git revision for the console units: stage tracks develop (manifests
 # float alongside the :develop image), prod tracks master (release-gated) —
 # the same philosophy as the image-tag pinning model.
@@ -125,13 +125,13 @@ CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # console: the repo owns its own cdk8s/dist deploy units). The dashcam-cv embed
 # workload it delivers is stage-only today, so only stage-1 has a revision.
 VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
-VIDEO_PIPELINE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-video-pipeline"
+VIDEO_PIPELINE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-video-pipeline"
 VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
 # The private platform-gateway repo — another cross-repo source (same split as
 # the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
 # per env). Delivers the gateway-twitch instance; both prod + stage run it.
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
-PLATFORM_GATEWAY_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-platform-gateway"
+PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
 # its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
@@ -879,7 +879,7 @@ class ArgoCD(Construct):
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-secretsmanager-cluster",
+                    name="aws-parameterstore-cluster",
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(
@@ -916,7 +916,7 @@ class ArgoCD(Construct):
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-secretsmanager-cluster",
+                    name="aws-parameterstore-cluster",
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(

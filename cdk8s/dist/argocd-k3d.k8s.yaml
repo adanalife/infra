@@ -384,12 +384,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key
+        key: /k8s/argocd/repo-ssh-key
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-infra

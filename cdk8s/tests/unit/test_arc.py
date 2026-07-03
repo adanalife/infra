@@ -77,8 +77,8 @@ def test_arc_github_app_secret_reads_the_cluster_store():
     assert es["metadata"]["namespace"] == "arc-runners"
     # platform components read the cluster-scoped store (no per-ns creds bootstrap)
     assert es["spec"]["secretStoreRef"]["kind"] == "ClusterSecretStore"
-    assert es["spec"]["secretStoreRef"]["name"] == "aws-secretsmanager-cluster"
-    assert es["spec"]["dataFrom"][0]["extract"]["key"] == "k8s/arc/github-app"
+    assert es["spec"]["secretStoreRef"]["name"] == "aws-parameterstore-cluster"
+    assert es["spec"]["dataFrom"][0]["extract"]["key"] == "/k8s/arc/github-app"
 
 
 # --- the platform-stack Helm Applications (OCI charts) ---

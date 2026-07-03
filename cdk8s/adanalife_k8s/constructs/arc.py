@@ -18,7 +18,7 @@ deploy unit (dist/arc.k8s.yaml), the same shape as the UPS monitor:
     starve the stage-1 workloads co-tenanting the node.
   * The GitHub App credential ExternalSecret (`arc-github-app`) the runner scale
     set authenticates with. Platform components read the cluster-scoped
-    `aws-secretsmanager-cluster` store (per k8s-platform-stack), so no per-ns
+    `aws-parameterstore-cluster` store (per k8s-platform-stack), so no per-ns
     eso-aws-credentials bootstrap is needed.
 
 minipc-only: the Pi is an arm64 worker on the minipc Talos cluster; the k3d dev
@@ -39,12 +39,12 @@ RUNNERS_NS = "arc-runners"
 # (githubConfigSecret). Holds the GitHub App triple — keys must be exactly
 # github_app_id / github_app_installation_id / github_app_private_key for ARC.
 GITHUB_APP_SECRET = "arc-github-app"
-# SM container holding that triple as a flat JSON object (dataFrom.extract pulls
-# every key verbatim). Lives in the account the cluster store reads.
-GITHUB_APP_SM_KEY = "k8s/arc/github-app"
+# SSM parameter holding that triple as a flat JSON object (dataFrom.extract
+# pulls every key verbatim). Lives in the account the cluster store reads.
+GITHUB_APP_SM_KEY = "/k8s/arc/github-app"
 
 # Platform components read the cluster-scoped store, not a per-namespace one.
-CLUSTER_STORE = ("aws-secretsmanager-cluster", "ClusterSecretStore")
+CLUSTER_STORE = ("aws-parameterstore-cluster", "ClusterSecretStore")
 
 
 class Arc(Construct):

@@ -1,0 +1,23 @@
+# ParameterStore sibling of secret-store.yml (SM → SSM migration, phase 2 —
+# see the migration header in terraform/stage-1/secrets.tf). Same per-namespace
+# shape and credentials; remoteRef keys gain a leading slash (`/k8s/...`, SSM
+# hierarchical names are fully qualified). Both stores stay live until every
+# ExternalSecret has flipped, then the SecretsManager store retires with the
+# SM containers (phase 3).
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: aws-parameterstore
+spec:
+  provider:
+    aws:
+      service: ParameterStore
+      region: us-east-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:
+            name: eso-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKeySecretRef:
+            name: eso-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY

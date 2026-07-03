@@ -16,13 +16,13 @@ from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.eso import ESData, external_secret
 
 # Cross-cutting observability secrets (k8s/shared-secrets/base) — all
-# dataFrom.extract from SM, materialized into the env namespace, envFrom'd by
-# tripbot / vlc-server with optional: false.
+# dataFrom.extract from SSM Parameter Store, materialized into the env
+# namespace, envFrom'd by tripbot / vlc-server with optional: false.
 _SHARED_SECRETS = [
-    ("grafana-cloud-otlp", "k8s/grafana-cloud-otlp"),
-    ("sentry-tripbot", "k8s/sentry-tripbot"),
-    ("sentry-vlc-server", "k8s/sentry-vlc-server"),
-    ("sentry-onscreens-server", "k8s/sentry-onscreens-server"),
+    ("grafana-cloud-otlp", "/k8s/grafana-cloud-otlp"),
+    ("sentry-tripbot", "/k8s/sentry-tripbot"),
+    ("sentry-vlc-server", "/k8s/sentry-vlc-server"),
+    ("sentry-onscreens-server", "/k8s/sentry-onscreens-server"),
 ]
 
 
@@ -58,9 +58,9 @@ def _app_issuers(scope: Construct, env: EnvConfig, ns: str | None) -> None:
         name="cert-manager-aws-credentials",
         namespace=ns,
         data=[
-            ESData("access-key-id", "k8s/external-dns/aws-credentials", "access-key"),
+            ESData("access-key-id", "/k8s/external-dns/aws-credentials", "access-key"),
             ESData(
-                "secret-access-key", "k8s/external-dns/aws-credentials", "secret-key"
+                "secret-access-key", "/k8s/external-dns/aws-credentials", "secret-key"
             ),
         ],
     )

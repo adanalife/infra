@@ -7,3 +7,4 @@ kind: Kustomization
 # in-namespace by `task k8s:<env>:bootstrap-secrets`.
 resources:
   - secret-store.yml
+  - parameter-store.yml

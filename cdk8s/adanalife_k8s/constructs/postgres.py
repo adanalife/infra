@@ -39,9 +39,10 @@ NAME = "postgres"
 SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
 PORT = 5432
 
-# SM container shapes (terraform-owned). See base/external-secret.yaml.
-_CREDS_SM = "k8s/postgres/credentials"
-_BACKUP_SM = "k8s/postgres/backup-s3-credentials"
+# SSM parameter paths (terraform-owned values; the SM names with a leading
+# slash since the SM → SSM migration). See base/external-secret.yaml.
+_CREDS_SM = "/k8s/postgres/credentials"
+_BACKUP_SM = "/k8s/postgres/backup-s3-credentials"
 
 # Placeholder DB creds for the laptop `local` overlay (gitignored secret.env in
 # Kustomize). Match tripbot/infra/docker/env.docker and the local render.
@@ -300,7 +301,7 @@ class Postgres(Construct):
                 {
                     "refreshInterval": "1h",
                     "secretStoreRef": {
-                        "name": "aws-secretsmanager",
+                        "name": "aws-parameterstore",
                         "kind": "SecretStore",
                     },
                     "target": {
