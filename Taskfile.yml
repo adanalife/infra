@@ -776,9 +776,9 @@ tasks:
     cmds:
       # eso-aws-credentials (ESOSecretsReader, adanalife-stage account that
       # dev borrows) goes in BOTH external-secrets (for the
-      # aws-secretsmanager-cluster ClusterSecretStore platform components
+      # aws-parameterstore-cluster ClusterSecretStore platform components
       # use) AND the development namespace (for the namespaced
-      # aws-secretsmanager SecretStore the apps use).
+      # aws-parameterstore SecretStore the apps use).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace development --dry-run=client -o yaml | kubectl apply -f -
       - |
@@ -868,9 +868,9 @@ tasks:
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
       # eso-aws-credentials goes in FOUR namespaces (same prod-account
-      # creds in all): external-secrets (for the aws-secretsmanager-cluster
+      # creds in all): external-secrets (for the aws-parameterstore-cluster
       # ClusterSecretStore the kube-system platform components use), prod-1
-      # (for the namespaced aws-secretsmanager SecretStore the apps use),
+      # (for the namespaced aws-parameterstore SecretStore the apps use),
       # prod-1-data (for the isolated DB namespace's store — postgres'
       # ExternalSecret reads it), and prod-1-platform (the store external-dns
       # reads).
@@ -906,10 +906,10 @@ tasks:
 
   # Stage-1 ESO bootstrap on the mini-PC Talos cluster. Seeds the
   # adanalife-stage reader creds as eso-aws-credentials into BOTH stage-1
-  # (the app namespace's aws-secretsmanager SecretStore, shipped in the
+  # (the app namespace's aws-parameterstore SecretStore, shipped in the
   # umbrella) and stage-1-platform (the namespaced store stage's own
   # external-dns reads). Stage does NOT touch external-secrets — prod owns
-  # the cluster-scoped aws-secretsmanager-cluster store there. Isolation is
+  # the cluster-scoped aws-parameterstore-cluster store there. Isolation is
   # by AWS account (stage creds only read the stage account) AND by
   # namespace (the stores are unreachable from prod). Stage has its OWN
   # external-dns in stage-1-platform (reading the stage account); it targets the
@@ -1025,7 +1025,7 @@ tasks:
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/cluster-store
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
+      - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -1077,7 +1077,7 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write"; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws ssm put-parameter --overwrite --type SecureString --name /k8s/grafana-cloud-metrics-write"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/development/values.yml
@@ -1220,7 +1220,7 @@ tasks:
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/cluster-store
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
+      - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       # Tailscale operator — kubectl over the tailnet (API server proxy) + app-UI
       # exposure as tailnet services. Needs ESO up (the operator-oauth Secret is
       # materialized from SM via the cluster store). prod-1 only — the tailnet is
@@ -1255,7 +1255,7 @@ tasks:
       - kubectl apply -f k8s/cilium/prod-1/hubble-tailscale-ingress.yaml
       # external-dns runs in the prod-1-platform namespace (not kube-system)
       # so the prod-1 app namespace stays pod-clean. The kustomize apply
-      # creates the namespace + its namespaced aws-secretsmanager SecretStore
+      # creates the namespace + its namespaced aws-parameterstore SecretStore
       # + the external-dns ExternalSecret (reading the prod account, no
       # cross-account). It watches Ingresses cluster-wide (chart ClusterRole)
       # and publishes prod.whereisdana.today records — including the platform
@@ -1304,7 +1304,7 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws ssm put-parameter --overwrite --type SecureString --name /k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
@@ -1405,14 +1405,15 @@ tasks:
     cmds:
       - |
         set -euo pipefail
-        sk=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
-          --secret-id k8s/obs/{{.PLATFORM}}-stream-key --query SecretString --output text)
+        sk=$(aws-vault exec adanalife-stage -- aws ssm get-parameter \
+          --name /k8s/obs/{{.PLATFORM}}-stream-key --with-decryption \
+          --query Parameter.Value --output text)
         kubectl create secret generic {{.SECRET}} \
           --from-literal=STREAM_KEY="$sk" \
           --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
       - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
       - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming ({{.PLATFORM}}) — key from adanalife-stage SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - 'echo "OBS streaming ({{.PLATFORM}}) — key from adanalife-stage SSM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   # Prod streaming is on-by-default via the obs app dist's ExternalSecret,
   # so this task only matters as the inverse of `:off`: re-apply the
@@ -1437,14 +1438,14 @@ tasks:
         msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling tripbot checkout; is ~/adanalife/tripbot present + synthed?"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
-      - sh: kubectl get secretstore aws-secretsmanager -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "aws-secretsmanager SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
+      - sh: kubectl get secretstore aws-parameterstore -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "aws-parameterstore SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
     cmds:
       - yq 'select(.kind == "ExternalSecret")' {{.OBS_DIST}} | kubectl apply -n {{.NAMESPACE}} -f -
       - kubectl wait --for=condition=Ready externalsecret/{{.SECRET}} -n {{.NAMESPACE}} --timeout=120s
       - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
       - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming ({{.PLATFORM}}) — {{.SECRET}} materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - 'echo "OBS streaming ({{.PLATFORM}}) — {{.SECRET}} materialized by ESO from adanalife-prod SSM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   # Stop streaming, keep OBS running. Deletes the stream-key ExternalSecret
   # (if any — prod has one, stage doesn't) AND the stream-key Secret, then

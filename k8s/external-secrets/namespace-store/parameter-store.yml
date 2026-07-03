@@ -1,9 +1,19 @@
-# ParameterStore sibling of secret-store.yml (SM → SSM migration, phase 2 —
-# see the migration header in terraform/stage-1/secrets.tf). Same per-namespace
-# shape and credentials; remoteRef keys gain a leading slash (`/k8s/...`, SSM
-# hierarchical names are fully qualified). Both stores stay live until every
-# ExternalSecret has flipped, then the SecretsManager store retires with the
-# SM containers (phase 3).
+# Namespaced SecretStore — one per environment namespace (prod-1,
+# stage-1, development), all named `aws-parameterstore`. Included by each
+# env umbrella, which stamps the namespace via its `namespace:` field, so
+# this file is byte-identical across environments.
+#
+# Reads SSM Parameter Store; remoteRef keys are fully-qualified parameter
+# names (`/k8s/...`). The backing creds (eso-aws-credentials in the SAME
+# namespace, seeded by `task k8s:<env>:bootstrap-secrets`) decide which AWS
+# account it reads — prod-1 → adanalife-prod, stage-1/development →
+# adanalife-stage. The secretRef has no explicit namespace, so it resolves
+# in the store's own namespace.
+#
+# Because a namespaced store is unreachable from other namespaces, env
+# isolation is structural — no namespaceSelector conditions needed. Every
+# app ExternalSecret references {name: aws-parameterstore, kind:
+# SecretStore} identically, in every environment.
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:

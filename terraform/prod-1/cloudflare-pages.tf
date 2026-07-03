@@ -31,7 +31,7 @@ variable "production_branch" {
 # inherit a hanging cloudflare provider via the symlinked providers.tf
 # from stage-1 (which intentionally omits it).
 provider "cloudflare" {
-  api_token = data.aws_secretsmanager_secret_version.cloudflare_api_token.secret_string
+  api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
 
 resource "cloudflare_pages_project" "prod_1" {

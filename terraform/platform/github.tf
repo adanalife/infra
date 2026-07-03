@@ -22,7 +22,7 @@ provider "github" {
   app_auth {
     id              = var.github_app_id
     installation_id = var.github_app_installation_id
-    pem_file        = data.aws_secretsmanager_secret_version.github_automation_app_key.secret_string
+    pem_file        = data.aws_ssm_parameter.github_automation_app_key.value
   }
 }
 
@@ -43,5 +43,5 @@ resource "github_actions_secret" "automation_app_private_key" {
   for_each    = local.automation_repos
   repository  = each.value
   secret_name = "AUTOMATION_APP_PRIVATE_KEY"
-  value       = data.aws_secretsmanager_secret_version.github_automation_app_key.secret_string
+  value       = data.aws_ssm_parameter.github_automation_app_key.value
 }

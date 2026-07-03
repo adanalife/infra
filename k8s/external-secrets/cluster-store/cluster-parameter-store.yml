@@ -1,9 +1,14 @@
-# ParameterStore sibling of cluster-secret-store.yml (SM → SSM migration,
-# phase 2 — see the migration header in terraform/stage-1/secrets.tf). Same
-# credentials and platform-only scope; remoteRef keys gain a leading slash
-# (`/k8s/...`, SSM hierarchical names are fully qualified). Both stores stay
-# live until every ExternalSecret has flipped, then the SecretsManager store
-# retires with the SM containers (phase 3).
+# Cluster-scoped store for PLATFORM components only (external-dns,
+# cert-manager, grafana-k8s-monitoring) whose ExternalSecrets live in
+# kube-system — a namespace no app overlay owns. Named
+# `aws-parameterstore-cluster` to stay visibly distinct from the
+# namespaced `aws-parameterstore` SecretStore the apps use (the two are
+# different kinds, but the distinct name keeps the split obvious).
+#
+# Reads SSM Parameter Store; remoteRef keys are fully-qualified parameter
+# names (`/k8s/...`). Creds come from external-secrets/eso-aws-credentials —
+# the cluster owner's account (adanalife-prod on the mini-PC, adanalife-stage
+# on the dev cluster). Applied by `task k8s:<env>:platform:up`.
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:

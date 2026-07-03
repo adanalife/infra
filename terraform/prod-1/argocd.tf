@@ -1,117 +1,30 @@
 # Argo CD — prod-1-only (Argo runs on the adanalife-minipc; the in-cluster
-# aws-secretsmanager-cluster ClusterSecretStore reads this prod account). Kept in
-# its own file rather than secrets.tf so the KEEP-IN-SYNC sibling
+# aws-parameterstore-cluster ClusterSecretStore reads this prod account). Kept
+# in its own file rather than secrets.tf so the KEEP-IN-SYNC sibling
 # terraform/stage-1/secrets.tf doesn't diverge — same reasoning as tailscale.tf.
-
-# Read-only SSH deploy key Argo CD uses to clone the infra repo. Container only —
-# the keypair is hand-generated (no terraform-side source), value set out-of-band,
-# same pattern as the other k8s/* secrets here. In-cluster ESO materializes it
-# into the `argocd-repo-infra` Secret (labeled argocd.argoproj.io/secret-type:
-# repository), which Argo auto-discovers as a repo credential. See
-# gitops/README.md and cdk8s/adanalife_k8s/constructs/argocd.py.
 #
-# Bootstrap (after `task tf:prod:apply` creates the container):
+# Read-only SSH deploy keys Argo CD uses to clone its source repos. The
+# keypairs are hand-generated (no terraform-side source), values set
+# out-of-band. In-cluster ESO materializes each into the corresponding
+# `argocd-repo-*` Secret (labeled argocd.argoproj.io/secret-type: repository),
+# which Argo auto-discovers as a repo credential. See gitops/README.md and
+# cdk8s/adanalife_k8s/constructs/argocd.py.
+#
+# Bootstrap dance, once per repo (infra shown; console / video-pipeline /
+# platform-gateway are identical with their own key names):
 #   ssh-keygen -t ed25519 -C "argocd-infra-deploy-key" -f argocd_infra -N ''
 #   gh repo deploy-key add argocd_infra.pub -R adanalife/infra --title "Argo CD (read-only)"
-#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/argocd/repo-ssh-key --secret-string file://argocd_infra
+#   aws-vault exec adanalife-prod -- aws ssm put-parameter \
+#     --name /k8s/argocd/repo-ssh-key --type SecureString \
+#     --overwrite --value "$(cat argocd_infra)"
 #   rm argocd_infra argocd_infra.pub
-resource "aws_secretsmanager_secret" "argocd_repo_ssh_key" {
-  name        = "k8s/argocd/repo-ssh-key"
-  description = "Read-only SSH deploy key for Argo CD to clone the infra repo. Consumed via ESO into the argocd-repo-infra repository Secret. Value set out-of-band (see argocd.tf header)."
-}
-
-resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key" {
-  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# Read-only deploy key for the private tripbot-console repo — Argo's second
-# source repo (the console's cdk8s/dist deploy units live there). Same
-# bootstrap dance as the infra key above:
-#   ssh-keygen -t ed25519 -N "" -C argocd-tripbot-console -f argocd_console
-#   gh repo deploy-key add argocd_console.pub -R adanalife/tripbot-console --title "Argo CD (read-only)"
-#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/argocd/repo-ssh-key-console --secret-string file://argocd_console
-#   rm argocd_console argocd_console.pub
-resource "aws_secretsmanager_secret" "argocd_repo_ssh_key_console" {
-  name        = "k8s/argocd/repo-ssh-key-console"
-  description = "Read-only SSH deploy key for Argo CD to clone the private tripbot-console repo. Consumed via ESO into the argocd-repo-tripbot-console repository Secret. Value set out-of-band (see argocd.tf header)."
-}
-
-resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_console" {
-  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key_console.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# Read-only deploy key for the private video-pipeline repo — another Argo source
-# (the dashcam-cv workload's cdk8s/dist lives there). Same bootstrap dance:
-#   ssh-keygen -t ed25519 -N "" -C argocd-video-pipeline -f argocd_video_pipeline
-#   gh repo deploy-key add argocd_video_pipeline.pub -R adanalife/video-pipeline --title "Argo CD (read-only)"
-#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/argocd/repo-ssh-key-video-pipeline --secret-string file://argocd_video_pipeline
-#   rm argocd_video_pipeline argocd_video_pipeline.pub
-resource "aws_secretsmanager_secret" "argocd_repo_ssh_key_video_pipeline" {
-  name        = "k8s/argocd/repo-ssh-key-video-pipeline"
-  description = "Read-only SSH deploy key for Argo CD to clone the private video-pipeline repo. Consumed via ESO into the argocd-repo-video-pipeline repository Secret. Value set out-of-band (see argocd.tf header)."
-}
-
-resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_video_pipeline" {
-  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key_video_pipeline.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# Read-only deploy key for the private platform-gateway repo — another Argo
-# source (the gateway-twitch gateway's cdk8s/dist lives there). Same bootstrap dance:
-#   ssh-keygen -t ed25519 -N "" -C argocd-platform-gateway -f argocd_platform_gateway
-#   gh repo deploy-key add argocd_platform_gateway.pub -R adanalife/platform-gateway --title "Argo CD (read-only)"
-#   aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/argocd/repo-ssh-key-platform-gateway --secret-string file://argocd_platform_gateway
-#   rm argocd_platform_gateway argocd_platform_gateway.pub
-resource "aws_secretsmanager_secret" "argocd_repo_ssh_key_platform_gateway" {
-  name        = "k8s/argocd/repo-ssh-key-platform-gateway"
-  description = "Read-only SSH deploy key for Argo CD to clone the private platform-gateway repo. Consumed via ESO into the argocd-repo-platform-gateway repository Secret. Value set out-of-band (see argocd.tf header)."
-}
-
-resource "aws_secretsmanager_secret_version" "argocd_repo_ssh_key_platform_gateway" {
-  secret_id     = aws_secretsmanager_secret.argocd_repo_ssh_key_platform_gateway.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# CI read grant — `terraform plan` refreshes this container + its placeholder
-# version, so CITerraformRole needs GetSecretValue/DescribeSecret on it. This
-# secret's ARN is folded into secrets.tf's bulk `ci_terraform_secrets_read`
-# policy rather than getting a standalone policy + attachment: CITerraformRole is
-# at AWS's hard cap of 10 managed policies per role, and this is a read grant
-# with the same action set as that bulk policy. The prod-only ARN is the one
-# intended divergence from the KEEP-IN-SYNC sibling stage-1/secrets.tf (stage has
-# no Argo CD). No lifecycle/manage or PutSecretValue grant: the value is set
-# out-of-band and SM-touching applies run locally (not in CI).
 #
-# Runtime read access (the actual GetSecretValue at reconcile time) is ESO's, not
-# CI's — covered by the eso_reader `k8s/*` wildcard in eso.tf.
-
-# --- SSM Parameter Store mirrors (SM → SSM migration, phase 1) ---
-#
-# See the migration header in secrets.tf. Kept here next to the SM originals
-# (not in secrets.tf's mirror map) for the same KEEP-IN-SYNC reasoning as the
-# containers themselves. CI read/lifecycle rides the account-wide SSM
-# statements in secrets.tf's ci_terraform_secrets_read.
+# CI read/lifecycle rides the account-wide SSM statements in secrets.tf's
+# ci_terraform_secrets_read. Runtime read access (at reconcile time) is ESO's —
+# the eso_reader parameter/k8s/* grant in eso.tf.
 
 locals {
-  argocd_ssm_mirror_parameters = {
+  argocd_ssm_parameters = {
     "k8s/argocd/repo-ssh-key"                  = "Read-only SSH deploy key for Argo CD to clone the infra repo. Consumed via ESO into the argocd-repo-infra repository Secret."
     "k8s/argocd/repo-ssh-key-console"          = "Read-only SSH deploy key for Argo CD to clone the private tripbot-console repo. Consumed via ESO into the argocd-repo-tripbot-console repository Secret."
     "k8s/argocd/repo-ssh-key-video-pipeline"   = "Read-only SSH deploy key for Argo CD to clone the private video-pipeline repo. Consumed via ESO into the argocd-repo-video-pipeline repository Secret."
@@ -119,13 +32,15 @@ locals {
   }
 }
 
+# Resource label kept as "argocd_mirror" from the SM → SSM migration to avoid
+# state moves; these are now the canonical (only) home of each key.
 resource "aws_ssm_parameter" "argocd_mirror" {
-  for_each = local.argocd_ssm_mirror_parameters
+  for_each = local.argocd_ssm_parameters
 
   name        = "/${each.key}"
   description = each.value
   type        = "SecureString"
-  value       = "placeholder — set via bin/migrate-sm-to-ssm.sh"
+  value       = jsonencode({ placeholder = "set via aws ssm put-parameter" })
 
   lifecycle {
     ignore_changes = [value]

@@ -18,7 +18,7 @@
 #   4. `task tf:stage:apply` to apply.
 
 locals {
-  grafana_creds = jsondecode(data.aws_secretsmanager_secret_version.grafana_cloud_api.secret_string)
+  grafana_creds = jsondecode(data.aws_ssm_parameter.grafana_cloud_api.value)
 }
 
 provider "grafana" {
