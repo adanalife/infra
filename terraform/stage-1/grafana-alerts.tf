@@ -630,6 +630,12 @@ resource "grafana_rule_group" "stream_health" {
     labels = {
       severity = "warning"
       service  = "vlc-server"
+      // Muted: fires continuously from routine iGPU contention on the shared
+      // single-node minipc (co-tenant stage/video-pipeline load) with no
+      // per-firing action to take. Kept (still evaluates + shows in the Alerting
+      // UI) but routed through the always-on mute timing — see the mute=true
+      // sub-route on grafana_notification_policy.root.
+      mute = "true"
     }
 
     data {
@@ -684,6 +690,12 @@ resource "grafana_rule_group" "stream_health" {
     labels = {
       severity = "warning"
       service  = "vlc-server"
+      // Muted: fires continuously from routine iGPU contention on the shared
+      // single-node minipc (co-tenant stage/video-pipeline load) with no
+      // per-firing action to take. Kept (still evaluates + shows in the Alerting
+      // UI) but routed through the always-on mute timing — see the mute=true
+      // sub-route on grafana_notification_policy.root.
+      mute = "true"
     }
 
     data {
