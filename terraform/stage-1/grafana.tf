@@ -82,7 +82,8 @@ locals {
     "service-health-tripbot",
     "service-health-vlc-server",
     "service-health-onscreens-server",
-    "igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "service-health-platform-gateway", # gateway façade request metrics + the Twitch Helix rate-limit/error panels that replace tripbot's in-process ones at cutover (platform-gateway#14)
+    "igpu-performance",                # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
     "twitch-chat-activity",
     "logs-and-errors",
     "go-runtime",

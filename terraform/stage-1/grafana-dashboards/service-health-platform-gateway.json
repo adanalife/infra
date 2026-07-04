@@ -1,0 +1,217 @@
+{
+  "title": "14 — Service Health: Platform Gateway",
+  "uid": "platform-gateway-service-health",
+  "tags": ["tripbot", "platform-gateway", "service-health"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(kube_pod_info, cluster)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "platform",
+        "label": "Platform",
+        "type": "custom",
+        "query": "twitch,youtube",
+        "current": { "text": "twitch", "value": "twitch" },
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 99,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "options": {
+        "mode": "markdown",
+        "content": "`gateway-$platform` is the per-platform API gateway (the `platform_gateway_*` metrics from `internal/metrics`, [platform-gateway#14](https://github.com/adanalife/platform-gateway/pull/14)). Unlike tripbot's OTel-push metrics, these are **annotation-scraped** (`prometheus.io/scrape` on the pod), so they carry `cluster`/`namespace`/`pod` — filtered here by `pod=~\"gateway-$platform.*\"`. Only **prod-1** ships to Grafana Cloud (stage-1 is dropped at the Alloy layer), so panels populate once prod `gateway-twitch` is live (post-cutover). **The Twitch Helix row is the cutover-parity replacement** for the `twitch_helix_*` panels on the Twitch Chat Activity dashboard, which go stale once tripbot routes Helix calls through the gateway. Helix-row panels are twitch-only (`pod=~\"gateway-twitch.*\"`); a youtube gateway leaves them empty."
+      }
+    },
+
+    { "id": 100, "type": "row", "title": "Façade", "collapsed": false, "gridPos": { "x": 0, "y": 4, "w": 24, "h": 1 } },
+
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Up (last 1m)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "(time() - max(timestamp(last_over_time(platform_gateway_up{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))) < bool 60" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "STALE", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Requests / sec",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "decimals": 2, "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Upstream failures (502) / sec",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"502\"}[5m]))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3, "unit": "reqps",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 0.001 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Not-supported (501) / sec",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"501\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "decimals": 3, "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests / sec by op",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (op) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))", "legendFormat": "{{op}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Requests / sec by status",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request latency by op (p50 / p95)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))", "legendFormat": "p50 {{op}}" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))", "legendFormat": "p95 {{op}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 0 } }, "overrides": [] }
+    },
+
+    { "id": 101, "type": "row", "title": "Twitch Helix (cutover parity)", "collapsed": false, "gridPos": { "x": 0, "y": 25, "w": 24, "h": 1 } },
+
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Helix rate remaining",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "orange", "value": 100 },
+            { "color": "green", "value": 300 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Helix errors (5m)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m]))" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Helix rate budget over time",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})", "legendFormat": "remaining" },
+        { "refId": "B", "expr": "max(platform_gateway_helix_ratelimit_limit{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})", "legendFormat": "limit" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Helix errors by endpoint and status (per min)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status}})" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+    }
+  ]
+}
