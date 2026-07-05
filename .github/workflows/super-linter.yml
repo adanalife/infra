@@ -1,8 +1,13 @@
 ---
 name: super-linter
 
+# pre-commit covers the per-PR lint surface (same hooks run locally and in
+# pre-commit.yml); super-linter is the belt-and-braces full-codebase sweep,
+# so it runs weekly + on demand instead of on every PR.
 on:
-  pull_request:
+  schedule:
+    - cron: '13 9 * * 1' # Mondays 09:13 UTC
+  workflow_dispatch:
 
 jobs:
   build:
@@ -22,6 +27,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT_BRANCH: master
+          # weekly sweep lints everything, not just a PR diff
+          VALIDATE_ALL_CODEBASE: true
           # don't post a "Super-linter summary" comment on every PR run
           # (the Actions step summary tab still gets the same content)
           ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
