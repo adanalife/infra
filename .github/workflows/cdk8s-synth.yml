@@ -27,6 +27,10 @@ on:
       - 'cdk8s/**'
       - '.github/workflows/cdk8s-synth.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: cdk8s
