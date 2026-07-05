@@ -19,13 +19,13 @@ on:
   pull_request:
     paths:
       - 'cdk8s/**'
-      - '.github/workflows/cdk8s.yml'
+      - '.github/workflows/cdk8s-synth.yml'
   push:
     branches:
       - master
     paths:
       - 'cdk8s/**'
-      - '.github/workflows/cdk8s.yml'
+      - '.github/workflows/cdk8s-synth.yml'
 
 defaults:
   run:
