@@ -3,6 +3,9 @@ on:
   push:
     tags:
       - v*
+  # bump-version.yml dispatches this at the new tag, since its
+  # GITHUB_TOKEN-pushed tags don't trigger the push event above
+  workflow_dispatch:
 
 jobs:
   build:
