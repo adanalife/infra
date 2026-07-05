@@ -29,7 +29,7 @@ jobs:
     name: Check for drift of terraform configuration
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
         env:
           CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
