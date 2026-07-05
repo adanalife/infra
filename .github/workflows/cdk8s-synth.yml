@@ -19,13 +19,17 @@ on:
   pull_request:
     paths:
       - 'cdk8s/**'
-      - '.github/workflows/cdk8s.yml'
+      - '.github/workflows/cdk8s-synth.yml'
   push:
     branches:
       - master
     paths:
       - 'cdk8s/**'
-      - '.github/workflows/cdk8s.yml'
+      - '.github/workflows/cdk8s-synth.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -34,6 +38,7 @@ defaults:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # continue-on-error: dependabot PRs can't read repo secrets — the mint
       # fails there and the || fallback below kicks in.
@@ -45,7 +50,7 @@ jobs:
           app-id: ${{ vars.AUTOMATION_APP_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # PR runs check out the branch tip (not the merge ref) so the
           # re-synth commit can be pushed straight back to the branch.

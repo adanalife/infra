@@ -19,6 +19,7 @@ jobs:
     # AWS-touching drift check. The scheduled cron run is unaffected.
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       # Don't let one workspace's drift cancel the others — mirror terraform.yml
       # so a prod-1 failure doesn't take stage-1's check down with it.
@@ -28,7 +29,7 @@ jobs:
     name: Check for drift of terraform configuration
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - run: ./.github/scripts/set-deploy-env.sh ${{ matrix.terraform-dirs }}
         env:
           CI_CORE_AWS_ACCESS_KEY_ID: ${{ secrets.CI_CORE_AWS_ACCESS_KEY_ID }}
