@@ -77,6 +77,38 @@ tasks:
       - task: k8s:_dashcam-localize:apply
         vars: { ENV: prod-1 }
 
+  # Post-rollout verification: confirm APP's running pods actually carry the
+  # image the Deployment asks for. imagePullPolicy Always can silently roll a
+  # pod onto a different image than expected — check the SHA before
+  # feature-testing a deploy. Read-only.
+  k8s:stage:verify-sha:
+    desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot)
+    cmds:
+      - task: k8s:_verify-sha
+        vars: { ENV: stage-1, APP: '{{.APP}}' }
+
+  k8s:prod:verify-sha:
+    desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot)
+    cmds:
+      - task: k8s:_verify-sha
+        vars: { ENV: prod-1, APP: '{{.APP}}' }
+
+  k8s:_verify-sha:
+    internal: true
+    requires:
+      vars: [APP]
+    preconditions:
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
+    cmds:
+      - |
+        set -euo pipefail
+        ns={{.ENV}}
+        want=$(kubectl -n "$ns" get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
+        echo "deployment image: $want"
+        sel=$(kubectl -n "$ns" get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+        kubectl -n "$ns" get pods -l "$sel" -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
+
   k8s:_dashcam-pv:apply:
     internal: true
     dir: cdk8s
