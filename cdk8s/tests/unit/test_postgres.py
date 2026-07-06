@@ -81,7 +81,11 @@ def test_container_spec_matches_render():
     assert c["readinessProbe"]["tcpSocket"]["port"] == "postgres"
     mount = c["volumeMounts"][0]
     assert mount["mountPath"] == "/var/lib/postgresql/data"
-    assert mount["subPath"] == "pgdata"
+    # PGDATA sits below the mount (not a subPath) so non-root postgres owns
+    # the directory it initdbs into; kubelet-created subPath dirs are
+    # root-owned and uid 999 can't chmod them.
+    assert "subPath" not in mount
+    assert {"name": "PGDATA", "value": "/var/lib/postgresql/data/pgdata"} in c["env"]
     # pod-level seccomp hardening
     pod_sc = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["securityContext"]
     assert pod_sc["seccompProfile"]["type"] == "RuntimeDefault"

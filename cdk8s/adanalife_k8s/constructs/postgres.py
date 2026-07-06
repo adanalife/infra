@@ -152,6 +152,12 @@ class Postgres(Construct):
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))
             ],
+            # PGDATA points one level below the mount so initdb owns its own
+            # directory: the local-path volume root arrives 0777 root:root and
+            # non-root postgres (uid 999) can't chmod it, but it can mkdir a
+            # subdir there, own it, and lock it down. A subPath mount can't do
+            # this — kubelet creates subPath dirs root:root 0755.
+            env=[k8s.EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata")],
             # pg_isready answers protocol-level — catches "up but not serving".
             liveness_probe=k8s.Probe(
                 exec=k8s.ExecAction(command=["pg_isready", "-U", "$(POSTGRES_USER)"]),
@@ -184,7 +190,6 @@ class Postgres(Construct):
                 k8s.VolumeMount(
                     name="postgres-data",
                     mount_path="/var/lib/postgresql/data",
-                    sub_path="pgdata",
                 )
             ],
         )
@@ -214,12 +219,11 @@ class Postgres(Construct):
                         # PSA `restricted`: non-root (uid/gid 999 = postgres in
                         # the pgvector/pg16 Debian image — NOT 70, that's Alpine),
                         # seccomp RuntimeDefault, no-privesc + caps drop[ALL] on
-                        # the container. fsGroup 999 has the kubelet group-own the
-                        # volume at mount so postgres writes PGDATA without the
-                        # image's first-boot root chown (the reason this was
-                        # previously deferred). Safe only on a fresh/empty PVC — an
-                        # existing large volume would pay a slow recursive chown.
-                        # Validated on prod's first boot on the new T5 UserVolume.
+                        # the container. Note fsGroup does NOT apply to
+                        # hostPath-type volumes (which local-path provisions) —
+                        # write access comes from the PGDATA-below-the-mount
+                        # arrangement on the container, not from ownership of the
+                        # volume root.
                         security_context=k8s.PodSecurityContext(
                             run_as_non_root=True,
                             run_as_user=999,
