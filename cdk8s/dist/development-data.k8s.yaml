@@ -72,7 +72,10 @@ spec:
         app: postgres
     spec:
       containers:
-        - envFrom:
+        - env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          envFrom:
             - secretRef:
                 name: postgres-secret
           image: ghcr.io/adanalife/mirror/pgvector:pg16
@@ -109,7 +112,6 @@ spec:
           volumeMounts:
             - mountPath: /var/lib/postgresql/data
               name: postgres-data
-              subPath: pgdata
       securityContext:
         fsGroup: 999
         runAsGroup: 999
