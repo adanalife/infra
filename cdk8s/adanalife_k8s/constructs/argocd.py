@@ -494,6 +494,13 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
+                # selfHeal off on stage so a hand/console scale sticks — same
+                # posture as the tripbot apps + gateway sets. NOTE: the appset's
+                # ignoreApplicationDifferences on /spec/syncPolicy means an
+                # EXISTING Application keeps its old policy; a one-time
+                # `kubectl -n argocd patch application <app>` (or app
+                # delete+regen) is needed after this lands.
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=CONSOLE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
@@ -516,6 +523,11 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
+                # selfHeal off on stage so scaling the embed responder up/down
+                # (console button or kubectl) sticks instead of being reverted
+                # to the git replicas within seconds. Same one-time
+                # existing-Application patch caveat as the console set above.
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
