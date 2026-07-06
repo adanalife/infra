@@ -179,9 +179,16 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 # ============================================================================
 # Plan-time data sources
 # ============================================================================
+#
+# Literal names, NOT aws_ssm_parameter.mirror[...].name: a data source that
+# references the mirror resource is deferred to apply time whenever ANY entry
+# is added to the map — which leaves a provider fed by it (cloudflare,
+# grafana) with an unknown token at plan, and the refresh fails with a
+# missing-auth 400. Fresh-account bootstrap: create + seed the parameter
+# before the first plan that needs it. KEEP-IN-SYNC: prod-1/secrets.tf.
 
 data "aws_ssm_parameter" "cloudflare_api_token" {
-  name = aws_ssm_parameter.mirror["stage-1/cloudflare-api-token"].name
+  name = "/stage-1/cloudflare-api-token"
 }
 
 data "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
@@ -189,19 +196,19 @@ data "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
 }
 
 data "aws_ssm_parameter" "grafana_cloud_api" {
-  name = aws_ssm_parameter.mirror["stage-1/grafana-cloud-api"].name
+  name = "/stage-1/grafana-cloud-api"
 }
 
 data "aws_ssm_parameter" "discord_alerts_webhook" {
-  name = aws_ssm_parameter.mirror["k8s/tripbot/discord-alerts-webhook"].name
+  name = "/k8s/tripbot/discord-alerts-webhook"
 }
 
 data "aws_ssm_parameter" "ntfy_critical_webhook" {
-  name = aws_ssm_parameter.mirror["stage-1/ntfy-critical-webhook"].name
+  name = "/stage-1/ntfy-critical-webhook"
 }
 
 data "aws_ssm_parameter" "healthchecks_deadman_ping" {
-  name = aws_ssm_parameter.mirror["stage-1/healthchecks-deadman-ping"].name
+  name = "/stage-1/healthchecks-deadman-ping"
 }
 
 # ============================================================================
