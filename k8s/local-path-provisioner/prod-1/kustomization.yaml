@@ -8,11 +8,15 @@
 # Codifies what the cluster bootstrap previously did by hand. Two
 # Talos-specific adjustments, applied as patches over the upstream manifest:
 #
-#   1. config.json nodePathMap retargeted /opt -> /var/lib. Talos mounts /opt
-#      read-only, so the provisioner's default host path can't create volume
-#      dirs; /var is writable. Applying this in the manifest (rather than the
-#      runbook's apply-then-patch-then-rollout) means the provisioner pod
-#      reads the corrected path on first start — no rollout restart needed.
+#   1. config.json nodePathMap retargeted to /var/mnt/data — the durable
+#      Samsung T5 UserVolume (see talos/adanalife-minipc/controlplane.patch.yaml).
+#      Talos mounts /opt read-only (so the default host path can't create volume
+#      dirs), and /var/lib is on the EPHEMERAL partition Talos wipes on any
+#      control-plane reconfig — the cause of the 2026-05/06 prod-DB losses.
+#      /var/mnt/data is a separate physical disk, untouched by Talos wipes.
+#      Applying this in the manifest (rather than the runbook's
+#      apply-then-patch-then-rollout) means the provisioner pod reads the
+#      corrected path on first start — no rollout restart needed.
 #
 #   2. local-path-storage namespace labeled PSS-privileged. The provisioner
 #      spawns a helper-pod that hostPath-mounts the node dir to set up / tear
@@ -30,7 +34,8 @@ resources:
   - https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.32/deploy/local-path-storage.yaml
 
 patches:
-  # Talos /opt is read-only — provision volumes under writable /var/lib.
+  # Provision volumes on the durable Samsung T5 UserVolume (/var/mnt/data),
+  # NOT the ephemeral /var/lib partition Talos wipes on control-plane reconfig.
   - patch: |-
       apiVersion: v1
       kind: ConfigMap
@@ -43,7 +48,7 @@ patches:
             "nodePathMap":[
               {
                 "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
-                "paths":["/var/lib/local-path-provisioner"]
+                "paths":["/var/mnt/data/local-path-provisioner"]
               }
             ]
           }
