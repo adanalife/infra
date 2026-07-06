@@ -4,10 +4,10 @@ cluster — so each is its own sync/health unit (one Argo Application) and the
 platform stack stays decoupled from any app env.
 
 The tripbot APP workloads (tripbot/vlc/onscreens/obs Deployments + their one-shot
-Jobs + identity Secrets) and the dashcam-cv vector-fill workload are no longer
-authored here: they moved to the tripbot and video-pipeline repos' cdk8s and Argo
-delivers them cross-repo (see constructs/argocd.py). This module keeps only the
-platform + stateful units that stay in infra.
+Jobs + identity Secrets) and the dashcam-cv vector-fill workload are authored in
+the tripbot and video-pipeline repos' cdk8s; Argo delivers them cross-repo (see
+constructs/argocd.py). This module holds only the platform + stateful units
+that live in infra.
 """
 
 from __future__ import annotations

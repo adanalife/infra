@@ -1,12 +1,8 @@
 # Cloudflare Pages project for dana.lol static site
 #
-# Staging-first: this creates "dana-lol-staging" on Cloudflare Pages.
-# The site will be available at dana-lol-staging.pages.dev.
-# PR preview deployments are automatic for any non-production branch.
-#
-# TODO: once staging is verified, add a "dana-lol" production project
-# alongside this one (in terraform/prod-1/) and update Route53
-# www.dana.lol CNAME to point to it.
+# This creates "dana-lol-staging" on Cloudflare Pages, available at
+# dana-lol-staging.pages.dev. PR preview deployments are automatic for any
+# non-production branch. The production project lives in terraform/prod-1/.
 
 variable "cloudflare_account_id" {
   type        = string

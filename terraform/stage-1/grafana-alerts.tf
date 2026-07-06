@@ -43,8 +43,8 @@ resource "grafana_contact_point" "discord_alerts" {
 // a dead Discord webhook (the 2026-06-15 failure) can't black-hole the page —
 // this transport shares no failure domain with Discord. Receives severity=
 // critical firings (escalation) + the notification-delivery-failure alert.
-// Message formatting is the default Grafana webhook JSON for now; prettifying
-// via ntfy X-Title/X-Priority headers is a follow-up (see infra TODO).
+// Message formatting is the default Grafana webhook JSON; prettifying
+// via ntfy X-Title/X-Priority headers is a tracked follow-up.
 resource "grafana_contact_point" "ntfy_critical" {
   name = "ntfy-critical"
 
@@ -151,7 +151,7 @@ resource "grafana_notification_policy" "root" {
   }
 
   // Muted-but-kept alerts (labelled mute=true). The active-series-cap warning
-  // fires continuously now that two deployments share the free-tier budget and
+  // fires continuously (two deployments share the free-tier budget) and
   // there's no action to take, so it's silenced via the always-on mute timing
   // while the rule is kept (still visible/firing in the Alerting UI).
   // continue=false so it never falls through to the Discord default receiver.
@@ -323,8 +323,8 @@ resource "grafana_rule_group" "metrics_budget" {
     labels = {
       severity = "warning"
       service  = "monitoring"
-      // Muted: fires continuously now that two deployments share the free-tier
-      // active-series budget and there's no action to take. Kept (still visible
+      // Muted: fires continuously (two deployments share the free-tier
+      // active-series budget) and there's no action to take. Kept (still visible
       // in the Alerting UI) but routed through the always-on mute timing — see
       // the mute=true sub-route on grafana_notification_policy.root.
       mute = "true"

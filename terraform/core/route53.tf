@@ -182,7 +182,6 @@ resource "aws_route53_record" "develop" {
 }
 
 # this is just a friendly alias to make SSH easier
-#TODO: update stream server to set this programatically
 # stream.local.whereisdana.today
 resource "aws_route53_record" "stream_local" {
   zone_id = aws_route53_zone.secondary.zone_id
@@ -215,12 +214,3 @@ resource "aws_route53_record" "bluesky_verification" {
   ttl     = "300"
   records = ["did=did:plc:3eikvksr7ojyaywda47uz5t7"]
 }
-
-#TODO: is this being used anywhere?
-# resource aws_route53_record twitch_scripts {
-#   zone_id = aws_route53_zone.primary.zone_id
-#   name    = "twitch-scripts.${var.domain}"
-#   type    = "A"
-#   ttl     = "300"
-#   records = ["172.3.109.123"]
-# }

@@ -52,10 +52,9 @@ extraVolumeMounts:
 # into Ingress.status and always use --default-targets above.
 #
 # This list is committed here (not in a per-machine values.local.yml) because
-# the target is now a stable name, not the node's IP. Helm REPLACES lists rather
+# the target is a stable name, not the node's IP. Helm REPLACES lists rather
 # than merging, so external-dns must be installed with this file as the sole
-# source of extraArgs — `task k8s:stage:platform-env:up` no longer layers a
-# values.local.yml.
+# source of extraArgs — nothing layers a values.local.yml on top.
 extraArgs:
   - --default-targets=minipc.whereisdana.today
   - --force-default-targets

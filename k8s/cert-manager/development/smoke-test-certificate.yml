@@ -7,10 +7,8 @@
 # burn LE-prod's per-week duplicate-cert limit; the resulting cert is
 # untrusted by browsers but valid in shape.
 #
-# TODO: once the home-network port-forward lands and real Ingresses are
-# consuming letsencrypt-route53 certs successfully, decide whether to
-# (a) flip this to letsencrypt-route53 as a continuous prod-issuer
-# canary, or (b) delete it as redundant.
+# TODO: decide whether to (a) flip this to letsencrypt-route53 as a
+# continuous prod-issuer canary, or (b) delete it as redundant.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
