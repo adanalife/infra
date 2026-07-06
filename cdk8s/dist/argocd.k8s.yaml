@@ -90,6 +90,8 @@ spec:
     - git@github.com:adanalife/video-pipeline.git
   destinations:
     - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
       namespace: stage-1
   clusterResourceWhitelist:
     - group: scheduling.k8s.io
@@ -598,8 +600,10 @@ spec:
   generators:
     - list:
         elements:
+          - env: prod-1
+            revision: main
           - env: stage-1
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
