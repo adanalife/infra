@@ -54,17 +54,24 @@ spec:
               port: postgres
           resources:
             limits:
-              memory: 1Gi
+              memory: 2Gi
             requests:
               cpu: 100m
               memory: 256Mi
           securityContext:
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - mountPath: /var/lib/postgresql/data
               name: postgres-data
               subPath: pgdata
       securityContext:
+        fsGroup: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 999
         seccompProfile:
           type: RuntimeDefault
   volumeClaimTemplates:
