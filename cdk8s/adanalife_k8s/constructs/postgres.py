@@ -144,7 +144,10 @@ class Postgres(Construct):
             # it every bringup). The mirror is the weekly-refreshed copy from the
             # ghcr-base-image-mirrors decision; GHCR isn't rate-limited.
             image="ghcr.io/adanalife/mirror/pgvector:pg16",
-            security_context=k8s.SecurityContext(allow_privilege_escalation=False),
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+            ),
             ports=[k8s.ContainerPort(name="postgres", container_port=PORT)],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))
@@ -169,7 +172,13 @@ class Postgres(Construct):
                     "cpu": k8s.Quantity.from_string("100m"),
                     "memory": k8s.Quantity.from_string("256Mi"),
                 },
-                limits={"memory": k8s.Quantity.from_string("1Gi")},
+                # 1Gi was too low: the bulk HNSW index build on a
+                # frame_embeddings restore OOM-killed prod at 1Gi and lost the
+                # PVC (2026-06-15). The seed:vectors task now forces a bounded
+                # on-disk build so it fits, but give headroom on the SSD-backed
+                # minipc so a faster in-memory build is an option and steady
+                # state has breathing room.
+                limits={"memory": k8s.Quantity.from_string("2Gi")},
             ),
             volume_mounts=[
                 k8s.VolumeMount(
@@ -202,10 +211,21 @@ class Postgres(Construct):
                 template=k8s.PodTemplateSpec(
                     metadata=k8s.ObjectMeta(labels=sel),
                     spec=k8s.PodSpec(
-                        # seccomp + no-privesc; caps.drop[ALL] + runAsNonRoot
-                        # deferred (entrypoint chowns PGDATA as root on first boot).
+                        # PSA `restricted`: non-root (uid/gid 999 = postgres in
+                        # the pgvector/pg16 Debian image — NOT 70, that's Alpine),
+                        # seccomp RuntimeDefault, no-privesc + caps drop[ALL] on
+                        # the container. fsGroup 999 has the kubelet group-own the
+                        # volume at mount so postgres writes PGDATA without the
+                        # image's first-boot root chown (the reason this was
+                        # previously deferred). Safe only on a fresh/empty PVC — an
+                        # existing large volume would pay a slow recursive chown.
+                        # Validated on prod's first boot on the new T5 UserVolume.
                         security_context=k8s.PodSecurityContext(
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
+                            run_as_non_root=True,
+                            run_as_user=999,
+                            run_as_group=999,
+                            fs_group=999,
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
                         ),
                         containers=[container],
                     ),

@@ -119,3 +119,39 @@ kind: HostnameConfig
 # hostname together. Quoted so YAML doesn't coerce `off` to boolean false.
 auto: "off"
 hostname: adanalife-minipc
+---
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+# Durable data volume on the Samsung Portable SSD T5 (1.8T, USB), mounted at
+# /var/mnt/data. This is the fix for the repeated prod-DB losses: local-path's
+# backing dir (Postgres, NATS JetStream) previously lived under /var/lib on the
+# Kingston NVMe's EPHEMERAL partition, which Talos WIPES on any control-plane
+# reconfig/upgrade (confirmed 2026-05-19 and 2026-06-15 — the retain reclaim
+# policy is irrelevant, the wipe is below the PV layer). A UserVolume is a
+# SEPARATE physical disk with its own partition; Talos never wipes it on an
+# apply-config/upgrade. The local-path-provisioner nodePathMap is repointed to
+# /var/mnt/data/local-path-provisioner (see k8s/local-path-provisioner/prod-1).
+#
+# Unlike KubeSpan/Cilium/Tailscale above, a UserVolume is NOT creation-time:
+# Talos provisions (partitions + formats) the disk on the next config reconcile
+# of the RUNNING node — no wipe-reinstall required. Applying this config FORMATS
+# the T5, destroying its current exFAT contents (the OG dashcam corpus + carsounds,
+# already salvaged to the NAS 2026-07-05). See the migration runbook.
+#
+# USB caveat: the T5 is USB-attached (less bulletproof than an internal M.2 for
+# an always-on DB volume). It's a strict improvement over the ephemeral partition
+# and the documented long-term target is an internal PLP M.2 (hardware.md); this
+# same config migrates to one by re-pointing the diskSelector.
+#
+# diskSelector matches by transport+size: the T5 is the only USB disk and the
+# only disk >1TB, so this can't accidentally select the ~950GB Kingston NVMe.
+name: data
+provisioning:
+  diskSelector:
+    match: disk.transport == 'usb' && disk.size > 1000u * GB
+  # minSize is required by Talos; grow: true then expands the partition to fill
+  # the whole ~1.8T disk (the T5 is dedicated to this one volume).
+  minSize: 100GB
+  grow: true
+filesystem:
+  type: xfs
