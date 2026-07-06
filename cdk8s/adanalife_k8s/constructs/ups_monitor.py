@@ -27,17 +27,17 @@ battery dies. A clean shutdown protects etcd + the Talos STATE/OS partition from
 hard-power-cut corruption (the kind of unclean crash that caused the 2026-06-15
 outage), so the node comes back cleanly. Note it does NOT save the prod postgres
 data while that DB is on an ephemeral local-path volume — durable storage is the
-separate fix that protects the data; this protects the cluster.
+separate fix that protects the data (shipped: the T5 UserVolume); this protects
+the cluster.
 
-**Disarmed by default.** `DRY_RUN=true` (the committed default) makes the trigger
-*log* the shutdown command it would run instead of executing it, and the
-talosconfig Secret mount is optional (absent until armed) — so even a sync can't
-power anything off. Plus the Argo Application is manual-sync. Three independent
-gates. Arming is a deliberate, separate act (see the arming runbook in the PR /
-the README): provision the scoped talosconfig (Secret `ups-talosconfig`), then
-flip `DRY_RUN=false`. The shutdown credential is a talosconfig minted with the
+**ARMED.** `DRY_RUN=false`: the trigger executes the real shutdown. The
+credential is the `ups-talosconfig` Secret, delivered by the ExternalSecret
+emitted here (cluster store → SSM `/k8s/ups/talosconfig`) and minted with the
 `os:operator` role (the narrowest Talos role that permits shutdown — no
-config-write/admin), reaching the Talos API at <node>:50000.
+config-write/admin), reaching the Talos API at <node>:50000. To stand down:
+flip `DRY_RUN` back to "true" (log-only) — the optional Secret mount and the
+manual-sync Argo Application remain as the other two gates for a fresh
+environment where the SSM parameter is unseeded.
 
 A raw-socket reader (vs `upsmon`) keeps the trigger logic explicit and auditable:
 it only ever reads UPS vars, and the single action it can take is the one
@@ -51,6 +51,7 @@ from __future__ import annotations
 import imports.k8s as k8s
 from constructs import Construct
 
+from adanalife_k8s import eso
 from adanalife_k8s.naming import meta_labels, selector
 
 NAME = "ups-monitor"
@@ -71,9 +72,9 @@ RUNTIME_THRESHOLD = "120"  # shut down once estimated runtime drops below this (
 CONFIRM_POLLS = "2"  # require the trigger condition this many polls in a row
 TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
 TALOSCTL_PATH = "/opt/talos/talosctl"  # placed by the initContainer
-# Disarmed by default — DRY_RUN logs the shutdown it WOULD run. Arming = flip to
-# "false" (plus provisioning the talosconfig Secret). See the module docstring.
-DRY_RUN = "true"
+# ARMED — the trigger executes the real `talosctl shutdown`. Flip to "true" for
+# log-only mode (it logs the command it WOULD run). See the module docstring.
+DRY_RUN = "false"
 # python:3.14-alpine — current latest stable, multi-arch (minipc is amd64). The
 # reader is pure stdlib, so no NUT package or pip install is needed.
 IMAGE = "python:3.14-alpine"
@@ -85,9 +86,10 @@ TALOSCTL_URL = (
     f"https://github.com/siderolabs/talos/releases/download/{TALOSCTL_VERSION}"
     "/talosctl-linux-amd64"
 )
-# The Secret (provisioned at arming time via ESO from SM k8s/ups/talosconfig)
-# holding the os:operator-scoped talosconfig. Mounted OPTIONALLY — absent until
-# armed, so DRY_RUN deploys need no credential.
+# The Secret holding the os:operator-scoped talosconfig, delivered by the
+# ExternalSecret emitted in UpsMonitor (cluster store → SSM
+# /k8s/ups/talosconfig). Mounted OPTIONALLY so a deploy without the seeded
+# parameter (fresh env, DRY_RUN testing) still schedules.
 TALOSCONFIG_SECRET = "ups-talosconfig"
 
 # initContainer: fetch the pinned talosctl into the shared volume. stdlib urllib
@@ -229,6 +231,19 @@ class UpsMonitor(Construct):
             "reader",
             metadata=k8s.ObjectMeta(name=NAME, namespace=NAMESPACE, labels=labels),
             data={"nutread.py": _READER, "fetch-talosctl.py": _FETCH_TALOSCTL},
+        )
+
+        # The shutdown credential. Cluster store (not a namespaced SecretStore):
+        # the ups namespace has no eso-aws-credentials of its own, and one
+        # parameter doesn't justify bootstrapping one.
+        eso.external_secret(
+            self,
+            "talosconfig-secret",
+            name=TALOSCONFIG_SECRET,
+            namespace=NAMESPACE,
+            store=("aws-parameterstore-cluster", "ClusterSecretStore"),
+            labels=labels,
+            data=[eso.ESData(secret_key="talosconfig", key="/k8s/ups/talosconfig")],
         )
 
         # Shared security floor for both containers: non-root, no privilege, no
