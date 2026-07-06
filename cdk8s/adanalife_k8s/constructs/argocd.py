@@ -319,8 +319,9 @@ class ArgoCD(Construct):
             + (["ups"] if ups_monitor else [])
             + (["arc-systems", "arc-runners"] if arc else []),
             # + Namespace when the UPS monitor / ARC ride this project: the unit's
-            # own Namespace objects are themselves gated by this whitelist (a
-            # missing entry here is what failed the first ups-monitor sync — #761).
+            # own Namespace objects are themselves gated by this
+            # clusterResourceWhitelist, so a CreateNamespace=true sync fails
+            # without the entry.
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
             + ([NAMESPACE_KIND] if (ups_monitor or arc) else []),
         )

@@ -23,8 +23,7 @@ paths = [
   # no value). All values in this file are stubs by design.
   '''k8s/apps/tripbot/overlays/local/secret\.env\.example''',
 
-  # Contains the rotated-and-dead access-key-id `AKIAWAS42L6WSH6MNBF6`
-  # (rotated 2026-05-04, see vault/decisions/k8s-platform-stack.md). The
+  # Contains the rotated-and-dead access-key-id `AKIAWAS42L6WSH6MNBF6`. The
   # ID is preserved here as a deliberate reference; the secret half lives
   # in SM and is reconciled via ESO. Migration to ESO-backed Secret +
   # secretRef is tracked separately.
@@ -36,8 +35,8 @@ paths = [
   '''terraform/core/user_data\.yml''',
 
   # Contains DISCORD_GUILD_ID=607964164220125258, the ADanaLife Discord
-  # server snowflake. Public ID (visible on invite previews, documented
-  # in vault/general/social/discord.md); gitleaks' generic-api-key rule
+  # server snowflake. Public ID (visible on invite previews);
+  # gitleaks' generic-api-key rule
   # false-positives on the 18-digit numeric value. The bot token itself
   # is in AWS SM (k8s/tripbot/discord-bot-token) and never in this repo.
   '''k8s/apps/tripbot/overlays/stage-1/kustomization\.yaml''',

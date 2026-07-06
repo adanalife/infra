@@ -140,7 +140,7 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_ip_allow" {
   # diff on every plan — the API doesn't roundtrip this attribute
   # cleanly against the data-source-derived sensitive list. Ignored to
   # keep plans clean; trade-off is `task stage:allowlist:add-current-ip`
-  # no longer pushes allowlist edits via apply (Cloudflare-side
+  # can't push allowlist edits via apply (Cloudflare-side
   # allowlist freezes at whatever was last applied). Acceptable
   # because the tunnel is superseded by Tailscale and slated for removal.
   lifecycle {

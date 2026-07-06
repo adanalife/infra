@@ -33,9 +33,9 @@ import imports.io.external_secrets as esx
 # The store every app ExternalSecret references — namespaced, identical in
 # every env (isolation is structural: a namespaced store is unreachable
 # cross-namespace; the backing eso-aws-credentials decides the AWS account).
-# ParameterStore since the SM → SSM migration (phase 2 — see the migration
-# header in terraform/stage-1/secrets.tf); remoteRef keys are the SM names
-# with a leading slash.
+# ParameterStore-backed (see the header in terraform/stage-1/secrets.tf);
+# remoteRef keys are the secret names with a leading slash (SSM parameter
+# name format).
 DEFAULT_STORE = ("aws-parameterstore", "SecretStore")
 
 _STORE_KIND = {

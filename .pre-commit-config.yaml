@@ -82,10 +82,10 @@ repos:
     hooks:
       - id: terraform_fmt
         exclude: terraform/bootstrap
-      #TODO: this was generating a diff in github workflow
+      #TODO: re-enable terraform_validate (produces spurious diffs in the GitHub workflow)
       # - id: terraform_validate
       #   exclude: terraform/bootstrap
-      #TODO: this required a number of (fairly easy) changes
+      #TODO: re-enable terraform_tflint (needs a batch of small code fixes first)
       # - id: terraform_tflint
       #   exclude: terraform/bootstrap
       # never tried these before
