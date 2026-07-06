@@ -28,7 +28,7 @@ machine:
   # NIC: omitted on purpose. With no interfaces block Talos DHCPs all NICs, so
   # the Pi 5's onboard ethernet (end0) comes up without us hard-coding the name.
   # KubeSpan parity with the controlplane (cluster.discovery is already on in the
-  # base worker.yaml). Dormant-but-tested per the infra TODO: it's the plumbing
+  # base worker.yaml). Dormant but tested: it's the plumbing
   # that lets a future node join over the public internet. On the LAN it's a
   # no-op for reachability — if the first join ever stalls, this is the first
   # thing to drop to isolate the cause.
@@ -78,7 +78,7 @@ cluster:
   # Route53 CNAME → per-location A record (terraform/core/minipc-dns.tf), so a
   # location move (e.g. back to shadyglen) is a single DNS flip with no Pi-side
   # reconfig. REQUIRES minipc.whereisdana.today in the kube-apiserver certSANs
-  # (added to controlplane.patch.yaml in this change), or the kubelet's TLS
+  # (set in controlplane.patch.yaml), or the kubelet's TLS
   # verification of the apiserver fails on a hostname mismatch.
   controlPlane:
     endpoint: https://minipc.whereisdana.today:6443

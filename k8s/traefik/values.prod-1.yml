@@ -55,13 +55,12 @@ service:
 # status.loadBalancer: the LAN pointer minipc.whereisdana.today (a CNAME in the
 # whereisdana.today apex zone — see terraform/core/minipc-dns.tf).
 #
-# This is now COSMETIC: external-dns runs with --force-default-targets (see
+# This is COSMETIC: external-dns runs with --force-default-targets (see
 # k8s/external-dns/prod-1/config.yml), so it ignores whatever traefik stamps and
 # always publishes the same pointer. We set the matching stable hostname here so
-# the Ingress ADDRESS column agrees and nothing carries the node's raw IP. (It
-# used to be the node's LAN IP, discovered from the InternalIP and written to a
-# gitignored values.local.yml — which silently grabbed the Tailscale interface
-# once; the stable pointer removes that whole per-machine discovery.)
+# the Ingress ADDRESS column agrees and nothing carries the node's raw IP
+# (per-machine IP discovery is a trap: it can silently grab the Tailscale
+# interface instead of the LAN one).
 #
 # `hostname` and `publishedService` are mutually exclusive ingress-endpoint
 # sources, so disable the (no-op here) publishedService copy inherited from

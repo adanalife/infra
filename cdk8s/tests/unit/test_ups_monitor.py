@@ -161,7 +161,7 @@ def test_minipc_emits_ups_monitor_application_manual_sync():
     )
     assert "ups" in {d["namespace"] for d in infra["spec"]["destinations"]}
     # CreateNamespace=true creates the `ups` Namespace as a PreSync resource, so
-    # the project must permit it — the omission that failed the first sync (#761).
+    # the project must permit the Namespace kind or the sync fails.
     assert "Namespace" in {c["kind"] for c in infra["spec"]["clusterResourceWhitelist"]}
 
 

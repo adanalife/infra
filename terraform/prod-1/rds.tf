@@ -43,7 +43,6 @@ resource "aws_security_group" "allow_postgres" {
   description = "This group allows Postgres connections"
   vpc_id      = module.default_vpc.vpc_id
 
-  #TODO: associate an elastic IP
   ingress {
     description = "Postgres from tripbot"
     from_port   = 5432

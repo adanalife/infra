@@ -24,7 +24,6 @@ resource "aws_acm_certificate" "primary_static_site" {
   }
 }
 
-#TODO: enable reduced redundancy
 resource "aws_s3_bucket" "static_website" {
   bucket = local.primary_static_site
 
@@ -103,40 +102,6 @@ resource "aws_cloudfront_distribution" "primary_cdn" {
   #   response_page_path = "/404.html"
   #   response_code      = 404
   # }
-
-  #TODO: enable cache control
-  #cache_control:
-  #  'assets/*': public, max-age=86400
-  #  #TODO: confirm this works
-  #  '*.jpg': public, max-age=86400
-  #  '*.png': public, max-age=86400
-  #  'favicon.ico': public, max-age=86400
-  #  'browserconfig.xml': public, max-age=86400
-  #  'robots.txt': public, max-age=86400
-  #  'humans.txt': public, max-age=86400
-  #  '*': no-cache, no-store
-
-  #TODO: enable redirects
-  # redirects:
-  #   # I shared this URL with a buncha NERT members
-  #   radio: 2017/10/11/san-francisco-emergency-radio-setup
-  #   # for convenience
-  #   fb: https://www.facebook.com/adanalifeunderscore
-  #   facebook: https://www.facebook.com/adanalifeunderscore
-  #   youtube: https://www.youtube.com/channel/UC8Q7uFC1Xyr2ZnTWOk9Aizg
-  #   instagram: https://instagram.com/adanalife_
-  #   twitter: https://twitter.com/adanalife_
-  #   twitch: https://twitch.tv/adanalife_
-  #   # I renamed these articles
-  #   2018/03/05/trip-recap-central-coast: 2018/03/05/trip-report-central-coast
-  #   2019/01/13/eleven-month-update/: 2019/01/13/post-adventure-summary
-  #   # in case people try to change the number and expect it to work
-  #   2017/10/01/how-this-site-works-p-2: 2017/10/12/how-this-site-works-p-2
-  #   2017/10/12/how-this-site-works-p-1: 2017/10/01/how-this-site-works
-  #   # this was posted on my flyer
-  #   van-tour: https://youtu.be/_own6DuEpLc
-  #   # the stream survey
-  #   survey: https://forms.gle/a52NamfEfCcSP7Vc9
 
   default_cache_behavior {
     target_origin_id = local.s3_origin_id

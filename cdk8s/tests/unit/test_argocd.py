@@ -121,7 +121,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("obs", "obs"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
-    # cluster-resource whitelists are scoped to what each repo's dist actually
+    # cluster-resource allowlists are scoped to what each repo's dist actually
     # creates: infra owns the platform cluster-scoped kinds, the console none.
     kinds = lambda n: {  # noqa: E731
         c["kind"] for c in _project(objs, n)["spec"]["clusterResourceWhitelist"]
@@ -162,8 +162,8 @@ def test_minipc_apps_autosync_except_prod_obs():
     # both minipc envs are automated in tripbot-apps...
     assert '(eq .env "stage-1")' in patch
     assert '(eq .env "prod-1")' in patch
-    # ...and tripbot-apps no longer carries ANY obs unit — OBS is delivered by the
-    # obs repo's own appset now (OBS_REVISIONS), so there's no obs carve-out here.
+    # ...and tripbot-apps carries no obs unit — OBS is delivered by the
+    # obs repo's own appset (OBS_REVISIONS), so there's no obs carve-out here.
     assert "obs" not in patch
     # selfHeal is per-env: stage is OFF (a hand/console scale sticks so
     # components can be parked at 0 to free the minipc), prod stays ON (the live

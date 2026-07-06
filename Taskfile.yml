@@ -961,11 +961,11 @@ tasks:
           done
           echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-data + prod-1-platform namespaces"
         fi
-      # external-dns + traefik no longer carry a per-machine LAN-IP override:
-      # both target the stable pointer minipc.whereisdana.today (committed in
+      # external-dns + traefik carry no per-machine LAN-IP override: both
+      # target the stable pointer minipc.whereisdana.today (committed in
       # k8s/external-dns/prod-1/config.yml + k8s/traefik/values.prod-1.yml), and
       # the pointer is repointed in terraform/core on a physical-network move. So
-      # this task is now purely the ESO credential bootstrap.
+      # this task is purely the ESO credential bootstrap.
 
   # Stage-1 ESO bootstrap on the mini-PC Talos cluster. Seeds the
   # adanalife-stage reader creds as eso-aws-credentials into BOTH stage-1
@@ -977,7 +977,7 @@ tasks:
   # namespace (the stores are unreachable from prod). Stage has its OWN
   # external-dns in stage-1-platform (reading the stage account); it targets the
   # stable minipc.whereisdana.today pointer from its committed config.yml, so
-  # this task no longer writes a per-machine values.local.yml. Point kubectl at
+  # no per-machine values.local.yml is involved. Point kubectl at
   # adanalife-minipc.
   k8s:stage:bootstrap-secrets:
     desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-data + stage-1-platform (mini-PC cluster)
@@ -1022,10 +1022,10 @@ tasks:
           done
           echo "applied eso-aws-credentials Secret to stage-1 + stage-1-data + stage-1-platform namespaces"
         fi
-      # stage external-dns no longer carries a per-machine LAN-IP override — it
+      # stage external-dns carries no per-machine LAN-IP override — it
       # targets the stable pointer minipc.whereisdana.today (committed in
       # k8s/external-dns/stage-1/config.yml), repointed in terraform/core on a
-      # physical-network move. So this task is now purely the ESO credential
+      # physical-network move. So this task is purely the ESO credential
       # bootstrap.
 
   # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
@@ -1432,8 +1432,8 @@ tasks:
   # per-platform obs app dist (tripbot repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
   # Argo-delivered), so a normal sync materializes the Secret and OBS streams
   # with no manual step. `obs:prod:stream:on` re-applies just that
-  # ExternalSecret (yq-extracted from the obs dist, since it no longer lives
-  # in a standalone overlay file); `obs:prod:stream:off` deletes the
+  # ExternalSecret (yq-extracted from the obs dist — it has no standalone
+  # overlay file); `obs:prod:stream:off` deletes the
   # ExternalSecret AND the Secret. The pause is durable because the
   # ApplicationSet deliberately excludes prod-1 obs-twitch from automated
   # selfHeal (see cdk8s argocd.k8s.yaml) — Argo won't re-create the deleted
