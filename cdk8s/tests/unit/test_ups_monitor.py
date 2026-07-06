@@ -61,18 +61,34 @@ def _env(objs):
     return {e["name"]: e.get("value") for e in _container(objs)["env"]}
 
 
-# --- the disarmed-by-default guard: three independent gates keep stage 2 from
-#     powering off the node until it's deliberately armed ---
+# --- the armed-state contract: the trigger is live, and its credential is
+#     declaratively delivered ---
 
 
-def test_disarmed_by_default_dry_run():
-    # Gate 1: the committed manifest ships DRY_RUN=true (log-only).
-    assert _env(_synth())["DRY_RUN"] == "true"
+def test_armed_dry_run_off():
+    # The committed manifest is ARMED: the trigger executes the real shutdown.
+    assert _env(_synth())["DRY_RUN"] == "false"
+
+
+def test_talosconfig_delivered_by_external_secret():
+    # The shutdown credential rides the cluster store (the ups namespace has no
+    # SecretStore of its own) into the ups-talosconfig Secret.
+    es = next(
+        o
+        for o in _synth()
+        if o["kind"] == "ExternalSecret" and o["metadata"]["name"] == "ups-talosconfig"
+    )
+    assert es["metadata"]["namespace"] == "ups"
+    ref = es["spec"]["secretStoreRef"]
+    assert ref == {"name": "aws-parameterstore-cluster", "kind": "ClusterSecretStore"}
+    d = es["spec"]["data"][0]
+    assert d["secretKey"] == "talosconfig"
+    assert d["remoteRef"]["key"] == "/k8s/ups/talosconfig"
 
 
 def test_talosconfig_mount_is_optional():
-    # Gate 2: the credential mount is optional, so a DRY_RUN deploy needs no cert
-    # and can't even reach a real talosconfig until arming provisions the Secret.
+    # The mount stays optional so a deploy without the seeded SSM parameter
+    # (fresh env) still schedules instead of wedging on a missing Secret.
     vols = _deploy(_synth())["spec"]["template"]["spec"]["volumes"]
     tc = next(v for v in vols if v["name"] == "talosconfig")
     assert tc["secret"]["optional"] is True

@@ -45,6 +45,7 @@ locals {
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
     "k8s/arc/github-app"                   = "GitHub App credentials for the self-hosted runner controller (ARC). Keys: github_app_id, github_app_installation_id, github_app_private_key."
+    "k8s/ups/talosconfig"                  = "Talosconfig for the ups-monitor graceful-shutdown trigger."
   }
 }
 

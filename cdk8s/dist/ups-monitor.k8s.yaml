@@ -118,6 +118,26 @@ data:
             log(f"ups.status=UNREACHABLE: {e}")
         time.sleep(interval)
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: ups-monitor
+    app.kubernetes.io/part-of: infra
+  name: ups-talosconfig
+  namespace: ups
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/ups/talosconfig
+      secretKey: talosconfig
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    name: ups-talosconfig
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -168,7 +188,7 @@ spec:
             - name: TALOSCTL
               value: /opt/talos/talosctl
             - name: DRY_RUN
-              value: "true"
+              value: "false"
             - name: HOME
               value: /tmp
           image: python:3.14-alpine
