@@ -107,9 +107,16 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 # ============================================================================
 # Plan-time data sources
 # ============================================================================
+#
+# Literal names, NOT aws_ssm_parameter.mirror[...].name: a data source that
+# references the mirror resource is deferred to apply time whenever ANY entry
+# is added to the map — which leaves a provider fed by it (cloudflare) with an
+# unknown token at plan, and the refresh 400s with "Missing … Authorization
+# headers". Fresh-account bootstrap: create + seed the parameter before the
+# first plan that needs it. KEEP-IN-SYNC: stage-1/secrets.tf.
 
 data "aws_ssm_parameter" "cloudflare_api_token" {
-  name = aws_ssm_parameter.mirror["prod-1/cloudflare-api-token"].name
+  name = "/prod-1/cloudflare-api-token"
 }
 
 # ============================================================================
