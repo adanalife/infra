@@ -58,16 +58,17 @@ machine:
     # the public internet with no firewall config). Requires cluster.discovery.
     kubespan:
       enabled: true
-  # IP forwarding for the Tailscale subnet router (TS_ROUTES=192.168.1.0/24 in
-  # tailscale.patch.yaml). Tailscale advertises the home LAN so off-LAN tailnet
-  # clients reach 192.168.1.200 (and the Synology, etc.) with no cert-SAN/endpoint
-  # changes; forwarding lets the node route to *other* LAN hosts. Host-level
-  # (machine.sysctls), not pod-level — hostNetwork pods can't set sysctls.
+  # IP forwarding for the Tailscale subnet router (TS_ROUTES=192.168.40.0/24 in
+  # tailscale.patch.yaml — the current Maine/tallman LAN). Tailscale advertises
+  # the home LAN so off-LAN tailnet clients reach 192.168.40.111 (and the
+  # Synology, etc.) with no cert-SAN/endpoint changes; forwarding lets the node
+  # route to *other* LAN hosts. Host-level (machine.sysctls), not pod-level —
+  # hostNetwork pods can't set sysctls.
   sysctls:
     net.ipv4.ip_forward: "1"
     net.ipv6.conf.all.forwarding: "1"
   # Extra cert SANs so kubectl/talosctl can reach the API by the node's Tailscale
-  # identity or the stable LAN-DNS pointer, not just 192.168.1.200 — works from
+  # identity or the stable LAN-DNS pointer, not just 192.168.40.111 — works from
   # any tailnet device with no subnet route, and survives the Maine move (the
   # tailnet name/IP and the LAN-DNS pointer are location-independent; the LAN IP
   # is not). machine.certSANs covers the Talos API (apid); cluster.apiServer.certSANs

@@ -95,9 +95,12 @@ resource "tailscale_acl" "this" {
       // cluster node, so it survives every wipe/re-register with no manual
       // clicks. Operator proxies wear tag:k8s too but advertise no routes, so
       // this only ever matches the subnet-router node itself.
+      // This must match TS_ROUTES in talos/adanalife-minipc/tailscale.patch.yaml
+      // — the node's current-location LAN subnet (Maine/tallman). On a move,
+      // update both to the new subnet (Texas/shadyglen was 192.168.1.0/24).
       "autoApprovers": {
           "routes": {
-              "192.168.1.0/24": ["tag:k8s"],
+              "192.168.40.0/24": ["tag:k8s"],
           },
           "exitNode": ["tag:k8s"],
       },

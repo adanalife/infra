@@ -15,9 +15,13 @@
 #   4. On a rebuild, `task talos:minipc:secrets:decrypt` restores the plaintext.
 # NEVER commit a real key in plaintext — only the .sops.yaml is committed.
 #
-# Prereqs in the tailnet policy (already set 2026-05-20): tag:k8s defined in
-# tagOwners, and 192.168.1.0/24 listed under autoApprovers.routes for tag:k8s
+# Prereqs in the tailnet policy: tag:k8s defined in tagOwners, and the
+# current-location LAN subnet listed under autoApprovers.routes for tag:k8s
 # (so the advertised route auto-approves on every wipe/re-register). MagicDNS on.
+# On a location move, update TS_ROUTES below AND the autoApprovers.routes entry
+# in terraform/prod-1/tailscale.tf to the new LAN subnet (one active subnet at a
+# time — don't advertise a subnet the node isn't physically on; it would hijack
+# the LAN of any tailnet client that happens to be on that subnet).
 ---
 apiVersion: v1alpha1
 kind: ExtensionServiceConfig
@@ -27,10 +31,12 @@ environment:
   - TS_AUTHKEY=tskey-auth-REPLACE_ME
   # Name the node in the tailnet (matches the Talos hostname / MagicDNS name).
   - TS_HOSTNAME=adanalife-minipc
-  # Advertise the home LAN so tailnet clients reach 192.168.1.200 (and the
-  # Synology at .222, etc.) without changing any cert SANs or endpoints.
-  # Auto-approved by the tag:k8s autoApprovers.routes rule.
-  - TS_ROUTES=192.168.1.0/24
+  # Advertise the current-location home LAN so tailnet clients reach the node
+  # (192.168.40.111 on the Maine/tallman network) and the Synology (.40.100),
+  # etc. without changing any cert SANs or endpoints. Auto-approved by the
+  # tag:k8s autoApprovers.routes rule. Advertise exactly the subnet the node is
+  # on — update on a move (Texas/shadyglen was 192.168.1.0/24).
+  - TS_ROUTES=192.168.40.0/24
   # Kernel networking — required for subnet routing (userspace is the extension
   # default and won't route a subnet). Pairs with the ip_forward sysctls in
   # controlplane.patch.yaml.
