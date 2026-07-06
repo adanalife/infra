@@ -4,10 +4,10 @@ cluster — so each is its own sync/health unit (one Argo Application) and the
 platform stack stays decoupled from any app env.
 
 The tripbot APP workloads (tripbot/vlc/onscreens/obs Deployments + their one-shot
-Jobs + identity Secrets) and the dashcam-cv vector-fill workload are no longer
-authored here: they moved to the tripbot and video-pipeline repos' cdk8s and Argo
-delivers them cross-repo (see constructs/argocd.py). This module keeps only the
-platform + stateful units that stay in infra.
+Jobs + identity Secrets) and the dashcam-cv vector-fill workload are authored in
+the tripbot and video-pipeline repos' cdk8s; Argo delivers them cross-repo (see
+constructs/argocd.py). This module holds only the platform + stateful units
+that live in infra.
 """
 
 from __future__ import annotations
@@ -16,7 +16,13 @@ from cdk8s import Chart
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.dashcam import emit_dashcam_pv, emit_dashcam_pvc
+from adanalife_k8s.constructs.dashcam import (
+    emit_dashcam_local_pvc,
+    emit_dashcam_localize_job,
+    emit_dashcam_pv,
+    emit_dashcam_pvc,
+)
+from adanalife_k8s.constructs.arc import Arc
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
@@ -54,6 +60,9 @@ class SupportingChart(Chart):
         # lives here in the app namespace. (Co-located envs keep it in DataChart.)
         if env.data_isolated:
             emit_dashcam_pvc(self, env)
+            # The node-local corpus cache rides alongside the NFS PVC, same
+            # namespace (no-op unless dashcam_local_enabled).
+            emit_dashcam_local_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -107,6 +116,9 @@ class DataChart(Chart):
         #     in a different namespace. ---
         if not env.data_isolated:
             emit_dashcam_pvc(self, env)
+            # The node-local corpus cache rides alongside the NFS PVC, same
+            # namespace (no-op unless dashcam_local_enabled).
+            emit_dashcam_local_pvc(self, env)
 
 
 class DashcamPVChart(Chart):
@@ -125,6 +137,19 @@ class DashcamPVChart(Chart):
         emit_dashcam_pv(self, env)
 
 
+class DashcamLocalizeChart(Chart):
+    """The one-shot Job that copies the NFS corpus onto the node-local cache PVC —
+    host-specific (carries the NFS coords), so it's kept OUT of Argo in its own
+    dist/<env>-dashcam-localize.k8s.yaml (globbed by no ApplicationSet, same as
+    DashcamPVChart) and applied on demand via `task k8s:<env>:dashcam-localize` with
+    the real coords injected at synth. Rendered only when dashcam_local_enabled, so
+    it never lands in dist for an env that hasn't adopted local serving."""
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        emit_dashcam_localize_job(self, env)
+
+
 class UpsMonitorChart(Chart):
     """The observe-only NUT-client UPS monitor — a cluster-singleton (one minipc,
     one UPS) in its own `ups` namespace. Env-agnostic, so it's authored once and
@@ -136,6 +161,19 @@ class UpsMonitorChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         UpsMonitor(self)
+
+
+class ArcChart(Chart):
+    """ARC supporting resources (namespaces + runner ResourceQuota + GitHub App
+    ExternalSecret) — a cluster-singleton, env-agnostic, synthed to
+    dist/arc.k8s.yaml and delivered by a minipc-only Argo Application (gated off
+    the k3d dev instance, which has no rpi5 — see constructs/argocd.py). The ARC
+    Helm charts themselves are Argo Applications in the platform stack
+    (helm_platform.arc_components); see constructs/arc.py for the split."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        Arc(self)
 
 
 class ArgoCDChart(Chart):

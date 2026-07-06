@@ -3,13 +3,21 @@ name: pre-commit
 on:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-python@v6
-    - uses: hashicorp/setup-terraform@v4
-    - uses: pre-commit/action@v3.0.1
-      env:
-        SKIP: no-commit-to-branch
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+      # terraform_fmt hook needs the terraform binary on PATH.
+      - uses: hashicorp/setup-terraform@v4
+      # no-commit-to-branch guards local commits; in CI the checkout is the
+      # branch itself, so the hook would false-positive on develop/master.
+      - uses: pre-commit/action@v3.0.1
+        env:
+          SKIP: no-commit-to-branch

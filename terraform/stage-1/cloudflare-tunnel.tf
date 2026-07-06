@@ -31,7 +31,7 @@ resource "cloudflare_zone" "stage_1" {
 # Secrets Manager so the home IP can rotate without a code change.
 # Edit via `task stage:allowlist:add-current-ip`.
 locals {
-  allowlist_cidrs = jsondecode(data.aws_secretsmanager_secret_version.stage_1_allowlist_cidrs.secret_string)
+  allowlist_cidrs = jsondecode(data.aws_ssm_parameter.stage_1_allowlist_cidrs.value)
 }
 
 # 32 random bytes used to derive the tunnel token. Rotating this
@@ -140,7 +140,7 @@ resource "cloudflare_zero_trust_access_policy" "stage_1_ip_allow" {
   # diff on every plan — the API doesn't roundtrip this attribute
   # cleanly against the data-source-derived sensitive list. Ignored to
   # keep plans clean; trade-off is `task stage:allowlist:add-current-ip`
-  # no longer pushes allowlist edits via apply (Cloudflare-side
+  # can't push allowlist edits via apply (Cloudflare-side
   # allowlist freezes at whatever was last applied). Acceptable
   # because the tunnel is superseded by Tailscale and slated for removal.
   lifecycle {

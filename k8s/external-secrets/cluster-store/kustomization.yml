@@ -4,4 +4,4 @@ kind: Kustomization
 # ClusterSecretStore is cluster-scoped, so no namespace transform applies.
 # Applied by `task k8s:<env>:platform:up` after the ESO helm install.
 resources:
-  - cluster-secret-store.yml
+  - cluster-parameter-store.yml

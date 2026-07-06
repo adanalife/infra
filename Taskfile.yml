@@ -61,11 +61,68 @@ tasks:
       - task: k8s:_dashcam-pv:apply
         vars: { ENV: prod-1 }
 
+  # Populate the node-local dashcam corpus cache from NFS (the NFS<->local serving
+  # toggle). Requires dashcam_local_enabled for the env (so the vlc-dashcam-local
+  # PVC exists). Re-runnable: the copy skips clips already present, so a second run
+  # only fills gaps. Watch: kubectl -n <env> logs -f job/dashcam-localize
+  k8s:stage:dashcam-localize:
+    desc: copy the stage-1 dashcam corpus NFS -> node-local PVC (the one-shot localize Job)
+    cmds:
+      - task: k8s:_dashcam-localize:apply
+        vars: { ENV: stage-1 }
+
+  k8s:prod:dashcam-localize:
+    desc: copy the prod-1 dashcam corpus NFS -> node-local PVC (the one-shot localize Job)
+    cmds:
+      - task: k8s:_dashcam-localize:apply
+        vars: { ENV: prod-1 }
+
+  # Post-rollout verification: confirm APP's running pods actually carry the
+  # image the Deployment asks for. imagePullPolicy Always can silently roll a
+  # pod onto a different image than expected — check the SHA before
+  # feature-testing a deploy. Read-only.
+  k8s:stage:verify-sha:
+    desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot)
+    cmds:
+      - task: k8s:_verify-sha
+        vars: { ENV: stage-1, APP: '{{.APP}}' }
+
+  k8s:prod:verify-sha:
+    desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot)
+    cmds:
+      - task: k8s:_verify-sha
+        vars: { ENV: prod-1, APP: '{{.APP}}' }
+
+  k8s:_verify-sha:
+    internal: true
+    requires:
+      vars: [APP]
+    preconditions:
+      - sh: kubectl cluster-info >/dev/null 2>&1
+        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
+    cmds:
+      - |
+        set -euo pipefail
+        ns={{.ENV}}
+        want=$(kubectl -n "$ns" get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
+        echo "deployment image: $want"
+        sel=$(kubectl -n "$ns" get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+        kubectl -n "$ns" get pods -l "$sel" -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
+
   k8s:_dashcam-pv:apply:
     internal: true
     dir: cdk8s
     deps: [cdk8s:imports]
     preconditions:
+      # Guard: minipc-cluster tasks act on the AMBIENT kube-context — a bare
+      # kubectl runs against whatever context happens to be current. On
+      # 2026-07-03 `task gitops:apply` stamped the full Argo config onto an
+      # unrelated GKE cluster this way. Same pattern as the k3d-only guard on
+      # the dev tasks. Accepts any minipc context (admin@adanalife-minipc,
+      # argocd-minipc) or the tailscale-operator off-LAN fallback.
+      - &minipc-context-guard
+        sh: 'case "$(kubectl config current-context 2>/dev/null)" in *minipc*|tailscale-operator.*) true ;; *) false ;; esac'
+        msg: "refusing: this task targets the minipc (stage/prod) cluster, but the current kube-context is not a minipc context. Run kubectl config use-context admin@adanalife-minipc first."
       - sh: test -f dashcam-nfs.local.env
         msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH"
     cmds:
@@ -81,6 +138,33 @@ tasks:
         CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
         echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
         kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
+
+  k8s:_dashcam-localize:apply:
+    internal: true
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    preconditions:
+      - *minipc-context-guard
+      - sh: test -f dashcam-nfs.local.env
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH"
+    cmds:
+      - |
+        set -euo pipefail
+        set -a; . ./dashcam-nfs.local.env; set +a
+        : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
+        : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+        # Synth via main.py directly (real coords land in a throwaway dir, never the
+        # committed golden — same as dashcam-pv). The localize Job only renders when
+        # the env has dashcam_local_enabled; if the file is absent, that's the hint.
+        CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
+        f="$out/{{.ENV}}-dashcam-localize.k8s.yaml"
+        test -f "$f" || { echo "no localize Job for {{.ENV}} — set dashcam_local_enabled=True for it in config.py first"; exit 1; }
+        # Jobs are largely immutable, so clear any prior run before re-applying.
+        kubectl -n {{.ENV}} delete job dashcam-localize --ignore-not-found
+        echo "Applying {{.ENV}} dashcam localize Job (NFS -> node-local PVC, outside Argo)"
+        kubectl apply -f "$f"
+        echo "Watch: kubectl -n {{.ENV}} logs -f job/dashcam-localize"
 
   # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
   # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.
@@ -133,6 +217,8 @@ tasks:
 
   gitops:apply:
     desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)
+    preconditions:
+      - *minipc-context-guard
     cmds:
       - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
 
@@ -149,110 +235,110 @@ tasks:
     desc: terraform apply against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:stage:plan:
     desc: terraform plan against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:stage:init:
     desc: terraform init against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:stage:init:reconfigure:
     desc: terraform init -reconfigure against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:stage:init:migrate:
     desc: terraform init -migrate-state against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:stage:destroy:
     desc: terraform destroy against stage-1
     dir: terraform/stage-1
     cmds:
-      - aws-vault exec adanalife-stage -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-stage -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   tf:prod:apply:
     desc: terraform apply against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:prod:plan:
     desc: terraform plan against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:prod:init:
     desc: terraform init against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:prod:init:reconfigure:
     desc: terraform init -reconfigure against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:prod:init:migrate:
     desc: terraform init -migrate-state against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:prod:destroy:
     desc: terraform destroy against prod-1
     dir: terraform/prod-1
     cmds:
-      - aws-vault exec adanalife-prod -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   # Core uses --no-session because session tokens can't make IAM changes.
   tf:core:apply:
     desc: terraform apply against core (no session token; IAM changes need full creds)
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:core:plan:
     desc: terraform plan against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:core:init:
     desc: terraform init against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:core:init:reconfigure:
     desc: terraform init -reconfigure against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:core:init:migrate:
     desc: terraform init -migrate-state against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:core:destroy:
     desc: terraform destroy against core
     dir: terraform/core
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   # platform = env-agnostic config, i.e. things not owned by any specific
   # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
@@ -263,37 +349,37 @@ tasks:
     desc: terraform apply against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform apply {{.CLI_ARGS}}
 
   tf:platform:plan:
     desc: terraform plan against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform plan {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:platform:init:
     desc: terraform init against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
 
   tf:platform:init:reconfigure:
     desc: terraform init -reconfigure against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -reconfigure {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
 
   tf:platform:init:migrate:
     desc: terraform init -migrate-state against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform init -migrate-state {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:platform:destroy:
     desc: terraform destroy against platform
     dir: terraform/platform
     cmds:
-      - aws-vault exec adanalife-core --no-session -- terraform destroy {{.CLI_ARGS}}
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
@@ -547,6 +633,8 @@ tasks:
   # the command line to roll a different platform's set.
   k8s:prod:rollout:tripbot:
     desc: restart prod-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -555,6 +643,8 @@ tasks:
 
   k8s:prod:rollout:vlc-server:
     desc: restart prod-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -563,6 +653,8 @@ tasks:
 
   k8s:prod:rollout:obs:
     desc: restart prod-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -571,6 +663,8 @@ tasks:
 
   k8s:prod:rollout:onscreens:
     desc: restart prod-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -587,6 +681,8 @@ tasks:
 
   k8s:stage:rollout:tripbot:
     desc: restart stage-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -595,6 +691,8 @@ tasks:
 
   k8s:stage:rollout:vlc-server:
     desc: restart stage-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -603,6 +701,8 @@ tasks:
 
   k8s:stage:rollout:obs:
     desc: restart stage-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -611,6 +711,8 @@ tasks:
 
   k8s:stage:rollout:onscreens:
     desc: restart stage-1 onscreens-server so it re-pulls the image (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -641,6 +743,8 @@ tasks:
 
   k8s:stage:platform-env:up:
     desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
+    preconditions:
+      - *minipc-context-guard
     deps: [k8s:stage:bootstrap-secrets]
     cmds:
       # Pre-req: task k8s:stage:bootstrap-secrets (stage ESO store + creds).
@@ -734,9 +838,9 @@ tasks:
     cmds:
       # eso-aws-credentials (ESOSecretsReader, adanalife-stage account that
       # dev borrows) goes in BOTH external-secrets (for the
-      # aws-secretsmanager-cluster ClusterSecretStore platform components
+      # aws-parameterstore-cluster ClusterSecretStore platform components
       # use) AND the development namespace (for the namespaced
-      # aws-secretsmanager SecretStore the apps use).
+      # aws-parameterstore SecretStore the apps use).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace development --dry-run=client -o yaml | kubectl apply -f -
       - |
@@ -745,8 +849,8 @@ tasks:
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
-          ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
-          sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
+          ak=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
           for ns in external-secrets development; do
             kubectl create secret generic eso-aws-credentials \
@@ -814,6 +918,7 @@ tasks:
       - kubectl get secret eso-aws-credentials -n prod-1-data >/dev/null 2>&1
       - kubectl get secret eso-aws-credentials -n prod-1-platform >/dev/null 2>&1
     preconditions:
+      - *minipc-context-guard
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
@@ -826,9 +931,9 @@ tasks:
         msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
     cmds:
       # eso-aws-credentials goes in FOUR namespaces (same prod-account
-      # creds in all): external-secrets (for the aws-secretsmanager-cluster
+      # creds in all): external-secrets (for the aws-parameterstore-cluster
       # ClusterSecretStore the kube-system platform components use), prod-1
-      # (for the namespaced aws-secretsmanager SecretStore the apps use),
+      # (for the namespaced aws-parameterstore SecretStore the apps use),
       # prod-1-data (for the isolated DB namespace's store — postgres'
       # ExternalSecret reads it), and prod-1-platform (the store external-dns
       # reads).
@@ -844,8 +949,8 @@ tasks:
           echo "eso-aws-credentials already present, skipping"
         else
           set -euo pipefail
-          ak=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
-          sk=$(aws-vault exec adanalife-prod -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
+          ak=$(aws-vault exec adanalife-prod -- mise exec -- terraform -chdir=terraform/prod-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-prod -- mise exec -- terraform -chdir=terraform/prod-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
           for ns in external-secrets prod-1 prod-1-data prod-1-platform; do
             kubectl create secret generic eso-aws-credentials \
@@ -856,23 +961,23 @@ tasks:
           done
           echo "applied eso-aws-credentials Secret to external-secrets + prod-1 + prod-1-data + prod-1-platform namespaces"
         fi
-      # external-dns + traefik no longer carry a per-machine LAN-IP override:
-      # both target the stable pointer minipc.whereisdana.today (committed in
+      # external-dns + traefik carry no per-machine LAN-IP override: both
+      # target the stable pointer minipc.whereisdana.today (committed in
       # k8s/external-dns/prod-1/config.yml + k8s/traefik/values.prod-1.yml), and
       # the pointer is repointed in terraform/core on a physical-network move. So
-      # this task is now purely the ESO credential bootstrap.
+      # this task is purely the ESO credential bootstrap.
 
   # Stage-1 ESO bootstrap on the mini-PC Talos cluster. Seeds the
   # adanalife-stage reader creds as eso-aws-credentials into BOTH stage-1
-  # (the app namespace's aws-secretsmanager SecretStore, shipped in the
+  # (the app namespace's aws-parameterstore SecretStore, shipped in the
   # umbrella) and stage-1-platform (the namespaced store stage's own
   # external-dns reads). Stage does NOT touch external-secrets — prod owns
-  # the cluster-scoped aws-secretsmanager-cluster store there. Isolation is
+  # the cluster-scoped aws-parameterstore-cluster store there. Isolation is
   # by AWS account (stage creds only read the stage account) AND by
   # namespace (the stores are unreachable from prod). Stage has its OWN
   # external-dns in stage-1-platform (reading the stage account); it targets the
   # stable minipc.whereisdana.today pointer from its committed config.yml, so
-  # this task no longer writes a per-machine values.local.yml. Point kubectl at
+  # no per-machine values.local.yml is involved. Point kubectl at
   # adanalife-minipc.
   k8s:stage:bootstrap-secrets:
     desc: seed the stage-1 ESO bootstrap Secret (adanalife-stage account) into stage-1 + stage-1-data + stage-1-platform (mini-PC cluster)
@@ -881,6 +986,7 @@ tasks:
       - kubectl get secret eso-aws-credentials -n stage-1-data >/dev/null 2>&1
       - kubectl get secret eso-aws-credentials -n stage-1-platform >/dev/null 2>&1
     preconditions:
+      - *minipc-context-guard
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v keybase >/dev/null
@@ -904,8 +1010,8 @@ tasks:
           echo "eso-aws-credentials already present in stage-1 + stage-1-data + stage-1-platform, skipping"
         else
           set -euo pipefail
-          ak=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
-          sk=$(aws-vault exec adanalife-stage -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
+          ak=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_access_key)
+          sk=$(aws-vault exec adanalife-stage -- mise exec -- terraform -chdir=terraform/stage-1 output -raw eso_reader_secret \
                 | base64 -d | keybase pgp decrypt)
           for ns in stage-1 stage-1-data stage-1-platform; do
             kubectl create secret generic eso-aws-credentials \
@@ -916,10 +1022,10 @@ tasks:
           done
           echo "applied eso-aws-credentials Secret to stage-1 + stage-1-data + stage-1-platform namespaces"
         fi
-      # stage external-dns no longer carries a per-machine LAN-IP override — it
+      # stage external-dns carries no per-machine LAN-IP override — it
       # targets the stable pointer minipc.whereisdana.today (committed in
       # k8s/external-dns/stage-1/config.yml), repointed in terraform/core on a
-      # physical-network move. So this task is now purely the ESO credential
+      # physical-network move. So this task is purely the ESO credential
       # bootstrap.
 
   # Install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring
@@ -983,7 +1089,7 @@ tasks:
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/cluster-store
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
+      - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -1035,7 +1141,7 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write"; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws ssm put-parameter --overwrite --type SecureString --name /k8s/grafana-cloud-metrics-write"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/development/values.yml
@@ -1123,6 +1229,7 @@ tasks:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the empty cluster
     deps: [k8s:prod:bootstrap-secrets]
     preconditions:
+      - *minipc-context-guard
       - sh: command -v helm >/dev/null
         msg: "helm not found — install with `brew install helm`"
       - sh: command -v kubectl >/dev/null
@@ -1178,7 +1285,7 @@ tasks:
           crd/clustersecretstores.external-secrets.io
           crd/externalsecrets.external-secrets.io
       - kubectl apply -k k8s/external-secrets/cluster-store
-      - echo "ESO up. ClusterSecretStore aws-secretsmanager-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
+      - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       # Tailscale operator — kubectl over the tailnet (API server proxy) + app-UI
       # exposure as tailnet services. Needs ESO up (the operator-oauth Secret is
       # materialized from SM via the cluster store). prod-1 only — the tailnet is
@@ -1213,7 +1320,7 @@ tasks:
       - kubectl apply -f k8s/cilium/prod-1/hubble-tailscale-ingress.yaml
       # external-dns runs in the prod-1-platform namespace (not kube-system)
       # so the prod-1 app namespace stays pod-clean. The kustomize apply
-      # creates the namespace + its namespaced aws-secretsmanager SecretStore
+      # creates the namespace + its namespaced aws-parameterstore SecretStore
       # + the external-dns ExternalSecret (reading the prod account, no
       # cross-account). It watches Ingresses cluster-wide (chart ClusterRole)
       # and publishes prod.whereisdana.today records — including the platform
@@ -1262,7 +1369,7 @@ tasks:
           sleep 2
         done
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
-          || { echo "ExternalSecret didn't materialize. Seed it with: aws secretsmanager put-secret-value --secret-id k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
+          || { echo "ExternalSecret didn't materialize. Seed it with: aws ssm put-parameter --overwrite --type SecureString --name /k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
@@ -1325,8 +1432,8 @@ tasks:
   # per-platform obs app dist (tripbot repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
   # Argo-delivered), so a normal sync materializes the Secret and OBS streams
   # with no manual step. `obs:prod:stream:on` re-applies just that
-  # ExternalSecret (yq-extracted from the obs dist, since it no longer lives
-  # in a standalone overlay file); `obs:prod:stream:off` deletes the
+  # ExternalSecret (yq-extracted from the obs dist — it has no standalone
+  # overlay file); `obs:prod:stream:off` deletes the
   # ExternalSecret AND the Secret. The pause is durable because the
   # ApplicationSet deliberately excludes prod-1 obs-twitch from automated
   # selfHeal (see cdk8s argocd.k8s.yaml) — Argo won't re-create the deleted
@@ -1352,6 +1459,7 @@ tasks:
       NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
       SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
     preconditions:
+      - *minipc-context-guard
       - sh: command -v aws-vault >/dev/null
         msg: "aws-vault not found — install with `brew install aws-vault`"
       - sh: command -v kubectl >/dev/null
@@ -1363,14 +1471,15 @@ tasks:
     cmds:
       - |
         set -euo pipefail
-        sk=$(aws-vault exec adanalife-stage -- aws secretsmanager get-secret-value \
-          --secret-id k8s/obs/{{.PLATFORM}}-stream-key --query SecretString --output text)
+        sk=$(aws-vault exec adanalife-stage -- aws ssm get-parameter \
+          --name /k8s/obs/{{.PLATFORM}}-stream-key --with-decryption \
+          --query Parameter.Value --output text)
         kubectl create secret generic {{.SECRET}} \
           --from-literal=STREAM_KEY="$sk" \
           --dry-run=client -o yaml | kubectl apply -n {{.NAMESPACE}} -f - >/dev/null
       - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
       - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming ({{.PLATFORM}}) — key from adanalife-stage SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - 'echo "OBS streaming ({{.PLATFORM}}) — key from adanalife-stage SSM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   # Prod streaming is on-by-default via the obs app dist's ExternalSecret,
   # so this task only matters as the inverse of `:off`: re-apply the
@@ -1385,6 +1494,7 @@ tasks:
       SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
       OBS_DIST: '../tripbot/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
     preconditions:
+      - *minipc-context-guard
       - sh: command -v kubectl >/dev/null
         msg: "kubectl not found — install with `brew install kubectl`"
       - sh: command -v yq >/dev/null
@@ -1395,14 +1505,14 @@ tasks:
         msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling tripbot checkout; is ~/adanalife/tripbot present + synthed?"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
-      - sh: kubectl get secretstore aws-secretsmanager -n {{.NAMESPACE}} >/dev/null 2>&1
-        msg: "aws-secretsmanager SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
+      - sh: kubectl get secretstore aws-parameterstore -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "aws-parameterstore SecretStore missing in {{.NAMESPACE}} — run the umbrella apply + bootstrap first"
     cmds:
       - yq 'select(.kind == "ExternalSecret")' {{.OBS_DIST}} | kubectl apply -n {{.NAMESPACE}} -f -
       - kubectl wait --for=condition=Ready externalsecret/{{.SECRET}} -n {{.NAMESPACE}} --timeout=120s
       - kubectl rollout restart deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}}
       - kubectl rollout status deploy/obs-{{.PLATFORM}} -n {{.NAMESPACE}} --timeout=120s
-      - 'echo "OBS streaming ({{.PLATFORM}}) — {{.SECRET}} materialized by ESO from adanalife-prod SM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
+      - 'echo "OBS streaming ({{.PLATFORM}}) — {{.SECRET}} materialized by ESO from adanalife-prod SSM; namespace: {{.NAMESPACE}}; kubectl context: $(kubectl config current-context)"'
 
   # Stop streaming, keep OBS running. Deletes the stream-key ExternalSecret
   # (if any — prod has one, stage doesn't) AND the stream-key Secret, then
@@ -1416,6 +1526,8 @@ tasks:
   # both delegate to one shared implementation.
   obs:stage:stream:off:
     desc: "stop OBS streaming (OBS stays up in idle/VNC mode; override PLATFORM=, default twitch)"
+    preconditions:
+      - *minipc-context-guard
     cmds:
       - task: obs:stream:off:_run
         vars:
@@ -1424,6 +1536,8 @@ tasks:
 
   obs:prod:stream:off:
     desc: "stop OBS streaming (OBS stays up in idle/VNC mode; override PLATFORM=, default twitch)"
+    preconditions:
+      - *minipc-context-guard
     cmds:
       - task: obs:stream:off:_run
         vars:
@@ -1466,6 +1580,8 @@ tasks:
   # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs-"`.
   obs:vnc:up:
     desc: start a local kubectl port-forward to OBS VNC at localhost:5902 (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
@@ -1499,6 +1615,8 @@ tasks:
   # namespace. PLATFORM selects the workload (default twitch).
   obs:prod:browser:refresh:
     desc: refresh all prod-1 OBS browser sources via websocket (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     cmds:
       - task: obs:browser:refresh:_run
         vars:
@@ -1507,6 +1625,8 @@ tasks:
 
   obs:stage:browser:refresh:
     desc: refresh all stage-1 OBS browser sources via websocket (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     cmds:
       - task: obs:browser:refresh:_run
         vars:
@@ -1540,6 +1660,7 @@ tasks:
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
+      - *minipc-context-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
@@ -1559,6 +1680,8 @@ tasks:
 
   vlc:vnc:up:
     desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
+    preconditions:
+      - *minipc-context-guard
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:

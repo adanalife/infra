@@ -6,11 +6,11 @@ metadata:
 spec:
   dataFrom:
     - extract:
-        key: k8s/grafana-cloud-otlp
+        key: /k8s/grafana-cloud-otlp
   refreshInterval: 1h
   secretStoreRef:
     kind: SecretStore
-    name: aws-secretsmanager
+    name: aws-parameterstore
   target:
     creationPolicy: Owner
     name: grafana-cloud-otlp
@@ -23,11 +23,11 @@ metadata:
 spec:
   dataFrom:
     - extract:
-        key: k8s/sentry-tripbot
+        key: /k8s/sentry-tripbot
   refreshInterval: 1h
   secretStoreRef:
     kind: SecretStore
-    name: aws-secretsmanager
+    name: aws-parameterstore
   target:
     creationPolicy: Owner
     name: sentry-tripbot
@@ -40,14 +40,31 @@ metadata:
 spec:
   dataFrom:
     - extract:
-        key: k8s/sentry-vlc-server
+        key: /k8s/sentry-vlc-server
   refreshInterval: 1h
   secretStoreRef:
     kind: SecretStore
-    name: aws-secretsmanager
+    name: aws-parameterstore
   target:
     creationPolicy: Owner
     name: sentry-vlc-server
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sentry-onscreens-server
+  namespace: development
+spec:
+  dataFrom:
+    - extract:
+        key: /k8s/sentry-onscreens-server
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-parameterstore
+  target:
+    creationPolicy: Owner
+    name: sentry-onscreens-server
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -57,17 +74,17 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/external-dns/aws-credentials
+        key: /k8s/external-dns/aws-credentials
         property: access-key
       secretKey: access-key-id
     - remoteRef:
-        key: k8s/external-dns/aws-credentials
+        key: /k8s/external-dns/aws-credentials
         property: secret-key
       secretKey: secret-access-key
   refreshInterval: 1h
   secretStoreRef:
     kind: SecretStore
-    name: aws-secretsmanager
+    name: aws-parameterstore
   target:
     name: cert-manager-aws-credentials
 ---

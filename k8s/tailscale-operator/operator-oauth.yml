@@ -19,16 +19,16 @@ metadata:
 spec:
   refreshInterval: 1h
   secretStoreRef:
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
     kind: ClusterSecretStore
   target:
     name: operator-oauth
   data:
     - secretKey: client_id
       remoteRef:
-        key: k8s/tailscale/operator-oauth
+        key: /k8s/tailscale/operator-oauth
         property: client_id
     - secretKey: client_secret
       remoteRef:
-        key: k8s/tailscale/operator-oauth
+        key: /k8s/tailscale/operator-oauth
         property: client_secret

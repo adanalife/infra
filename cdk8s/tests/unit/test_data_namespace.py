@@ -71,7 +71,7 @@ def test_isolated_postgres_and_store_land_in_data_namespace():
         ("StatefulSet", "postgres"),
         ("Service", "postgres"),
         ("ExternalSecret", "postgres-credentials"),
-        ("SecretStore", "aws-secretsmanager"),
+        ("SecretStore", "aws-parameterstore"),
     ):
         assert _ns(_by(objs, kind, name)[0]) == "stage-1-data"
     # the dashcam PVC must NOT ride along into the data namespace (vlc mounts it)
@@ -81,7 +81,7 @@ def test_isolated_postgres_and_store_land_in_data_namespace():
 def test_isolated_supporting_gains_app_ns_store_and_dashcam_pvc():
     objs = _synth(SupportingChart, load_env("stage-1"))
     # the app namespace needs its OWN store (postgres' moved to the data ns)
-    store = _by(objs, "SecretStore", "aws-secretsmanager")[0]
+    store = _by(objs, "SecretStore", "aws-parameterstore")[0]
     assert _ns(store) == "stage-1"
     # ...and the dashcam PVC lands here, in the app namespace, bound to its PV
     pvc = _by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]
@@ -96,7 +96,7 @@ def test_colocated_keeps_postgres_store_and_pvc_in_data_unit():
     objs = _synth(DataChart, _COLOCATED_NFS)
     # postgres, its store, AND the dashcam PVC all stay in the (app) data unit
     assert _ns(_by(objs, "StatefulSet", "postgres")[0]) == "stage-1"
-    assert _ns(_by(objs, "SecretStore", "aws-secretsmanager")[0]) == "stage-1"
+    assert _ns(_by(objs, "SecretStore", "aws-parameterstore")[0]) == "stage-1"
     assert _ns(_by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]) == "stage-1"
 
 
@@ -104,5 +104,5 @@ def test_colocated_supporting_has_no_duplicate_store_or_pvc():
     # the single same-namespace store in DataChart serves the app ES too, so
     # SupportingChart must NOT emit a second one (which would collide), nor the PVC.
     objs = _synth(SupportingChart, _COLOCATED_NFS)
-    assert not _by(objs, "SecretStore", "aws-secretsmanager")
+    assert not _by(objs, "SecretStore", "aws-parameterstore")
     assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")

@@ -1,21 +1,22 @@
 # Cluster-scoped store for PLATFORM components only (external-dns,
 # cert-manager, grafana-k8s-monitoring) whose ExternalSecrets live in
 # kube-system — a namespace no app overlay owns. Named
-# `aws-secretsmanager-cluster` to stay visibly distinct from the
-# namespaced `aws-secretsmanager` SecretStore the apps use (the two are
+# `aws-parameterstore-cluster` to stay visibly distinct from the
+# namespaced `aws-parameterstore` SecretStore the apps use (the two are
 # different kinds, but the distinct name keeps the split obvious).
 #
-# Reads creds from external-secrets/eso-aws-credentials — the cluster
-# owner's account (adanalife-prod on the mini-PC, adanalife-stage on the
-# dev cluster). Applied by `task k8s:<env>:platform:up`.
+# Reads SSM Parameter Store; remoteRef keys are fully-qualified parameter
+# names (`/k8s/...`). Creds come from external-secrets/eso-aws-credentials —
+# the cluster owner's account (adanalife-prod on the mini-PC, adanalife-stage
+# on the dev cluster). Applied by `task k8s:<env>:platform:up`.
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
-  name: aws-secretsmanager-cluster
+  name: aws-parameterstore-cluster
 spec:
   provider:
     aws:
-      service: SecretsManager
+      service: ParameterStore
       region: us-east-1
       auth:
         secretRef:

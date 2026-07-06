@@ -1,26 +1,27 @@
 # Namespaced SecretStore — one per environment namespace (prod-1,
-# stage-1, development), all named `aws-secretsmanager`. Included by each
+# stage-1, development), all named `aws-parameterstore`. Included by each
 # env umbrella, which stamps the namespace via its `namespace:` field, so
 # this file is byte-identical across environments.
 #
-# The backing creds (eso-aws-credentials in the SAME namespace, seeded by
-# `task k8s:<env>:bootstrap-secrets`) decide which AWS account it reads —
-# prod-1 → adanalife-prod, stage-1/development → adanalife-stage. The
-# secretRef has no explicit namespace, so it resolves in the store's own
-# namespace.
+# Reads SSM Parameter Store; remoteRef keys are fully-qualified parameter
+# names (`/k8s/...`). The backing creds (eso-aws-credentials in the SAME
+# namespace, seeded by `task k8s:<env>:bootstrap-secrets`) decide which AWS
+# account it reads — prod-1 → adanalife-prod, stage-1/development →
+# adanalife-stage. The secretRef has no explicit namespace, so it resolves
+# in the store's own namespace.
 #
 # Because a namespaced store is unreachable from other namespaces, env
 # isolation is structural — no namespaceSelector conditions needed. Every
-# app ExternalSecret references {name: aws-secretsmanager, kind:
+# app ExternalSecret references {name: aws-parameterstore, kind:
 # SecretStore} identically, in every environment.
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
-  name: aws-secretsmanager
+  name: aws-parameterstore
 spec:
   provider:
     aws:
-      service: SecretsManager
+      service: ParameterStore
       region: us-east-1
       auth:
         secretRef:

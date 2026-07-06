@@ -20,6 +20,7 @@ _DEV = dict(
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
     ups_monitor=False,  # dev can't reach the Synology NUT server
+    arc=False,  # no rpi5 on the k3d dev cluster — self-hosted runners are minipc-only
 )
 
 
@@ -70,12 +71,14 @@ def test_dev_is_development_only_with_traefik_ui():
         ing["metadata"]["annotations"]["external-dns.alpha.kubernetes.io/hostname"]
         == "argocd.dev.whereisdana.today"
     )
-    # dev runs only the per-repo tripbot + infra projects (no console/video-pipeline)
+    # dev runs the per-repo tripbot + infra projects, plus obs (the public obs
+    # repo delivers dev OBS now) — but no console/video-pipeline (private repos).
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == {
         "tripbot",
         "infra",
+        "obs",
     }
-    for name in ("tripbot", "infra"):
+    for name in ("tripbot", "infra", "obs"):
         assert {
             d["namespace"] for d in _project(objs, name)["spec"]["destinations"]
         } == {"development"}
@@ -99,6 +102,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "tripbot-console": ["git@github.com:adanalife/tripbot-console.git"],
         "video-pipeline": ["git@github.com:adanalife/video-pipeline.git"],
         "platform-gateway": ["git@github.com:adanalife/platform-gateway.git"],
+        "obs": ["https://github.com/adanalife/obs.git"],
     }
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
         want_repos
@@ -114,9 +118,10 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("tripbot-console", "tripbot-console"),
         ("video-pipeline", "video-pipeline"),
         ("platform-gateway", "platform-gateway"),
+        ("obs", "obs"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
-    # cluster-resource whitelists are scoped to what each repo's dist actually
+    # cluster-resource allowlists are scoped to what each repo's dist actually
     # creates: infra owns the platform cluster-scoped kinds, the console none.
     kinds = lambda n: {  # noqa: E731
         c["kind"] for c in _project(objs, n)["spec"]["clusterResourceWhitelist"]
@@ -147,24 +152,29 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "prod-1-data",
         "stage-1-data",
     }
-    assert dests("video-pipeline") == {"stage-1"}
+    assert dests("video-pipeline") == {"prod-1", "stage-1"}
     assert dests("platform-gateway") == {"prod-1", "stage-1"}
 
 
 def test_minipc_apps_autosync_except_prod_obs():
     objs = _synth()
     patch = _appset(objs, "tripbot-apps")["spec"]["templatePatch"]
-    # both minipc envs are automated...
+    # both minipc envs are automated in tripbot-apps...
     assert '(eq .env "stage-1")' in patch
     assert '(eq .env "prod-1")' in patch
-    # ...except prod OBS, carved back out (a sync restarts the live stream)
-    assert '(not (and (eq .env "prod-1") (eq .app "obs-twitch")))' in patch
+    # ...and tripbot-apps carries no obs unit — OBS is delivered by the
+    # obs repo's own appset (OBS_REVISIONS), so there's no obs carve-out here.
+    assert "obs" not in patch
     # selfHeal is per-env: stage is OFF (a hand/console scale sticks so
     # components can be parked at 0 to free the minipc), prod stays ON (the live
     # stream must match git). Both branches render in the goTemplate conditional.
     assert '{{- if (eq .env "stage-1") }}' in patch
     assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
+    # the live-encoder holdout moved with OBS to the obs appset: prod-1 obs is a
+    # deliberate manual sync (a sync restarts the live stream), the rest autosync.
+    obs_patch = _appset(objs, "obs")["spec"]["templatePatch"]
+    assert '(not (and (eq .env "prod-1") (eq .app "obs")))' in obs_patch
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
@@ -207,16 +217,20 @@ def test_notifications_secret_minipc_only():
     assert names(_synth(**_DEV)) == {"argocd-repo-infra"}
 
 
-def test_video_pipeline_appset_stage_only_cross_repo():
+def test_video_pipeline_appset_both_envs_cross_repo():
     objs = _synth()
     vp = _appset(objs, "video-pipeline")
-    elements = vp["spec"]["generators"][0]["list"]["elements"]
-    assert {e["env"] for e in elements} == {"stage-1"}  # stage-only today
+    revs = {
+        e["env"]: e["revision"] for e in vp["spec"]["generators"][0]["list"]["elements"]
+    }
+    # trunk-based repo: both envs track main (stage = batch stack + parked
+    # responder, prod = the !find embed responder only)
+    assert revs == {"stage-1": "main", "prod-1": "main"}
     src = vp["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "git@github.com:adanalife/video-pipeline.git"
     # exact-match include: the persistent unit, not the sibling -jobs file
     assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
-    assert "automated" in vp["spec"]["templatePatch"]  # stage autosyncs
+    assert "automated" in vp["spec"]["templatePatch"]  # both envs autosync
     # dev cluster carries no private-repo deploy key, so no video-pipeline unit
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "video-pipeline")

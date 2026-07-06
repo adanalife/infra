@@ -39,6 +39,10 @@ spec:
       namespace: stage-1-data
     - server: https://kubernetes.default.svc
       namespace: ups
+    - server: https://kubernetes.default.svc
+      namespace: arc-systems
+    - server: https://kubernetes.default.svc
+      namespace: arc-runners
   clusterResourceWhitelist:
     - group: ""
       kind: PersistentVolume
@@ -86,6 +90,8 @@ spec:
     - git@github.com:adanalife/video-pipeline.git
   destinations:
     - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
       namespace: stage-1
   clusterResourceWhitelist:
     - group: scheduling.k8s.io
@@ -103,6 +109,25 @@ spec:
   description: platform-API gateway (gateway-twitch), from the private platform-gateway repo
   sourceRepos:
     - git@github.com:adanalife/platform-gateway.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: obs
+  namespace: argocd
+spec:
+  description: OBS streaming encoder (live stream), from the public obs repo
+  sourceRepos:
+    - https://github.com/adanalife/obs.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: prod-1
@@ -138,7 +163,15 @@ spec:
             repo: https://github.com/adanalife/tripbot.git
             revision: master
           - env: prod-1
-            app: obs-twitch
+            app: tripbot-youtube
+            repo: https://github.com/adanalife/tripbot.git
+            revision: master
+          - env: prod-1
+            app: vlc-youtube
+            repo: https://github.com/adanalife/tripbot.git
+            revision: master
+          - env: prod-1
+            app: onscreens-youtube
             repo: https://github.com/adanalife/tripbot.git
             revision: master
           - env: stage-1
@@ -154,10 +187,6 @@ spec:
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
           - env: stage-1
-            app: obs-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: develop
-          - env: stage-1
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
@@ -167,10 +196,6 @@ spec:
             revision: develop
           - env: stage-1
             app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: develop
-          - env: stage-1
-            app: obs-twitch
             repo: https://github.com/adanalife/tripbot.git
             revision: develop
   ignoreApplicationDifferences:
@@ -213,7 +238,7 @@ spec:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
   templatePatch: |
-    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs-twitch"))) }}
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
       syncPolicy:
         automated:
@@ -449,6 +474,59 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
+  name: arc
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - {}
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: arc
+    spec:
+      project: infra
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: master
+        path: cdk8s/dist
+        directory:
+          include: arc.k8s.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: arc-runners
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
   name: tripbot-console
   namespace: argocd
 spec:
@@ -522,8 +600,10 @@ spec:
   generators:
     - list:
         elements:
+          - env: prod-1
+            revision: main
           - env: stage-1
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -633,6 +713,76 @@ spec:
       syncPolicy:
         automated:
           prune: true
+    {{- if (eq .env "stage-1") }}
+          selfHeal: false
+    {{- else }}
+          selfHeal: true
+    {{- end }}
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: obs
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            app: obs
+            revision: master
+          - env: stage-1
+            app: obs
+            revision: develop
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-obs"
+    spec:
+      project: obs
+      source:
+        repoURL: https://github.com/adanalife/obs.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-obs-*.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
           selfHeal: true
     {{- end }}
 ---
@@ -686,12 +836,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key
+        key: /k8s/argocd/repo-ssh-key
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-infra
@@ -713,12 +863,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key-console
+        key: /k8s/argocd/repo-ssh-key-console
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-tripbot-console
@@ -740,12 +890,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key-video-pipeline
+        key: /k8s/argocd/repo-ssh-key-video-pipeline
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-video-pipeline
@@ -767,12 +917,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/argocd/repo-ssh-key-platform-gateway
+        key: /k8s/argocd/repo-ssh-key-platform-gateway
       secretKey: sshPrivateKey
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-repo-platform-gateway
@@ -794,12 +944,12 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: k8s/tripbot/discord-alerts-webhook
+        key: /k8s/tripbot/discord-alerts-webhook
       secretKey: discord-webhook-url
   refreshInterval: 1h
   secretStoreRef:
     kind: ClusterSecretStore
-    name: aws-secretsmanager-cluster
+    name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
     name: argocd-notifications-secret

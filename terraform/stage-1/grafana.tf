@@ -18,7 +18,7 @@
 #   4. `task tf:stage:apply` to apply.
 
 locals {
-  grafana_creds = jsondecode(data.aws_secretsmanager_secret_version.grafana_cloud_api.secret_string)
+  grafana_creds = jsondecode(data.aws_ssm_parameter.grafana_cloud_api.value)
 }
 
 provider "grafana" {
@@ -82,7 +82,8 @@ locals {
     "service-health-tripbot",
     "service-health-vlc-server",
     "service-health-onscreens-server",
-    "igpu-performance", # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
+    "service-health-platform-gateway", # gateway façade request metrics + the Twitch Helix rate-limit/error panels that replace tripbot's in-process ones at cutover (platform-gateway#14)
+    "igpu-performance",                # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
     "twitch-chat-activity",
     "logs-and-errors",
     "go-runtime",

@@ -1,695 +1,138 @@
-# AWS Secrets Manager — stage-1 SM containers + CI lifecycle grants.
+# SSM Parameter Store — stage-1 parameters + CI grants.
 #
-# As of 2026-05-11 consolidation: this file is the single bookkeeping point
-# for "what SM containers exist in this AWS account." Topic files
-# (grafana-cloud.tf, grafana-k8s-monitoring.tf, etc.) keep their consumer-
-# side resources (IAM users, providers, locals, dashboards) but no longer
-# declare SM containers themselves.
+# Migrated from AWS Secrets Manager 2026-07 (SM bills $0.40/secret/month;
+# standard-tier parameters are free). The SM containers, their version
+# resources, and the per-secret SM CI grants were deleted in the migration's
+# final phase; live values were copied by bin/migrate-sm-to-ssm.sh and the
+# full pre-migration corpus is archived offline (encrypted, 2026-07-03).
 #
-# Per-secret pattern:
-#   - `aws_secretsmanager_secret`     — container, terraform-managed.
-#   - `aws_secretsmanager_secret_version` with `lifecycle.ignore_changes =
-#     [secret_string]` so the placeholder doesn't clobber out-of-band updates.
-#   - Optional `data.aws_secretsmanager_secret_version` if terraform itself
-#     needs the value at plan time (e.g. provider auth).
-#   - Container only (no version resource) if the secret should never be
-#     refreshed by CI — e.g. stream keys, where CI compromise should not give
-#     read access. Value seeded out-of-band, read at runtime by ESO.
+# This file is the single bookkeeping point for "what parameters exist in
+# this AWS account." Topic files (grafana-cloud.tf, grafana-alerts.tf, etc.)
+# keep their consumer-side resources but don't declare parameters.
 #
-# CI lifecycle grants live at the bottom of this file:
-#   - `ci_terraform_secrets_read`: bulk GetSecretValue for SM containers
-#     terraform refreshes during plan (any with a version resource or data
-#     source).
-#   - Per-secret lifecycle policies (CreateSecret / DeleteSecret / Update /
-#     Tag) for k8s/* SM containers that CI manages the container of. No
-#     GetSecretValue; the value is admin-owned (out-of-band put-secret-value)
-#     and ESO-readable.
+# Per-parameter pattern:
+#   - Out-of-band values: an entry in `ssm_parameters` below. The terraform-
+#     written placeholder is JSON (`{"placeholder": ...}`) so `jsondecode`
+#     consumers and ESO `dataFrom.extract` degrade cleanly while unseeded —
+#     same convention as the old SM placeholders. Seed / rotate via:
+#       aws-vault exec adanalife-stage -- aws ssm put-parameter \
+#         --name /<path> --type SecureString --overwrite --value '<value>'
+#     ignore_changes keeps the placeholder from clobbering seeded values.
+#   - Terraform-owned values (postgres credentials): a dedicated
+#     aws_ssm_parameter writing the real value.
+#   - `data "aws_ssm_parameter"` when terraform itself needs the value at
+#     plan time (provider auth, alert contact points).
+#   - Deliberately UNMANAGED (stream keys, grafana metrics-write): created
+#     out-of-band only — a terraform-managed parameter is read
+#     (ssm:GetParameter) during refresh, which would hand CI the value. The
+#     SSMDenySensitiveParameterRead statement below keeps CI locked out.
 #
-# First-apply flow (chicken-and-egg with the cloudflare provider):
-#   1. `task tf:stage:apply` — SM resources apply; cloudflare_* resources
-#      fail on the placeholder token (expected).
-#   2. Populate the cloudflare-api-token + any other secrets needed for
-#      provider auth or at-plan reads. Examples:
-#        aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#          --secret-id stage-1/cloudflare-api-token --secret-string "$CLOUDFLARE_API_TOKEN"
-#        task stage:allowlist:add-current-ip   # writes ["X.X.X.X/32"] to stage-1/allowlist-cidrs
-#   3. `task tf:stage:apply` again — provider auths cleanly.
+# First-apply flow in a fresh account (chicken-and-egg with the cloudflare
+# provider):
+#   1. `task tf:stage:apply` — parameters apply; cloudflare_* resources fail
+#      on the placeholder token (expected).
+#   2. Seed /stage-1/cloudflare-api-token, plus any other plan-time values.
+#      `task stage:allowlist:add-current-ip` populates the allowlist.
+#   3. `task tf:stage:apply` again — the provider auths cleanly.
 
 # ============================================================================
-# Cloudflare
+# Parameters (out-of-band values)
 # ============================================================================
+#
+# Seeding notes for the non-obvious ones:
+#   - stage-1/cloudflare-api-token — token scopes: Zone:Edit, Tunnel:Edit,
+#     Pages:Edit, Access:Apps and Policies:Edit, DNS:Edit, Zone Settings:Edit.
+#   - stage-1/grafana-cloud-api — JSON {"GRAFANA_CLOUD_URL": "https://<stack>.grafana.net",
+#     "GRAFANA_CLOUD_API_TOKEN": ..., "GRAFANA_CLOUD_STACK_SLUG": ...}. Mint a
+#     stack service account (Admin role) + token; slug = the URL subdomain.
+#   - k8s/grafana-cloud-otlp — JSON {"OTEL_EXPORTER_OTLP_ENDPOINT": ...,
+#     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Basic <base64(id:key)>"}.
+#   - k8s/sentry-* — JSON {"SENTRY_DSN": "https://<key>@<org>.ingest.sentry.io/<project>"}.
+#   - k8s/tripbot/twitch-creds — JSON {"TWITCH_CLIENT_ID": ..., "TWITCH_CLIENT_SECRET": ...}
+#     (app: tripbot-development). The IRC token lives in the oauth_tokens DB
+#     table, not here.
+#   - k8s/tripbot/google-maps-api-key — JSON {"GOOGLE_MAPS_API_KEY": "AIza..."}.
+#     Stage and prod are distinct keys, restricted to Geocoding + Maps JS.
+#   - k8s/tripbot/youtube-creds — JSON {"YOUTUBE_CLIENT_ID": ...,
+#     "YOUTUBE_CLIENT_SECRET": ..., optionally "YOUTUBE_CHANNEL_ID": ...}.
+#   - k8s/tripbot/discord-alerts-webhook — one webhook URL, two consumers:
+#     the Grafana contact point (grafana-alerts.tf, plan-time data source) and
+#     tripbot's !report command (via ESO). Same value seeded in adanalife-prod.
+#   - k8s/*/ghcr-pull-token — JSON {"username": ..., "token": ...} — a
+#     fine-grained GitHub token with read:packages on the package.
+#   - ESO picks up new values within 1h; force with
+#     `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`.
 
-resource "aws_secretsmanager_secret" "cloudflare_api_token" {
-  name        = "stage-1/cloudflare-api-token"
-  description = "Cloudflare API token used by the cloudflare provider. Scopes: Zone:Edit, Tunnel:Edit, Pages:Edit, Access:Apps and Policies:Edit, DNS:Edit, Zone Settings:Edit."
-}
-
-resource "aws_secretsmanager_secret_version" "cloudflare_api_token" {
-  secret_id     = aws_secretsmanager_secret.cloudflare_api_token.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
+locals {
+  # parameter name (sans leading /) => description
+  ssm_parameters = {
+    "stage-1/cloudflare-api-token"         = "Cloudflare API token used by the cloudflare provider."
+    "stage-1/grafana-cloud-api"            = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
+    "stage-1/ntfy-critical-webhook"        = "ntfy webhook URL for the Grafana independent critical-alert contact point."
+    "stage-1/healthchecks-deadman-ping"    = "healthchecks.io ping URL for the Grafana alerting deadman switch."
+    "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
+    "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-vlc-server"                = "Sentry DSN for the vlc-server Go service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-onscreens-server"          = "Sentry DSN for the onscreens-server Go service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-platform-gateway"          = "Sentry DSN for the platform-gateway service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-tripbot-console"           = "Sentry DSN for the tripbot-console service. Consumed via the SENTRY_DSN env var."
+    "k8s/sentry-video-pipeline"            = "Sentry DSN for the video-pipeline batch jobs. Consumed via the SENTRY_DSN env var."
+    "k8s/tripbot/twitch-creds"             = "Twitch app credentials for tripbot. Keys: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET."
+    "k8s/tripbot/google-maps-api-key"      = "Google Maps API key for tripbot. Key holds GOOGLE_MAPS_API_KEY."
+    "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
+    "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
+    "k8s/tripbot/discord-bot-token"        = "Discord bot token for the staging tripbot Discord session."
+    "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
+    "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
+    "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
   }
 }
 
-data "aws_secretsmanager_secret_version" "cloudflare_api_token" {
-  secret_id = aws_secretsmanager_secret.cloudflare_api_token.id
+# Resource label kept as "mirror" from the SM → SSM migration to avoid state
+# moves; these are now the canonical (only) home of each value.
+resource "aws_ssm_parameter" "mirror" {
+  for_each = local.ssm_parameters
+
+  name        = "/${each.key}"
+  description = each.value
+  type        = "SecureString"
+  value       = jsonencode({ placeholder = "set via aws ssm put-parameter" })
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 # JSON array of CIDR strings, e.g. ["69.222.113.215/32"]. Edited interactively
 # via `task stage:allowlist:add-current-ip`. Consumed by the Cloudflare Access
-# policy on tripbot — see cloudflare-tunnel.tf.
-resource "aws_secretsmanager_secret" "stage_1_allowlist_cidrs" {
-  name        = "stage-1/allowlist-cidrs"
+# policy on tripbot — see cloudflare-tunnel.tf. Separate from the map so the
+# placeholder is a valid (empty) allowlist — jsondecode works pre-seed.
+# It lived in the mirror map during the migration — keep its state instance.
+moved {
+  from = aws_ssm_parameter.mirror["stage-1/allowlist-cidrs"]
+  to   = aws_ssm_parameter.stage_1_allowlist_cidrs
+}
+
+resource "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
+  name        = "/stage-1/allowlist-cidrs"
   description = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
-}
-
-resource "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
-  secret_id     = aws_secretsmanager_secret.stage_1_allowlist_cidrs.id
-  secret_string = "[]"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "stage_1_allowlist_cidrs" {
-  secret_id = aws_secretsmanager_secret.stage_1_allowlist_cidrs.id
-}
-
-# ============================================================================
-# Grafana Cloud
-# ============================================================================
-
-# OTLP credentials for in-cluster OpenTelemetry exporters (tripbot, vlc-server).
-# Bootstrap:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/grafana-cloud-otlp \
-#     --secret-string '{"OTEL_EXPORTER_OTLP_ENDPOINT":"https://otlp-gateway-prod-us-central-0.grafana.net/otlp","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Basic <base64(instanceID:apiKey)>"}'
-# ESO picks up new values within an hour; force-sync with
-#   kubectl annotate externalsecret grafana-cloud-otlp force-sync=$(date +%s) --overwrite
-# The k8s/ name prefix matches AllowESOReadK8sSecrets in eso.tf, so ESO can read
-# without extra IAM grants.
-resource "aws_secretsmanager_secret" "grafana_cloud_otlp" {
-  name        = "k8s/grafana-cloud-otlp"
-  description = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
-}
-
-resource "aws_secretsmanager_secret_version" "grafana_cloud_otlp" {
-  secret_id     = aws_secretsmanager_secret.grafana_cloud_otlp.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
+  type        = "SecureString"
+  value       = "[]"
 
   lifecycle {
-    ignore_changes = [secret_string]
+    ignore_changes = [value]
   }
 }
 
-# Grafana Cloud admin API credentials consumed terraform-side by the `grafana`
-# provider (see grafana.tf). Seeded via:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id stage-1/grafana-cloud-api \
-#     --secret-string '{"GRAFANA_CLOUD_URL":"https://<stack>.grafana.net","GRAFANA_CLOUD_API_TOKEN":"<token>","GRAFANA_CLOUD_STACK_SLUG":"<stack>"}'
-# Token: mint a service account in the stack with Admin role, then create a
-# token under it. Stack slug = the subdomain of your URL. Lives at stage-1/*
-# (terraform-only consumer) so it stays out of the ESOSecretsReader scope.
-resource "aws_secretsmanager_secret" "grafana_cloud_api" {
-  name        = "stage-1/grafana-cloud-api"
-  description = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
-}
-
-resource "aws_secretsmanager_secret_version" "grafana_cloud_api" {
-  secret_id     = aws_secretsmanager_secret.grafana_cloud_api.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "grafana_cloud_api" {
-  secret_id  = aws_secretsmanager_secret.grafana_cloud_api.id
-  depends_on = [aws_secretsmanager_secret_version.grafana_cloud_api] # cold-start ordering
-}
-
-# Metrics + logs write credentials for the in-cluster grafana-k8s-monitoring
-# helm chart (Alloy + kube-state-metrics + node-exporter + cAdvisor). Separate
-# token from grafana_cloud_otlp so the cluster-monitoring blast radius is
-# isolated from the app-side OTel exporters.
+# k8s/postgres/credentials — terraform OWNS the value: random_pet generates a
+# passphrase-style password, jsonencode wraps it with the user/db fields. ESO
+# materializes it into the `postgres-secret` Secret in the stage-1-data
+# namespace. stage-1's Postgres is fresh-seeded and disposable, but the
+# credential still flows through SSM/ESO (not committed literals) to stay
+# symmetric with prod and keep secrets out of git.
 #
-# Container only (no version resource) — value populated out-of-band and
-# consumed by Alloy at runtime via ESO. Same precedent as k8s_obs_twitch_stream_key:
-# no GetSecretValue grant for CITerraformRole, and a CI compromise can't read
-# the token out of state.
-#
-# Bootstrap (after first `task tf:stage:apply`):
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/grafana-cloud-metrics-write \
-#     --secret-string '{
-#       "PROMETHEUS_HOST": "https://prometheus-prod-XX-XXX.grafana.net",
-#       "PROMETHEUS_USERNAME": "<numeric prom instance ID>",
-#       "LOKI_HOST": "https://logs-prod-XXX.grafana.net",
-#       "LOKI_USERNAME": "<numeric loki instance ID>",
-#       "TOKEN": "<Grafana Cloud Access Policy token with metrics:write + logs:write>"
-#     }'
-# Endpoints + numeric IDs come from Grafana Cloud `Connections → Add new
-# connection → Hosted Prometheus / Hosted Loki`. Token via Grafana Cloud admin
-# → Access Policies with scopes `metrics:write` + `logs:write`.
-resource "aws_secretsmanager_secret" "k8s_grafana_cloud_metrics_write" {
-  name        = "k8s/grafana-cloud-metrics-write"
-  description = "Grafana Cloud Mimir/Loki credentials for the in-cluster k8s-monitoring chart. Consumed by Alloy via ESO."
-
-  # CI-driven applies need the lifecycle policy attached to CITerraformRole
-  # before AWS will accept CreateSecret on this ARN. Local applies (admin role)
-  # don't care, but the explicit ordering is required for a CI bootstrap to
-  # succeed without a retry.
-  depends_on = [aws_iam_role_policy_attachment.ci_terraform_grafana_metrics_write_manage]
-}
-
-# ============================================================================
-# Sentry
-# ============================================================================
-
-# Sentry DSNs for the tripbot bot and vlc-server services. Two SM secrets, one
-# per Sentry project. Both materialize into k8s Secrets via ExternalSecret
-# resources owned by each app's overlay (k8s/apps/*), envFrom'd into the
-# respective Deployments as SENTRY_DSN.
-#
-# Bootstrap:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/sentry-tripbot \
-#     --secret-string '{"SENTRY_DSN":"https://<key>@<org>.ingest.sentry.io/<project>"}'
-# and again for k8s/sentry-vlc-server with the matching DSN.
-resource "aws_secretsmanager_secret" "sentry_tripbot" {
-  name        = "k8s/sentry-tripbot"
-  description = "Sentry DSN for the tripbot Go service. Consumed by pkg/errors via SENTRY_DSN env var."
-}
-
-resource "aws_secretsmanager_secret_version" "sentry_tripbot" {
-  secret_id     = aws_secretsmanager_secret.sentry_tripbot.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-resource "aws_secretsmanager_secret" "sentry_vlc_server" {
-  name        = "k8s/sentry-vlc-server"
-  description = "Sentry DSN for the vlc-server Go service. Consumed by pkg/errors via SENTRY_DSN env var."
-}
-
-resource "aws_secretsmanager_secret_version" "sentry_vlc_server" {
-  secret_id     = aws_secretsmanager_secret.sentry_vlc_server.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# Twitch
-# ============================================================================
-
-# Twitch app credentials (Helix API + OAuth Authorization Code flow) for the
-# tripbot Go service. One SM secret holding TWITCH_CLIENT_ID + TWITCH_CLIENT_SECRET.
-# The IRC token is no longer here — since tripbot v2.3.0 it lives in the
-# oauth_tokens DB table, populated by `task auth:bootstrap` and rotated hourly.
-#
-# Materializes into a k8s Secret via an ExternalSecret resource owned by
-# k8s/apps/tripbot/overlays/local/, envFrom'd into the Deployment.
-#
-# Bootstrap:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/tripbot/twitch-creds \
-#     --secret-string '{"TWITCH_CLIENT_ID":"...","TWITCH_CLIENT_SECRET":"..."}'
-resource "aws_secretsmanager_secret" "tripbot_twitch_creds" {
-  name        = "k8s/tripbot/twitch-creds"
-  description = "Twitch app credentials for tripbot. App: tripbot-development. Keys: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET. Consumed by pkg/twitch (Helix API + OAuth Authorization Code flow). IRC token lives in the oauth_tokens DB table, not in this secret."
-}
-
-resource "aws_secretsmanager_secret_version" "tripbot_twitch_creds" {
-  secret_id     = aws_secretsmanager_secret.tripbot_twitch_creds.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# Google Maps
-# ============================================================================
-
-# Google Maps API key for the tripbot Go service. Used by the `!location`
-# chat command (`pkg/chatbot/commands.go` → `helpers.CityFromCoords`) and
-# during video ingest (`pkg/video/db.go` → `helpers.StateFromCoords`); the
-# tripbot config marks it `required:"true"`, so the bot won't boot without
-# it. Per-env keys (stage and prod are separate API keys in the same GCP
-# project, restricted to the Geocoding + Maps JavaScript APIs) for bounded
-# blast radius.
-#
-# Materializes into a k8s Secret via an ExternalSecret resource owned by
-# k8s/apps/tripbot/overlays/local/, envFrom'd into the Deployment.
-#
-# Bootstrap:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/tripbot/google-maps-api-key \
-#     --secret-string '{"GOOGLE_MAPS_API_KEY":"AIza..."}'
-resource "aws_secretsmanager_secret" "tripbot_google_maps_api_key" {
-  name        = "k8s/tripbot/google-maps-api-key"
-  description = "Google Maps API key for tripbot. Key holds GOOGLE_MAPS_API_KEY. Consumed by pkg/chatbot (!location command) and pkg/video (state lookup on ingest). Restricted to Geocoding + Maps JavaScript APIs. Stage and prod are distinct keys."
-}
-
-resource "aws_secretsmanager_secret_version" "tripbot_google_maps_api_key" {
-  secret_id     = aws_secretsmanager_secret.tripbot_google_maps_api_key.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# YouTube
-# ============================================================================
-
-# YouTube OAuth client credentials (Web-application client in the tripbot-stage
-# GCP project) for the tripbot-youtube platform instance. The OAuth client is
-# console-created — terraform can't manage user-consent OAuth clients (see
-# google.tf header). One SM secret holding YOUTUBE_CLIENT_ID +
-# YOUTUBE_CLIENT_SECRET; YOUTUBE_CHANNEL_ID may be added to the same JSON to pin
-# the bot to a specific channel identity (pkg/youtube treats it as optional).
-#
-# Materializes into the tripbot-youtube-creds k8s Secret via an ExternalSecret
-# emitted by the cdk8s Tripbot construct when the env's platforms include
-# youtube, envFrom'd into the tripbot-youtube Deployment.
-#
-# Bootstrap:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/tripbot/youtube-creds \
-#     --secret-string '{"YOUTUBE_CLIENT_ID":"...","YOUTUBE_CLIENT_SECRET":"..."}'
-resource "aws_secretsmanager_secret" "tripbot_youtube_creds" {
-  name        = "k8s/tripbot/youtube-creds"
-  description = "YouTube OAuth client credentials for tripbot (stage-1). Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID. Consumed by pkg/youtube (live-chat OAuth flow)."
-}
-
-resource "aws_secretsmanager_secret_version" "tripbot_youtube_creds" {
-  secret_id     = aws_secretsmanager_secret.tripbot_youtube_creds.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# OBS
-# ============================================================================
-
-# Twitch RTMP ingest key for the adanalife_staging channel. No terraform-side
-# consumer (no data source); ESO reads it at runtime once the platform stack
-# lands. The k8s/obs/ name prefix puts this inside the ESOSecretsReader read
-# scope (k8s/*); CI lifecycle is granted narrowly per-secret below.
-# Populate out-of-band (terraform-via-CI never sees the value):
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/obs/twitch-stream-key --secret-string "$STREAM_KEY"
-# Get the key from https://dashboard.twitch.tv/u/adanalife_staging/settings/stream
-# Container only — terraform deliberately doesn't manage the version resource.
-# Keeping the version out of terraform state means CI never refreshes it (no
-# GetSecretValue grant required) and a CITerraformRole compromise can't read
-# the stream key.
-resource "aws_secretsmanager_secret" "k8s_obs_twitch_stream_key" {
-  name        = "k8s/obs/twitch-stream-key"
-  description = "Twitch RTMP stream key for adanalife_staging. Consumed by OBS via ESO. Rotate from the Twitch dashboard, then put-secret-value here."
-
-  # CI-driven applies need the lifecycle policy attached to CITerraformRole
-  # before AWS will accept CreateSecret on this ARN. Local applies (admin role)
-  # don't care, but the explicit ordering is required for a CI bootstrap to
-  # succeed without a retry.
-  depends_on = [aws_iam_role_policy_attachment.ci_terraform_twitch_stream_key_manage]
-}
-
-# YouTube RTMPS ingest key for the semi-private staging channel (the YouTube
-# analog of adanalife_staging — its own "ADL Staging" Brand Account). Same shape
-# as k8s_obs_twitch_stream_key: container only, value seeded out-of-band, read at
-# runtime by ESO once obs-youtube streams (the k8s/obs/ name prefix is inside the
-# ESOSecretsReader read scope, k8s/*). CI lifecycle granted narrowly below.
-# Populate out-of-band (terraform-via-CI never sees the value):
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/obs/youtube-stream-key --secret-string "$STREAM_KEY"
-# Get the key from YouTube Studio (the staging Brand Account) → Go live → Stream.
-# Container only — keeping the version out of terraform state means CI never
-# refreshes it (no GetSecretValue grant required) and a CITerraformRole
-# compromise can't read the stream key.
-resource "aws_secretsmanager_secret" "k8s_obs_youtube_stream_key" {
-  name        = "k8s/obs/youtube-stream-key"
-  description = "YouTube RTMPS stream key for the staging channel. Consumed by OBS via ESO. Rotate from YouTube Studio, then put-secret-value here."
-
-  depends_on = [aws_iam_role_policy_attachment.ci_terraform_youtube_stream_key_manage]
-}
-
-# ============================================================================
-# Discord alerts webhook
-# ============================================================================
-#
-# One webhook URL, one SM container, two consumers in this account:
-#   - Grafana Cloud contact point (grafana-alerts.tf, terraform-side) — routes
-#     infra monitoring alerts to Discord. Reads the value at plan via the data
-#     source below.
-#   - tripbot's !report command (pkg/chatbot reportCmd) — posts viewer reports
-#     to Discord at runtime, via the tripbot-discord-alerts-webhook ExternalSecret
-#     in k8s/apps/tripbot/base/ (shared across all envs).
-#
-# Named under k8s/* so in-cluster ESO can read it (ESO's read scope is k8s/*);
-# terraform reads it too via the ci_terraform_secrets_read grant below. The same
-# value also lives at k8s/tripbot/discord-alerts-webhook in adanalife-prod
-# (prod-1/secrets.tf) — separate account, can't cross-read.
-#
-# Populate after `task tf:stage:apply`:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/tripbot/discord-alerts-webhook --secret-string '<URL>'
-resource "aws_secretsmanager_secret" "discord_alerts_webhook" {
-  name        = "k8s/tripbot/discord-alerts-webhook"
-  description = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command. Same value as k8s/tripbot/discord-alerts-webhook in adanalife-prod."
-}
-
-resource "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
-  secret_id     = aws_secretsmanager_secret.discord_alerts_webhook.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "discord_alerts_webhook" {
-  secret_id  = aws_secretsmanager_secret.discord_alerts_webhook.id
-  depends_on = [aws_secretsmanager_secret_version.discord_alerts_webhook]
-}
-
-# ntfy webhook URL for the Grafana independent critical-alert contact point.
-# Receives severity=critical firings (escalation) + the notification-delivery-
-# failure alert, so a dead Discord webhook can't black-hole the page. Grafana-
-# only (deliberately NOT under k8s/* — in-cluster ESO has no reason to read it).
-# Populate after `task tf:stage:apply`:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id stage-1/ntfy-critical-webhook --secret-string '<URL>'
-resource "aws_secretsmanager_secret" "ntfy_critical_webhook" {
-  name        = "stage-1/ntfy-critical-webhook"
-  description = "ntfy webhook URL for the Grafana independent critical-alert contact point."
-}
-
-resource "aws_secretsmanager_secret_version" "ntfy_critical_webhook" {
-  secret_id     = aws_secretsmanager_secret.ntfy_critical_webhook.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "ntfy_critical_webhook" {
-  secret_id  = aws_secretsmanager_secret.ntfy_critical_webhook.id
-  depends_on = [aws_secretsmanager_secret_version.ntfy_critical_webhook]
-}
-
-# healthchecks.io ping URL for the Grafana alerting deadman switch. An always-
-# firing rule pings this on the repeat interval; if the pings stop (Grafana
-# Cloud outage, eval engine stuck, egress dead, API token lapsed), healthchecks
-# notifies via its own independent channel — the one signal that survives the
-# whole Grafana pipeline being down. Grafana-only. Populate after apply:
-#   aws-vault exec adanalife-stage -- aws secretsmanager put-secret-value \
-#     --secret-id stage-1/healthchecks-deadman-ping --secret-string '<URL>'
-resource "aws_secretsmanager_secret" "healthchecks_deadman_ping" {
-  name        = "stage-1/healthchecks-deadman-ping"
-  description = "healthchecks.io ping URL for the Grafana alerting deadman switch."
-}
-
-resource "aws_secretsmanager_secret_version" "healthchecks_deadman_ping" {
-  secret_id     = aws_secretsmanager_secret.healthchecks_deadman_ping.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "healthchecks_deadman_ping" {
-  secret_id  = aws_secretsmanager_secret.healthchecks_deadman_ping.id
-  depends_on = [aws_secretsmanager_secret_version.healthchecks_deadman_ping]
-}
-
-# Discord bot token for the staging tripbot Discord session (pkg/discord).
-# Consumed at runtime via the tripbot-discord-bot-token ExternalSecret in
-# k8s/apps/tripbot/base/; pkg/discord skips startup cleanly when this is
-# still the placeholder string, so leaving it unpopulated keeps the bot
-# gated off without blocking apply.
-resource "aws_secretsmanager_secret" "tripbot_discord_bot_token" {
-  name        = "k8s/tripbot/discord-bot-token"
-  description = "Discord bot token for the staging tripbot Discord session."
-}
-
-resource "aws_secretsmanager_secret_version" "tripbot_discord_bot_token" {
-  secret_id     = aws_secretsmanager_secret.tripbot_discord_bot_token.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# CI lifecycle grants
-# ============================================================================
-
-# ============================================================================
-# tripbot-console
-# ============================================================================
-
-# GHCR pull token for the private tripbot-console image. The console repo is
-# private, so its image is too; ESO renders this into the `ghcr-pull`
-# dockerconfigjson Secret each env's console Deployment pulls through.
-# Bootstrap (fine-grained GitHub token, read:packages on the package):
-#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/tripbot-console/ghcr-pull-token \
-#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
-resource "aws_secretsmanager_secret" "tripbot_console_ghcr_pull" {
-  name        = "k8s/tripbot-console/ghcr-pull-token"
-  description = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
-}
-
-resource "aws_secretsmanager_secret_version" "tripbot_console_ghcr_pull" {
-  secret_id     = aws_secretsmanager_secret.tripbot_console_ghcr_pull.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# platform-gateway
-# ============================================================================
-
-# GHCR pull token for the private platform-gateway image (the gateway-twitch
-# gateway). The repo is private, so its image is too; ESO renders this into the
-# platform-gateway-ghcr-pull dockerconfigjson Secret the gateway Deployment
-# pulls through. Bootstrap (fine-grained GitHub token, read:packages):
-#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/platform-gateway/ghcr-pull-token \
-#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
-resource "aws_secretsmanager_secret" "platform_gateway_ghcr_pull" {
-  name        = "k8s/platform-gateway/ghcr-pull-token"
-  description = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token. Consumed via ESO into the platform-gateway-ghcr-pull dockerconfigjson Secret."
-}
-
-resource "aws_secretsmanager_secret_version" "platform_gateway_ghcr_pull" {
-  secret_id     = aws_secretsmanager_secret.platform_gateway_ghcr_pull.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# ============================================================================
-# video-pipeline
-# ============================================================================
-
-# GHCR pull token for the private video-pipeline image (the dashcam-cv embed
-# workload). The repo is private, so its image is too; ESO renders this into the
-# `ghcr-pull` dockerconfigjson Secret the workload's pods pull through.
-# Bootstrap (fine-grained GitHub token, read:packages on the package):
-#   aws-vault exec <profile> -- aws secretsmanager put-secret-value \
-#     --secret-id k8s/video-pipeline/ghcr-pull-token \
-#     --secret-string '{"username":"<github-user>","token":"<read-packages-token>"}'
-resource "aws_secretsmanager_secret" "video_pipeline_ghcr_pull" {
-  name        = "k8s/video-pipeline/ghcr-pull-token"
-  description = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token. Consumed via ESO into the ghcr-pull dockerconfigjson Secret."
-}
-
-resource "aws_secretsmanager_secret_version" "video_pipeline_ghcr_pull" {
-  secret_id     = aws_secretsmanager_secret.video_pipeline_ghcr_pull.id
-  secret_string = jsonencode({ placeholder = "set via aws secretsmanager put-secret-value" })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-# Allow CITerraformRole to read the SM secrets that terraform itself touches
-# at plan time. ReadOnlyAccess (already attached) excludes
-# secretsmanager:GetSecretValue. Two distinct call sites need it:
-#   - provider data sources (cloudflare provider reads its own token at plan
-#     via `data.aws_secretsmanager_secret_version.cloudflare_api_token`);
-#   - `aws_secretsmanager_secret_version` resource refresh, which calls
-#     GetSecretValue to compare current value against state — even with
-#     `ignore_changes = [secret_string]`, the refresh still reads.
-# Scoped to specific ARNs so CI can't read the values of other secrets in
-# the account.
-data "aws_iam_policy_document" "ci_terraform_secrets_read" {
-  statement {
-    actions = [
-      "secretsmanager:GetSecretValue",
-      "secretsmanager:DescribeSecret",
-      "secretsmanager:ListSecretVersionIds",
-    ]
-    resources = [
-      aws_secretsmanager_secret.cloudflare_api_token.arn,
-      aws_secretsmanager_secret.stage_1_allowlist_cidrs.arn,
-      aws_secretsmanager_secret.grafana_cloud_otlp.arn,
-      aws_secretsmanager_secret.grafana_cloud_api.arn,
-      aws_secretsmanager_secret.sentry_tripbot.arn,
-      aws_secretsmanager_secret.sentry_vlc_server.arn,
-      aws_secretsmanager_secret.tripbot_twitch_creds.arn,
-      aws_secretsmanager_secret.tripbot_youtube_creds.arn,
-      aws_secretsmanager_secret.tripbot_google_maps_api_key.arn,
-      aws_secretsmanager_secret.tripbot_db_credentials.arn,
-      aws_secretsmanager_secret.discord_alerts_webhook.arn,
-      aws_secretsmanager_secret.ntfy_critical_webhook.arn,
-      aws_secretsmanager_secret.healthchecks_deadman_ping.arn,
-      aws_secretsmanager_secret.tripbot_discord_bot_token.arn,
-      aws_secretsmanager_secret.tripbot_console_ghcr_pull.arn,
-      aws_secretsmanager_secret.video_pipeline_ghcr_pull.arn,
-      aws_secretsmanager_secret.platform_gateway_ghcr_pull.arn,
-    ]
-  }
-}
-
-resource "aws_iam_policy" "ci_terraform_secrets_read" {
-  name        = "AllowCITerraformReadStage1Secrets"
-  description = "Read-only access for CITerraformRole to the SM secrets terraform refreshes during plan in stage-1."
-  policy      = data.aws_iam_policy_document.ci_terraform_secrets_read.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_secrets_read.arn
-}
-
-# --- Per-secret lifecycle grants ---
-#
-# Each k8s/* SM secret that needs CI-applicable lifecycle (CreateSecret /
-# DeleteSecret / UpdateSecret / Tag) but should NOT be CI-readable gets its
-# own narrow policy. The `-*` ARN suffix handles AWS's auto-appended 6-char
-# random ID, which the CreateSecret IAM check evaluates against the to-be-
-# created ARN.
-
-# k8s/obs/twitch-stream-key
-data "aws_iam_policy_document" "ci_terraform_twitch_stream_key_manage" {
-  statement {
-    actions = [
-      "secretsmanager:CreateSecret",
-      "secretsmanager:DeleteSecret",
-      "secretsmanager:TagResource",
-      "secretsmanager:UntagResource",
-      "secretsmanager:UpdateSecret",
-    ]
-    resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/obs/twitch-stream-key-*",
-    ]
-  }
-}
-
-resource "aws_iam_policy" "ci_terraform_twitch_stream_key_manage" {
-  name        = "AllowCITerraformManageStage1TwitchStreamKey"
-  description = "Lifecycle access for CITerraformRole to the k8s/obs/twitch-stream-key SM secret in stage-1 (container only — value stays placeholder via ignore_changes)."
-  policy      = data.aws_iam_policy_document.ci_terraform_twitch_stream_key_manage.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_twitch_stream_key_manage" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_twitch_stream_key_manage.arn
-}
-
-# k8s/obs/youtube-stream-key
-data "aws_iam_policy_document" "ci_terraform_youtube_stream_key_manage" {
-  statement {
-    actions = [
-      "secretsmanager:CreateSecret",
-      "secretsmanager:DeleteSecret",
-      "secretsmanager:TagResource",
-      "secretsmanager:UntagResource",
-      "secretsmanager:UpdateSecret",
-    ]
-    resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/obs/youtube-stream-key-*",
-    ]
-  }
-}
-
-resource "aws_iam_policy" "ci_terraform_youtube_stream_key_manage" {
-  name        = "AllowCITerraformManageStage1YoutubeStreamKey"
-  description = "Lifecycle access for CITerraformRole to the k8s/obs/youtube-stream-key SM secret in stage-1 (container only — value seeded out-of-band)."
-  policy      = data.aws_iam_policy_document.ci_terraform_youtube_stream_key_manage.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_youtube_stream_key_manage" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_youtube_stream_key_manage.arn
-}
-
-# k8s/grafana-cloud-metrics-write
-data "aws_iam_policy_document" "ci_terraform_grafana_metrics_write_manage" {
-  statement {
-    actions = [
-      "secretsmanager:CreateSecret",
-      "secretsmanager:DeleteSecret",
-      "secretsmanager:TagResource",
-      "secretsmanager:UntagResource",
-      "secretsmanager:UpdateSecret",
-    ]
-    resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/grafana-cloud-metrics-write-*",
-    ]
-  }
-}
-
-resource "aws_iam_policy" "ci_terraform_grafana_metrics_write_manage" {
-  name        = "AllowCITerraformManageStage1GrafanaMetricsWrite"
-  description = "Lifecycle access for CITerraformRole to the k8s/grafana-cloud-metrics-write SM secret in stage-1 (container only — value stays out-of-terraform)."
-  policy      = data.aws_iam_policy_document.ci_terraform_grafana_metrics_write_manage.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_terraform_grafana_metrics_write_manage" {
-  role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_grafana_metrics_write_manage.arn
-}
-
-# ============================================================================
-# Postgres credentials (k8s/postgres/credentials)
-# ============================================================================
-#
-# Credentials for tripbot's Postgres in the stage-1 environment on
-# adanalife-minipc. Mirrors terraform/prod-1/secrets.tf: terraform OWNS
-# the value — random_pet generates a passphrase-style password, jsonencode
-# wraps it with the user/db fields, and aws_secretsmanager_secret_version
-# writes the result. ESO (the aws-secretsmanager-stage ClusterSecretStore)
-# materializes it into the `postgres-secret` Secret in the stage-1
-# namespace via the ExternalSecret at k8s/apps/postgres/overlays/stage-1/.
-#
-# stage-1's Postgres is fresh-seeded and disposable, but the credential
-# still flows through SM/ESO (not committed literals) to stay symmetric
-# with prod and keep secrets out of git.
-#
-# Password rotation: bump keepers.rotation_id on random_pet, then apply;
-# after SM updates, ESO syncs (≤1h or force) and then ALTER USER to bring
+# Password rotation: bump keepers.rotation_id on random_pet, then apply; after
+# the parameter updates, ESO syncs (≤1h or force) and then ALTER USER to bring
 # pg_authid in line.
 
 resource "random_pet" "tripbot_db_password" {
@@ -697,47 +140,137 @@ resource "random_pet" "tripbot_db_password" {
   separator = "-"
 }
 
-resource "aws_secretsmanager_secret" "tripbot_db_credentials" {
-  name        = "k8s/postgres/credentials"
+resource "aws_ssm_parameter" "tripbot_db_credentials" {
+  name        = "/k8s/postgres/credentials"
   description = "Postgres credentials for tripbot in stage-1 on adanalife-minipc."
-}
-
-resource "aws_secretsmanager_secret_version" "tripbot_db_credentials" {
-  secret_id = aws_secretsmanager_secret.tripbot_db_credentials.id
-  secret_string = jsonencode({
+  type        = "SecureString"
+  value = jsonencode({
     user     = "tripbot"
     password = random_pet.tripbot_db_password.id
     db       = "tripbot"
   })
 }
 
-# CI lifecycle grant — includes PutSecretValue because terraform writes the
-# value (not an out-of-band aws-cli put). The container ARN is also in the
-# ci_terraform_secrets_read list above, since terraform refreshes the
-# version during plan.
-data "aws_iam_policy_document" "ci_terraform_postgres_credentials_manage" {
+# ============================================================================
+# Unmanaged parameters (deliberately NOT terraform resources)
+# ============================================================================
+#
+# A terraform-managed aws_ssm_parameter is read (ssm:GetParameter) during
+# refresh, so managing these would hand CI their values. Create/rotate them
+# out-of-band; the Deny statement below keeps CI away.
+#
+#   - /k8s/obs/twitch-stream-key — Twitch RTMP ingest key for the staging
+#     channel. Rotate from the Twitch dashboard (Settings → Stream), then:
+#       aws-vault exec adanalife-stage -- aws ssm put-parameter \
+#         --name /k8s/obs/twitch-stream-key --type SecureString \
+#         --overwrite --value "$STREAM_KEY"
+#   - /k8s/obs/youtube-stream-key — YouTube RTMPS key for the staging Brand
+#     Account (YouTube Studio → Go live → Stream). Same put-parameter shape.
+#   - /k8s/grafana-cloud-metrics-write — Grafana Cloud Mimir/Loki credentials
+#     for the in-cluster k8s-monitoring chart (Alloy). JSON:
+#     {"PROMETHEUS_HOST": ..., "PROMETHEUS_USERNAME": "<prom instance ID>",
+#      "LOKI_HOST": ..., "LOKI_USERNAME": "<loki instance ID>",
+#      "TOKEN": "<access-policy token with metrics:write + logs:write>"}
+#     Endpoints/IDs from Grafana Cloud Connections; token via Access Policies.
+#   - /k8s/external-dns/aws-credentials — the external_dns IAM access key
+#     (iam.tf), seeded by hand from the PGP-encrypted outputs. JSON keys:
+#     access-key, secret-key.
+
+# ============================================================================
+# Plan-time data sources
+# ============================================================================
+#
+# Literal names, NOT aws_ssm_parameter.mirror[...].name: a data source that
+# references the mirror resource is deferred to apply time whenever ANY entry
+# is added to the map — which leaves a provider fed by it (cloudflare,
+# grafana) with an unknown token at plan, and the refresh fails with a
+# missing-auth 400. Fresh-account bootstrap: create + seed the parameter
+# before the first plan that needs it. KEEP-IN-SYNC: prod-1/secrets.tf.
+
+data "aws_ssm_parameter" "cloudflare_api_token" {
+  name = "/stage-1/cloudflare-api-token"
+}
+
+data "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
+  name = aws_ssm_parameter.stage_1_allowlist_cidrs.name
+}
+
+data "aws_ssm_parameter" "grafana_cloud_api" {
+  name = "/stage-1/grafana-cloud-api"
+}
+
+data "aws_ssm_parameter" "discord_alerts_webhook" {
+  name = "/k8s/tripbot/discord-alerts-webhook"
+}
+
+data "aws_ssm_parameter" "ntfy_critical_webhook" {
+  name = "/stage-1/ntfy-critical-webhook"
+}
+
+data "aws_ssm_parameter" "healthchecks_deadman_ping" {
+  name = "/stage-1/healthchecks-deadman-ping"
+}
+
+# ============================================================================
+# CI grants
+# ============================================================================
+
+# Terraform reads managed aws_ssm_parameter values (ssm:GetParameter) during
+# plan refresh, and CI applies need parameter lifecycle. Read is granted
+# account-wide MINUS an explicit Deny on the sensitive unmanaged parameters —
+# the Deny is load-bearing: AWS's ReadOnlyAccess (already attached to
+# CITerraformRole) includes broad ssm:Get*, so without it CI could read every
+# SecureString in the account. Folded into one policy document because
+# CITerraformRole is at AWS's 10-managed-policies-per-role cap.
+data "aws_iam_policy_document" "ci_terraform_secrets_read" {
   statement {
+    sid = "SSMParameterRead"
     actions = [
-      "secretsmanager:CreateSecret",
-      "secretsmanager:DeleteSecret",
-      "secretsmanager:TagResource",
-      "secretsmanager:UntagResource",
-      "secretsmanager:UpdateSecret",
-      "secretsmanager:PutSecretValue",
+      "ssm:GetParameter",
+      "ssm:GetParameters",
     ]
     resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/postgres/credentials-*",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/*",
+    ]
+  }
+
+  statement {
+    sid    = "SSMDenySensitiveParameterRead"
+    effect = "Deny"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath",
+      "ssm:GetParameterHistory",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/obs/*",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
+    ]
+  }
+
+  statement {
+    sid = "SSMParameterLifecycle"
+    actions = [
+      "ssm:PutParameter",
+      "ssm:DeleteParameter",
+      "ssm:AddTagsToResource",
+      "ssm:RemoveTagsFromResource",
+      "ssm:ListTagsForResource",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/*",
     ]
   }
 }
 
-resource "aws_iam_policy" "ci_terraform_postgres_credentials_manage" {
-  name        = "AllowCITerraformManageStage1PostgresCredentials"
-  description = "Lifecycle access for CITerraformRole to the k8s/postgres/credentials SM secret in stage-1, including PutSecretValue (terraform owns the value)."
-  policy      = data.aws_iam_policy_document.ci_terraform_postgres_credentials_manage.json
+resource "aws_iam_policy" "ci_terraform_secrets_read" {
+  name        = "AllowCITerraformReadStage1Secrets"
+  description = "SSM parameter read + lifecycle for CITerraformRole in stage-1 (read denied on the sensitive unmanaged parameters)."
+  policy      = data.aws_iam_policy_document.ci_terraform_secrets_read.json
 }
 
-resource "aws_iam_role_policy_attachment" "ci_terraform_postgres_credentials_manage" {
+resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
   role       = aws_iam_role.ci_terraform.name
-  policy_arn = aws_iam_policy.ci_terraform_postgres_credentials_manage.arn
+  policy_arn = aws_iam_policy.ci_terraform_secrets_read.arn
 }

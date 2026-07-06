@@ -7,6 +7,7 @@ spec:
   description: shared cluster platform (Helm) reconciled by Argo CD
   sourceRepos:
     - git@github.com:adanalife/infra.git
+    - ghcr.io/actions/actions-runner-controller-charts
     - https://argoproj.github.io/argo-helm
     - https://charts.external-secrets.io
     - https://charts.jetstack.io
@@ -275,6 +276,70 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: stage-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-controller
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: ghcr.io/actions/actions-runner-controller-charts
+      chart: gha-runner-scale-set-controller
+      targetRevision: 0.14.2
+      helm:
+        releaseName: arc-controller
+        valueFiles:
+          - $values/k8s/arc/controller/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-systems
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-arm64-tripbot
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: ghcr.io/actions/actions-runner-controller-charts
+      chart: gha-runner-scale-set
+      targetRevision: 0.14.2
+      helm:
+        releaseName: arc-arm64-tripbot
+        valueFiles:
+          - $values/k8s/arc/runners/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: master
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-runners
   syncPolicy:
     syncOptions:
       - CreateNamespace=true

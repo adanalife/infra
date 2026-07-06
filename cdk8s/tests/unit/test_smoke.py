@@ -11,11 +11,10 @@ def test_all_envs_load():
 
 
 def test_dashcam_envs_converge_on_shared_path(monkeypatch):
-    """Both prod and stage read the shared NFS_PATH (now the canonical regenerated
-    _opt/clips corpus) — the temporary STAGE_NFS_PATH override that let stage run
-    ahead during the regen has been retired, so it no longer repoints stage. The
-    per-env override mechanism stays generic (config.py nfs_path_env) for the next
-    time one env needs to diverge."""
+    """Both prod and stage read the shared NFS_PATH (the canonical _opt/clips
+    corpus); no per-env override repoints stage. The per-env override mechanism
+    stays generic (config.py nfs_path_env) for the next time one env needs to
+    diverge."""
     monkeypatch.setenv("NFS_SERVER", "nas")
     monkeypatch.setenv("NFS_PATH", "/regen/_opt/clips")
     monkeypatch.setenv("STAGE_NFS_PATH", "/somewhere/else")  # retired → no effect

@@ -12,17 +12,17 @@ from __future__ import annotations
 from constructs import Construct
 
 import imports.io.cert_manager as cm
-import imports.k8s as k8s
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.eso import ESData, external_secret
 
 # Cross-cutting observability secrets (k8s/shared-secrets/base) — all
-# dataFrom.extract from SM, materialized into the env namespace, envFrom'd by
-# tripbot / vlc-server with optional: false.
+# dataFrom.extract from SSM Parameter Store, materialized into the env
+# namespace, envFrom'd by tripbot / vlc-server with optional: false.
 _SHARED_SECRETS = [
-    ("grafana-cloud-otlp", "k8s/grafana-cloud-otlp"),
-    ("sentry-tripbot", "k8s/sentry-tripbot"),
-    ("sentry-vlc-server", "k8s/sentry-vlc-server"),
+    ("grafana-cloud-otlp", "/k8s/grafana-cloud-otlp"),
+    ("sentry-tripbot", "/k8s/sentry-tripbot"),
+    ("sentry-vlc-server", "/k8s/sentry-vlc-server"),
+    ("sentry-onscreens-server", "/k8s/sentry-onscreens-server"),
 ]
 
 
@@ -47,43 +47,6 @@ def emit_supporting(scope: Construct, env: EnvConfig) -> None:
     _app_issuers(scope, env, ns)
 
 
-def emit_stream_protection(scope: Construct, env: EnvConfig) -> None:
-    """The prod-stream protection objects (2026-06-11 stage-starves-prod
-    incident): the PriorityClass the env's app pods reference (when
-    env.priority_class is set), and the app-namespace ResourceQuota capping
-    what co-tenant envs can request in aggregate (when env.app_quota is set).
-    """
-    ns = env.namespace or None
-
-    if env.priority_class:
-        # Cluster-scoped; cdk8s stamps the chart namespace, which the apiserver
-        # ignores on cluster-scoped kinds (same as dashcam-cv-low). value 1000
-        # outranks every default-priority (0) pod, so under node pressure the
-        # scheduler preempts co-tenants, never the live stream. dashcam-cv-low
-        # (-10) stays the most-preemptible tier.
-        k8s.KubePriorityClass(
-            scope,
-            "priority-class",
-            metadata=k8s.ObjectMeta(name=env.priority_class),
-            value=1000,
-            global_default=False,
-            description="Live-stream workloads — outrank default-priority co-tenants; preempt them under node pressure.",
-        )
-
-    if env.app_quota:
-        k8s.KubeResourceQuota(
-            scope,
-            "app-quota",
-            metadata=k8s.ObjectMeta(name="app-quota", namespace=ns),
-            spec=k8s.ResourceQuotaSpec(
-                hard={
-                    key: k8s.Quantity.from_string(val)
-                    for key, val in env.app_quota.items()
-                }
-            ),
-        )
-
-
 def _app_issuers(scope: Construct, env: EnvConfig, ns: str | None) -> None:
     """Namespaced cert-manager Issuers (LE staging + prod) for app ingresses,
     plus the DNS-01 Route53 creds ExternalSecret they solve with."""
@@ -95,9 +58,9 @@ def _app_issuers(scope: Construct, env: EnvConfig, ns: str | None) -> None:
         name="cert-manager-aws-credentials",
         namespace=ns,
         data=[
-            ESData("access-key-id", "k8s/external-dns/aws-credentials", "access-key"),
+            ESData("access-key-id", "/k8s/external-dns/aws-credentials", "access-key"),
             ESData(
-                "secret-access-key", "k8s/external-dns/aws-credentials", "secret-key"
+                "secret-access-key", "/k8s/external-dns/aws-credentials", "secret-key"
             ),
         ],
     )

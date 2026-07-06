@@ -87,11 +87,11 @@ CUTOVER_ENVS = ENVS
 # units NEVER autosync (Prune=false is their guarantee); supporting stays manual
 # too — only the apps set reads this.
 AUTOSYNC_ENVS = ("stage-1", "prod-1")
-# (env, app) pairs held out of autosync even when their env is automated. OBS is
-# the live encoder: any pod-template change restarts the prod stream, so deploys
-# to it stay a deliberate manual sync (pick the quiet moment), while the rest of
-# prod autosyncs.
-AUTOSYNC_HOLDOUTS = (("prod-1", "obs-twitch"),)
+# (env, app) pairs held out of autosync even when their env is automated. Empty
+# now that OBS is delivered entirely by the obs repo's own ApplicationSet (see
+# OBS_REVISIONS) — the live-encoder manual-sync holdout lives on that appset
+# (("prod-1", "obs")), not on tripbot-apps, which no longer carries any obs unit.
+AUTOSYNC_HOLDOUTS: tuple[tuple[str, str], ...] = ()
 # Envs whose apps autosync but with selfHeal OFF — Argo still deploys git/dist
 # changes, but it won't revert hand/console live edits, so a manual `kubectl
 # scale` (or a console start/stop button) sticks. Stage only: it's where
@@ -107,32 +107,52 @@ TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # lives under the prod subdomain alongside the apps (vlc-twitch.prod...) and the
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
-REPO_SM_KEY = "k8s/argocd/repo-ssh-key"
-# Discord webhook for the notifications controller — deliberately the SAME SM
-# container tripbot's reportCmd and the Grafana alerts read (one channel, one
+REPO_SM_KEY = "/k8s/argocd/repo-ssh-key"
+# Discord webhook for the notifications controller — deliberately the SAME
+# parameter tripbot's reportCmd and the Grafana alerts read (one channel, one
 # webhook, already seeded in both accounts), not a new argocd-scoped secret.
-NOTIFICATIONS_SM_KEY = "k8s/tripbot/discord-alerts-webhook"
+NOTIFICATIONS_SM_KEY = "/k8s/tripbot/discord-alerts-webhook"
 # The private tripbot-console repo — Argo's second source. Its cdk8s/dist
 # deploy units (one <env>.k8s.yaml per env) live in that repo, per the split
 # design: the console repo owns its own deployment; infra owns everything else.
 CONSOLE_REPO_URL = "git@github.com:adanalife/tripbot-console.git"
-CONSOLE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-console"
+CONSOLE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-console"
 # Per-env git revision for the console units: stage tracks develop (manifests
 # float alongside the :develop image), prod tracks master (release-gated) —
 # the same philosophy as the image-tag pinning model.
 CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # The private video-pipeline repo — another cross-repo source (same split as the
-# console: the repo owns its own cdk8s/dist deploy units). The dashcam-cv embed
-# workload it delivers is stage-only today, so only stage-1 has a revision.
+# console: the repo owns its own cdk8s/dist deploy units). The repo is
+# trunk-based (release-please), so both envs track main: stage carries the
+# batch stack + a scaled-to-zero !find embed responder, prod just the responder.
 VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
-VIDEO_PIPELINE_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-video-pipeline"
-VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
+VIDEO_PIPELINE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-video-pipeline"
+VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # The private platform-gateway repo — another cross-repo source (same split as
 # the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
 # per env). Delivers the gateway-twitch instance; both prod + stage run it.
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
-PLATFORM_GATEWAY_REPO_SM_KEY = "k8s/argocd/repo-ssh-key-platform-gateway"
+PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+# The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
+# its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
+# repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
+# no _repo_external_secret below). OBS_REVISIONS is the single source of truth
+# for the progressive cutover: an env listed here is delivered by the obs repo's
+# own ApplicationSet AND excluded from tripbot-apps' obs generation (so the two
+# never co-manage the same obs-* resources). Stage first; add "prod-1": "master"
+# to cut prod over (prod obs is already an AUTOSYNC_HOLDOUT — a deliberate sync).
+OBS_PROJECT = "obs"
+OBS_REPO_URL = "https://github.com/adanalife/obs.git"
+# Whole-env cutover: every obs-* platform for the env is delivered by the obs
+# repo's own appset (one {{.env}}-obs Application globbing both platforms) and
+# excluded from tripbot-apps. prod-1 joined on a planned-downtime cutover (the
+# live twitch encoder restarts onto the obs-repo image) — youtube was already
+# on the obs repo, so the whole-env app adopts it cleanly and only twitch moves.
+# development joined last so tripbot can drop its obs construct entirely: the obs
+# repo emits development-obs-twitch.k8s.yaml at develop, and the dev k3d Argo
+# fetches the public obs repo over anonymous HTTPS (no deploy key) like the minipc.
+OBS_REVISIONS = {"stage-1": "develop", "prod-1": "master", "development": "develop"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -197,6 +217,11 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
         revision = TRIPBOT_REVISIONS[env_name]
         for platform in load_env(env_name).platforms:
             for comp in TRIPBOT_COMPONENTS:
+                # OBS for a cut-over env is delivered by the standalone obs repo's
+                # own ApplicationSet (OBS_REVISIONS), not tripbot's — skip it here
+                # so the two never co-manage the same obs-* resources.
+                if comp == "obs" and env_name in OBS_REVISIONS:
+                    continue
                 elements.append(
                     {
                         "env": env_name,
@@ -236,6 +261,7 @@ class ArgoCD(Construct):
         lan_tls: bool = True,
         notifications_secret: bool = True,
         ups_monitor: bool = True,
+        arc: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -262,6 +288,10 @@ class ArgoCD(Construct):
         self.platform_gateway_envs = tuple(
             e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
         )
+        # Envs whose OBS is delivered from the standalone (public) obs repo
+        # instead of tripbot's cdk8s — now every env, including the k3d dev
+        # instance (the obs repo is public, so dev fetches it anonymously).
+        self.obs_envs = tuple(e for e in envs if e in OBS_REVISIONS)
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -282,16 +312,18 @@ class ArgoCD(Construct):
             name=INFRA_PROJECT,
             description="shared cluster infrastructure (postgres data + supporting), from the infra repo",
             source_repos=[REPO_URL],
-            # + the UPS monitor's `ups` namespace on the minipc (the singleton
-            # Application below rides the infra project — same repo, same project).
+            # + the UPS monitor's `ups` namespace and ARC's arc-systems/arc-runners
+            # on the minipc (both singleton Applications below ride the infra
+            # project — same repo, same project).
             namespaces=_project_namespaces(self.envs)
-            + (["ups"] if ups_monitor else []),
-            # + Namespace when the UPS monitor rides this project: its
-            # CreateNamespace=true sync creates the `ups` namespace as a PreSync
-            # resource, which is itself gated by this whitelist (a missing entry
-            # here is what failed the first ups-monitor sync — #761).
+            + (["ups"] if ups_monitor else [])
+            + (["arc-systems", "arc-runners"] if arc else []),
+            # + Namespace when the UPS monitor / ARC ride this project: the unit's
+            # own Namespace objects are themselves gated by this
+            # clusterResourceWhitelist, so a CreateNamespace=true sync fails
+            # without the entry.
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
-            + ([NAMESPACE_KIND] if ups_monitor else []),
+            + ([NAMESPACE_KIND] if (ups_monitor or arc) else []),
         )
         if self.console_envs:
             self._app_project(
@@ -323,6 +355,16 @@ class ArgoCD(Construct):
                 # App namespace only — the gateway needs no data-namespace access
                 # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
                 namespaces=list(self.platform_gateway_envs),
+                cluster_resources=[],
+            )
+        if self.obs_envs:
+            self._app_project(
+                id="project-obs",
+                name=OBS_PROJECT,
+                description="OBS streaming encoder (live stream), from the public obs repo",
+                source_repos=[OBS_REPO_URL],
+                # App namespace only — OBS creates nothing cluster-scoped.
+                namespaces=list(self.obs_envs),
                 cluster_resources=[],
             )
         # ApplicationSets, one Application each per unit. The apps set is
@@ -414,6 +456,26 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 create_namespace=True,
             )
+        # ARC self-hosted-runner supporting resources (arc.k8s.yaml) — a
+        # cluster-SINGLETON like the UPS monitor, one-element set with static
+        # templates. minipc-only (the rpi5 lives there; the dev Argo passes
+        # arc=False). MANUAL sync (no automated block) — the ARC Helm
+        # Applications it underpins are themselves MONITOR-ONLY, and bringing
+        # runners up is a deliberate gesture, not an on-merge deploy. The unit
+        # owns its own arc-systems/arc-runners Namespaces, so create_namespace is
+        # unnecessary; the dest namespace is arc-runners (where the quota + secret
+        # live), the cluster-scoped Namespace objects apply regardless.
+        if arc:
+            self._application_set(
+                id="appset-arc",
+                name="arc",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="arc",
+                include_tmpl="arc.k8s.yaml",
+                dest_ns_tmpl="arc-runners",
+                prune_disabled=False,
+            )
         # The cross-repo console unit: one Application per env, sourcing the
         # PRIVATE tripbot-console repo's committed dist (per-env revision —
         # stage follows develop, prod follows master). Same autosync posture
@@ -475,7 +537,37 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
+                # selfHeal off on stage so a hand `kubectl scale gateway-* 0`
+                # sticks (the minipc gets freed for prod by hand) — same posture
+                # as the tripbot apps set. Paired with the stage gateways omitting
+                # spec.replicas (platform-gateway EnvConfig.manual_replicas), so an
+                # autosync on a develop merge doesn't reset a scaled-down gateway.
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
+        if self.obs_envs:
+            # One Application per env, each managing both platforms via the
+            # include glob ({{.env}}-obs-twitch + -youtube). Distinct name
+            # ({{.env}}-obs) from the old per-platform tripbot-apps Applications,
+            # so the cutover can adopt-then-remove without a name collision.
+            self._application_set(
+                id="appset-obs",
+                name="obs",
+                project=OBS_PROJECT,
+                elements=[
+                    {"env": e, "app": "obs", "revision": OBS_REVISIONS[e]}
+                    for e in self.obs_envs
+                ],
+                app_name_tmpl="{{.env}}-obs",
+                include_tmpl="{{.env}}-obs-*.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                # prod obs restarts the live stream on any pod-template change, so
+                # it's a deliberate manual sync.
+                automated_holdouts=(("prod-1", "obs"),),
+                selfheal=self._selfheal,
+                repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
@@ -789,7 +881,7 @@ class ArgoCD(Construct):
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-secretsmanager-cluster",
+                    name="aws-parameterstore-cluster",
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(
@@ -826,7 +918,7 @@ class ArgoCD(Construct):
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-secretsmanager-cluster",
+                    name="aws-parameterstore-cluster",
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(

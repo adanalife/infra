@@ -42,7 +42,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_streaming_active{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "background",
@@ -70,7 +70,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_active_fps{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_active_fps{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "value",
@@ -87,7 +87,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "8 * max by (deployment_environment) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "8 * max by (deployment_environment, service_platform) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "value",
@@ -104,7 +104,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_stream_output_congestion{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "background",
@@ -131,9 +131,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "rate(vlc_player_displayed_pictures{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "displayed/s [{{deployment_environment}}]" },
-        { "refId": "B", "expr": "rate(vlc_player_lost_pictures{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "lost/s [{{deployment_environment}}]" },
-        { "refId": "C", "expr": "rate(vlc_player_demux_corrupted{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "demux corrupted/s [{{deployment_environment}}]" }
+        { "refId": "A", "expr": "rate(vlc_player_displayed_pictures{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "displayed/s [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "B", "expr": "rate(vlc_player_lost_pictures{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "lost/s [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "C", "expr": "rate(vlc_player_demux_corrupted{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "demux corrupted/s [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } },
@@ -150,9 +150,9 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "rate(obs_render_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "render thread [{{deployment_environment}}]" },
-        { "refId": "B", "expr": "rate(obs_output_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "output thread [{{deployment_environment}}]" },
-        { "refId": "C", "expr": "rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "stream output [{{deployment_environment}}]" }
+        { "refId": "A", "expr": "rate(obs_render_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "render thread [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "B", "expr": "rate(obs_output_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "output thread [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "C", "expr": "rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "stream output [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -163,7 +163,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "bps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -174,8 +174,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "congestion [{{deployment_environment}}]" },
-        { "refId": "B", "expr": "max by (deployment_environment) (obs_stream_output_reconnecting{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "reconnecting [{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_stream_output_congestion{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "congestion [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment, service_platform) (obs_stream_output_reconnecting{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "reconnecting [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -186,8 +186,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 20, "w": 8, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (vlc_player_input_bitrate{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "input [{{deployment_environment}}]" },
-        { "refId": "B", "expr": "max by (deployment_environment) (vlc_player_demux_bitrate{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "demux [{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (vlc_player_input_bitrate{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "input [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment, service_platform) (vlc_player_demux_bitrate{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "demux [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -198,8 +198,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 8, "y": 20, "w": 8, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_cpu_usage_percent{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "cpu % [{{deployment_environment}}]" },
-        { "refId": "B", "expr": "max by (deployment_environment) (obs_memory_usage_mb{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "memory (MB) [{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_cpu_usage_percent{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "cpu % [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment, service_platform) (obs_memory_usage_mb{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "memory (MB) [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
@@ -210,9 +210,204 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 16, "y": 20, "w": 8, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment) (obs_average_frame_render_time_ms{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame [{{deployment_environment}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_average_frame_render_time_ms{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "ms/frame [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Background audio (Twitch · SomaFM → Car Hum fallback)",
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Background audio",
+      "description": "1 when the Twitch music bed (Groove Salad Classic) is playing, 0 when its OBS media state is ended/stopped/errored. Twitch-only (tripbot), not platform-labeled.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "audio" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "SILENT", "color": "red" }, "1": { "text": "PLAYING", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "Source",
+      "description": "Which bed is on air: the normal SomaFM source, or the local Car Hum fallback the watchdog swaps in when SomaFM is unreachable.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "source" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "SomaFM", "color": "green" }, "1": { "text": "CAR HUM (fallback)", "color": "yellow" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "SomaFM edge",
+      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(somafm_reachable{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "Source swaps (1h)",
+      "description": "Background-audio source swaps in the last hour (to_fallback + to_somafm). Any to_fallback swap means SomaFM dropped.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(obs_background_audio_swaps_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "swaps/1h" }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none", "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Background audio level (peak dBFS)",
+      "description": "Peak output level of the Twitch background bed, floored at -60. Sustained ≈ -60 is dead air; recorded only while the volume meter is fresh, so gaps mean the meter subscription dropped (not silence).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "min(obs_background_audio_level_db{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "peak dBFS" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none", "decimals": 1, "min": -60, "max": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": -50 }
+          ]},
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Background audio state (playing / fallback / SomaFM reachable)",
+      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "playing" },
+        { "refId": "B", "expr": "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "on fallback" },
+        { "refId": "C", "expr": "max(somafm_reachable{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm reachable" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "on fallback" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "playing" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      }
+    },
+    {
+      "id": 47,
+      "type": "row",
+      "title": "Clip playback (currently-playing dashcam segment)",
+      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 1 }
+    },
+    {
+      "id": 48,
+      "type": "gauge",
+      "title": "Clip progress",
+      "description": "Playback progress through the currently-playing clip as a 0..1 fraction (vlc_player_progress_fraction).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 41, "w": 8, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (vlc_player_progress_fraction{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] }
+    },
+    {
+      "id": 49,
+      "type": "timeseries",
+      "title": "Time remaining in current clip",
+      "description": "Seconds left in the currently-playing clip (media length minus playhead), vlc_player_time_remaining_seconds. Sawtooths down to ~0 then jumps at each clip transition.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 8, "y": 41, "w": 16, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (vlc_player_time_remaining_seconds{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     }
   ]
 }

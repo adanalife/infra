@@ -1,12 +1,8 @@
 # Cloudflare Pages project for dana.lol static site
 #
-# Staging-first: this creates "dana-lol-staging" on Cloudflare Pages.
-# The site will be available at dana-lol-staging.pages.dev.
-# PR preview deployments are automatic for any non-production branch.
-#
-# TODO: once staging is verified, add a "dana-lol" production project
-# alongside this one (in terraform/prod-1/) and update Route53
-# www.dana.lol CNAME to point to it.
+# This creates "dana-lol-staging" on Cloudflare Pages, available at
+# dana-lol-staging.pages.dev. PR preview deployments are automatic for any
+# non-production branch. The production project lives in terraform/prod-1/.
 
 variable "cloudflare_account_id" {
   type        = string
@@ -28,7 +24,7 @@ variable "production_branch" {
 # bootstrap flow. Lives here (not providers.tf) so prod-1's symlink
 # to providers.tf doesn't inherit a provider it has no resources for.
 provider "cloudflare" {
-  api_token = data.aws_secretsmanager_secret_version.cloudflare_api_token.secret_string
+  api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
 
 resource "cloudflare_pages_project" "stage_1" {

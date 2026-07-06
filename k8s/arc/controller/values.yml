@@ -1,0 +1,17 @@
+# gha-runner-scale-set-controller — the ARC reconciler.
+#
+# Pin the controller to the stable amd64 MS-01, NOT the ephemeral arm64 rpi5:
+# it's a small always-on reconciler, not a build workload, so it shouldn't ride
+# the node we treat as unpluggable. Only the runner pods belong on the Pi
+# (see ../runners/values.yml). Keeping it off the Pi also means an unplugged Pi
+# never takes the controller (or the runner-online fallback signal) down.
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

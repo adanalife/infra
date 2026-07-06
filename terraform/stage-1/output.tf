@@ -4,9 +4,6 @@
 # into shared modules. Any structural change here SHOULD be mirrored to the
 # sibling file unless the divergence is the whole point of the change.
 
-#TODO: consider adding a message that says something to the effect of:
-# visit the website at: https://static.stage.dana.lol/
-
 output "default_vpc_cidr" {
   description = "The CIDR block of the entire VPC"
   value       = module.default_vpc.default_vpc_cidr_block

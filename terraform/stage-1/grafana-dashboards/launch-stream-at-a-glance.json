@@ -277,6 +277,19 @@
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 52,
+      "type": "state-timeline",
+      "title": "Dashcam state (US state over time)",
+      "description": "Which US state the dashcam playhead is in over the time range, from tripbot_current_state. Only one state reads 1 at a time, so each band is a segment spent in that state; an unresolved playhead reads as \"unknown\". One lane per state visited in the window.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform, state) (tripbot_current_state{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}) == 1", "legendFormat": "{{state}} · {{service_platform}}" }
+      ],
+      "options": { "mergeValues": false, "showValue": "never", "alignValue": "left", "rowHeight": 0.9, "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "noValue": "no data" }, "overrides": [] }
     }
   ]
 }

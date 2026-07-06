@@ -8,7 +8,7 @@ namespace: stage-1-platform
 
 resources:
   - namespace.yml
-  # Namespaced aws-secretsmanager SecretStore (byte-identical across
+  # Namespaced aws-parameterstore SecretStore (byte-identical across
   # envs; reads the stage account via stage-1-platform's
   # eso-aws-credentials, seeded by `task k8s:stage:bootstrap-secrets`).
   - ../../external-secrets/namespace-store
