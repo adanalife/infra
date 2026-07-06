@@ -122,11 +122,12 @@ CONSOLE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-console"
 # the same philosophy as the image-tag pinning model.
 CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # The private video-pipeline repo — another cross-repo source (same split as the
-# console: the repo owns its own cdk8s/dist deploy units). The dashcam-cv embed
-# workload it delivers is stage-only today, so only stage-1 has a revision.
+# console: the repo owns its own cdk8s/dist deploy units). The repo is
+# trunk-based (release-please), so both envs track main: stage carries the
+# batch stack + a scaled-to-zero !find embed responder, prod just the responder.
 VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
 VIDEO_PIPELINE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-video-pipeline"
-VIDEO_PIPELINE_REVISIONS = {"stage-1": "develop"}
+VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # The private platform-gateway repo — another cross-repo source (same split as
 # the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
 # per env). Delivers the gateway-twitch instance; both prod + stage run it.
