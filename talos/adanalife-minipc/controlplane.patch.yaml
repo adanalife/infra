@@ -44,10 +44,17 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    # Schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale. Was
-    # 2dcd44…; tailscale added 2026-05-20 with i915-ucode kept byte-identical.
-    # Regenerate via the curl block in the bootstrap runbook if extensions change.
-    image: factory.talos.dev/installer/fb46591af14131d1c3ae89c8ce50f0fd6705113d0493a90cd06b8c1d669c9199:v1.13.2
+    # Schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale extensions
+    # + the usb-storage.quirks=04e8:61f5:u kernel arg. The quirk forces the
+    # plain usb-storage driver (no UAS command queuing) for the Samsung T5
+    # (the /var/mnt/data UserVolume), which drops off the USB bus under
+    # sustained UAS write load — taking the XFS filesystem and both postgreses
+    # down with it. Slower sequential I/O, stable link. The config uses UKI
+    # (grubUseUKICmdline), so kernel args live in the factory schematic, not
+    # install.extraKernelArgs — regenerate via the curl block in the bootstrap
+    # runbook, and note image changes only land via `talosctl upgrade`, not
+    # apply-config alone.
+    image: factory.talos.dev/installer/915463e793b97f79f7ea950f7b4e9d4a3ce9d674dd45e63ffe12f934d0b792c9:v1.13.2
   network:
     interfaces:
       - interface: enp88s0
