@@ -954,6 +954,11 @@ resource "grafana_rule_group" "stream_health" {
       condition      = "C"
       no_data_state  = "OK"
       exec_err_state = "Alerting"
+      // Paused: fires spuriously whenever a vlc-server isn't emitting
+      // obs_streaming_active (unlisted/idle platform, pod churn), which drowns
+      // out real-downtime pages. Re-enable once every prod platform reliably
+      // stamps service_platform and stays live.
+      is_paused = true
 
       annotations = {
         summary     = "No obs_streaming_active from prod ${rule.value} vlc-server for 5m"
