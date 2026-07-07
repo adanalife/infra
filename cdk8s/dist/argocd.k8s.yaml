@@ -537,9 +537,9 @@ spec:
     - list:
         elements:
           - env: prod-1
-            revision: master
+            revision: main
           - env: stage-1
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -742,10 +742,10 @@ spec:
         elements:
           - env: prod-1
             app: obs
-            revision: master
+            revision: main
           - env: stage-1
             app: obs
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy

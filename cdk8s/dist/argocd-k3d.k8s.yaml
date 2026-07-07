@@ -306,7 +306,7 @@ spec:
         elements:
           - env: development
             app: obs
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy

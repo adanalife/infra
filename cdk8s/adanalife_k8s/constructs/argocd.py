@@ -117,10 +117,11 @@ NOTIFICATIONS_SM_KEY = "/k8s/tripbot/discord-alerts-webhook"
 # design: the console repo owns its own deployment; infra owns everything else.
 CONSOLE_REPO_URL = "git@github.com:adanalife/tripbot-console.git"
 CONSOLE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-console"
-# Per-env git revision for the console units: stage tracks develop (manifests
-# float alongside the :develop image), prod tracks master (release-gated) —
-# the same philosophy as the image-tag pinning model.
-CONSOLE_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+# Per-env git revision for the console units. Trunk-based (release-please), so
+# both envs track main; prod stays release-gated by the image pin in
+# versions.yaml (bumped only at release), not by a separate branch — stage
+# floats the :main image, prod deploys the pinned tag.
+CONSOLE_REVISIONS = {"prod-1": "main", "stage-1": "main"}
 # The private video-pipeline repo — another cross-repo source (same split as the
 # console: the repo owns its own cdk8s/dist deploy units). The repo is
 # trunk-based (release-please), so both envs track main: stage carries the
@@ -138,10 +139,10 @@ PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
 # its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
 # repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
 # no _repo_external_secret below). OBS_REVISIONS is the single source of truth
-# for the progressive cutover: an env listed here is delivered by the obs repo's
-# own ApplicationSet AND excluded from tripbot-apps' obs generation (so the two
-# never co-manage the same obs-* resources). Stage first; add "prod-1": "master"
-# to cut prod over (prod obs is already an AUTOSYNC_HOLDOUT — a deliberate sync).
+# for which envs the obs repo delivers: an env listed here is delivered by the obs
+# repo's own ApplicationSet AND excluded from tripbot-apps' obs generation (so the
+# two never co-manage the same obs-* resources). All envs are cut over; prod obs
+# is an AUTOSYNC_HOLDOUT — a deliberate sync.
 OBS_PROJECT = "obs"
 OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # Whole-env cutover: every obs-* platform for the env is delivered by the obs
@@ -150,9 +151,11 @@ OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # live twitch encoder restarts onto the obs-repo image) — youtube was already
 # on the obs repo, so the whole-env app adopts it cleanly and only twitch moves.
 # development joined last so tripbot can drop its obs construct entirely: the obs
-# repo emits development-obs-twitch.k8s.yaml at develop, and the dev k3d Argo
+# repo emits development-obs-twitch.k8s.yaml at main, and the dev k3d Argo
 # fetches the public obs repo over anonymous HTTPS (no deploy key) like the minipc.
-OBS_REVISIONS = {"stage-1": "develop", "prod-1": "master", "development": "develop"}
+# Trunk-based (release-please): every env tracks main; prod stays release-gated by
+# the image pin in versions.yaml, not by a separate branch.
+OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
