@@ -291,6 +291,74 @@ resource "grafana_rule_group" "go_runtime" {
   }
 }
 
+// Host-storage alert — the Samsung T5 USB SSD is the Talos UserVolume backing
+// every durable PV on the minipc (prod+stage Postgres, NATS JetStream, the vlc
+// cache). When the USB link drops the device off the bus, xfs shuts the
+// filesystem down and every service on it starts logging "input/output error";
+// prod+stage Postgres go CreateContainerError until a node reboot re-enumerates
+// the disk. This alerts off Loki rather than the pod-state KSM metrics on
+// purpose: those series are dropped by the Mimir active-series cap (see the
+// metrics-budget note below), but logs ride a separate, uncapped path. severity
+// = critical so it escalates to ntfy (phone) as well as Discord.
+resource "grafana_rule_group" "host_storage" {
+  name             = "host-storage"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "minipc T5 SSD I/O fault"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc durable SSD is throwing I/O errors (Postgres/NATS/vlc volume)"
+      description = "A service on the minipc logged \"input/output error\" — the signature of the Samsung T5 USB SSD dropping off the bus (xfs shuts down; prod+stage Postgres go CreateContainerError). Recovery: reboot the node to re-enumerate the disk and replay the xfs log — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today reboot` (reboot does NOT wipe the UserVolume). The hourly S3 pg_dump is the backstop; the root fix is the physical USB link (USB4/rear port + known-good short cable). Runbook: vault/infra/minipc-ssd-migration-runbook.md."
+    }
+    labels = {
+      severity = "critical"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(count_over_time({cluster=\"adanalife-minipc\"} |= \"input/output error\" [5m]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // Metrics-budget alert — fires when Grafana Cloud's tenant-side count of
 // active series climbs toward the free-tier hard cap (15000). Routes to the
 // shared discord-alerts contact point.
