@@ -1567,11 +1567,22 @@ resource "grafana_rule_group" "gateway_health" {
 
     annotations = {
       summary     = "No platform_gateway_up from prod-1 for 5m"
-      description = "platform_gateway_up{namespace=\"prod-1\"} has been absent for 5m — the gateway isn't being scraped, so its process-liveness signal is gone. Usually means every gateway pod in prod-1 is down (crashloop/OOM/evicted) or the scrape pipeline broke. Check `kubectl get pods -n prod-1 | grep gateway`. Paired with the consumer-side 'unreachable from tripbot' rule above; no_data is OK because a present series makes absent() return nothing."
+      description = "platform_gateway_up{namespace=\"prod-1\"} has been absent for 5m. Known cause: the prod gateway's Prometheus series are dropped by the Grafana Cloud free-tier active-series cap (see the active-series warning above), so absent() fires even though the gateway is up and serving (tripbot_gateway_up=1). Muted until the metrics budget is addressed. If the budget is fixed and this still fires, the gateway genuinely isn't being scraped — check `kubectl get pods -n prod-1 | grep gateway`. no_data is OK because a present series makes absent() return nothing."
     }
     labels = {
-      severity = "critical"
+      // Muted: the prod gateway's platform_gateway_* series are dropped by the
+      // Mimir active-series cap (two deployments over the free-tier budget — see
+      // the active-series warning above), so absent() fires continuously even
+      // though the gateway is up. Known cause, no action until the budget is
+      // addressed. Kept (still visible/firing in the Alerting UI) but routed
+      // through the always-on mute timing — see the mute=true sub-route on
+      // grafana_notification_policy.root. Downgraded critical -> warning so it
+      // doesn't match the critical->ntfy/Discord routes that run before the
+      // mute route; the SSD-loss alert (Loki-based, uncapped) stays critical and
+      // pages through.
+      severity = "warning"
       service  = "gateway"
+      mute     = "true"
     }
 
     data {
