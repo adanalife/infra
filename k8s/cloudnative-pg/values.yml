@@ -1,0 +1,7 @@
+# Helm values for the cloudnative-pg/cloudnative-pg chart (the CNPG operator,
+# cnpg-system). Backs the stage-1/prod-1 `pg` Postgres clusters — continuous
+# WAL archiving + base backups to S3 (via the plugin-barman-cloud sidecar
+# release) for PITR. Chart defaults are correct here: single replica, and the
+# operator image is GHCR-native (ghcr.io/cloudnative-pg/cloudnative-pg), so
+# nothing pulls Docker Hub.
+{}

@@ -34,7 +34,14 @@ def test_non_argo_manageable_charts_excluded():
     assert "external-dns" not in releases
     assert "external-dns-stage" not in releases
     # the git-declarable middle is present
-    assert {"external-secrets", "cert-manager", "k8s-monitoring", "nats"} <= releases
+    assert {
+        "external-secrets",
+        "cert-manager",
+        "cnpg",
+        "plugin-barman-cloud",
+        "k8s-monitoring",
+        "nats",
+    } <= releases
 
 
 def test_every_app_is_multisource_pinned_with_values_ref():

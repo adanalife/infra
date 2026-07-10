@@ -1,0 +1,7 @@
+# Helm values for the cloudnative-pg/plugin-barman-cloud chart (the barman-cloud
+# CNPG-I plugin, cnpg-system). Gives CNPG clusters WAL archiving + base backups
+# to S3, wired per cluster via an `ObjectStore` CR. Requires cert-manager (the
+# plugin's mTLS certs are cert-manager Certificates — installed ahead of it in
+# the platform order). Chart defaults are correct: images are GHCR-native
+# (ghcr.io/cloudnative-pg/plugin-barman-cloud*), nothing pulls Docker Hub.
+{}

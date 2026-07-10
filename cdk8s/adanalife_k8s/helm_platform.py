@@ -50,6 +50,7 @@ REPOS = {
     "nats": "https://nats-io.github.io/k8s/helm/charts/",
     "tailscale": "https://pkgs.tailscale.com/helmcharts",
     "argo": "https://argoproj.github.io/argo-helm",
+    "cloudnative-pg": "https://cloudnative-pg.github.io/charts",
     # OCI registry (no scheme) — the ARC charts. Argo renders these in-cluster;
     # cdk8s.Helm can't `helm template` an OCI ref, so the ARC components are
     # Argo-only (never fed to PlatformChart). See arc_components below.
@@ -77,6 +78,10 @@ VERSIONS = {
     "nats": "2.14.0",  # already pinned in the legacy task
     "tailscale-operator": "1.98.3",  # already pinned in the legacy task
     "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
+    # CNPG — operator v1.30.0 + the barman-cloud CNPG-I plugin v0.13.0 (WAL
+    # archiving / PITR to S3). Verified latest stable at add time (2026-07-10).
+    "cloudnative-pg": "0.29.0",
+    "plugin-barman-cloud": "0.7.0",
     # ARC — controller + runner scale set share one release version.
     "arc-controller": "0.14.2",
     "arc-runner-set": "0.14.2",
@@ -239,6 +244,31 @@ def cluster_components(
             "cert-manager",
             "kube-system",
             value_files=(f"cert-manager/{env.name}/config.yml",),
+        )
+    )
+
+    # CloudNativePG — Postgres operator, backing the stage-1/prod-1 `pg`
+    # clusters (PITR via WAL archiving to S3). The barman-cloud CNPG-I plugin
+    # handles the S3 side; it needs cert-manager (webhook certs), so both sit
+    # after it in install order.
+    components.append(
+        HelmComponent(
+            "cnpg",
+            "cloudnative-pg",
+            "cloudnative-pg",
+            "cloudnative-pg",
+            "cnpg-system",
+            value_files=("cloudnative-pg/values.yml",),
+        )
+    )
+    components.append(
+        HelmComponent(
+            "plugin-barman-cloud",
+            "cloudnative-pg",
+            "plugin-barman-cloud",
+            "plugin-barman-cloud",
+            "cnpg-system",
+            value_files=("plugin-barman-cloud/values.yml",),
         )
     )
 
