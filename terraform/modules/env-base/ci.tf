@@ -1,9 +1,3 @@
-# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/ci.tf
-#
-# Stage-1 and prod-1 are intentionally near-identical until they're refactored
-# into shared modules. Any structural change here SHOULD be mirrored to the
-# sibling file unless the divergence is the whole point of the change.
-
 resource "aws_iam_user" "ci" {
   name = "CIUser"
   path = "/bots/"
@@ -43,7 +37,7 @@ resource "aws_iam_role" "ci" {
 data "aws_iam_policy_document" "ci" {
   dynamic "statement" {
     # the core account doesnt have a static website bucket
-    for_each = local.account_name != "adanalife-core" ? [1] : []
+    for_each = var.account_name != "adanalife-core" ? [1] : []
     content {
       sid    = "S3ReadWriteAccess"
       effect = "Allow"
@@ -61,7 +55,7 @@ data "aws_iam_policy_document" "ci" {
   }
 
   dynamic "statement" {
-    for_each = local.account_name != "adanalife-core" ? [1] : []
+    for_each = var.account_name != "adanalife-core" ? [1] : []
     content {
       sid    = "CloudFrontInvalidation"
       effect = "Allow"

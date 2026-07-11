@@ -70,11 +70,6 @@ variable "gcp_impersonate" {
   default = true
 }
 
-# a secret string between CloudFront and S3 to control access
-resource "random_password" "static_site_secret" {
-  length = 32
-}
-
 locals {
   org_name = "adanalife"
   # this is how we will refer to the account in other places
