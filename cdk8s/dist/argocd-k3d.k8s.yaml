@@ -72,15 +72,15 @@ spec:
           - env: development
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: development
             app: vlc-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: development
             app: onscreens-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -142,7 +142,7 @@ spec:
     - list:
         elements:
           - env: development
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -207,7 +207,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-supporting.k8s.yaml"
@@ -261,7 +261,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-data.k8s.yaml"

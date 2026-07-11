@@ -46,7 +46,7 @@ import imports.k8s as k8s
 from constructs import Construct
 
 REPO_URL = "git@github.com:adanalife/infra.git"
-TARGET_REVISION = "master"
+TARGET_REVISION = "main"
 ARGO_NS = "argocd"
 # One AppProject per source repo — a per-repo tenancy boundary so an Application
 # can only ever pull from its one repo and sync into its own namespaces (see the
@@ -83,7 +83,7 @@ CUTOVER_ENVS = ENVS
 # Envs whose *apps* run automated (prune + selfHeal) — a merged dist/ change
 # deploys itself. Applied per-env via a templatePatch on the apps ApplicationSet,
 # so the rest stay manual. stage-1 led; prod-1 joined once the version pins made
-# merge-to-master a deliberate deploy gesture (versions.yaml bump PRs). The DATA
+# a release merge a deliberate deploy gesture (versions.yaml bump PRs). The DATA
 # units NEVER autosync (Prune=false is their guarantee); supporting stays manual
 # too — only the apps set reads this.
 AUTOSYNC_ENVS = ("stage-1", "prod-1")
@@ -98,7 +98,7 @@ AUTOSYNC_HOLDOUTS: tuple[tuple[str, str], ...] = ()
 # components are scaled up/down by hand to keep the minipc free for prod + the
 # shared transcode job. prod must always match git, so it keeps selfHeal on.
 # Paired with unmanaged replicas in the tripbot deploy manifests (stage omits
-# spec.replicas via EnvConfig.manual_replicas), so an autosync on a develop
+# spec.replicas via EnvConfig.manual_replicas), so an autosync on a main
 # merge doesn't reset a scaled-down component either.
 SELFHEAL_OFF_ENVS = ("stage-1",)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
@@ -132,9 +132,11 @@ VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # The private platform-gateway repo — another cross-repo source (same split as
 # the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
 # per env). Delivers the gateway-twitch instance; both prod + stage run it.
+# Trunk-based (release-please), so both envs track main; prod stays
+# release-gated by the image pin in versions.yaml, stage floats the :main image.
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
-PLATFORM_GATEWAY_REVISIONS = {"prod-1": "master", "stage-1": "develop"}
+PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
 # The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
 # its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
 # repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
@@ -163,11 +165,11 @@ OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
 # ("cdk8s/dist/<env>-<app>.k8s.yaml") are identical to infra's, so only the
 # source repo + revision change per env.
 TRIPBOT_REPO_URL = "https://github.com/adanalife/tripbot.git"
-# Per-env revision: prod rides master (release-gated), stage + dev ride develop
-# (manifests float with the :develop image) — same philosophy as the console +
-# the image-tag pins. (local isn't Argo-managed — it kubectl-applies tripbot's
-# dist directly.)
-TRIPBOT_REVISIONS = {"prod-1": "master", "stage-1": "develop", "development": "develop"}
+# Trunk-based (release-please): every env tracks main; prod stays release-gated
+# by the image pin in versions.yaml (bumped only at release), stage + dev float
+# the :main image — same philosophy as the console + the image-tag pins. (local
+# isn't Argo-managed — it kubectl-applies tripbot's dist directly.)
+TRIPBOT_REVISIONS = {"prod-1": "main", "stage-1": "main", "development": "main"}
 # Envs whose APP workloads + identity Secrets Argo reads from the tripbot repo
 # instead of infra. Every Argo-managed env is now cut over: prod-1/stage-1 on the
 # minipc and development on the k3d cluster. infra no longer authors any tripbot
@@ -209,7 +211,7 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
     """The per-component ApplicationSet elements: one {env, app} per
     (env, platform, component), where app = "<component>-<platform>". Every env's
     app workloads are authored in the tripbot repo now, so each element sources it
-    at the env's revision (prod→master, stage/dev→develop). The component list +
+    at the env's revision (every env → main). The component list +
     each env's platforms drive the (env, platform, component) fan-out; it must
     stay in sync with the dist files tripbot's cdk8s emits. Lazy config import
     avoids an import cycle (config has no cycle, but kept local for symmetry)."""
@@ -389,7 +391,7 @@ class ArgoCD(Construct):
             selfheal=self._selfheal,
             selfheal_off_envs=SELFHEAL_OFF_ENVS,
             # Source repo + revision are per-element (see _app_elements): every env
-            # reads the tripbot repo at its own revision (prod→master, else develop).
+            # reads the tripbot repo at its own revision (main for every env).
             repo_url="{{.repo}}",
             target_revision_tmpl="{{.revision}}",
         )
@@ -481,7 +483,7 @@ class ArgoCD(Construct):
             )
         # The cross-repo console unit: one Application per env, sourcing the
         # PRIVATE tripbot-console repo's committed dist (per-env revision —
-        # stage follows develop, prod follows master). Same autosync posture
+        # every env follows main). Same autosync posture
         # as the apps set.
         if self.console_envs:
             self._application_set(
@@ -536,7 +538,7 @@ class ArgoCD(Construct):
             )
         # The cross-repo platform-gateway unit: one Application per env, sourcing
         # the PRIVATE platform-gateway repo's committed dist (<env>.k8s.yaml —
-        # the gateway-twitch instance). Per-env revision (stage→develop, prod→master),
+        # the gateway-twitch instance). Per-env revision (main for every env),
         # same autosync posture as the apps/console sets.
         if self.platform_gateway_envs:
             self._application_set(
@@ -556,7 +558,7 @@ class ArgoCD(Construct):
                 # sticks (the minipc gets freed for prod by hand) — same posture
                 # as the tripbot apps set. Paired with the stage gateways omitting
                 # spec.replicas (platform-gateway EnvConfig.manual_replicas), so an
-                # autosync on a develop merge doesn't reset a scaled-down gateway.
+                # autosync on a main merge doesn't reset a scaled-down gateway.
                 selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
                 target_revision_tmpl="{{.revision}}",

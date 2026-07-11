@@ -194,10 +194,10 @@ def test_identity_appset_sources_tripbot_and_never_prunes():
         assert src["directory"]["include"] == "{{.env}}-tripbot-identity.k8s.yaml"
         opts = ident["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
         assert "Prune=false" in opts
-        # prod rides master (release-gated); stage + dev ride develop
+        # trunk-based repo: every env tracks main (prod is release-gated by the
+        # image pin, not a branch)
         revs = {e["env"]: e["revision"] for e in elements}
-        assert revs.get("prod-1", "master") == "master"
-        assert all(v == "develop" for k, v in revs.items() if k != "prod-1")
+        assert all(v == "main" for v in revs.values())
 
 
 def test_notifications_secret_minipc_only():
@@ -242,8 +242,8 @@ def test_platform_gateway_appset_both_envs_cross_repo():
     revs = {
         e["env"]: e["revision"] for e in pg["spec"]["generators"][0]["list"]["elements"]
     }
-    # both prod + stage run gateway-twitch; prod pins master, stage floats develop
-    assert revs == {"prod-1": "master", "stage-1": "develop"}
+    # both prod + stage run gateway-twitch; trunk-based repo, both envs track main
+    assert revs == {"prod-1": "main", "stage-1": "main"}
     src = pg["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "git@github.com:adanalife/platform-gateway.git"
     assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
