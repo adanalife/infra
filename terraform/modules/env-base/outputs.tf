@@ -54,5 +54,5 @@ output "external_dns_user_name" {
 }
 
 output "ci_terraform_role_name" {
-  value = aws_iam_role.ci_terraform.name
+  value = module.ci.ci_terraform_role_name
 }

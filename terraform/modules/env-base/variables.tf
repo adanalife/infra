@@ -3,11 +3,6 @@
 # RDS, and the default VPC. Env-specific resources belong in the calling
 # root, not behind conditionals here.
 
-variable "account_name" {
-  type        = string
-  description = "Short account name, e.g. stage-1 (local.account_name in the root)"
-}
-
 variable "core_account_id" {
   type        = string
   description = "The AWS account ID for the core account"

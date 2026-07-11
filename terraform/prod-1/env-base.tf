@@ -7,7 +7,6 @@
 module "env_base" {
   source = "../modules/env-base"
 
-  account_name                       = local.account_name
   core_account_id                    = var.core_account_id
   external_dns_role                  = var.external_dns_role
   primary_subdomain                  = local.primary_subdomain
@@ -86,52 +85,52 @@ moved {
 
 moved {
   from = aws_iam_user.ci
-  to   = module.env_base.aws_iam_user.ci
+  to   = module.env_base.module.ci.aws_iam_user.ci
 }
 
 moved {
   from = aws_iam_access_key.ci
-  to   = module.env_base.aws_iam_access_key.ci
+  to   = module.env_base.module.ci.aws_iam_access_key.ci
 }
 
 moved {
   from = aws_iam_role.ci
-  to   = module.env_base.aws_iam_role.ci
+  to   = module.env_base.module.ci.aws_iam_role.ci
 }
 
 moved {
   from = aws_iam_policy.ci
-  to   = module.env_base.aws_iam_policy.ci
+  to   = module.env_base.module.ci.aws_iam_policy.ci
 }
 
 moved {
   from = aws_iam_user_policy_attachment.ci
-  to   = module.env_base.aws_iam_user_policy_attachment.ci
+  to   = module.env_base.module.ci.aws_iam_user_policy_attachment.ci
 }
 
 moved {
   from = aws_iam_role_policy_attachment.ci_role_access
-  to   = module.env_base.aws_iam_role_policy_attachment.ci_role_access
+  to   = module.env_base.module.ci.aws_iam_role_policy_attachment.ci_role_access
 }
 
 moved {
   from = aws_iam_role.ci_terraform
-  to   = module.env_base.aws_iam_role.ci_terraform
+  to   = module.env_base.module.ci.aws_iam_role.ci_terraform
 }
 
 moved {
   from = aws_iam_role_policy_attachment.ci_terraform_managed_policy
-  to   = module.env_base.aws_iam_role_policy_attachment.ci_terraform_managed_policy
+  to   = module.env_base.module.ci.aws_iam_role_policy_attachment.ci_terraform_managed_policy
 }
 
 moved {
   from = aws_iam_policy.ci_terraform_assume_role
-  to   = module.env_base.aws_iam_policy.ci_terraform_assume_role
+  to   = module.env_base.module.ci.aws_iam_policy.ci_terraform_assume_role
 }
 
 moved {
   from = aws_iam_user_policy_attachment.ci_terraform
-  to   = module.env_base.aws_iam_user_policy_attachment.ci_terraform
+  to   = module.env_base.module.ci.aws_iam_user_policy_attachment.ci_terraform
 }
 
 moved {
