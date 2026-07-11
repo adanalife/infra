@@ -180,6 +180,6 @@ resource "aws_iam_policy" "ci_terraform_secrets_read" {
 }
 
 resource "aws_iam_role_policy_attachment" "ci_terraform_secrets_read" {
-  role       = aws_iam_role.ci_terraform.name
+  role       = module.env_base.ci_terraform_role_name
   policy_arn = aws_iam_policy.ci_terraform_secrets_read.arn
 }

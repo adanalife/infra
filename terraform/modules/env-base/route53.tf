@@ -1,15 +1,9 @@
-# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/route53.tf
-#
-# Stage-1 and prod-1 are intentionally near-identical until they're refactored
-# into shared modules. Any structural change here SHOULD be mirrored to the
-# sibling file unless the divergence is the whole point of the change.
-
 resource "aws_route53_zone" "primary_subdomain_zone" {
-  name = local.primary_subdomain
+  name = var.primary_subdomain
 }
 
 resource "aws_route53_zone" "secondary_subdomain_zone" {
-  name = local.secondary_subdomain
+  name = var.secondary_subdomain
 }
 
 # resource aws_route53_record example {

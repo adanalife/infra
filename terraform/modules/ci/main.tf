@@ -1,9 +1,3 @@
-# KEEP-IN-SYNC: terraform/{stage-1,prod-1}/ci.tf
-#
-# Stage-1 and prod-1 are intentionally near-identical until they're refactored
-# into shared modules. Any structural change here SHOULD be mirrored to the
-# sibling file unless the divergence is the whole point of the change.
-
 resource "aws_iam_user" "ci" {
   name = "CIUser"
   path = "/bots/"
@@ -43,14 +37,14 @@ resource "aws_iam_role" "ci" {
 data "aws_iam_policy_document" "ci" {
   dynamic "statement" {
     # the core account doesnt have a static website bucket
-    for_each = local.account_name != "adanalife-core" ? [1] : []
+    for_each = var.static_website_bucket_arn != null ? [1] : []
     content {
       sid    = "S3ReadWriteAccess"
       effect = "Allow"
 
       resources = [
-        aws_s3_bucket.static_website.arn,
-        "${aws_s3_bucket.static_website.arn}/*",
+        var.static_website_bucket_arn,
+        "${var.static_website_bucket_arn}/*",
       ]
 
       actions = [
@@ -61,13 +55,13 @@ data "aws_iam_policy_document" "ci" {
   }
 
   dynamic "statement" {
-    for_each = local.account_name != "adanalife-core" ? [1] : []
+    for_each = var.cdn_arn != null ? [1] : []
     content {
       sid    = "CloudFrontInvalidation"
       effect = "Allow"
 
       resources = [
-        aws_cloudfront_distribution.primary_cdn.arn,
+        var.cdn_arn,
       ]
 
       actions = [
@@ -187,4 +181,8 @@ output "ci_user_secret" {
 
 output "ci_role_arn" {
   value = aws_iam_role.ci.arn
+}
+
+output "ci_terraform_role_name" {
+  value = aws_iam_role.ci_terraform.name
 }
