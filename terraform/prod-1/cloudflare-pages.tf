@@ -23,7 +23,7 @@ variable "project_name" {
 variable "production_branch" {
   type        = string
   description = "Git branch used for production deployments of the Pages project"
-  default     = "master"
+  default     = "main"
 }
 
 # Token sourced from AWS Secrets Manager — see secrets.tf for the

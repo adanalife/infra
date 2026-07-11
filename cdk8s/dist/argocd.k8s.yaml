@@ -153,51 +153,51 @@ spec:
           - env: prod-1
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: vlc-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: onscreens-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: tripbot-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: vlc-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: onscreens-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: stage-1
             app: tripbot-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: vlc-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: onscreens-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: vlc-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: onscreens-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -263,9 +263,9 @@ spec:
     - list:
         elements:
           - env: prod-1
-            revision: master
+            revision: main
           - env: stage-1
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -331,7 +331,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-supporting.k8s.yaml"
@@ -387,7 +387,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-data.k8s.yaml"
@@ -441,7 +441,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: ups-monitor.k8s.yaml
@@ -494,7 +494,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: arc.k8s.yaml
@@ -673,9 +673,9 @@ spec:
     - list:
         elements:
           - env: prod-1
-            revision: master
+            revision: main
           - env: stage-1
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy

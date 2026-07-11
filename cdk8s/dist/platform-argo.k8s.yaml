@@ -45,7 +45,7 @@ spec:
         valueFiles:
           - $values/k8s/metrics-server/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -77,7 +77,7 @@ spec:
         valueFiles:
           - $values/k8s/external-secrets/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -109,7 +109,7 @@ spec:
         valueFiles:
           - $values/k8s/tailscale-operator/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -141,7 +141,7 @@ spec:
         valueFiles:
           - $values/k8s/cert-manager/prod-1/config.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -173,7 +173,7 @@ spec:
         valueFiles:
           - $values/k8s/monitoring/node-exporter/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -205,7 +205,7 @@ spec:
         valueFiles:
           - $values/k8s/monitoring/prod-1/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -238,7 +238,7 @@ spec:
           - $values/k8s/nats/values.yml
           - $values/k8s/nats/prod-1/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -271,7 +271,7 @@ spec:
           - $values/k8s/nats/values.yml
           - $values/k8s/nats/stage-1/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -303,7 +303,7 @@ spec:
         valueFiles:
           - $values/k8s/arc/controller/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -335,7 +335,7 @@ spec:
         valueFiles:
           - $values/k8s/arc/runners/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc

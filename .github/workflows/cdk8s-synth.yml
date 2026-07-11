@@ -5,7 +5,7 @@ name: cdk8s-synth
 #
 # dist/ (the GitOps source Argo reads) is kept in sync by CI itself: on PRs,
 # a stale dist/ gets re-synthed and pushed back to the branch as a follow-up
-# commit, so nobody has to run `task cdk8s:synth` locally. On master pushes
+# commit, so nobody has to run `task cdk8s:synth` locally. On main pushes
 # the job is verify-only and fails if dist/ is stale (belt-and-braces for
 # anything that slips around the PR path).
 #
@@ -22,7 +22,7 @@ on:
       - '.github/workflows/cdk8s-synth.yml'
   push:
     branches:
-      - master
+      - main
     paths:
       - 'cdk8s/**'
       - '.github/workflows/cdk8s-synth.yml'
@@ -101,11 +101,11 @@ jobs:
           git push
           echo "::notice::dist/ was stale — pushed a re-synth commit; checks re-run on it."
 
-      # master: verify-only. The PR path above should make this unreachable.
-      - name: Assert committed dist/ is up to date (master)
+      # main: verify-only. The PR path above should make this unreachable.
+      - name: Assert committed dist/ is up to date (main)
         if: github.event_name == 'push'
         run: |
           if ! git diff --exit-code -- dist/; then
-            echo "::error::dist/ is stale on master — run 'task cdk8s:synth' and commit the result."
+            echo "::error::dist/ is stale on main — run 'task cdk8s:synth' and commit the result."
             exit 1
           fi

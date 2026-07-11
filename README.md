@@ -31,7 +31,7 @@ task k8s:dev:up
 # for one of tripbot|vlc|obs|onscreens; omit for all four:
 task k8s:dev:deploy APP=tripbot
 
-# Revert to CI's :develop image (re-enables selfHeal + re-syncs):
+# Revert to CI's :main image (re-enables selfHeal + re-syncs):
 task k8s:dev:sync
 
 # At a glance: pods, the image tag each app runs, and Argo app health:
@@ -41,7 +41,7 @@ task k8s:dev:status
 task k8s:dev:down
 ```
 
-A fresh cluster cold-starts on CI's `adanalife/*:develop` images from the
+A fresh cluster cold-starts on CI's `adanalife/*:main` images from the
 registry (so `k8s:dev:up` just works); `k8s:dev:deploy` is only for running a
 local build. While you're iterating on `:dev-local`, Argo shows the app
 `OutOfSync` — that's expected; `k8s:dev:sync` clears it.
