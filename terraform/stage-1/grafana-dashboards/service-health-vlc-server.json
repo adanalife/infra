@@ -357,6 +357,35 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Clip-transition stutter",
+      "description": "OBS render-thread frame skips overlaid with clip-transition markers (playback progress wrapping to 0). A skip spike aligned with a transition marker is the between-clips stutter. The 60s scrape interval means alignment is statistical: counters catch every skip, but not its sub-second timing, and a gap where VLC displays nothing between clips never registers as a skip.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 62, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "increase(obs_render_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "render frames skipped [{{service_platform}} {{deployment_environment}}]" },
+        { "refId": "B", "expr": "(idelta(vlc_player_progress_fraction{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[2m]) < bool -0.5)", "legendFormat": "clip transition [{{service_platform}} {{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "clip transition.*" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [4, 4] } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
