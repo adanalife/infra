@@ -386,6 +386,46 @@
           }
         ]
       }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Clip swap dead-air (p50 / p95 / p99)",
+      "description": "Measured inside vlc-server via libvlc events: seconds from one clip ending (or a skip being requested) until the next clip reaches Playing. The direct measurement of the between-clips seam — millisecond-accurate, unlike the scrape-aligned stutter panel above.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 70, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, service_platform) (rate(vlc_player_media_swap_gap_seconds_bucket{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50 [{{service_platform}}]" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, service_platform) (rate(vlc_player_media_swap_gap_seconds_bucket{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 [{{service_platform}}]" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, service_platform) (rate(vlc_player_media_swap_gap_seconds_bucket{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p99 [{{service_platform}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Clip swaps / hour",
+      "description": "Rate of clip boundaries observed by the swap-gap tracker (histogram sample count). A sustained drop to zero while streaming means playback is stuck on one clip or the tracker events stopped firing.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 70, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (service_platform) (rate(vlc_player_media_swap_gap_seconds_count{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])) * 3600", "legendFormat": "swaps/h [{{service_platform}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        },
+        "overrides": []
+      }
     }
   ]
 }
