@@ -258,3 +258,35 @@ def test_data_appset_never_prunes_either_variant():
         data = _appset(_synth(**kwargs), "tripbot-data")
         opts = data["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
         assert "Prune=false" in opts
+
+
+def _by_name(objs, kind, name):
+    return next(o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name)
+
+
+def test_console_argo_rbac_scopes_to_applications_for_console_sas():
+    objs = _synth()
+    role = _by_name(objs, "Role", "tripbot-console-argo")
+    assert role["metadata"]["namespace"] == "argocd"
+    # applications only — no other Argo CRs / config, no cluster scope
+    assert len(role["rules"]) == 1
+    rule = role["rules"][0]
+    assert rule["apiGroups"] == ["argoproj.io"]
+    assert rule["resources"] == ["applications"]
+    assert set(rule["verbs"]) == {"get", "list", "watch", "patch"}
+    # bound to each minipc console env's ServiceAccount
+    rb = _by_name(objs, "RoleBinding", "tripbot-console-argo")
+    assert rb["roleRef"]["name"] == "tripbot-console-argo"
+    subjects = {(s["name"], s["namespace"]) for s in rb["subjects"]}
+    assert subjects == {("tripbot-console", "prod-1"), ("tripbot-console", "stage-1")}
+
+
+def test_no_console_argo_rbac_on_dev():
+    # dev's console isn't Argo-managed (CONSOLE_REVISIONS is prod/stage only), so
+    # the dev Argo grants no console→Applications access.
+    objs = _synth(**_DEV)
+    assert not any(
+        o["kind"] in ("Role", "RoleBinding")
+        and o["metadata"]["name"] == "tripbot-console-argo"
+        for o in objs
+    )
