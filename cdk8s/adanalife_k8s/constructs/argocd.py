@@ -342,6 +342,12 @@ class ArgoCD(Construct):
                 namespaces=_project_namespaces(self.console_envs),
                 cluster_resources=[],
             )
+            # Let the console read + roll back its own Argo Applications (the
+            # rollback button pauses auto-sync and syncs to the prior revision;
+            # the dashboard flags auto-sync-paused apps). Applications live here in
+            # the argocd namespace, which the console's AppProject can't grant — so
+            # the grant lives with Argo, scoped to `applications` only.
+            self._console_argo_rbac()
         if self.video_pipeline_envs:
             self._app_project(
                 id="project-video-pipeline",
@@ -657,6 +663,41 @@ class ArgoCD(Construct):
                     "namespaceResourceWhitelist": [{"group": "*", "kind": "*"}],
                 },
             )
+        )
+
+    def _console_argo_rbac(self):
+        """A Role + RoleBinding in the argocd namespace letting each console
+        env's `tripbot-console` ServiceAccount get/list/watch/patch Argo
+        `applications` — the minimum for the console's rollback button and its
+        auto-sync-paused indicator. Scoped to applications only (no Argo config,
+        no other CRs), one binding covering this Argo instance's console envs."""
+        k8s.KubeRole(
+            self,
+            "console-argo-role",
+            metadata=k8s.ObjectMeta(name="tripbot-console-argo", namespace=ARGO_NS),
+            rules=[
+                k8s.PolicyRule(
+                    api_groups=["argoproj.io"],
+                    resources=["applications"],
+                    verbs=["get", "list", "watch", "patch"],
+                )
+            ],
+        )
+        k8s.KubeRoleBinding(
+            self,
+            "console-argo-rolebinding",
+            metadata=k8s.ObjectMeta(name="tripbot-console-argo", namespace=ARGO_NS),
+            role_ref=k8s.RoleRef(
+                api_group="rbac.authorization.k8s.io",
+                kind="Role",
+                name="tripbot-console-argo",
+            ),
+            subjects=[
+                k8s.Subject(
+                    kind="ServiceAccount", name="tripbot-console", namespace=env
+                )
+                for env in self.console_envs
+            ],
         )
 
     def _application_set(
