@@ -377,37 +377,6 @@
           { "matcher": { "id": "byName", "options": "playing" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
         ]
       }
-    },
-    {
-      "id": 47,
-      "type": "row",
-      "title": "Clip playback (currently-playing dashcam segment)",
-      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 1 }
-    },
-    {
-      "id": 48,
-      "type": "gauge",
-      "title": "Clip progress",
-      "description": "Playback progress through the currently-playing clip as a 0..1 fraction (vlc_player_progress_fraction).",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 41, "w": 8, "h": 8 },
-      "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (vlc_player_progress_fraction{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
-      ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] }
-    },
-    {
-      "id": 49,
-      "type": "timeseries",
-      "title": "Time remaining in current clip",
-      "description": "Seconds left in the currently-playing clip (media length minus playhead), vlc_player_time_remaining_seconds. Sawtooths down to ~0 then jumps at each clip transition.",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 8, "y": 41, "w": 16, "h": 8 },
-      "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (vlc_player_time_remaining_seconds{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     }
   ]
 }
