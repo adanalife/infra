@@ -377,6 +377,48 @@
           { "matcher": { "id": "byName", "options": "playing" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
         ]
       }
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "Decoder corruption (OBS-side, from decode logs)",
+      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 1 }
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "OBS decode errors /s",
+      "description": "Rate of H.264 decode errors in the OBS ffmpeg decoder (concealing, co-located POCs, MB-decode / cabac failures) — the decoder working on frames whose reference pictures are missing or mismatched. Spikes mean OBS is decoding across a clip splice without a clean reference reset. Baseline is near-zero on 3.17; a 10-20x jump was the gather (3.18) whole-frame block-corruption signature. Sourced from Loki (the errors exist only as decoder log lines, and prod is at the Prometheus active-series cap).",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 41, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (pod) (rate({service_name=\"obs\", namespace=~\"$deployment_environment\", pod=~\"obs-($platform)-.*\"} |~ \"co located POCs unavailable|concealing [0-9]+ DC.*errors in [BP] frame|error while decoding MB|cabac decode of qscale diff failed\" [$__rate_interval]))", "legendFormat": "{{pod}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.5 },
+            { "color": "red", "value": 2 }
+          ]},
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "Co-located POC failures (splice-specific)",
+      "description": "count/interval of `co located POCs unavailable` — ffmpeg's error for a B-frame whose co-located reference picture is gone, i.e. decoding a clip boundary with no reference reset. The cleanest gather-vs-baseline discriminator: ~10 per 10min on 3.17, 80-200 per 10min under gather (3.18).",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 12, "y": 41, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (pod) (count_over_time({service_name=\"obs\", namespace=~\"$deployment_environment\", pod=~\"obs-($platform)-.*\"} |~ \"co located POCs unavailable\" [$__interval]))", "legendFormat": "{{pod}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 40 } }, "overrides": [] }
     }
   ]
 }
