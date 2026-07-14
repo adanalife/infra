@@ -29,7 +29,7 @@ from adanalife_k8s.naming import meta_labels, selector
 
 # GHCR mirror, not Docker Hub (the ghcr-base-image-mirrors decision) — the
 # mirror pair is registered in the playout repo's mirror-images workflow.
-IMAGE = "ghcr.io/adanalife/mirror/mediamtx:v1.19.2"
+IMAGE = "ghcr.io/adanalife/mirror/mediamtx:1.19.2"
 RTSP_PORT = 8554
 RTP_PORT = 8000
 RTCP_PORT = 8001

@@ -42,7 +42,7 @@ spec:
         app: mediamtx-youtube
     spec:
       containers:
-        - image: ghcr.io/adanalife/mirror/mediamtx:v1.19.2
+        - image: ghcr.io/adanalife/mirror/mediamtx:1.19.2
           name: mediamtx-youtube
           ports:
             - containerPort: 8554
@@ -155,7 +155,7 @@ spec:
         app: mediamtx-twitch
     spec:
       containers:
-        - image: ghcr.io/adanalife/mirror/mediamtx:v1.19.2
+        - image: ghcr.io/adanalife/mirror/mediamtx:1.19.2
           name: mediamtx-twitch
           ports:
             - containerPort: 8554
