@@ -158,6 +158,23 @@ OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # Trunk-based (release-please): every env tracks main; prod stays release-gated by
 # the image pin in versions.yaml, not by a separate branch.
 OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
+# The playout repo — the Rust/GStreamer playout server (vlc-server's successor):
+# it publishes the dashcam stream over RTSP into the MediaMTX relay, and OBS
+# pulls from the relay. PUBLIC like obs, so Argo fetches it over anonymous
+# HTTPS — no deploy key / repo Secret. Its cdk8s/dist deploy units follow the
+# obs shape (one <env>-playout-<platform>.k8s.yaml per platform, globbed into
+# one {{.env}}-playout Application). Trunk-based (release-please): both envs
+# track main; prod stays release-gated by the image pin in versions.yaml.
+# prod-1 playout is an autosync holdout — it feeds the live stream at cutover,
+# so its deploys stay a deliberate manual sync (same reasoning as prod obs).
+PLAYOUT_PROJECT = "playout"
+PLAYOUT_REPO_URL = "https://github.com/adanalife/playout.git"
+PLAYOUT_REVISIONS = {"stage-1": "main", "prod-1": "main"}
+# Envs running the per-platform MediaMTX relays (infra-authored,
+# dist/<env>-mediamtx.k8s.yaml) — the minipc envs, matching where playout
+# deploys. Unlike the other infra units (supporting/data, manual sync), the
+# relay autosyncs: restarts are cheap and it should self-heal.
+MEDIAMTX_ENVS = ("prod-1", "stage-1")
 # The tripbot repo — Argo's source for the APP workloads (the four images built
 # from it: tripbot/vlc/onscreens/obs) once they migrate out of infra/cdk8s. It's
 # PUBLIC, so Argo fetches it over anonymous https — no deploy key / repo Secret
@@ -297,6 +314,11 @@ class ArgoCD(Construct):
         # instead of tripbot's cdk8s — now every env, including the k3d dev
         # instance (the obs repo is public, so dev fetches it anonymously).
         self.obs_envs = tuple(e for e in envs if e in OBS_REVISIONS)
+        # Envs whose playout (the public playout repo) this Argo delivers —
+        # minipc-only; empty on the k3d dev instance.
+        self.playout_envs = tuple(e for e in envs if e in PLAYOUT_REVISIONS)
+        # Envs whose MediaMTX relays (infra-authored) this Argo delivers.
+        self.mediamtx_envs = tuple(e for e in envs if e in MEDIAMTX_ENVS)
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -378,6 +400,16 @@ class ArgoCD(Construct):
                 namespaces=list(self.obs_envs),
                 cluster_resources=[],
             )
+        if self.playout_envs:
+            self._app_project(
+                id="project-playout",
+                name=PLAYOUT_PROJECT,
+                description="playout server (RTSP publisher feeding the MediaMTX relay), from the public playout repo",
+                source_repos=[PLAYOUT_REPO_URL],
+                # App namespace only — playout creates nothing cluster-scoped.
+                namespaces=list(self.playout_envs),
+                cluster_resources=[],
+            )
         # ApplicationSets, one Application each per unit. The apps set is
         # per-COMPONENT (one Application per <env>-<component>-<platform> →
         # cdk8s/dist/<env>-<component>-<platform>.k8s.yaml in the TRIPBOT repo), so
@@ -448,6 +480,23 @@ class ArgoCD(Construct):
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
+        # The MediaMTX relays (infra-authored, per-env <env>-mediamtx.k8s.yaml).
+        # Unlike supporting/data this unit AUTOSYNCS with selfHeal: a relay
+        # restart is cheap (the publisher + OBS reconnect), so a merged dist
+        # change deploys itself and drift gets reverted — no holdout, no
+        # selfheal_off_envs (nothing here is hand-scaled).
+        if self.mediamtx_envs:
+            self._application_set(
+                id="appset-mediamtx",
+                name="mediamtx",
+                project=INFRA_PROJECT,
+                elements=[{"env": e} for e in self.mediamtx_envs],
+                app_name_tmpl="{{.env}}-mediamtx",
+                include_tmpl="{{.env}}-mediamtx.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                selfheal=self._selfheal,
+            )
         # The UPS monitor (observe-only NUT client) — a cluster-SINGLETON, not
         # per-env, so it's a one-element set with static templates (no .env). It's
         # minipc-only: the k3d dev Argo passes ups_monitor=False because that
@@ -591,6 +640,29 @@ class ArgoCD(Construct):
                 automated_holdouts=(("prod-1", "obs"),),
                 selfheal=self._selfheal,
                 repo_url=OBS_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
+        if self.playout_envs:
+            # One Application per env, managing every platform's playout via
+            # the include glob — the obs shape ({{.env}}-playout globs
+            # {{.env}}-playout-*.k8s.yaml from the playout repo's dist).
+            self._application_set(
+                id="appset-playout",
+                name="playout",
+                project=PLAYOUT_PROJECT,
+                elements=[
+                    {"env": e, "app": "playout", "revision": PLAYOUT_REVISIONS[e]}
+                    for e in self.playout_envs
+                ],
+                app_name_tmpl="{{.env}}-playout",
+                include_tmpl="{{.env}}-playout-*.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                # prod playout feeds the live stream at cutover, so its deploys
+                # stay a deliberate manual sync — same reasoning as prod obs.
+                automated_holdouts=(("prod-1", "playout"),),
+                selfheal=self._selfheal,
+                repo_url=PLAYOUT_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
