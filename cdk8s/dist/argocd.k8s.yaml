@@ -172,6 +172,25 @@ spec:
       kind: "*"
 ---
 apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: playout
+  namespace: argocd
+spec:
+  description: playout server (RTSP publisher feeding the MediaMTX relay), from the public playout repo
+  sourceRepos:
+    - https://github.com/adanalife/playout.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: tripbot-apps
@@ -450,6 +469,68 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: mediamtx
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+          - env: stage-1
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-mediamtx"
+    spec:
+      project: infra
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: main
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-mediamtx.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
@@ -820,6 +901,72 @@ spec:
             - .spec.volumeClaimTemplates[]?.kind
   templatePatch: |
     {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: playout
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            app: playout
+            revision: main
+          - env: stage-1
+            app: playout
+            revision: main
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-playout"
+    spec:
+      project: playout
+      source:
+        repoURL: https://github.com/adanalife/playout.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-playout-*.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  templatePatch: |
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "playout"))) }}
     spec:
       syncPolicy:
         automated:

@@ -23,6 +23,7 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_pvc,
 )
 from adanalife_k8s.constructs.arc import Arc
+from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
@@ -119,6 +120,20 @@ class DataChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
+
+
+class MediamtxChart(Chart):
+    """The per-platform MediaMTX RTSP relays for one env — the endpoint OBS
+    pulls the dashcam stream from, fed by the playout publisher (see
+    constructs/mediamtx.py). Its own deploy unit / Argo Application
+    (dist/<env>-mediamtx.k8s.yaml, the appset-mediamtx set in
+    constructs/argocd.py), decoupled from supporting/data: relay restarts are
+    cheap and it autosyncs, unlike the manual-sync infra units."""
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        self.env = env
+        Mediamtx(self, env=env)
 
 
 class DashcamPVChart(Chart):

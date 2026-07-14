@@ -103,6 +103,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "video-pipeline": ["git@github.com:adanalife/video-pipeline.git"],
         "platform-gateway": ["git@github.com:adanalife/platform-gateway.git"],
         "obs": ["https://github.com/adanalife/obs.git"],
+        "playout": ["https://github.com/adanalife/playout.git"],
     }
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
         want_repos
@@ -119,6 +120,8 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("video-pipeline", "video-pipeline"),
         ("platform-gateway", "platform-gateway"),
         ("obs", "obs"),
+        ("playout", "playout"),
+        ("mediamtx", "infra"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
     # cluster-resource allowlists are scoped to what each repo's dist actually
@@ -138,6 +141,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     assert kinds("video-pipeline") == {"PriorityClass"}
     assert kinds("tripbot-console") == set()
     assert kinds("platform-gateway") == set()
+    assert kinds("playout") == set()
     # destinations are scoped to the namespaces each project's apps target. The
     # console reaches into the isolated data namespace too (read-only RBAC for
     # the live status views), so its project must permit both — tripbot apps and
@@ -154,6 +158,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     }
     assert dests("video-pipeline") == {"prod-1", "stage-1"}
     assert dests("platform-gateway") == {"prod-1", "stage-1"}
+    assert dests("playout") == {"prod-1", "stage-1"}
 
 
 def test_minipc_apps_autosync_except_prod_obs():
@@ -251,6 +256,45 @@ def test_platform_gateway_appset_both_envs_cross_repo():
     # dev cluster carries no private-repo deploy key, so no platform-gateway unit
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "platform-gateway")
+
+
+def test_playout_appset_cross_repo_with_prod_holdout():
+    objs = _synth()
+    po = _appset(objs, "playout")
+    src = po["spec"]["template"]["spec"]["source"]
+    assert src["repoURL"] == "https://github.com/adanalife/playout.git"
+    # one Application per env, globbing every platform's dist file
+    assert src["directory"]["include"] == "{{.env}}-playout-*.k8s.yaml"
+    revs = {
+        e["env"]: e["revision"] for e in po["spec"]["generators"][0]["list"]["elements"]
+    }
+    assert revs == {"stage-1": "main", "prod-1": "main"}
+    # prod playout feeds the live stream at cutover — deliberate manual sync
+    patch = po["spec"]["templatePatch"]
+    assert '(not (and (eq .env "prod-1") (eq .app "playout")))' in patch
+    # the public repo needs no deploy key, and the dev cluster runs no playout
+    dev = _synth(**_DEV)
+    with pytest.raises(StopIteration):
+        _appset(dev, "playout")
+    assert "playout" not in {
+        o["metadata"]["name"] for o in dev if o["kind"] == "AppProject"
+    }
+
+
+def test_mediamtx_appset_autosyncs_both_envs():
+    objs = _synth()
+    mtx = _appset(objs, "mediamtx")
+    src = mtx["spec"]["template"]["spec"]["source"]
+    # infra-authored unit: sources the infra repo like supporting/data...
+    assert src["repoURL"] == "git@github.com:adanalife/infra.git"
+    assert src["directory"]["include"] == "{{.env}}-mediamtx.k8s.yaml"
+    # ...but unlike them it autosyncs with selfHeal on (relay restarts are cheap)
+    patch = mtx["spec"]["templatePatch"]
+    assert "prune: true" in patch
+    assert "selfHeal: true" in patch
+    assert "selfHeal: false" not in patch
+    with pytest.raises(StopIteration):
+        _appset(_synth(**_DEV), "mediamtx")
 
 
 def test_data_appset_never_prunes_either_variant():
