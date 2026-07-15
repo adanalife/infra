@@ -305,14 +305,14 @@ spec:
     - list:
         elements:
           - env: development
-            app: obs
+            app: obs-twitch
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-obs"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: obs
       source:
@@ -320,7 +320,7 @@ spec:
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
-          include: "{{.env}}-obs-*.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -346,8 +346,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
-    {{- if and ((eq .env "development")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
+    {{- if and ((eq .env "development")) (not (or (and (eq .env "prod-1") (eq .app "obs-twitch")) (and (eq .env "prod-1") (eq .app "obs-youtube")))) }}
     spec:
       syncPolicy:
         automated:

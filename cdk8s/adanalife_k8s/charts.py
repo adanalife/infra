@@ -123,17 +123,19 @@ class DataChart(Chart):
 
 
 class MediamtxChart(Chart):
-    """The per-platform MediaMTX RTSP relays for one env — the endpoint OBS
+    """One platform's MediaMTX RTSP relay for one env — the endpoint OBS
     pulls the dashcam stream from, fed by the playout publisher (see
     constructs/mediamtx.py). Its own deploy unit / Argo Application
-    (dist/<env>-mediamtx.k8s.yaml, the appset-mediamtx set in
+    (dist/<env>-mediamtx-<platform>.k8s.yaml, the appset-mediamtx set in
     constructs/argocd.py), decoupled from supporting/data: relay restarts are
-    cheap and it autosyncs, unlike the manual-sync infra units."""
+    cheap and it autosyncs, unlike the manual-sync infra units. Per-platform
+    like obs/playout, so one platform's relay can be paused or scaled without
+    touching its siblings."""
 
-    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig, platform: str):
         super().__init__(scope, id, namespace=env.namespace or None)
         self.env = env
-        Mediamtx(self, env=env)
+        Mediamtx(self, env=env, platform=platform)
 
 
 class DashcamPVChart(Chart):

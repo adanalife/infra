@@ -483,13 +483,19 @@ spec:
     - list:
         elements:
           - env: prod-1
+            app: mediamtx-twitch
+          - env: prod-1
+            app: mediamtx-youtube
           - env: stage-1
+            app: mediamtx-youtube
+          - env: stage-1
+            app: mediamtx-twitch
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-mediamtx"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: infra
       source:
@@ -497,7 +503,7 @@ spec:
         targetRevision: main
         path: cdk8s/dist
         directory:
-          include: "{{.env}}-mediamtx.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -523,6 +529,8 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
@@ -787,15 +795,38 @@ spec:
     - list:
         elements:
           - env: prod-1
+            app: gateway-twitch
+            revision: main
+          - env: prod-1
+            app: gateway-youtube
+            revision: main
+          - env: prod-1
+            app: gateway-shared
             revision: main
           - env: stage-1
+            app: gateway-twitch
+            revision: main
+          - env: stage-1
+            app: gateway-youtube
+            revision: main
+          - env: stage-1
+            app: gateway-tiktok
+            revision: main
+          - env: stage-1
+            app: gateway-facebook
+            revision: main
+          - env: stage-1
+            app: gateway-instagram
+            revision: main
+          - env: stage-1
+            app: gateway-shared
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-platform-gateway"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: platform-gateway
       source:
@@ -803,7 +834,7 @@ spec:
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
-          include: "{{.env}}.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -829,6 +860,8 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
@@ -855,17 +888,23 @@ spec:
     - list:
         elements:
           - env: prod-1
-            app: obs
+            app: obs-twitch
+            revision: main
+          - env: prod-1
+            app: obs-youtube
             revision: main
           - env: stage-1
-            app: obs
+            app: obs-youtube
+            revision: main
+          - env: stage-1
+            app: obs-twitch
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-obs"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: obs
       source:
@@ -873,7 +912,7 @@ spec:
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
-          include: "{{.env}}-obs-*.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -899,8 +938,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
-    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (or (and (eq .env "prod-1") (eq .app "obs-twitch")) (and (eq .env "prod-1") (eq .app "obs-youtube")))) }}
     spec:
       syncPolicy:
         automated:
@@ -921,17 +962,20 @@ spec:
     - list:
         elements:
           - env: prod-1
-            app: playout
+            app: playout-twitch
+            revision: main
+          - env: prod-1
+            app: playout-youtube
             revision: main
           - env: stage-1
-            app: playout
+            app: playout-youtube
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-playout"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: playout
       source:
@@ -939,7 +983,7 @@ spec:
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
-          include: "{{.env}}-playout-*.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -965,8 +1009,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
-    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "playout"))) }}
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (or (and (eq .env "prod-1") (eq .app "playout-twitch")) (and (eq .env "prod-1") (eq .app "playout-youtube")))) }}
     spec:
       syncPolicy:
         automated:

@@ -130,13 +130,23 @@ VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
 VIDEO_PIPELINE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-video-pipeline"
 VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # The private platform-gateway repo — another cross-repo source (same split as
-# the console: the repo owns its own cdk8s/dist deploy units, one <env>.k8s.yaml
-# per env). Delivers the gateway-twitch instance; both prod + stage run it.
+# the console: the repo owns its own cdk8s/dist deploy units, one
+# <env>-gateway-<platform>.k8s.yaml per instance plus <env>-gateway-shared
+# for the per-namespace ExternalSecrets). Both prod + stage run it.
 # Trunk-based (release-please), so both envs track main; prod stays
 # release-gated by the image pin in versions.yaml, stage floats the :main image.
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
+# The gateway instances each env runs — a cross-repo contract with the gateway
+# repo's cdk8s config (ENVS[env].platforms): it must track the dist files that
+# repo emits, or the appset would generate Applications pointing at files that
+# don't exist (or miss new ones). Dormant platforms (parked at replicas:0)
+# still get an Application — the manifest exists either way.
+PLATFORM_GATEWAY_PLATFORMS = {
+    "prod-1": ("twitch", "youtube"),
+    "stage-1": ("twitch", "youtube", "tiktok", "facebook", "instagram"),
+}
 # The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
 # its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
 # repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
@@ -148,10 +158,10 @@ PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
 OBS_PROJECT = "obs"
 OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # Whole-env cutover: every obs-* platform for the env is delivered by the obs
-# repo's own appset (one {{.env}}-obs Application globbing both platforms) and
+# repo's own appset (one {{.env}}-obs-<platform> Application per instance) and
 # excluded from tripbot-apps. prod-1 joined on a planned-downtime cutover (the
 # live twitch encoder restarts onto the obs-repo image) — youtube was already
-# on the obs repo, so the whole-env app adopts it cleanly and only twitch moves.
+# on the obs repo, so the env's apps adopt it cleanly and only twitch moves.
 # development joined last so tripbot can drop its obs construct entirely: the obs
 # repo emits development-obs-twitch.k8s.yaml at main, and the dev k3d Argo
 # fetches the public obs repo over anonymous HTTPS (no deploy key) like the minipc.
@@ -162,16 +172,23 @@ OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
 # it publishes the dashcam stream over RTSP into the MediaMTX relay, and OBS
 # pulls from the relay. PUBLIC like obs, so Argo fetches it over anonymous
 # HTTPS — no deploy key / repo Secret. Its cdk8s/dist deploy units follow the
-# obs shape (one <env>-playout-<platform>.k8s.yaml per platform, globbed into
-# one {{.env}}-playout Application). Trunk-based (release-please): both envs
-# track main; prod stays release-gated by the image pin in versions.yaml.
-# prod-1 playout is an autosync holdout — it feeds the live stream at cutover,
-# so its deploys stay a deliberate manual sync (same reasoning as prod obs).
+# obs shape (one <env>-playout-<platform>.k8s.yaml per platform, one
+# Application each). Trunk-based (release-please): both envs track main; prod
+# stays release-gated by the image pin in versions.yaml. prod-1 playout is an
+# autosync holdout — it feeds the live stream at cutover, so its deploys stay
+# a deliberate manual sync (same reasoning as prod obs).
 PLAYOUT_PROJECT = "playout"
 PLAYOUT_REPO_URL = "https://github.com/adanalife/playout.git"
 PLAYOUT_REVISIONS = {"stage-1": "main", "prod-1": "main"}
+# The playout instances each env runs — a cross-repo contract with the playout
+# repo's cdk8s config (ENVS[env].platforms), like PLATFORM_GATEWAY_PLATFORMS.
+# Stage runs youtube only.
+PLAYOUT_PLATFORMS = {
+    "prod-1": ("twitch", "youtube"),
+    "stage-1": ("youtube",),
+}
 # Envs running the per-platform MediaMTX relays (infra-authored,
-# dist/<env>-mediamtx.k8s.yaml) — the minipc envs, matching where playout
+# dist/<env>-mediamtx-<platform>.k8s.yaml) — the minipc envs, matching where playout
 # deploys. Unlike the other infra units (supporting/data, manual sync), the
 # relay autosyncs: restarts are cheap and it should self-heal.
 MEDIAMTX_ENVS = ("prod-1", "stage-1")
@@ -252,6 +269,34 @@ def _app_elements(envs: tuple[str, ...]) -> list[dict]:
                         "revision": revision,
                     }
                 )
+    return elements
+
+
+def _platform_elements(
+    envs: tuple[str, ...],
+    component: str,
+    revisions: dict[str, str] | None = None,
+    platforms_by_env: dict[str, tuple[str, ...]] | None = None,
+) -> list[dict]:
+    """One {env, app} element per (env, platform) for a per-platform appset
+    (app = "<component>-<platform>"), the tripbot-apps shape. Platforms come
+    from the infra env config unless the source repo's platform set differs
+    (playout/gateway carry their own cross-repo contract maps). `revisions`
+    adds the per-env revision for cross-repo sources; infra-sourced sets
+    (mediamtx) omit it."""
+    from adanalife_k8s.config import load_env
+
+    elements: list[dict] = []
+    for env_name in envs:
+        if platforms_by_env is not None:
+            platforms = platforms_by_env[env_name]
+        else:
+            platforms = load_env(env_name).platforms
+        for platform in platforms:
+            element = {"env": env_name, "app": f"{component}-{platform}"}
+            if revisions is not None:
+                element["revision"] = revisions[env_name]
+            elements.append(element)
     return elements
 
 
@@ -480,22 +525,24 @@ class ArgoCD(Construct):
             # NEVER prune the stateful unit.
             prune_disabled=True,
         )
-        # The MediaMTX relays (infra-authored, per-env <env>-mediamtx.k8s.yaml).
-        # Unlike supporting/data this unit AUTOSYNCS with selfHeal: a relay
-        # restart is cheap (the publisher + OBS reconnect), so a merged dist
-        # change deploys itself and drift gets reverted — no holdout, no
-        # selfheal_off_envs (nothing here is hand-scaled).
+        # The MediaMTX relays (infra-authored, one Application per (env,
+        # platform) reconciling its own <env>-mediamtx-<platform>.k8s.yaml —
+        # the obs shape). Unlike supporting/data this unit AUTOSYNCS with
+        # selfHeal: a relay restart is cheap (the publisher + OBS reconnect),
+        # so a merged dist change deploys itself and drift gets reverted — no
+        # holdout, no selfheal_off_envs (nothing here is hand-scaled).
         if self.mediamtx_envs:
             self._application_set(
                 id="appset-mediamtx",
                 name="mediamtx",
                 project=INFRA_PROJECT,
-                elements=[{"env": e} for e in self.mediamtx_envs],
-                app_name_tmpl="{{.env}}-mediamtx",
-                include_tmpl="{{.env}}-mediamtx.k8s.yaml",
+                elements=_platform_elements(self.mediamtx_envs, "mediamtx"),
+                app_name_tmpl="{{.env}}-{{.app}}",
+                include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
+                preserve_on_deletion=True,
             )
         # The UPS monitor (observe-only NUT client) — a cluster-SINGLETON, not
         # per-env, so it's a one-element set with static templates (no .env). It's
@@ -591,21 +638,32 @@ class ArgoCD(Construct):
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
-        # The cross-repo platform-gateway unit: one Application per env, sourcing
-        # the PRIVATE platform-gateway repo's committed dist (<env>.k8s.yaml —
-        # the gateway-twitch instance). Per-env revision (main for every env),
-        # same autosync posture as the apps/console sets.
+        # The cross-repo platform-gateway unit: one Application per (env,
+        # platform) sourcing the PRIVATE platform-gateway repo's committed
+        # dist (<env>-gateway-<platform>.k8s.yaml), plus a per-env
+        # {{.env}}-gateway-shared Application for the once-per-namespace
+        # ExternalSecrets every instance references. Per-platform so the
+        # console's kill switch can flip one platform's selfHeal without
+        # dropping drift-reversion for the others. Per-env revision (main for
+        # every env), same autosync posture as the apps/console sets.
         if self.platform_gateway_envs:
             self._application_set(
                 id="appset-platform-gateway",
                 name="platform-gateway",
                 project=PLATFORM_GATEWAY_PROJECT,
-                elements=[
-                    {"env": e, "revision": PLATFORM_GATEWAY_REVISIONS[e]}
-                    for e in self.platform_gateway_envs
-                ],
-                app_name_tmpl="{{.env}}-platform-gateway",
-                include_tmpl="{{.env}}.k8s.yaml",
+                elements=_platform_elements(
+                    self.platform_gateway_envs,
+                    "gateway",
+                    PLATFORM_GATEWAY_REVISIONS,
+                    # + the shared unit, riding the same appset as a pseudo
+                    # platform — it's just another dist file to reconcile.
+                    platforms_by_env={
+                        e: PLATFORM_GATEWAY_PLATFORMS[e] + ("shared",)
+                        for e in self.platform_gateway_envs
+                    },
+                ),
+                app_name_tmpl="{{.env}}-{{.app}}",
+                include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
@@ -617,53 +675,63 @@ class ArgoCD(Construct):
                 selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
+                preserve_on_deletion=True,
             )
         if self.obs_envs:
-            # One Application per env, each managing both platforms via the
-            # include glob ({{.env}}-obs-twitch + -youtube). Distinct name
-            # ({{.env}}-obs) from the old per-platform tripbot-apps Applications,
-            # so the cutover can adopt-then-remove without a name collision.
+            # One Application per (env, platform) — {{.env}}-obs-{{platform}},
+            # each reconciling its own dist file — so a single platform's OBS
+            # can be paused/synced/scaled without touching its siblings (the
+            # console's per-platform kill switch flips selfHeal per app). The
+            # platform fan-out reads the infra env config, which matches the
+            # obs repo's (twitch+youtube on the minipc envs, twitch on dev).
             self._application_set(
                 id="appset-obs",
                 name="obs",
                 project=OBS_PROJECT,
-                elements=[
-                    {"env": e, "app": "obs", "revision": OBS_REVISIONS[e]}
-                    for e in self.obs_envs
-                ],
-                app_name_tmpl="{{.env}}-obs",
-                include_tmpl="{{.env}}-obs-*.k8s.yaml",
+                elements=_platform_elements(self.obs_envs, "obs", OBS_REVISIONS),
+                app_name_tmpl="{{.env}}-{{.app}}",
+                include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 # prod obs restarts the live stream on any pod-template change, so
                 # it's a deliberate manual sync.
-                automated_holdouts=(("prod-1", "obs"),),
+                automated_holdouts=(
+                    ("prod-1", "obs-twitch"),
+                    ("prod-1", "obs-youtube"),
+                ),
                 selfheal=self._selfheal,
                 repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
+                preserve_on_deletion=True,
             )
         if self.playout_envs:
-            # One Application per env, managing every platform's playout via
-            # the include glob — the obs shape ({{.env}}-playout globs
-            # {{.env}}-playout-*.k8s.yaml from the playout repo's dist).
+            # One Application per (env, platform) — the obs shape, each
+            # reconciling its own {{.env}}-playout-<platform>.k8s.yaml from
+            # the playout repo's dist (fan-out from PLAYOUT_PLATFORMS).
             self._application_set(
                 id="appset-playout",
                 name="playout",
                 project=PLAYOUT_PROJECT,
-                elements=[
-                    {"env": e, "app": "playout", "revision": PLAYOUT_REVISIONS[e]}
-                    for e in self.playout_envs
-                ],
-                app_name_tmpl="{{.env}}-playout",
-                include_tmpl="{{.env}}-playout-*.k8s.yaml",
+                elements=_platform_elements(
+                    self.playout_envs,
+                    "playout",
+                    PLAYOUT_REVISIONS,
+                    platforms_by_env=PLAYOUT_PLATFORMS,
+                ),
+                app_name_tmpl="{{.env}}-{{.app}}",
+                include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 # prod playout feeds the live stream at cutover, so its deploys
                 # stay a deliberate manual sync — same reasoning as prod obs.
-                automated_holdouts=(("prod-1", "playout"),),
+                automated_holdouts=(
+                    ("prod-1", "playout-twitch"),
+                    ("prod-1", "playout-youtube"),
+                ),
                 selfheal=self._selfheal,
                 repo_url=PLAYOUT_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
+                preserve_on_deletion=True,
             )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
         # traefik/LAN Ingress is published on every cluster with a DNS host —
@@ -790,6 +858,7 @@ class ArgoCD(Construct):
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
         create_namespace: bool = False,
+        preserve_on_deletion: bool = False,
     ):
         """Emit one ApplicationSet -> one Application per generator element. The
         apps set has one element per (env, component, platform) so each component
@@ -889,6 +958,14 @@ class ArgoCD(Construct):
                 "spec": spec,
             },
         }
+        # When a generator element goes away (a platform removed, an app
+        # renamed), delete only the Application object and leave its workloads
+        # running — the default cascade would tear down live pods, which is
+        # never acceptable for the stream-adjacent sets that opt in here.
+        # Orphans are then adopted by name on the next sync (ServerSideApply)
+        # or cleaned up by hand.
+        if preserve_on_deletion:
+            appset_spec["syncPolicy"] = {"preserveResourcesOnDeletion": True}
         # Per-env autosync: merge an `automated` block onto only the matching envs'
         # Applications. templatePatch is re-rendered with the same goTemplate, so a
         # non-matching env (or a held-out app) renders an empty patch (a no-op

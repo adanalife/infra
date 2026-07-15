@@ -176,10 +176,23 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert '{{- if (eq .env "stage-1") }}' in patch
     assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
-    # the live-encoder holdout moved with OBS to the obs appset: prod-1 obs is a
-    # deliberate manual sync (a sync restarts the live stream), the rest autosync.
-    obs_patch = _appset(objs, "obs")["spec"]["templatePatch"]
-    assert '(not (and (eq .env "prod-1") (eq .app "obs")))' in obs_patch
+    # the live-encoder holdout moved with OBS to the obs appset: each prod-1 obs
+    # platform is a deliberate manual sync (a sync restarts the live stream),
+    # the rest autosync.
+    obs = _appset(objs, "obs")
+    obs_patch = obs["spec"]["templatePatch"]
+    assert '(and (eq .env "prod-1") (eq .app "obs-twitch"))' in obs_patch
+    assert '(and (eq .env "prod-1") (eq .app "obs-youtube"))' in obs_patch
+    # one Application per (env, platform), each reconciling its own dist file
+    elements = obs["spec"]["generators"][0]["list"]["elements"]
+    assert {(e["env"], e["app"]) for e in elements} == {
+        ("prod-1", "obs-twitch"),
+        ("prod-1", "obs-youtube"),
+        ("stage-1", "obs-twitch"),
+        ("stage-1", "obs-youtube"),
+    }
+    src = obs["spec"]["template"]["spec"]["source"]
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
@@ -241,18 +254,35 @@ def test_video_pipeline_appset_both_envs_cross_repo():
         _appset(_synth(**_DEV), "video-pipeline")
 
 
-def test_platform_gateway_appset_both_envs_cross_repo():
+def test_platform_gateway_appset_per_platform_cross_repo():
     objs = _synth()
     pg = _appset(objs, "platform-gateway")
-    revs = {
-        e["env"]: e["revision"] for e in pg["spec"]["generators"][0]["list"]["elements"]
+    elements = pg["spec"]["generators"][0]["list"]["elements"]
+    # one Application per gateway instance (PLATFORM_GATEWAY_PLATFORMS — the
+    # cross-repo contract with the gateway repo's env.platforms) plus the
+    # per-env shared unit carrying the once-per-namespace ExternalSecrets
+    apps = {(e["env"], e["app"]) for e in elements}
+    assert {a for a in apps if a[0] == "prod-1"} == {
+        ("prod-1", "gateway-twitch"),
+        ("prod-1", "gateway-youtube"),
+        ("prod-1", "gateway-shared"),
     }
-    # both prod + stage run gateway-twitch; trunk-based repo, both envs track main
-    assert revs == {"prod-1": "main", "stage-1": "main"}
+    assert {a[1] for a in apps if a[0] == "stage-1"} == {
+        "gateway-twitch",
+        "gateway-youtube",
+        "gateway-tiktok",
+        "gateway-facebook",
+        "gateway-instagram",
+        "gateway-shared",
+    }
+    # trunk-based repo: every element tracks main
+    assert all(e["revision"] == "main" for e in elements)
     src = pg["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "git@github.com:adanalife/platform-gateway.git"
-    assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
     assert "automated" in pg["spec"]["templatePatch"]  # autosyncs like the others
+    # an app rename / platform removal must never cascade-delete live gateways
+    assert pg["spec"]["syncPolicy"] == {"preserveResourcesOnDeletion": True}
     # dev cluster carries no private-repo deploy key, so no platform-gateway unit
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "platform-gateway")
@@ -263,15 +293,20 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     po = _appset(objs, "playout")
     src = po["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "https://github.com/adanalife/playout.git"
-    # one Application per env, globbing every platform's dist file
-    assert src["directory"]["include"] == "{{.env}}-playout-*.k8s.yaml"
-    revs = {
-        e["env"]: e["revision"] for e in po["spec"]["generators"][0]["list"]["elements"]
+    # one Application per (env, platform), each reconciling its own dist file
+    # (PLAYOUT_PLATFORMS — stage runs youtube only)
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
+    elements = po["spec"]["generators"][0]["list"]["elements"]
+    assert {(e["env"], e["app"]) for e in elements} == {
+        ("prod-1", "playout-twitch"),
+        ("prod-1", "playout-youtube"),
+        ("stage-1", "playout-youtube"),
     }
-    assert revs == {"stage-1": "main", "prod-1": "main"}
+    assert all(e["revision"] == "main" for e in elements)
     # prod playout feeds the live stream at cutover — deliberate manual sync
     patch = po["spec"]["templatePatch"]
-    assert '(not (and (eq .env "prod-1") (eq .app "playout")))' in patch
+    assert '(and (eq .env "prod-1") (eq .app "playout-twitch"))' in patch
+    assert '(and (eq .env "prod-1") (eq .app "playout-youtube"))' in patch
     # the public repo needs no deploy key, and the dev cluster runs no playout
     dev = _synth(**_DEV)
     with pytest.raises(StopIteration):
@@ -287,7 +322,15 @@ def test_mediamtx_appset_autosyncs_both_envs():
     src = mtx["spec"]["template"]["spec"]["source"]
     # infra-authored unit: sources the infra repo like supporting/data...
     assert src["repoURL"] == "git@github.com:adanalife/infra.git"
-    assert src["directory"]["include"] == "{{.env}}-mediamtx.k8s.yaml"
+    # ...one Application per (env, platform), fan-out from the infra env config
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
+    elements = mtx["spec"]["generators"][0]["list"]["elements"]
+    assert {(e["env"], e["app"]) for e in elements} == {
+        ("prod-1", "mediamtx-twitch"),
+        ("prod-1", "mediamtx-youtube"),
+        ("stage-1", "mediamtx-twitch"),
+        ("stage-1", "mediamtx-youtube"),
+    }
     # ...but unlike them it autosyncs with selfHeal on (relay restarts are cheap)
     patch = mtx["spec"]["templatePatch"]
     assert "prune: true" in patch
