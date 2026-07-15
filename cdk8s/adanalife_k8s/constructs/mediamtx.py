@@ -8,7 +8,7 @@ off-cluster viewers. One instance per platform, deliberately: it keeps the
 per-stream blast-radius isolation the fleet already uses (vlc-{platform},
 obs-{platform}), so a relay restart only ever touches one platform's stream.
 
-Emits, per platform in env.platforms, into the env's app namespace:
+Emits, for one platform, into the env's app namespace:
   * ConfigMap mediamtx-{platform}-config — mediamtx.yml (RTSP + metrics only;
     every other protocol disabled) with a single explicit `dashcam` path.
   * Deployment mediamtx-{platform} — one replica, Recreate (a relay handles one
@@ -57,13 +57,14 @@ paths:
 
 
 class Mediamtx(Construct):
-    """One RTSP relay per platform in the env's app namespace — the endpoint
+    """One platform's RTSP relay in the env's app namespace — the endpoint
     OBS pulls the dashcam stream from, fed by the playout publisher."""
 
-    def __init__(self, scope: Construct, id: str = "mediamtx", *, env: EnvConfig):
+    def __init__(
+        self, scope: Construct, id: str = "mediamtx", *, env: EnvConfig, platform: str
+    ):
         super().__init__(scope, id)
-        for platform in env.platforms:
-            self._instance(env, platform)
+        self._instance(env, platform)
 
     def _instance(self, env: EnvConfig, platform: str):
         name = f"mediamtx-{platform}"

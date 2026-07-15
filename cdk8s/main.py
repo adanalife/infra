@@ -50,10 +50,13 @@ for name in targets:
     DataChart(app, f"{name}-data", env=env)
     # Per-platform MediaMTX RTSP relays (playout publishes in, OBS pulls out) —
     # minipc envs only, matching where the playout repo deploys (see
-    # constructs/argocd.py PLAYOUT_REVISIONS). Its own deploy unit / Argo
-    # Application per env (appset-mediamtx).
+    # constructs/argocd.py PLAYOUT_REVISIONS). One deploy unit / Argo
+    # Application per (env, platform), like obs/playout (appset-mediamtx).
     if env.cluster == "minipc":
-        MediamtxChart(app, f"{name}-mediamtx", env=env)
+        for platform in env.platforms:
+            MediamtxChart(
+                app, f"{name}-mediamtx-{platform}", env=env, platform=platform
+            )
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
     # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
     # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist
