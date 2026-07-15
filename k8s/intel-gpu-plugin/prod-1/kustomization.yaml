@@ -19,16 +19,20 @@
 #   read GPU telemetry off all devices on the node.
 #
 #   `-shared-dev-num=8` advertises 8 virtual instances of the single
-#   physical iGPU so multiple pods (OBS + vlc-server in prod-1 and
-#   stage-1 twitch, plus stage-1's youtube pair — 6 steady-state
-#   claims) can share the device, with headroom for RollingUpdate
-#   rollouts that briefly surge a 7th or 8th pod alongside the
-#   existing claim. The Iris Xe handles concurrent VAAPI clients
-#   fine — desktop Linux runs Firefox + VLC + OBS sharing the same
-#   iGPU every day. Was 4 (= 1+1+1+1 with no surge headroom; the
-#   2026-05-28 vlc-server rollout stuck Pending on the missing 5th
-#   slot), then 6; bumped to 8 when stage's youtube platform stack
-#   (vlc-youtube + obs-youtube) added claims 5-6.
+#   physical iGPU so multiple pods can share the device. The claim
+#   ledger (worst-case steady state): prod obs-twitch + prod
+#   obs-youtube + prod playout-youtube (vah264enc) + stage obs-youtube
+#   + stage playout-youtube + the stage video-optimization job = 6,
+#   leaving 2 slots of surge headroom for OBS RollingUpdates (playout
+#   uses Recreate; vlc-server stream-copies and claims nothing). A
+#   playout-twitch claim joins at cutover — still within 8. The Iris
+#   Xe handles concurrent VAAPI clients fine — desktop Linux runs
+#   Firefox + VLC + OBS sharing the same iGPU every day. Was 4 (no
+#   surge headroom; the 2026-05-28 vlc-server rollout stuck Pending
+#   on the missing 5th slot), then 6, then 8. Scheduling is only half
+#   the guardrail: stage-1's ResourceQuota caps stage's aggregate
+#   claims at 3 so stage scale-ups park Pending instead of contending
+#   with the prod stream.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
