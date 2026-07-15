@@ -79,6 +79,7 @@ locals {
   dashboard_files = toset([
     "launch-stream-at-a-glance",
     "stream-health-vlc-server-to-obs",
+    "stream-health-playout-to-mediamtx", # playout OTLP push + MediaMTX relay scrape — the dashcam publish path that replaces vlc-server (playout 0.6.0 metrics)
     "service-health-tripbot",
     "service-health-vlc-server",
     "service-health-onscreens-server",
