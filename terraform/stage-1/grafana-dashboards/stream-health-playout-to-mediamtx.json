@@ -1,0 +1,319 @@
+{
+  "title": "06 — Stream Health: playout ↔ MediaMTX",
+  "uid": "stream-health-playout",
+  "tags": ["tripbot", "playout", "mediamtx", "stream"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "platform",
+        "label": "Platform",
+        "type": "custom",
+        "query": "twitch,youtube",
+        "current": { "text": "youtube", "value": "youtube" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false
+      },
+      {
+        "name": "deployment_environment",
+        "label": "Environment (playout only)",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(playout_pipeline_running_time_ms{service_name=\"playout\"}, deployment_environment)",
+        "current": { "text": "prod-1", "value": "prod-1" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 99,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "options": {
+        "mode": "markdown",
+        "content": "The dashcam publish path: **playout** (GStreamer/Rust) encodes one gapless H.264 stream and publishes it into the per-platform **MediaMTX** relay, which OBS reads.\n\n- **Playout row** — `playout_*` OTLP-push metrics, filtered by `service_platform=$platform` and `deployment_environment=$deployment_environment`. Push arrives from **both stage-1 and prod-1**.\n- **MediaMTX row** — annotation-scraped from the relay pods (`pod=~\"mediamtx-$platform.*\"`); the `$deployment_environment` variable does **not** apply. Only **prod-1** ships (stage-1 is dropped at the Alloy layer), so these panels stay empty for stage.\n\nOnly `playout-youtube` exists pre-cutover — `twitch` panels populate once the twitch playout is live."
+      }
+    },
+
+    { "id": 100, "type": "row", "title": "Playout (publisher)", "collapsed": false, "gridPos": { "x": 0, "y": 4, "w": 24, "h": 1 } },
+
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Data fresh (last 1m)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "(time() - max(timestamp(last_over_time(playout_pipeline_running_time_ms{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[10m])))) < bool 60" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "STALE", "color": "red" }, "1": { "text": "FRESH", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Realtime health (s/s)",
+      "description": "Pipeline running time advancing per wallclock second. ~1.0 = holding realtime; a sustained dip means the encoder is falling behind (the wedge tell).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "deriv(playout_pipeline_running_time_ms{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m]) / 1000" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2, "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 0.9 },
+            { "color": "green", "value": 0.97 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Clip spawns / min",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(playout_clip_spawns_total{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])) * 60" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "decimals": 1, "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Running version",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "group by (service_version) (playout_pipeline_running_time_ms{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
+      ],
+      "options": { "colorMode": "none", "graphMode": "none", "textMode": "name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Realtime health over time (s/s)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "deriv(playout_pipeline_running_time_ms{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m]) / 1000", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none", "decimals": 2,
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 0.97 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Playhead position in active clip",
+      "description": "Position within the currently-playing clip. Sawtooth: climbs, resets to 0 at each clip boundary.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "playout_playhead_position_ms{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"} / 1000", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5, "spanNulls": false } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Commands / sec by verb",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (verb) (rate(playout_commands_total{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{verb}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Clip spawns / min",
+      "description": "Clips spliced into the pipeline (boundaries + redirect commands). A steady baseline ≈ one clip length; spikes signal churn or a redirect storm.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(playout_clip_spawns_total{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])) * 60", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 1, "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+
+    { "id": 200, "type": "row", "title": "MediaMTX relay (prod-1 only)", "collapsed": false, "gridPos": { "x": 0, "y": 25, "w": 24, "h": 1 } },
+
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Path ready",
+      "description": "MediaMTX `dashcam` path in the ready state — a publisher is connected and the relay is serving.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(paths{name=\"dashcam\", state=\"ready\", pod=~\"mediamtx-$platform.*\"})" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] },
+          "mappings": [ { "type": "value", "options": { "0": { "text": "NOT READY", "color": "red" }, "1": { "text": "READY", "color": "green" } } } ],
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Publisher connected",
+      "description": "RTSP sessions publishing to the dashcam path (playout). Expected: 1.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rtsp_sessions{path=\"dashcam\", state=\"publish\", pod=~\"mediamtx-$platform.*\"})" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] },
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Readers (OBS)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(paths_readers{name=\"dashcam\", pod=~\"mediamtx-$platform.*\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short", "noValue": "0" }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Inbound bitrate",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "8 * sum(rate(paths_inbound_bytes{name=\"dashcam\", pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Relay throughput (in / out)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "8 * sum(rate(paths_inbound_bytes{name=\"dashcam\", pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))", "legendFormat": "inbound (from playout)" },
+        { "refId": "B", "expr": "8 * sum(rate(paths_outbound_bytes{name=\"dashcam\", pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))", "legendFormat": "outbound (to readers)" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bps", "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "RTP packet loss & errors / sec",
+      "description": "Inbound RTP packets lost or in error on the relay (aggregated across sessions). Sustained loss = a degraded publish link from playout.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(rtsp_sessions_inbound_rtp_packets_lost{path=\"dashcam\", pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))", "legendFormat": "lost" },
+        { "refId": "B", "expr": "sum(rate(rtsp_sessions_inbound_rtp_packets_in_error{path=\"dashcam\", pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))", "legendFormat": "in error" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps", "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.001 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Inbound frames in error / sec",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 38, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(paths_inbound_frames_in_error{name=\"dashcam\", pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))", "legendFormat": "frames in error" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Readers over time",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 38, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum(paths_readers{name=\"dashcam\", pod=~\"mediamtx-$platform.*\"})", "legendFormat": "readers" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 20, "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ]
+}

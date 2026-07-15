@@ -128,7 +128,17 @@ class Mediamtx(Construct):
                 strategy=k8s.DeploymentStrategy(type="Recreate"),
                 selector=k8s.LabelSelector(match_labels=sel),
                 template=k8s.PodTemplateSpec(
-                    metadata=k8s.ObjectMeta(labels=sel),
+                    # Scraped into Grafana Cloud via annotation-autodiscovery
+                    # (prod-1 only; stage-1 series are dropped at the Alloy
+                    # layer). Feeds the "Stream Health: playout ↔ MediaMTX"
+                    # dashboard.
+                    metadata=k8s.ObjectMeta(
+                        labels=sel,
+                        annotations={
+                            "prometheus.io/scrape": "true",
+                            "prometheus.io/port": str(METRICS_PORT),
+                        },
+                    ),
                     spec=k8s.PodSpec(
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
