@@ -133,7 +133,8 @@ merged `dist/` describes the state you want *before* turning Argo back on.
 ## Platform stack (Argo-native Helm)
 
 The git-declarable platform charts (ESO, cert-manager, node-exporter,
-k8s-monitoring, tailscale-operator, NATS) are authored as **Argo Applications with
+victoria-metrics, k8s-monitoring, tailscale-operator, NATS, CNPG, ARC,
+metrics-server) are authored as **Argo Applications with
 a multi-source Helm source** — the upstream chart (version-pinned) + the in-repo
 `k8s/<component>/values.yml` via a `$values` ref. Argo runs `helm template`
 in-cluster, so **no rendered charts land in git** — only the small Application
@@ -157,10 +158,24 @@ intentionally broad **`platform` AppProject** governs them (platform installs CR
 - The kustomize-only bits (local-path-provisioner, intel-gpu/xpu, ESO
   cluster-store, cert-manager ClusterIssuers).
 
+**Argo is the delivery path for everything in the list above** — adoption of the
+live helm releases completed 2026-07-16. Day-2 changes (values edits, chart
+bumps, new platform charts) go: edit `helm_platform.py` / the values files →
+merge → `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml` (if the
+Application specs changed) → sync in Argo. Do **not** `helm upgrade --install`
+an adopted release against the live cluster: Argo owns the objects via
+server-side apply, and helm's apply fails with `argocd-controller`
+field-manager conflicts. The remaining `helm upgrade --install` steps in
+`task k8s:<env>:platform:up` exist for day-0 bring-up of an empty cluster only
+(where Argo adopts them afterwards); retiring them in favor of an
+argo-sync-based bring-up is tracked in the vault infra TODO.
+
 ### Adoption (deliberate, NOT merge-and-forget)
 
-Argo would be *adopting* releases that `helm upgrade --install` currently owns, so
-the risk is Helm/SSA field-manager conflicts. Mirror the app cutover:
+How the live helm releases were adopted (kept as the playbook for adopting any
+future not-yet-Argo-managed release). Argo *adopts* releases that
+`helm upgrade --install` owns, so the risk is Helm/SSA field-manager conflicts.
+Mirror the app cutover:
 
 1. `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml` — the project + Applications
    come up **OutOfSync, monitor-only**; nothing changes.

@@ -2,6 +2,10 @@
 # prod-1/minipc only (the dev k3d cluster ships logs + events only, so
 # there's nothing for a local TSDB to hold there).
 #
+# Argo-delivered: the victoria-metrics Application in platform-argo.k8s.yaml
+# (chart table: cdk8s/adanalife_k8s/helm_platform.py) pulls this file via a
+# $values ref. Edit → merge → argo sync; no helm CLI involved.
+#
 # Grafana Cloud's free tier caps active series, so the cloud metrics
 # destination in prod-1/values.yml trims aggressively (stage-1 dropped
 # wholesale, the launch-day trim list). This store has no cap:
