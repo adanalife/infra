@@ -20,6 +20,7 @@ spec:
     - https://pkgs.tailscale.com/helmcharts
     - https://prometheus-community.github.io/helm-charts
     - https://traefik.github.io/charts
+    - https://victoriametrics.github.io/helm-charts/
   destinations:
     - server: https://kubernetes.default.svc
       namespace: "*"
@@ -243,6 +244,38 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring-host
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: victoria-metrics
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://victoriametrics.github.io/helm-charts/
+      chart: victoria-metrics-single
+      targetRevision: 0.42.0
+      helm:
+        releaseName: victoria-metrics
+        valueFiles:
+          - $values/k8s/monitoring/victoria-metrics/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
   syncPolicy:
     syncOptions:
       - CreateNamespace=true
