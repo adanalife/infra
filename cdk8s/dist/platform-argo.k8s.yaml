@@ -174,7 +174,7 @@ spec:
         valueFiles:
           - $values/k8s/cloudnative-pg/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -206,7 +206,7 @@ spec:
         valueFiles:
           - $values/k8s/plugin-barman-cloud/values.yml
     - repoURL: git@github.com:adanalife/infra.git
-      targetRevision: master
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
