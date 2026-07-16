@@ -105,6 +105,11 @@ clusterMetrics:
       excludeMetrics:
         - kube_pod_status_reason
         - kube_deployment_status_condition
+        # Neither is referenced by any dashboard or alert (~270 series
+        # combined): completion_time is a per-finished-pod timestamp,
+        # restart_policy is a static per-pod constant.
+        - kube_pod_completion_time
+        - kube_pod_restart_policy
     # Drop pod UID — changes on every pod rebuild and creates a fresh series
     # set each rollout. Dashboards query by pod name, not uid.
     extraMetricProcessingRules: |-

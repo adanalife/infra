@@ -99,6 +99,11 @@ clusterMetrics:
       excludeMetrics:
         - kube_pod_status_reason
         - kube_deployment_status_condition
+        # Neither is referenced by any dashboard or alert (~270 series
+        # combined): completion_time is a per-finished-pod timestamp,
+        # restart_policy is a static per-pod constant.
+        - kube_pod_completion_time
+        - kube_pod_restart_policy
     # Drop pod UID — changes on every pod rebuild and creates a fresh series
     # set each rollout. Dashboards query by pod name, not uid.
     extraMetricProcessingRules: |-
@@ -216,6 +221,22 @@ annotationAutodiscovery:
       // today). Keep counts and sums for rate panels.
       source_labels = ["__name__"]
       regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
+      action = "drop"
+    }
+    rule {
+      // 2026-07-15 headroom trim — none of these appear in any dashboard
+      // or alert:
+      //   envoy_*        (~500): Cilium's envoy L7 proxy internals; no L7
+      //                  policies in use here.
+      //   node_nfs_*     (~200): per-op NFS client counters from the
+      //                  dashcam mount; NFS health is watched via the
+      //                  video-pipeline job metrics, not per-op counters.
+      //   rtsp_conns_*   MediaMTX per-connection counters labeled by a
+      //                  UUID `id` that churns on every reconnect; the
+      //                  paths_* / rtsp_sessions_* series feed the
+      //                  stream-health dashboard, these feed nothing.
+      source_labels = ["__name__"]
+      regex = "envoy_.+|node_nfs_.+|rtsp_conns.*"
       action = "drop"
     }
     rule {
