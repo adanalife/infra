@@ -1,0 +1,56 @@
+# VictoriaMetrics single-node — the local, full-fidelity metrics store.
+# prod-1/minipc only (the dev k3d cluster ships logs + events only, so
+# there's nothing for a local TSDB to hold there).
+#
+# Grafana Cloud's free tier caps active series, so the cloud metrics
+# destination in prod-1/values.yml trims aggressively (stage-1 dropped
+# wholesale, the launch-day trim list). This store has no cap:
+# alloy-metrics remote_writes everything it scrapes here via the
+# localMetrics destination in prod-1/values.yml, so the trimmed series
+# stay queryable — full PromQL on :8428.
+#
+# Storage: local-path PVC (Delete reclaim) on the T5 UserVolume. Metrics
+# are loss-tolerant — no backups, no retain class, and `talosctl
+# upgrade` wiping EPHEMERAL doesn't touch the T5 UserVolume. At VM's
+# ~1 byte/sample compression, 20Gi holds years of this cluster.
+
+server:
+  # Collapses the chart's default victoria-metrics-victoria-metrics-single-server
+  # object naming; service DNS becomes victoria-metrics.monitoring.svc:8428.
+  fullnameOverride: victoria-metrics
+  retentionPeriod: 1y
+  extraArgs:
+    # VM scrapes its own /metrics into itself. Self-observability without
+    # prometheus.io/* annotations — annotation autodiscovery leaves this
+    # pod alone, so vm_* series never head toward the cloud destination.
+    selfScrapeInterval: 30s
+  persistentVolume:
+    storageClassName: local-path
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    # The minipc's encoders (playout/OBS) are the latency-sensitive
+    # tenants; keep the TSDB a bounded neighbor.
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # Talos enforces PodSecurity baseline cluster-wide; match the explicit
+  # non-root posture of the other monitoring workloads. fsGroup handles
+  # /storage PVC ownership; VM writes nowhere else.
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  podSecurityContext:
+    fsGroup: 65534
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault

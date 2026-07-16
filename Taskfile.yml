@@ -1374,6 +1374,17 @@ tasks:
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
+      # VictoriaMetrics — local full-fidelity metrics store (no series
+      # cap). alloy-metrics remote_writes everything here; Grafana Cloud
+      # gets the trimmed subset. See k8s/monitoring/victoria-metrics/.
+      - helm repo add vm https://victoriametrics.github.io/helm-charts/
+      - helm repo update vm
+      - helm upgrade --install victoria-metrics vm/victoria-metrics-single
+          --version 0.42.0
+          -n monitoring
+          -f k8s/monitoring/victoria-metrics/values.yml
+      - kubectl rollout status statefulset/victoria-metrics -n monitoring --timeout=120s
+      - 'echo "VictoriaMetrics up. PromQL + remote_write at http://victoria-metrics.monitoring.svc:8428 (in-cluster only)."'
       # NATS — pubsub substrate for inter-component messaging.
       # Single-node, no JetStream, prom-exporter sidecar scraped by
       # alloy-metrics via prometheus.io/* pod annotations. Lives in
