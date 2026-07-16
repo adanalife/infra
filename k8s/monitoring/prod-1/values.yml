@@ -25,8 +25,9 @@
 #     deployment.environment OTEL attribute — NOT by cluster.
 #   - clusterMetrics / hostMetrics / annotationAutodiscovery are off in
 #     development (logs + cluster events only). Here they're on for
-#     prod-1, with a top-of-list `namespace=stage-1(-platform)?` drop
-#     rule on each metric source so stage-1 series don't ship.
+#     prod-1, fanned out to two metrics destinations: Grafana Cloud
+#     (capped free tier — cap-driven drops applied per-destination) and
+#     the in-cluster VictoriaMetrics (full fidelity, no drops).
 
 cluster:
   name: adanalife-minipc
@@ -46,6 +47,53 @@ destinations:
       create: false
       name: grafana-cloud-metrics-write
       namespace: monitoring
+    # Cloud-only trims. These are write_relabel_config blocks on this
+    # destination's remote_write endpoint, so they gate what ships to
+    # Grafana Cloud without touching what localMetrics receives. Every
+    # drop here exists purely for the free tier's active-series cap —
+    # series with real signal that we'd keep if the cloud were free.
+    # Zero-signal noise (dup-timestamp xpum series, rollout-churn
+    # labels, Cilium internals) is dropped at the source rules instead,
+    # before the fan-out.
+    metricProcessingRules: |-
+      write_relabel_config {
+        // stage-1 namespaces don't ship to the cloud — prod-1 metrics
+        // only from this shared cluster. stage-1 logs + events still
+        // ship (Loki, not Mimir), and stage-1 series land in
+        // localMetrics.
+        source_labels = ["namespace"]
+        regex = "stage-1(-platform)?"
+        action = "drop"
+      }
+      write_relabel_config {
+        // Launch-day trim: "cool but not essential" series kept out of
+        // the cloud for cap headroom (15K hard cap).
+        //
+        // Cilium: keep policy / network / drop counters; drop the
+        // feature-flag info gauges, BPF-map internals, FQDN-cache
+        // stats, controller heartbeats, drift checker, and
+        // cilium_endpoint (per-endpoint cardinality grows with pods).
+        //
+        // external-dns: nothing here is alert-relevant — Route53 record
+        // presence is checked via cert-manager + the smoke tests.
+        //
+        // cert-manager: keep only the expiration / ready / renewal
+        // timestamps that ops actually queries.
+        //
+        // CoreDNS: drop histogram buckets (no p95 DNS latency charts in
+        // the cloud). Counts and sums still ship for rate panels.
+        source_labels = ["__name__"]
+        regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
+        action = "drop"
+      }
+
+  localMetrics:
+    type: prometheus
+    # In-cluster VictoriaMetrics — the full-fidelity, no-cap store
+    # (see k8s/monitoring/victoria-metrics/). Receives everything the
+    # collectors scrape, including the stage-1 and launch-day-trim
+    # series the cloud destination drops.
+    url: http://victoria-metrics.monitoring.svc.cluster.local:8428/api/v1/write
 
   logs:
     type: loki
@@ -72,16 +120,8 @@ clusterMetrics:
     # Drop high-cardinality identifier labels that change on every container
     # restart (container_id) or are duplicates of pod/container (id, image_id).
     # Mimir merges series that differ only by dropped labels — saves the
-    # restart-churn cardinality.
+    # restart-churn cardinality. Source-level: no destination wants these.
     extraMetricProcessingRules: |-
-      rule {
-        // Drop stage-1 namespaces — only prod-1 metrics ship from this
-        // shared cluster. Logs + events from stage-1 still ship via
-        // podLogsViaKubernetesApi / clusterEvents (Loki, not Mimir).
-        source_labels = ["namespace"]
-        regex = "stage-1(-platform)?"
-        action = "drop"
-      }
       rule {
         action = "labeldrop"
         regex = "id|container_id|image_id"
@@ -102,12 +142,6 @@ clusterMetrics:
     # Drop pod UID — changes on every pod rebuild and creates a fresh series
     # set each rollout. Dashboards query by pod name, not uid.
     extraMetricProcessingRules: |-
-      rule {
-        // Drop stage-1 namespaces — see the matching rule in cadvisor above.
-        source_labels = ["namespace"]
-        regex = "stage-1(-platform)?"
-        action = "drop"
-      }
       rule {
         action = "labeldrop"
         regex = "uid"
@@ -160,15 +194,11 @@ annotationAutodiscovery:
   # scraped via annotation-autodiscovery — covers Cilium, traefik, ESO,
   # cert-manager, external-dns, node-exporter, and any future prometheus.io-
   # annotated pod. Rules execute top-to-bottom; first matching action wins.
+  # Source-level rules run before the destination fan-out, so everything
+  # dropped here is gone from Grafana Cloud AND the local VictoriaMetrics —
+  # only zero-signal noise belongs in this list. Cap-driven trims live on
+  # the cloud destination's metricProcessingRules instead.
   extraMetricProcessingRules: |-
-    rule {
-      // Drop stage-1 namespaces — only prod-1 metrics ship from this
-      // shared cluster. Logs + events from stage-1 still ship via
-      // podLogsViaKubernetesApi / clusterEvents (Loki, not Mimir).
-      source_labels = ["namespace"]
-      regex = "stage-1(-platform)?"
-      action = "drop"
-    }
     rule {
       // Drop Cilium's internal scheduler / k8s-client histograms — high
       // cardinality (~700 series combined), zero operational signal for
@@ -192,31 +222,6 @@ annotationAutodiscovery:
       // rollout doubles the active series for ~20min (Mimir lookback).
       action = "labeldrop"
       regex = "pod_template_hash|controller_revision_hash"
-    }
-    rule {
-      // Launch-day trim: drop "cool but not essential" series to keep
-      // headroom under the 15K hard cap as live traffic grows. We can
-      // revert these individually post-launch when the cluster has
-      // settled and we know what we'll actually query.
-      //
-      // Cilium: keep policy / network / drop counters; drop the
-      // feature-flag info gauges (~50 static signals about which
-      // Cilium features are enabled), the BPF-map internals, the
-      // FQDN-cache stats, the controller heartbeats, the drift checker.
-      // Plus cilium_endpoint (per-endpoint cardinality grows with pods).
-      //
-      // external-dns: nothing here is alert-relevant — Route53 record
-      // presence is checked via cert-manager + the smoke tests.
-      //
-      // cert-manager: keep only the expiration / ready / renewal
-      // timestamps that ops actually queries. Drop the rest of the
-      // internals (HTTP client, ACME challenge counts, clock).
-      //
-      // CoreDNS: drop histogram buckets (we don't chart p95 DNS latency
-      // today). Keep counts and sums for rate panels.
-      source_labels = ["__name__"]
-      regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
-      action = "drop"
     }
     rule {
       // intel/xpumanager v1.3.6 emits xpum_per_engine_ratio (12x per
