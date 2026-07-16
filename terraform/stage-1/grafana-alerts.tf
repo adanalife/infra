@@ -1495,6 +1495,156 @@ resource "grafana_rule_group" "stream_health" {
   }
 }
 
+# Relay health — MediaMTX is the RTSP hop between playout (publisher) and OBS
+# (reader) per platform. A dead playout pipeline is otherwise indistinguishable
+# from a healthy pod (rtspclientsink reports PLAYING without proving data flow,
+# and a silent EOS raises no Sentry error), but every one of those black-stream
+# modes — pipeline death, crash-loop, wedge-then-exit, pod gone — converges on
+# the same relay-side symptom: the dashcam path loses its publisher session.
+# MediaMTX flips the path's `state` label off "ready" the moment that happens,
+# so the relay is the one vantage point that pages for all of them.
+#
+# Scope note: a publisher that stays CONNECTED but frozen (session up, no
+# frames) keeps state="ready" and does NOT fire this — that's the playhead-
+# freeze signal on playout_pipeline_running_time_ms (tracked separately with
+# the playout dashboards+alerts item).
+resource "grafana_rule_group" "relay_health" {
+  name             = "relay-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // One rule per platform (from local.stream_platforms, same as the vlc
+  // visibility canaries). state!="ready" instead of state="notReady" so the
+  // rule doesn't depend on MediaMTX's exact spelling of the unhealthy state:
+  // a healthy path exposes ONLY the state="ready" series, so any series
+  // matching state!="ready" means the path exists and has no publisher.
+  // no_data=OK keeps it quiet both when healthy (no matching series) and
+  // while the relay series are still blocked by the active-series cap
+  // (infra#849) — it arms itself automatically once they land.
+  dynamic "rule" {
+    for_each = toset(local.stream_platforms)
+    content {
+      name           = "MediaMTX: ${rule.value} dashcam has no publisher"
+      for            = "1m"
+      condition      = "C"
+      no_data_state  = "OK"
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "No publisher on the ${rule.value} dashcam relay for 1m — stream is black"
+        description = "MediaMTX reports the `dashcam` path on mediamtx-${rule.value} has no publisher — playout-${rule.value} stopped publishing (pipeline error, crash-loop, wedge-then-exit, or pod down), and the ${rule.value} OBS Dashcam source is showing a frozen frame or black. Check `kubectl -n prod-1 get pods | grep playout-${rule.value}` and its logs. A crash-loop that keeps dying on the same clip is the resume-from-lastplayed corrupt-clip trap — send `!skip` over NATS to advance past the wedged clip. If playout-${rule.value} is deliberately scaled to 0 (parked pre-cutover), add a Grafana silence for this rule."
+      }
+      labels = {
+        severity = "critical"
+        service  = "playout"
+      }
+
+      data {
+        ref_id = "A"
+        relative_time_range {
+          from = 300
+          to   = 0
+        }
+        datasource_uid = data.grafana_data_source.prometheus.uid
+        model = jsonencode({
+          refId         = "A"
+          expr          = "max(paths{name=\"dashcam\", state!=\"ready\", pod=~\"mediamtx-${rule.value}.*\"})"
+          instant       = true
+          intervalMs    = 60000
+          maxDataPoints = 43200
+        })
+      }
+      data {
+        ref_id         = "C"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          refId      = "C"
+          type       = "threshold"
+          expression = "A"
+          conditions = [{
+            type      = "query"
+            evaluator = { type = "gt", params = [0] }
+            operator  = { type = "and" }
+            query     = { params = ["A"] }
+            reducer   = { type = "last", params = [] }
+          }]
+        })
+      }
+    }
+  }
+
+  // Visibility canary, one per platform: the no-publisher rule above is
+  // no_data=OK, so if the relay's series vanish entirely (mediamtx pod down —
+  // which also blacks the stream — or the scrape/ingest path dead) it goes
+  // quiet instead of firing. absent() flips that into an explicit page, same
+  // pattern as the vlc stream-metrics canaries.
+  //
+  // PAUSED at introduction: the relay series have never been admitted to
+  // Mimir (the tenant sits on the 15K active-series cap — see infra#849), so
+  // this would fire continuously today. Unpause once `paths{name="dashcam"}`
+  // is confirmed flowing after the headroom trim is applied.
+  dynamic "rule" {
+    for_each = toset(local.stream_platforms)
+    content {
+      name           = "MediaMTX: ${rule.value} relay metrics absent (lost visibility)"
+      for            = "5m"
+      condition      = "C"
+      no_data_state  = "OK"
+      exec_err_state = "Alerting"
+      is_paused      = true
+
+      annotations = {
+        summary     = "No metrics from the ${rule.value} MediaMTX relay for 5m"
+        description = "paths{name=\"dashcam\", pod=~\"mediamtx-${rule.value}.*\"} has been absent for 5m — either the mediamtx-${rule.value} pod is down (the ${rule.value} OBS loses its Dashcam feed: black stream) or the scrape/ingest path is broken (the no-publisher page above is blind either way). Check `kubectl -n prod-1 get pods | grep mediamtx-${rule.value}`, then the alloy-metrics logs for err-mimir-max-active-series rejections (the tenant lives near the 15K cap)."
+      }
+      labels = {
+        severity = "critical"
+        service  = "playout"
+      }
+
+      data {
+        ref_id = "A"
+        relative_time_range {
+          from = 300
+          to   = 0
+        }
+        datasource_uid = data.grafana_data_source.prometheus.uid
+        model = jsonencode({
+          refId         = "A"
+          expr          = "absent(paths{name=\"dashcam\", pod=~\"mediamtx-${rule.value}.*\"})"
+          instant       = true
+          intervalMs    = 60000
+          maxDataPoints = 43200
+        })
+      }
+      data {
+        ref_id         = "C"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          refId      = "C"
+          type       = "threshold"
+          expression = "A"
+          conditions = [{
+            type      = "query"
+            evaluator = { type = "gt", params = [0] }
+            operator  = { type = "and" }
+            query     = { params = ["A"] }
+            reducer   = { type = "last", params = [] }
+          }]
+        })
+      }
+    }
+  }
+}
+
 # Gateway health — the per-platform API gateway sits on tripbot's critical path
 # (every Helix / Data-API call routes through it). Two complementary prod-scoped
 # signals: the consumer-side reachability gauge tripbot emits (catches "the bot

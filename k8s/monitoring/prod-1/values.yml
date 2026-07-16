@@ -86,6 +86,18 @@ destinations:
         regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
         action = "drop"
       }
+      write_relabel_config {
+        // 2026-07-15 headroom trim — nothing in any dashboard or alert
+        // references these:
+        //   envoy_*     (~500): Cilium's envoy L7 proxy internals; no L7
+        //               policies in use here.
+        //   node_nfs_*  (~200): per-op NFS client counters from the
+        //               dashcam mount; NFS health is watched via the
+        //               video-pipeline job metrics, not per-op counters.
+        source_labels = ["__name__"]
+        regex = "envoy_.+|node_nfs_.+"
+        action = "drop"
+      }
 
   localMetrics:
     type: prometheus
@@ -139,6 +151,11 @@ clusterMetrics:
       excludeMetrics:
         - kube_pod_status_reason
         - kube_deployment_status_condition
+        # Neither is referenced by any dashboard or alert (~270 series
+        # combined): completion_time is a per-finished-pod timestamp,
+        # restart_policy is a static per-pod constant.
+        - kube_pod_completion_time
+        - kube_pod_restart_policy
     # Drop pod UID — changes on every pod rebuild and creates a fresh series
     # set each rollout. Dashboards query by pod name, not uid.
     extraMetricProcessingRules: |-
@@ -222,6 +239,15 @@ annotationAutodiscovery:
       // rollout doubles the active series for ~20min (Mimir lookback).
       action = "labeldrop"
       regex = "pod_template_hash|controller_revision_hash"
+    }
+    rule {
+      // MediaMTX rtsp_conns_* carry a UUID `id` label that churns on
+      // every reconnect — cardinality-toxic and nothing charts them
+      // (paths_* / rtsp_sessions_* feed the stream-health dashboard).
+      // Source-level: no destination wants a per-reconnect series set.
+      source_labels = ["__name__"]
+      regex = "rtsp_conns.*"
+      action = "drop"
     }
     rule {
       // intel/xpumanager v1.3.6 emits xpum_per_engine_ratio (12x per
