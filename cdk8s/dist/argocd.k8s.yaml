@@ -79,6 +79,39 @@ spec:
     - group: "*"
       kind: "*"
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tripbot-console-argo
+  namespace: argocd
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tripbot-console-argo
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tripbot-console-argo
+subjects:
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: prod-1
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: stage-1
+---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -139,6 +172,25 @@ spec:
       kind: "*"
 ---
 apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: playout
+  namespace: argocd
+spec:
+  description: playout server (RTSP publisher feeding the MediaMTX relay), from the public playout repo
+  sourceRepos:
+    - https://github.com/adanalife/playout.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: tripbot-apps
@@ -153,51 +205,51 @@ spec:
           - env: prod-1
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: vlc-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: onscreens-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: tripbot-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: vlc-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: prod-1
             app: onscreens-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: master
+            revision: main
           - env: stage-1
             app: tripbot-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: vlc-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: onscreens-youtube
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: tripbot-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: vlc-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
           - env: stage-1
             app: onscreens-twitch
             repo: https://github.com/adanalife/tripbot.git
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -263,9 +315,9 @@ spec:
     - list:
         elements:
           - env: prod-1
-            revision: master
+            revision: main
           - env: stage-1
-            revision: develop
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -331,7 +383,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-supporting.k8s.yaml"
@@ -387,7 +439,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-data.k8s.yaml"
@@ -421,6 +473,76 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
+  name: mediamtx
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            app: mediamtx-twitch
+          - env: prod-1
+            app: mediamtx-youtube
+          - env: stage-1
+            app: mediamtx-youtube
+          - env: stage-1
+            app: mediamtx-twitch
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-{{.app}}"
+    spec:
+      project: infra
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: main
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-{{.app}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  templatePatch: |
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
   name: ups-monitor
   namespace: argocd
 spec:
@@ -441,7 +563,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: ups-monitor.k8s.yaml
@@ -494,7 +616,7 @@ spec:
       project: infra
       source:
         repoURL: git@github.com:adanalife/infra.git
-        targetRevision: master
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: arc.k8s.yaml
@@ -673,15 +795,38 @@ spec:
     - list:
         elements:
           - env: prod-1
-            revision: master
+            app: gateway-twitch
+            revision: main
+          - env: prod-1
+            app: gateway-youtube
+            revision: main
+          - env: prod-1
+            app: gateway-shared
+            revision: main
           - env: stage-1
-            revision: develop
+            app: gateway-twitch
+            revision: main
+          - env: stage-1
+            app: gateway-youtube
+            revision: main
+          - env: stage-1
+            app: gateway-tiktok
+            revision: main
+          - env: stage-1
+            app: gateway-facebook
+            revision: main
+          - env: stage-1
+            app: gateway-instagram
+            revision: main
+          - env: stage-1
+            app: gateway-shared
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-platform-gateway"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: platform-gateway
       source:
@@ -689,7 +834,7 @@ spec:
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
-          include: "{{.env}}.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -715,6 +860,8 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
@@ -741,17 +888,23 @@ spec:
     - list:
         elements:
           - env: prod-1
-            app: obs
+            app: obs-twitch
+            revision: main
+          - env: prod-1
+            app: obs-youtube
             revision: main
           - env: stage-1
-            app: obs
+            app: obs-youtube
+            revision: main
+          - env: stage-1
+            app: obs-twitch
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
   template:
     metadata:
-      name: "{{.env}}-obs"
+      name: "{{.env}}-{{.app}}"
     spec:
       project: obs
       source:
@@ -759,7 +912,7 @@ spec:
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
-          include: "{{.env}}-obs-*.k8s.yaml"
+          include: "{{.env}}-{{.app}}.k8s.yaml"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.env}}"
@@ -785,8 +938,81 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
-    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (and (eq .env "prod-1") (eq .app "obs"))) }}
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (or (and (eq .env "prod-1") (eq .app "obs-twitch")) (and (eq .env "prod-1") (eq .app "obs-youtube")))) }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: playout
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: prod-1
+            app: playout-twitch
+            revision: main
+          - env: prod-1
+            app: playout-youtube
+            revision: main
+          - env: stage-1
+            app: playout-youtube
+            revision: main
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-{{.app}}"
+    spec:
+      project: playout
+      source:
+        repoURL: https://github.com/adanalife/playout.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}-{{.app}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  templatePatch: |
+    {{- if and (or (eq .env "stage-1") (eq .env "prod-1")) (not (or (and (eq .env "prod-1") (eq .app "playout-twitch")) (and (eq .env "prod-1") (eq .app "playout-youtube")))) }}
     spec:
       syncPolicy:
         automated:

@@ -23,6 +23,7 @@ from adanalife_k8s.charts import (
     DashcamLocalizeChart,
     DashcamPVChart,
     DataChart,
+    MediamtxChart,
     PlatformArgoChart,
     SupportingChart,
     UpsMonitorChart,
@@ -47,6 +48,15 @@ for name in targets:
     # Stateful resources (postgres + dashcam PV/PVC) as a separate deploy unit /
     # Argo Application — isolated from the app churn, synced before the apps.
     DataChart(app, f"{name}-data", env=env)
+    # Per-platform MediaMTX RTSP relays (playout publishes in, OBS pulls out) —
+    # minipc envs only, matching where the playout repo deploys (see
+    # constructs/argocd.py PLAYOUT_REVISIONS). One deploy unit / Argo
+    # Application per (env, platform), like obs/playout (appset-mediamtx).
+    if env.cluster == "minipc":
+        for platform in env.platforms:
+            MediamtxChart(
+                app, f"{name}-mediamtx-{platform}", env=env, platform=platform
+            )
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
     # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
     # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist

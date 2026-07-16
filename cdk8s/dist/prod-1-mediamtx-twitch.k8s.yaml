@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: mediamtx-twitch
+    app.kubernetes.io/part-of: tripbot
+  name: mediamtx-twitch-config
+  namespace: prod-1
+data:
+  mediamtx.yml: |
+    rtsp: yes
+    rtspAddress: :8554
+    rtpAddress: :8000
+    rtcpAddress: :8001
+    rtmp: no
+    hls: no
+    webrtc: no
+    srt: no
+    metrics: yes
+    metricsAddress: :9998
+    paths:
+      dashcam:
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: mediamtx-twitch
+    app.kubernetes.io/part-of: tripbot
+  name: mediamtx-twitch
+  namespace: prod-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mediamtx-twitch
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        prometheus.io/port: "9998"
+        prometheus.io/scrape: "true"
+      labels:
+        app: mediamtx-twitch
+    spec:
+      containers:
+        - image: ghcr.io/adanalife/mirror/mediamtx:1.19.2
+          name: mediamtx-twitch
+          ports:
+            - containerPort: 8554
+              name: rtsp
+            - containerPort: 8000
+              name: rtp
+              protocol: UDP
+            - containerPort: 8001
+              name: rtcp
+              protocol: UDP
+            - containerPort: 9998
+              name: metrics
+          readinessProbe:
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            tcpSocket:
+              port: rtsp
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /mediamtx.yml
+              name: config
+              readOnly: true
+              subPath: mediamtx.yml
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - configMap:
+            name: mediamtx-twitch-config
+          name: config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: mediamtx-twitch
+    app.kubernetes.io/part-of: tripbot
+  name: mediamtx-twitch
+  namespace: prod-1
+spec:
+  ports:
+    - name: rtsp
+      port: 8554
+      targetPort: rtsp
+    - name: rtp
+      port: 8000
+      protocol: UDP
+      targetPort: rtp
+    - name: rtcp
+      port: 8001
+      protocol: UDP
+      targetPort: rtcp
+    - name: metrics
+      port: 9998
+      targetPort: metrics
+  selector:
+    app: mediamtx-twitch

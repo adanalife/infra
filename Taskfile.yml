@@ -198,7 +198,7 @@ tasks:
 
   # cdk8s:dev:apply — bootstrap the development (k3d) DATA unit directly.
   # dev's apps + supporting + identity are Argo-managed (the k3d Argo reads the
-  # tripbot repo @ develop); this just lays down the postgres + SecretStore unit
+  # tripbot repo @ main); this just lays down the postgres + SecretStore unit
   # that Argo's app sync depends on, before/independently of an Argo bootstrap.
   # Pre-req: a running k3d cluster + `task k8s:dev:bootstrap-secrets` for the
   # eso-aws-credentials Secret.
@@ -449,7 +449,7 @@ tasks:
   #   k8s:dev:up      → cluster:up + platform:up + sync (cold-start to running)
   #   k8s:dev:down    → cluster:down
   #   k8s:dev:deploy  → build + import a local image and run it (APP=<app> for one)
-  #   k8s:dev:sync    → re-sync Argo apps / revert a local image to CI :develop
+  #   k8s:dev:sync    → re-sync Argo apps / revert a local image to CI :main
   #   k8s:dev:status  → pods + running image tags + Argo health
   k8s:dev:cluster:up:
     desc: "create the local k3d dev cluster — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
@@ -512,7 +512,7 @@ tasks:
 
   # Build the dev app images locally, tag them :dev-local, and import them into
   # the k3d dev cluster's image store. APP=tripbot|vlc|obs|onscreens builds just
-  # one; omit for all four. The committed manifests still pin CI's :develop so a
+  # one; omit for all four. The committed manifests still pin CI's :main so a
   # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
   # only for iterating on a LOCAL build.
   k8s:dev:images:build:
@@ -552,7 +552,7 @@ tasks:
   # syncPolicy diffs (ignoreApplicationDifferences), so the pause sticks — and
   # flips imagePullPolicy to IfNotPresent so the imported image isn't evicted by
   # a re-pull. Argo will show the app OutOfSync while you iterate; that's
-  # expected. Revert to CI :develop (and re-enable selfHeal) with k8s:dev:sync.
+  # expected. Revert to CI :main (and re-enable selfHeal) with k8s:dev:sync.
   k8s:dev:deploy:
     desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all four. Revert with k8s:dev:sync"
     deps:
@@ -575,11 +575,11 @@ tasks:
           app=${row%%:*}; r=${row#*:}; dep=${r%%:*}; r=${r#*:}; ctr=${r%%:*}; repo=${r#*:}
           { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
           echo "==> deploy $repo:dev-local -> deploy/$dep (container $ctr)"
-          # Pause Argo selfHeal so the override isn't reconciled back to :develop.
+          # Pause Argo selfHeal so the override isn't reconciled back to :main.
           kubectl patch application "development-$dep" -n argocd --type merge \
             -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}' >/dev/null
           # Any initContainer sharing the image (tripbot's `migrate`) needs the
-          # same override, or the pod gets stuck pulling :develop for the init
+          # same override, or the pod gets stuck pulling :main for the init
           # step. Build an initContainers patch fragment for matching ones.
           init_items=""
           for ic in $(kubectl get "deploy/$dep" -n development \
@@ -597,12 +597,12 @@ tasks:
             -p "{\"spec\":{\"template\":{\"spec\":{${init_patch}\"containers\":[{\"name\":\"$ctr\",\"image\":\"$repo:dev-local\",\"imagePullPolicy\":\"IfNotPresent\"}]}}}}"
           kubectl rollout status "deploy/$dep" -n development --timeout=180s
         done
-        echo "running your local :dev-local build. revert to CI :develop with: task k8s:dev:sync"
+        echo "running your local :dev-local build. revert to CI :main with: task k8s:dev:sync"
 
-  # Dev env at a glance: pods, the image tag each app is running (CI :develop vs
+  # Dev env at a glance: pods, the image tag each app is running (CI :main vs
   # local :dev-local), and Argo app sync/health.
   k8s:dev:status:
-    desc: "dev env at a glance: pods + running image tags (:develop vs :dev-local) + Argo app health"
+    desc: "dev env at a glance: pods + running image tags (:main vs :dev-local) + Argo app health"
     preconditions:
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
         msg: "k8s:dev:* must target the k3d dev cluster — `unset KUBECONFIG` (or use-context k3d-adanalife-dev) first."
@@ -730,7 +730,7 @@ tasks:
   # NOTE: the dev rollout:* tasks were removed — they pointed at pre-per-platform
   # deployment names (deploy/tripbot, not deploy/tripbot-twitch) so they no
   # longer matched anything, and a bare restart under imagePullPolicy: Always
-  # just re-pulls CI's :develop. Use `task k8s:dev:deploy` to run a local build,
+  # just re-pulls CI's :main. Use `task k8s:dev:deploy` to run a local build,
   # `task k8s:dev:sync` to revert to CI images, and a plain
   # `kubectl rollout restart deploy/<app>-twitch -n development` for a bare bounce.
 
@@ -1179,12 +1179,12 @@ tasks:
   # Sync the dev Argo Applications in dependency order, then kick the apps.
   # data + supporting + identity are manual-sync (data is Prune=false forever —
   # it can never auto-prune the DB); the apps autosync, but this kicks them so
-  # you don't wait for the next reconcile. Doubles as the "revert to CI :develop"
+  # you don't wait for the next reconcile. Doubles as the "revert to CI :main"
   # gesture — it re-enables selfHeal on the app Applications (k8s:dev:deploy
   # pauses it to pin a local :dev-local image) and re-syncs them to the
   # committed manifest. Replaces clicking Sync in the UI.
   k8s:dev:sync:
-    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps); also reverts a k8s:dev:deploy local-image override back to CI :develop"
+    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps); also reverts a k8s:dev:deploy local-image override back to CI :main"
     aliases: ["k8s:dev:argo:sync"]
     preconditions:
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
@@ -1212,7 +1212,7 @@ tasks:
         # Apps: the tripbot-apps ApplicationSet template sets no labels, so a
         # label selector matches nothing — enumerate the generated Applications
         # by name instead. Re-enable selfHeal first so any k8s:dev:deploy
-        # :dev-local override reverts to the committed :develop on sync.
+        # :dev-local override reverts to the committed :main on sync.
         apps=$(argocd app list --core -o name | sed 's#^argocd/##' \
                  | grep -E '^development-' \
                  | grep -vE '^development-(data|supporting|tripbot-identity)$')

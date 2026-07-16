@@ -103,6 +103,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "video-pipeline": ["git@github.com:adanalife/video-pipeline.git"],
         "platform-gateway": ["git@github.com:adanalife/platform-gateway.git"],
         "obs": ["https://github.com/adanalife/obs.git"],
+        "playout": ["https://github.com/adanalife/playout.git"],
     }
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
         want_repos
@@ -119,6 +120,8 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("video-pipeline", "video-pipeline"),
         ("platform-gateway", "platform-gateway"),
         ("obs", "obs"),
+        ("playout", "playout"),
+        ("mediamtx", "infra"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
     # cluster-resource allowlists are scoped to what each repo's dist actually
@@ -138,6 +141,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     assert kinds("video-pipeline") == {"PriorityClass"}
     assert kinds("tripbot-console") == set()
     assert kinds("platform-gateway") == set()
+    assert kinds("playout") == set()
     # destinations are scoped to the namespaces each project's apps target. The
     # console reaches into the isolated data namespace too (read-only RBAC for
     # the live status views), so its project must permit both — tripbot apps and
@@ -154,6 +158,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     }
     assert dests("video-pipeline") == {"prod-1", "stage-1"}
     assert dests("platform-gateway") == {"prod-1", "stage-1"}
+    assert dests("playout") == {"prod-1", "stage-1"}
 
 
 def test_minipc_apps_autosync_except_prod_obs():
@@ -171,10 +176,23 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert '{{- if (eq .env "stage-1") }}' in patch
     assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
-    # the live-encoder holdout moved with OBS to the obs appset: prod-1 obs is a
-    # deliberate manual sync (a sync restarts the live stream), the rest autosync.
-    obs_patch = _appset(objs, "obs")["spec"]["templatePatch"]
-    assert '(not (and (eq .env "prod-1") (eq .app "obs")))' in obs_patch
+    # the live-encoder holdout moved with OBS to the obs appset: each prod-1 obs
+    # platform is a deliberate manual sync (a sync restarts the live stream),
+    # the rest autosync.
+    obs = _appset(objs, "obs")
+    obs_patch = obs["spec"]["templatePatch"]
+    assert '(and (eq .env "prod-1") (eq .app "obs-twitch"))' in obs_patch
+    assert '(and (eq .env "prod-1") (eq .app "obs-youtube"))' in obs_patch
+    # one Application per (env, platform), each reconciling its own dist file
+    elements = obs["spec"]["generators"][0]["list"]["elements"]
+    assert {(e["env"], e["app"]) for e in elements} == {
+        ("prod-1", "obs-twitch"),
+        ("prod-1", "obs-youtube"),
+        ("stage-1", "obs-twitch"),
+        ("stage-1", "obs-youtube"),
+    }
+    src = obs["spec"]["template"]["spec"]["source"]
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
@@ -194,10 +212,10 @@ def test_identity_appset_sources_tripbot_and_never_prunes():
         assert src["directory"]["include"] == "{{.env}}-tripbot-identity.k8s.yaml"
         opts = ident["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
         assert "Prune=false" in opts
-        # prod rides master (release-gated); stage + dev ride develop
+        # trunk-based repo: every env tracks main (prod is release-gated by the
+        # image pin, not a branch)
         revs = {e["env"]: e["revision"] for e in elements}
-        assert revs.get("prod-1", "master") == "master"
-        assert all(v == "develop" for k, v in revs.items() if k != "prod-1")
+        assert all(v == "main" for v in revs.values())
 
 
 def test_notifications_secret_minipc_only():
@@ -236,21 +254,90 @@ def test_video_pipeline_appset_both_envs_cross_repo():
         _appset(_synth(**_DEV), "video-pipeline")
 
 
-def test_platform_gateway_appset_both_envs_cross_repo():
+def test_platform_gateway_appset_per_platform_cross_repo():
     objs = _synth()
     pg = _appset(objs, "platform-gateway")
-    revs = {
-        e["env"]: e["revision"] for e in pg["spec"]["generators"][0]["list"]["elements"]
+    elements = pg["spec"]["generators"][0]["list"]["elements"]
+    # one Application per gateway instance (PLATFORM_GATEWAY_PLATFORMS — the
+    # cross-repo contract with the gateway repo's env.platforms) plus the
+    # per-env shared unit carrying the once-per-namespace ExternalSecrets
+    apps = {(e["env"], e["app"]) for e in elements}
+    assert {a for a in apps if a[0] == "prod-1"} == {
+        ("prod-1", "gateway-twitch"),
+        ("prod-1", "gateway-youtube"),
+        ("prod-1", "gateway-shared"),
     }
-    # both prod + stage run gateway-twitch; prod pins master, stage floats develop
-    assert revs == {"prod-1": "master", "stage-1": "develop"}
+    assert {a[1] for a in apps if a[0] == "stage-1"} == {
+        "gateway-twitch",
+        "gateway-youtube",
+        "gateway-tiktok",
+        "gateway-facebook",
+        "gateway-instagram",
+        "gateway-shared",
+    }
+    # trunk-based repo: every element tracks main
+    assert all(e["revision"] == "main" for e in elements)
     src = pg["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "git@github.com:adanalife/platform-gateway.git"
-    assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
     assert "automated" in pg["spec"]["templatePatch"]  # autosyncs like the others
+    # an app rename / platform removal must never cascade-delete live gateways
+    assert pg["spec"]["syncPolicy"] == {"preserveResourcesOnDeletion": True}
     # dev cluster carries no private-repo deploy key, so no platform-gateway unit
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "platform-gateway")
+
+
+def test_playout_appset_cross_repo_with_prod_holdout():
+    objs = _synth()
+    po = _appset(objs, "playout")
+    src = po["spec"]["template"]["spec"]["source"]
+    assert src["repoURL"] == "https://github.com/adanalife/playout.git"
+    # one Application per (env, platform), each reconciling its own dist file
+    # (PLAYOUT_PLATFORMS — stage runs youtube only)
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
+    elements = po["spec"]["generators"][0]["list"]["elements"]
+    assert {(e["env"], e["app"]) for e in elements} == {
+        ("prod-1", "playout-twitch"),
+        ("prod-1", "playout-youtube"),
+        ("stage-1", "playout-youtube"),
+    }
+    assert all(e["revision"] == "main" for e in elements)
+    # prod playout feeds the live stream at cutover — deliberate manual sync
+    patch = po["spec"]["templatePatch"]
+    assert '(and (eq .env "prod-1") (eq .app "playout-twitch"))' in patch
+    assert '(and (eq .env "prod-1") (eq .app "playout-youtube"))' in patch
+    # the public repo needs no deploy key, and the dev cluster runs no playout
+    dev = _synth(**_DEV)
+    with pytest.raises(StopIteration):
+        _appset(dev, "playout")
+    assert "playout" not in {
+        o["metadata"]["name"] for o in dev if o["kind"] == "AppProject"
+    }
+
+
+def test_mediamtx_appset_autosyncs_both_envs():
+    objs = _synth()
+    mtx = _appset(objs, "mediamtx")
+    src = mtx["spec"]["template"]["spec"]["source"]
+    # infra-authored unit: sources the infra repo like supporting/data...
+    assert src["repoURL"] == "git@github.com:adanalife/infra.git"
+    # ...one Application per (env, platform), fan-out from the infra env config
+    assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
+    elements = mtx["spec"]["generators"][0]["list"]["elements"]
+    assert {(e["env"], e["app"]) for e in elements} == {
+        ("prod-1", "mediamtx-twitch"),
+        ("prod-1", "mediamtx-youtube"),
+        ("stage-1", "mediamtx-twitch"),
+        ("stage-1", "mediamtx-youtube"),
+    }
+    # ...but unlike them it autosyncs with selfHeal on (relay restarts are cheap)
+    patch = mtx["spec"]["templatePatch"]
+    assert "prune: true" in patch
+    assert "selfHeal: true" in patch
+    assert "selfHeal: false" not in patch
+    with pytest.raises(StopIteration):
+        _appset(_synth(**_DEV), "mediamtx")
 
 
 def test_data_appset_never_prunes_either_variant():
@@ -258,3 +345,35 @@ def test_data_appset_never_prunes_either_variant():
         data = _appset(_synth(**kwargs), "tripbot-data")
         opts = data["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
         assert "Prune=false" in opts
+
+
+def _by_name(objs, kind, name):
+    return next(o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name)
+
+
+def test_console_argo_rbac_scopes_to_applications_for_console_sas():
+    objs = _synth()
+    role = _by_name(objs, "Role", "tripbot-console-argo")
+    assert role["metadata"]["namespace"] == "argocd"
+    # applications only — no other Argo CRs / config, no cluster scope
+    assert len(role["rules"]) == 1
+    rule = role["rules"][0]
+    assert rule["apiGroups"] == ["argoproj.io"]
+    assert rule["resources"] == ["applications"]
+    assert set(rule["verbs"]) == {"get", "list", "watch", "patch"}
+    # bound to each minipc console env's ServiceAccount
+    rb = _by_name(objs, "RoleBinding", "tripbot-console-argo")
+    assert rb["roleRef"]["name"] == "tripbot-console-argo"
+    subjects = {(s["name"], s["namespace"]) for s in rb["subjects"]}
+    assert subjects == {("tripbot-console", "prod-1"), ("tripbot-console", "stage-1")}
+
+
+def test_no_console_argo_rbac_on_dev():
+    # dev's console isn't Argo-managed (CONSOLE_REVISIONS is prod/stage only), so
+    # the dev Argo grants no console→Applications access.
+    objs = _synth(**_DEV)
+    assert not any(
+        o["kind"] in ("Role", "RoleBinding")
+        and o["metadata"]["name"] == "tripbot-console-argo"
+        for o in objs
+    )

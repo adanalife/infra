@@ -53,13 +53,13 @@ EOF
 # external-dns (k8s) authenticates as the user via its access key.
 resource "aws_iam_user_policy_attachment" "external_dns_dev_zone" {
   policy_arn = aws_iam_policy.allow_external_dns_dev_zone.arn
-  user       = aws_iam_user.external_dns.name
+  user       = module.env_base.external_dns_user_name
 }
 
 # cert-manager's DNS-01 solver assumes the role.
 resource "aws_iam_role_policy_attachment" "external_dns_dev_zone" {
   policy_arn = aws_iam_policy.allow_external_dns_dev_zone.arn
-  role       = aws_iam_role.external_dns.name
+  role       = module.env_base.external_dns_role_name
 }
 
 output "dev_route53_name_servers" {
