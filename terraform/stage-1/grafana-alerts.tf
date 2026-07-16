@@ -391,11 +391,6 @@ resource "grafana_rule_group" "metrics_budget" {
     labels = {
       severity = "warning"
       service  = "monitoring"
-      // Muted: fires continuously (two deployments share the free-tier
-      // active-series budget) and there's no action to take. Kept (still visible
-      // in the Alerting UI) but routed through the always-on mute timing — see
-      // the mute=true sub-route on grafana_notification_policy.root.
-      mute = "true"
     }
 
     data {
@@ -1582,11 +1577,6 @@ resource "grafana_rule_group" "relay_health" {
   // which also blacks the stream — or the scrape/ingest path dead) it goes
   // quiet instead of firing. absent() flips that into an explicit page, same
   // pattern as the vlc stream-metrics canaries.
-  //
-  // PAUSED at introduction: the relay series have never been admitted to
-  // Mimir (the tenant sits on the 15K active-series cap — see infra#849), so
-  // this would fire continuously today. Unpause once `paths{name="dashcam"}`
-  // is confirmed flowing after the headroom trim is applied.
   dynamic "rule" {
     for_each = toset(local.stream_platforms)
     content {
@@ -1595,11 +1585,10 @@ resource "grafana_rule_group" "relay_health" {
       condition      = "C"
       no_data_state  = "OK"
       exec_err_state = "Alerting"
-      is_paused      = true
 
       annotations = {
         summary     = "No metrics from the ${rule.value} MediaMTX relay for 5m"
-        description = "paths{name=\"dashcam\", pod=~\"mediamtx-${rule.value}.*\"} has been absent for 5m — either the mediamtx-${rule.value} pod is down (the ${rule.value} OBS loses its Dashcam feed: black stream) or the scrape/ingest path is broken (the no-publisher page above is blind either way). Check `kubectl -n prod-1 get pods | grep mediamtx-${rule.value}`, then the alloy-metrics logs for err-mimir-max-active-series rejections (the tenant lives near the 15K cap)."
+        description = "paths{name=\"dashcam\", pod=~\"mediamtx-${rule.value}.*\"} has been absent for 5m — either the mediamtx-${rule.value} pod is down (the ${rule.value} OBS loses its Dashcam feed: black stream) or the scrape/ingest path is broken (the no-publisher page above is blind either way). Check `kubectl -n prod-1 get pods | grep mediamtx-${rule.value}`, then the alloy-metrics logs for err-mimir-max-active-series rejections (the free-tier active-series cap)."
       }
       labels = {
         severity = "critical"
@@ -1717,22 +1706,11 @@ resource "grafana_rule_group" "gateway_health" {
 
     annotations = {
       summary     = "No platform_gateway_up from prod-1 for 5m"
-      description = "platform_gateway_up{namespace=\"prod-1\"} has been absent for 5m. Known cause: the prod gateway's Prometheus series are dropped by the Grafana Cloud free-tier active-series cap (see the active-series warning above), so absent() fires even though the gateway is up and serving (tripbot_gateway_up=1). Muted until the metrics budget is addressed. If the budget is fixed and this still fires, the gateway genuinely isn't being scraped — check `kubectl get pods -n prod-1 | grep gateway`. no_data is OK because a present series makes absent() return nothing."
+      description = "platform_gateway_up{namespace=\"prod-1\"} has been absent for 5m — the gateway genuinely isn't reporting (all replicas down, or the scrape/ingest path is broken). Check `kubectl get pods -n prod-1 | grep gateway`, then the alloy-metrics logs for err-mimir-max-active-series rejections (the free-tier active-series cap). no_data is OK because a present series makes absent() return nothing."
     }
     labels = {
-      // Muted: the prod gateway's platform_gateway_* series are dropped by the
-      // Mimir active-series cap (two deployments over the free-tier budget — see
-      // the active-series warning above), so absent() fires continuously even
-      // though the gateway is up. Known cause, no action until the budget is
-      // addressed. Kept (still visible/firing in the Alerting UI) but routed
-      // through the always-on mute timing — see the mute=true sub-route on
-      // grafana_notification_policy.root. Downgraded critical -> warning so it
-      // doesn't match the critical->ntfy/Discord routes that run before the
-      // mute route; the SSD-loss alert (Loki-based, uncapped) stays critical and
-      // pages through.
-      severity = "warning"
+      severity = "critical"
       service  = "gateway"
-      mute     = "true"
     }
 
     data {
