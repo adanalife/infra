@@ -24,6 +24,10 @@ class EnvConfig:
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
+    # Emit the CNPG `pg` cluster (PITR via barman-cloud → S3) alongside the
+    # legacy StatefulSet. Stage-1 first; prod-1 flips on after the stage PITR
+    # restore drill passes. dev/local keep the legacy StatefulSet only.
+    cnpg: bool = False
     # "" → postgres co-locates in the app namespace (default, byte-identical
     # render). Set to an isolated namespace (e.g. "stage-1-data") to move the DB
     # StatefulSet + its ESO SecretStore out of the app namespace, so deleting the
@@ -137,6 +141,7 @@ ENVS: dict[str, EnvConfig] = {
         tailscale=True,
         postgres_size="10Gi",
         postgres_storage_class="local-path",
+        cnpg=True,
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
