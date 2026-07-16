@@ -11,6 +11,7 @@ spec:
     - https://argoproj.github.io/argo-helm
     - https://charts.external-secrets.io
     - https://charts.jetstack.io
+    - https://cloudnative-pg.github.io/charts
     - https://grafana.github.io/helm-charts
     - https://helm.cilium.io
     - https://kubernetes-sigs.github.io/external-dns/
@@ -146,6 +147,70 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: 0.29.0
+      helm:
+        releaseName: cnpg
+        valueFiles:
+          - $values/k8s/cloudnative-pg/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plugin-barman-cloud
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: plugin-barman-cloud
+      targetRevision: 0.7.0
+      helm:
+        releaseName: plugin-barman-cloud
+        valueFiles:
+          - $values/k8s/plugin-barman-cloud/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
   syncPolicy:
     syncOptions:
       - CreateNamespace=true
