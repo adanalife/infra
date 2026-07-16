@@ -9,10 +9,14 @@
 # lives in the main `monitoring` namespace, which is why this is
 # installed separately into `monitoring-host` (labeled `privileged`).
 #
-# Discovery: pod annotations let grafana-k8s-monitoring's
-# annotationAutodiscovery feature (running in the `monitoring` ns)
-# scrape this pod across namespaces — same path traefik /
-# external-dns / cert-manager / external-secrets metrics flow.
+# Discovery: grafana-k8s-monitoring's hostMetrics feature scrapes this
+# pod via labelMatchers (app.kubernetes.io/name=prometheus-node-exporter,
+# see k8s/monitoring/prod-1/values.yml) with the curated integration
+# allowlist. Deliberately NOT annotation-discovered: prometheus.io/*
+# podAnnotations here would make annotationAutodiscovery scrape the
+# FULL exposition (~3600 series) alongside hostMetrics' allowlisted
+# ~700 — a duplicate that alone ate a quarter of the Grafana Cloud
+# active-series cap until removed on 2026-07-16.
 
 # Bind to :9101 instead of the chart default :9100 — traefik in
 # prod-1 runs with hostNetwork: true and already binds host port
@@ -24,15 +28,6 @@
 service:
   port: 9101
   targetPort: 9101
-
-# Set on the DaemonSet's pod template (not just the Service) so
-# annotationAutodiscovery picks it up. Without these on the pod,
-# the Service annotations the chart sets by default don't help —
-# alloy-metrics scrapes pods, not services.
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "9101"
-  prometheus.io/path: "/metrics"
 
 # Cardinality controls. node-exporter is ~45% of all active series in
 # Grafana Cloud — most of that from per-interface metrics (one veth per
