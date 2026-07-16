@@ -22,8 +22,8 @@
         "type": "custom",
         "query": "twitch,youtube",
         "current": {
-          "text": "youtube",
-          "value": "youtube"
+          "text": "twitch",
+          "value": "twitch"
         },
         "includeAll": true,
         "allValue": ".*",
