@@ -18,6 +18,21 @@ data:
     srt: no
     metrics: yes
     metricsAddress: :9998
+    # MediaMTX's built-in default auth grants `metrics` only to localhost,
+    # which 401s the in-cluster Alloy scraper (it hits the pod IP over the
+    # pod network; only kubectl port-forward traffic arrives via loopback).
+    # Defining authInternalUsers replaces the default list entirely, so the
+    # default publish/read/playback grants are restated alongside metrics.
+    # Everything stays cluster-internal — the Service is ClusterIP-only.
+    authInternalUsers:
+      - user: any
+        pass:
+        ips: []
+        permissions:
+          - action: publish
+          - action: read
+          - action: playback
+          - action: metrics
     paths:
       dashcam:
 ---
