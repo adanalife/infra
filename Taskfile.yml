@@ -1225,8 +1225,17 @@ tasks:
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
   # mirror to both unless deliberately env-specific.
+  #
+  # DAY-0 BRING-UP ONLY. The Argo-adoptable platform releases in here (ESO,
+  # metrics-server, tailscale-operator, cert-manager, cnpg, node-exporter,
+  # k8s-monitoring, NATS) are Argo-owned on the live cluster
+  # (platform-argo.k8s.yaml; adopted 2026-07-16) — re-running their helm
+  # steps against it fails with argocd-controller field-manager conflicts.
+  # Day-2 changes go through git + Argo sync; see gitops/README.md
+  # ("Platform stack"). On an empty cluster this task still works: helm
+  # installs everything, Argo adopts on first sync.
   k8s:prod:platform:up:
-    desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the empty cluster
+    desc: "day-0 bring-up of an empty cluster (live releases are Argo-owned — see gitops/README.md)"
     deps: [k8s:prod:bootstrap-secrets]
     preconditions:
       - *minipc-context-guard
@@ -1374,17 +1383,9 @@ tasks:
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
-      # VictoriaMetrics — local full-fidelity metrics store (no series
-      # cap). alloy-metrics remote_writes everything here; Grafana Cloud
-      # gets the trimmed subset. See k8s/monitoring/victoria-metrics/.
-      - helm repo add vm https://victoriametrics.github.io/helm-charts/
-      - helm repo update vm
-      - helm upgrade --install victoria-metrics vm/victoria-metrics-single
-          --version 0.42.0
-          -n monitoring
-          -f k8s/monitoring/victoria-metrics/values.yml
-      - kubectl rollout status statefulset/victoria-metrics -n monitoring --timeout=120s
-      - 'echo "VictoriaMetrics up. PromQL + remote_write at http://victoria-metrics.monitoring.svc:8428 (in-cluster only)."'
+      # VictoriaMetrics (the local metrics store k8s-monitoring writes to) has
+      # no helm step here — it's Argo-delivered only (platform-argo.k8s.yaml,
+      # synced after gitops:apply), never helm-CLI-owned.
       # NATS — pubsub substrate for inter-component messaging.
       # Single-node, no JetStream, prom-exporter sidecar scraped by
       # alloy-metrics via prometheus.io/* pod annotations. Lives in

@@ -8,7 +8,8 @@ is a tooling change, not a values rewrite.
 
 Two deploy units (mirrors the legacy split):
   * `PlatformChart(cluster)`  — the cluster-scoped platform (cilium, ESO, traefik,
-    cert-manager, node-exporter, k8s-monitoring, tailscale-operator).
+    cert-manager, node-exporter, victoria-metrics, k8s-monitoring,
+    tailscale-operator).
   * `PlatformEnvChart(env)`   — the per-env-platform pieces that live in the
     `<env>-platform` namespace (external-dns, NATS), with the LAN IP injected
     from `EnvConfig` (replacing the gitignored `values.local.yml`).
@@ -51,6 +52,7 @@ REPOS = {
     "tailscale": "https://pkgs.tailscale.com/helmcharts",
     "argo": "https://argoproj.github.io/argo-helm",
     "cloudnative-pg": "https://cloudnative-pg.github.io/charts",
+    "victoria-metrics": "https://victoriametrics.github.io/helm-charts/",
     # OCI registry (no scheme) — the ARC charts. Argo renders these in-cluster;
     # cdk8s.Helm can't `helm template` an OCI ref, so the ARC components are
     # Argo-only (never fed to PlatformChart). See arc_components below.
@@ -82,6 +84,9 @@ VERSIONS = {
     # archiving / PITR to S3). Verified latest stable at add time (2026-07-10).
     "cloudnative-pg": "0.29.0",
     "plugin-barman-cloud": "0.7.0",
+    # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
+    # live minipc release.
+    "victoria-metrics-single": "0.42.0",
     # ARC — controller + runner scale set share one release version.
     "arc-controller": "0.14.2",
     "arc-runner-set": "0.14.2",
@@ -282,6 +287,24 @@ def cluster_components(
             value_files=("monitoring/node-exporter/values.yml",),
         )
     )
+
+    # VictoriaMetrics — the local, full-fidelity metrics store that
+    # k8s-monitoring's localMetrics destination writes to (the Grafana Cloud
+    # destination gets the series-cap-trimmed subset). minipc only: dev ships
+    # logs + events, no local TSDB. Before k8s-monitoring so a fresh cluster
+    # has the destination up before alloy's first write (alloy retries, so
+    # this is politeness, not a hard dependency).
+    if minipc:
+        components.append(
+            HelmComponent(
+                "victoria-metrics",
+                "victoria-metrics",
+                "victoria-metrics-single",
+                "victoria-metrics-single",
+                "monitoring",
+                value_files=("monitoring/victoria-metrics/values.yml",),
+            )
+        )
 
     # k8s-monitoring 4.1.4 is confirmed live on the minipc (prod renders + the
     # pin matches `helm list`). But dev's values.yml was authored for the k3d dev
