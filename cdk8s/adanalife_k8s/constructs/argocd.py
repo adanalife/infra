@@ -152,14 +152,14 @@ PLATFORM_GATEWAY_PLATFORMS = {
 # repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
 # no _repo_external_secret below). OBS_REVISIONS is the single source of truth
 # for which envs the obs repo delivers: an env listed here is delivered by the obs
-# repo's own ApplicationSet AND excluded from tripbot-apps' obs generation (so the
-# two never co-manage the same obs-* resources). All envs are cut over; prod obs
-# is an AUTOSYNC_HOLDOUT — a deliberate sync.
+# repo's own ApplicationSet. tripbot-apps only ever delivers what tripbot's cdk8s
+# synths (tripbot/onscreens), so it never carries an obs unit to collide with.
+# All envs are cut over; prod obs is an AUTOSYNC_HOLDOUT — a deliberate sync.
 OBS_PROJECT = "obs"
 OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # Whole-env cutover: every obs-* platform for the env is delivered by the obs
-# repo's own appset (one {{.env}}-obs-<platform> Application per instance) and
-# excluded from tripbot-apps. prod-1 joined on a planned-downtime cutover (the
+# repo's own appset (one {{.env}}-obs-<platform> Application per instance).
+# prod-1 joined on a planned-downtime cutover (the
 # live twitch encoder restarts onto the obs-repo image) — youtube was already
 # on the obs repo, so the env's apps adopt it cleanly and only twitch moves.
 # development joined last so tripbot can drop its obs construct entirely: the obs
@@ -210,13 +210,6 @@ TRIPBOT_REVISIONS = {"prod-1": "main", "stage-1": "main", "development": "main"}
 # app manifests — it delivers them cross-repo (see the apps + identity
 # ApplicationSets below) and keeps only postgres/supporting/dashcam.
 TRIPBOT_APPS_ENVS = ("stage-1", "prod-1", "development")
-# The tripbot APP components — one Application per (env, component, platform). The
-# matching dist files (`<env>-<component>-<platform>.k8s.yaml`) are authored in
-# the tripbot repo now, so this list is a cross-repo contract: it must track the
-# components tripbot's cdk8s emits, or the apps set would generate Applications
-# pointing at files that don't exist (or miss new ones). Lived in charts.py while
-# infra emitted the apps; it's now purely an Argo-config concern.
-TRIPBOT_COMPONENTS = ("tripbot", "vlc", "onscreens", "obs")
 
 
 def _data_ns(env_name: str) -> str:
@@ -241,37 +234,6 @@ def _project_namespaces(envs: tuple[str, ...]) -> list[str]:
     return seen
 
 
-def _app_elements(envs: tuple[str, ...]) -> list[dict]:
-    """The per-component ApplicationSet elements: one {env, app} per
-    (env, platform, component), where app = "<component>-<platform>". Every env's
-    app workloads are authored in the tripbot repo now, so each element sources it
-    at the env's revision (every env → main). The component list +
-    each env's platforms drive the (env, platform, component) fan-out; it must
-    stay in sync with the dist files tripbot's cdk8s emits. Lazy config import
-    avoids an import cycle (config has no cycle, but kept local for symmetry)."""
-    from adanalife_k8s.config import load_env
-
-    elements: list[dict] = []
-    for env_name in envs:
-        revision = TRIPBOT_REVISIONS[env_name]
-        for platform in load_env(env_name).platforms:
-            for comp in TRIPBOT_COMPONENTS:
-                # OBS for a cut-over env is delivered by the standalone obs repo's
-                # own ApplicationSet (OBS_REVISIONS), not tripbot's — skip it here
-                # so the two never co-manage the same obs-* resources.
-                if comp == "obs" and env_name in OBS_REVISIONS:
-                    continue
-                elements.append(
-                    {
-                        "env": env_name,
-                        "app": f"{comp}-{platform}",
-                        "repo": TRIPBOT_REPO_URL,
-                        "revision": revision,
-                    }
-                )
-    return elements
-
-
 def _platform_elements(
     envs: tuple[str, ...],
     component: str,
@@ -279,11 +241,11 @@ def _platform_elements(
     platforms_by_env: dict[str, tuple[str, ...]] | None = None,
 ) -> list[dict]:
     """One {env, app} element per (env, platform) for a per-platform appset
-    (app = "<component>-<platform>"), the tripbot-apps shape. Platforms come
-    from the infra env config unless the source repo's platform set differs
-    (playout/gateway carry their own cross-repo contract maps). `revisions`
-    adds the per-env revision for cross-repo sources; infra-sourced sets
-    (mediamtx) omit it."""
+    (app = "<component>-<platform>") — the obs/playout/gateway/mediamtx shape.
+    Platforms come from the infra env config unless the source repo's platform
+    set differs (playout/gateway carry their own cross-repo contract maps).
+    `revisions` adds the per-env revision for cross-repo sources; infra-sourced
+    sets (mediamtx) omit it."""
     from adanalife_k8s.config import load_env
 
     elements: list[dict] = []
@@ -465,7 +427,16 @@ class ArgoCD(Construct):
             id="appset-apps",
             name="tripbot-apps",
             project=TRIPBOT_PROJECT,
-            elements=_app_elements(envs),
+            # Self-discover the deploy units from the tripbot repo's committed
+            # discovery index (dist/apps/<env>-<app>.json), scoped to this Argo's
+            # tripbot envs. One Application per JSON — so tripbot/onscreens ×
+            # whatever platforms tripbot synthed, and nothing it didn't (no
+            # phantom vlc/obs units, no infra-side platform matrix to maintain).
+            discover_globs=tuple(
+                f"cdk8s/dist/apps/{env}-*.json" for env in self.tripbot_apps_envs
+            ),
+            discover_repo=TRIPBOT_REPO_URL,
+            discover_revision="main",
             app_name_tmpl="{{.env}}-{{.app}}",
             include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
             prune_disabled=False,
@@ -473,10 +444,10 @@ class ArgoCD(Construct):
             automated_holdouts=autosync_holdouts,
             selfheal=self._selfheal,
             selfheal_off_envs=SELFHEAL_OFF_ENVS,
-            # Source repo + revision are per-element (see _app_elements): every env
-            # reads the tripbot repo at its own revision (main for every env).
-            repo_url="{{.repo}}",
-            target_revision_tmpl="{{.revision}}",
+            # Every tripbot env tracks main (release-please gates prod by the
+            # versions.yaml image pin, not by a branch).
+            repo_url=TRIPBOT_REPO_URL,
+            target_revision_tmpl="main",
         )
         # The cross-repo identity unit: tripbot's per-env identity Secrets (DB creds
         # + twitch/maps/discord ExternalSecrets) and the prod-stream PriorityClass/
@@ -846,7 +817,10 @@ class ArgoCD(Construct):
         id: str,
         name: str,
         project: str,
-        elements: list[dict],
+        elements: list[dict] | None = None,
+        discover_globs: tuple[str, ...] | None = None,
+        discover_repo: str = REPO_URL,
+        discover_revision: str = TARGET_REVISION,
         app_name_tmpl: str,
         include_tmpl: str,
         prune_disabled: bool,
@@ -860,11 +834,13 @@ class ArgoCD(Construct):
         create_namespace: bool = False,
         preserve_on_deletion: bool = False,
     ):
-        """Emit one ApplicationSet -> one Application per generator element. The
-        apps set has one element per (env, component, platform) so each component
-        is its own Application reconciling its own dist file; supporting + data
-        have one element per env. The data set disables prune so it can never
-        delete the database/volumes, even when apps flips to automated sync.
+        """Emit one ApplicationSet -> one Application per generator element. Pass
+        `elements` for a static List generator, or `discover_globs` for a git
+        files generator that self-discovers one element per matching JSON in the
+        source repo (the apps set: one Application per (env, component, platform)
+        the app repo synthed, each reconciling its own dist file). supporting +
+        data have one element per env. The data set disables prune so it can
+        never delete the database/volumes, even when apps flips to automated sync.
 
         `automated_envs` turns on continuous reconcile (prune, + selfHeal when
         `selfheal`) for just those envs via a per-element templatePatch — so one
@@ -883,6 +859,22 @@ class ArgoCD(Construct):
         ]
         if prune_disabled:
             sync_options.append("Prune=false")  # never delete stateful resources
+
+        # The generator: a static List of hand-declared elements, or — for the
+        # apps set — a git files generator that self-discovers one element per
+        # `dist/apps/<env>-<app>.json` the source repo emits, so the deploy units
+        # this set delivers are exactly the ones the app repo synthed (no infra
+        # matrix to keep in sync). Each discovered JSON supplies {env, app}.
+        if discover_globs is not None:
+            generator: dict = {
+                "git": {
+                    "repoURL": discover_repo,
+                    "revision": discover_revision,
+                    "files": [{"path": g} for g in discover_globs],
+                }
+            }
+        else:
+            generator = {"list": {"elements": elements or []}}
 
         spec: dict = {
             "project": project,
@@ -943,7 +935,7 @@ class ArgoCD(Construct):
         appset_spec: dict = {
             "goTemplate": True,
             "goTemplateOptions": ["missingkey=error"],
-            "generators": [{"list": {"elements": elements}}],
+            "generators": [generator],
             # Emergency brake: let a manual sync-policy change on a generated
             # Application STICK instead of being stomped back within seconds by
             # this controller. With this, `argocd app set <app> --sync-policy none`

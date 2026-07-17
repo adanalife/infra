@@ -200,56 +200,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: tripbot-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: vlc-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: tripbot-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: vlc-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: onscreens-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: tripbot-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: vlc-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: onscreens-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: tripbot-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: vlc-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/tripbot.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -259,8 +215,8 @@ spec:
     spec:
       project: tripbot
       source:
-        repoURL: "{{.repo}}"
-        targetRevision: "{{.revision}}"
+        repoURL: https://github.com/adanalife/tripbot.git
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
