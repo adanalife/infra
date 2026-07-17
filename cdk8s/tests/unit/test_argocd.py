@@ -170,8 +170,12 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert "obs" not in patch
     # selfHeal is per-env: stage is OFF (a hand/console scale sticks so
     # components can be parked at 0 to free the minipc), prod stays ON (the live
-    # stream must match git). Both branches render in the goTemplate conditional.
-    assert '{{- if (eq .env "stage-1") }}' in patch
+    # stream must match git) — except the parked prod facebook stack, which the
+    # console scales live and so keeps selfHeal off. Both branches render in the
+    # goTemplate conditional.
+    assert '(eq .env "stage-1")' in patch
+    assert '(and (eq .env "prod-1") (eq .app "tripbot-facebook"))' in patch
+    assert '(and (eq .env "prod-1") (eq .app "onscreens-facebook"))' in patch
     assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
     # the live-encoder holdout moved with OBS to the obs appset: each prod-1 obs
@@ -181,8 +185,11 @@ def test_minipc_apps_autosync_except_prod_obs():
     obs_patch = obs["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "obs-twitch"))' in obs_patch
     assert '(and (eq .env "prod-1") (eq .app "obs-youtube"))' in obs_patch
-    # selfHeal per-env: stage OFF (console scale-up sticks), prod ON
-    assert '{{- if (eq .env "stage-1") }}' in obs_patch
+    # selfHeal: stage OFF (console scale-up sticks), prod ON — except the parked
+    # prod facebook stack, which is scaled live by the console and so keeps
+    # selfHeal off too.
+    assert '(eq .env "stage-1")' in obs_patch
+    assert '(and (eq .env "prod-1") (eq .app "obs-facebook"))' in obs_patch
     assert "selfHeal: false" in obs_patch
     assert "selfHeal: true" in obs_patch
     # one Application per (env, platform), each reconciling its own dist file
@@ -314,8 +321,10 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     patch = po["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "playout-twitch"))' in patch
     assert '(and (eq .env "prod-1") (eq .app "playout-youtube"))' in patch
-    # selfHeal per-env: stage OFF (console scale-up sticks), prod ON
-    assert '{{- if (eq .env "stage-1") }}' in patch
+    # selfHeal: stage OFF (console scale-up sticks), prod ON — except the parked
+    # prod facebook stack, which the console scales live and so keeps selfHeal off.
+    assert '(eq .env "stage-1")' in patch
+    assert '(and (eq .env "prod-1") (eq .app "playout-facebook"))' in patch
     assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
     # the public repo needs no deploy key, and the dev cluster runs no playout

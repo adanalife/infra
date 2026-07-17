@@ -444,6 +444,12 @@ class ArgoCD(Construct):
             automated_holdouts=autosync_holdouts,
             selfheal=self._selfheal,
             selfheal_off_envs=SELFHEAL_OFF_ENVS,
+            # prod facebook is parked until a console scale-up brings it live, so
+            # its Applications keep selfHeal off (the scale must stick).
+            selfheal_off_apps=(
+                ("prod-1", "tripbot-facebook"),
+                ("prod-1", "onscreens-facebook"),
+            ),
             # Every tripbot env tracks main (release-please gates prod by the
             # versions.yaml image pin, not by a branch).
             repo_url=TRIPBOT_REPO_URL,
@@ -646,6 +652,9 @@ class ArgoCD(Construct):
                 # spec.replicas (platform-gateway EnvConfig.manual_replicas), so an
                 # autosync on a main merge doesn't reset a scaled-down gateway.
                 selfheal_off_envs=SELFHEAL_OFF_ENVS,
+                # prod facebook is parked until a console scale-up brings it live,
+                # so gateway-facebook keeps selfHeal off (the scale must stick).
+                selfheal_off_apps=(("prod-1", "gateway-facebook"),),
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -675,6 +684,9 @@ class ArgoCD(Construct):
                 ),
                 selfheal=self._selfheal,
                 selfheal_off_envs=SELFHEAL_OFF_ENVS,
+                # prod facebook is parked until a console scale-up brings it live,
+                # so obs-facebook keeps selfHeal off (the scale must stick).
+                selfheal_off_apps=(("prod-1", "obs-facebook"),),
                 repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -707,6 +719,9 @@ class ArgoCD(Construct):
                 ),
                 selfheal=self._selfheal,
                 selfheal_off_envs=SELFHEAL_OFF_ENVS,
+                # prod facebook is parked until a console scale-up brings it live,
+                # so playout-facebook keeps selfHeal off (the scale must stick).
+                selfheal_off_apps=(("prod-1", "playout-facebook"),),
                 repo_url=PLAYOUT_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -836,6 +851,7 @@ class ArgoCD(Construct):
         automated_holdouts: tuple[tuple[str, str], ...] = (),
         selfheal: bool = True,
         selfheal_off_envs: tuple[str, ...] = (),
+        selfheal_off_apps: tuple[tuple[str, str], ...] = (),
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
         create_namespace: bool = False,
@@ -981,10 +997,20 @@ class ArgoCD(Construct):
                 cond = f"and ({cond}) (not {held})"
             # selfHeal is per-env when selfheal_off_envs is set: those envs render
             # selfHeal:false (a hand/console live edit sticks); the rest follow the
-            # instance `selfheal`. Otherwise it's the static instance value.
-            if selfheal and selfheal_off_envs:
-                off_test = " ".join(f'(eq .env "{e}")' for e in selfheal_off_envs)
-                off_cond = f"or {off_test}" if len(selfheal_off_envs) > 1 else off_test
+            # instance `selfheal`. selfheal_off_apps carves individual (env, app)
+            # pairs to selfHeal:false even inside a selfHeal-on env (the prod
+            # facebook stack: parked at replicas:0, brought live by a console
+            # scale-up, so its Applications must not revert the hand scale while
+            # the rest of prod keeps selfHeal on). Otherwise it's the static value.
+            if selfheal and (selfheal_off_envs or selfheal_off_apps):
+                off_terms = [f'(eq .env "{e}")' for e in selfheal_off_envs]
+                off_terms += [
+                    f'(and (eq .env "{env}") (eq .app "{app}"))'
+                    for env, app in selfheal_off_apps
+                ]
+                off_cond = (
+                    f"or {' '.join(off_terms)}" if len(off_terms) > 1 else off_terms[0]
+                )
                 selfheal_block = (
                     "{{- if " + off_cond + " }}\n"
                     "      selfHeal: false\n"
