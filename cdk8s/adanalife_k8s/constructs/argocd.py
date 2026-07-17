@@ -182,10 +182,10 @@ PLAYOUT_REPO_URL = "https://github.com/adanalife/playout.git"
 PLAYOUT_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # The playout instances each env runs — a cross-repo contract with the playout
 # repo's cdk8s config (ENVS[env].platforms), like PLATFORM_GATEWAY_PLATFORMS.
-# Stage runs youtube only.
+# Stage runs the facebook burn-in, with youtube parked in the playout repo.
 PLAYOUT_PLATFORMS = {
     "prod-1": ("twitch", "youtube"),
-    "stage-1": ("youtube",),
+    "stage-1": ("youtube", "facebook"),
 }
 # Envs running the per-platform MediaMTX relays (infra-authored,
 # dist/<env>-mediamtx-<platform>.k8s.yaml) — the minipc envs, matching where playout

@@ -446,6 +446,8 @@ spec:
             app: mediamtx-youtube
           - env: stage-1
             app: mediamtx-twitch
+          - env: stage-1
+            app: mediamtx-facebook
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -855,6 +857,9 @@ spec:
           - env: stage-1
             app: obs-twitch
             revision: main
+          - env: stage-1
+            app: obs-facebook
+            revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -925,6 +930,9 @@ spec:
             revision: main
           - env: stage-1
             app: playout-youtube
+            revision: main
+          - env: stage-1
+            app: playout-facebook
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
