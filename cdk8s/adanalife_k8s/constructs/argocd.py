@@ -671,6 +671,12 @@ class ArgoCD(Construct):
                     ("prod-1", "obs-youtube"),
                 ),
                 selfheal=self._selfheal,
+                # selfHeal off on stage so a hand/console scale sticks — stage
+                # rests every platform at replicas:0 and the console scale-up is
+                # the activation, same posture as the tripbot apps + gateway
+                # sets. Same one-time existing-Application patch caveat as the
+                # console set above.
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -700,6 +706,10 @@ class ArgoCD(Construct):
                     ("prod-1", "playout-youtube"),
                 ),
                 selfheal=self._selfheal,
+                # selfHeal off on stage so a hand/console scale sticks — same
+                # posture (and same existing-Application patch caveat) as the
+                # obs set above.
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=PLAYOUT_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,

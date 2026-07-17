@@ -192,6 +192,14 @@ def test_minipc_apps_autosync_except_prod_obs():
     }
     src = obs["spec"]["template"]["spec"]["source"]
     assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
+    # stage rests every platform at replicas:0 with the console scale-up as the
+    # activation, so stage obs/playout render selfHeal: false (a hand/console
+    # scale sticks) — the same per-env conditional as tripbot-apps.
+    assert '{{- if (eq .env "stage-1") }}' in obs_patch
+    assert "selfHeal: false" in obs_patch
+    playout_patch = _appset(objs, "playout")["spec"]["templatePatch"]
+    assert '{{- if (eq .env "stage-1") }}' in playout_patch
+    assert "selfHeal: false" in playout_patch
     # supporting + data + identity stay manual everywhere
     for name in ("tripbot-supporting", "tripbot-data", "tripbot-identity"):
         assert "templatePatch" not in _appset(objs, name)["spec"]
