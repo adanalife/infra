@@ -50,12 +50,10 @@ def test_minipc_default_has_both_uis_and_both_envs():
         o["spec"].get("ingressClassName") for o in objs if o["kind"] == "Ingress"
     }
     assert classes == {"tailscale", "traefik"}  # tailnet UI + LAN UI
-    envs = {
-        e["env"]
-        for e in _appset(objs, "tripbot-apps")["spec"]["generators"][0]["list"][
-            "elements"
-        ]
-    }
+    # tripbot-apps self-discovers deploy units from the tripbot repo's index
+    # (git files generator); the per-env globs scope which envs it delivers.
+    globs = _appset(objs, "tripbot-apps")["spec"]["generators"][0]["git"]["files"]
+    envs = {f["path"].split("/")[-1].removesuffix("-*.json") for f in globs}
     assert envs == {"prod-1", "stage-1"}
 
 
