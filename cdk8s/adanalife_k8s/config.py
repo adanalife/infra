@@ -147,15 +147,12 @@ ENVS: dict[str, EnvConfig] = {
         # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
         # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
         data_namespace="stage-1-data",
-        # The YouTube platform stack burns in on stage first (tripbot-youtube
-        # binds chat once a broadcast is live; vlc-youtube self-sustains;
-        # obs-youtube boots idle — the streaming toggle is prod-twitch-only).
-        # prod follows once the stage burn-in + dual-iGPU-encode validation
-        # pass.
-        #
-        # twitch is back ON (2026-06-19) to test the platform-gateway end to
-        # end: stage tripbot-twitch routes its Helix calls through gateway-twitch.
-        platforms=("youtube", "twitch"),
+        # This list is the Argo/mediamtx fan-out for stage: every platform
+        # here gets a mediamtx relay + an obs Application. facebook is the
+        # active burn-in platform (streaming to the ADL Staging Page);
+        # youtube/twitch stay listed so their Applications keep existing —
+        # their app repos declare them parked at replicas:0.
+        platforms=("youtube", "twitch", "facebook"),
     ),
     "development": EnvConfig(
         name="development",

@@ -188,6 +188,7 @@ def test_minipc_apps_autosync_except_prod_obs():
         ("prod-1", "obs-youtube"),
         ("stage-1", "obs-twitch"),
         ("stage-1", "obs-youtube"),
+        ("stage-1", "obs-facebook"),
     }
     src = obs["spec"]["template"]["spec"]["source"]
     assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
@@ -292,13 +293,14 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     src = po["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "https://github.com/adanalife/playout.git"
     # one Application per (env, platform), each reconciling its own dist file
-    # (PLAYOUT_PLATFORMS — stage runs youtube only)
+    # (PLAYOUT_PLATFORMS — stage runs the facebook burn-in, youtube parked)
     assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
     elements = po["spec"]["generators"][0]["list"]["elements"]
     assert {(e["env"], e["app"]) for e in elements} == {
         ("prod-1", "playout-twitch"),
         ("prod-1", "playout-youtube"),
         ("stage-1", "playout-youtube"),
+        ("stage-1", "playout-facebook"),
     }
     assert all(e["revision"] == "main" for e in elements)
     # prod playout feeds the live stream at cutover — deliberate manual sync
@@ -328,6 +330,7 @@ def test_mediamtx_appset_autosyncs_both_envs():
         ("prod-1", "mediamtx-youtube"),
         ("stage-1", "mediamtx-twitch"),
         ("stage-1", "mediamtx-youtube"),
+        ("stage-1", "mediamtx-facebook"),
     }
     # ...but unlike them it autosyncs with selfHeal on (relay restarts are cheap)
     patch = mtx["spec"]["templatePatch"]

@@ -167,6 +167,8 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 #         --overwrite --value "$STREAM_KEY"
 #   - /k8s/obs/youtube-stream-key — YouTube RTMPS key for the staging Brand
 #     Account (YouTube Studio → Go live → Stream). Same put-parameter shape.
+#   - /k8s/obs/facebook-stream-key — Facebook Live RTMPS key for the stage
+#     facebook burn-in Page. Same put-parameter shape.
 #   - /k8s/grafana-cloud-metrics-write — Grafana Cloud Mimir/Loki credentials
 #     for the in-cluster k8s-monitoring chart (Alloy). JSON:
 #     {"PROMETHEUS_HOST": ..., "PROMETHEUS_USERNAME": "<prom instance ID>",
