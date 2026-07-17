@@ -144,7 +144,7 @@ PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
 # don't exist (or miss new ones). Dormant platforms (parked at replicas:0)
 # still get an Application — the manifest exists either way.
 PLATFORM_GATEWAY_PLATFORMS = {
-    "prod-1": ("twitch", "youtube"),
+    "prod-1": ("twitch", "youtube", "facebook"),
     "stage-1": ("twitch", "youtube", "tiktok", "facebook", "instagram"),
 }
 # The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
@@ -184,7 +184,7 @@ PLAYOUT_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # repo's cdk8s config (ENVS[env].platforms), like PLATFORM_GATEWAY_PLATFORMS.
 # Stage runs the facebook burn-in, with youtube parked in the playout repo.
 PLAYOUT_PLATFORMS = {
-    "prod-1": ("twitch", "youtube"),
+    "prod-1": ("twitch", "youtube", "facebook"),
     "stage-1": ("youtube", "facebook"),
 }
 # Envs running the per-platform MediaMTX relays (infra-authored,

@@ -190,6 +190,7 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert {(e["env"], e["app"]) for e in elements} == {
         ("prod-1", "obs-twitch"),
         ("prod-1", "obs-youtube"),
+        ("prod-1", "obs-facebook"),
         ("stage-1", "obs-twitch"),
         ("stage-1", "obs-youtube"),
         ("stage-1", "obs-facebook"),
@@ -268,6 +269,7 @@ def test_platform_gateway_appset_per_platform_cross_repo():
     assert {a for a in apps if a[0] == "prod-1"} == {
         ("prod-1", "gateway-twitch"),
         ("prod-1", "gateway-youtube"),
+        ("prod-1", "gateway-facebook"),
         ("prod-1", "gateway-shared"),
     }
     assert {a[1] for a in apps if a[0] == "stage-1"} == {
@@ -303,6 +305,7 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     assert {(e["env"], e["app"]) for e in elements} == {
         ("prod-1", "playout-twitch"),
         ("prod-1", "playout-youtube"),
+        ("prod-1", "playout-facebook"),
         ("stage-1", "playout-youtube"),
         ("stage-1", "playout-facebook"),
     }
@@ -336,6 +339,7 @@ def test_mediamtx_appset_autosyncs_both_envs():
     assert {(e["env"], e["app"]) for e in elements} == {
         ("prod-1", "mediamtx-twitch"),
         ("prod-1", "mediamtx-youtube"),
+        ("prod-1", "mediamtx-facebook"),
         ("stage-1", "mediamtx-twitch"),
         ("stage-1", "mediamtx-youtube"),
         ("stage-1", "mediamtx-facebook"),

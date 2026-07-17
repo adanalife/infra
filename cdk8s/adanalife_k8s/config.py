@@ -124,9 +124,12 @@ ENVS: dict[str, EnvConfig] = {
         # youtube is staged here so Argo creates the prod-youtube Applications,
         # but the tripbot repo renders that stack at replicas=0 (parked_platforms)
         # until stage-youtube is shut down and prod-youtube is turned on — the
-        # minipc never runs two youtube stacks at once. This list is the Argo
+        # minipc never runs two youtube stacks at once. facebook is staged the
+        # same way: Argo creates the prod-facebook Applications (obs + mediamtx
+        # relay via this list), and the app repos render the stack parked at
+        # replicas=0 until it's unparked for a go-live. This list is the Argo
         # fan-out contract; it must match the platforms tripbot's cdk8s emits.
-        platforms=("twitch", "youtube"),
+        platforms=("twitch", "youtube", "facebook"),
     ),
     "stage-1": EnvConfig(
         name="stage-1",

@@ -442,6 +442,8 @@ spec:
             app: mediamtx-twitch
           - env: prod-1
             app: mediamtx-youtube
+          - env: prod-1
+            app: mediamtx-facebook
           - env: stage-1
             app: mediamtx-youtube
           - env: stage-1
@@ -763,6 +765,9 @@ spec:
             app: gateway-youtube
             revision: main
           - env: prod-1
+            app: gateway-facebook
+            revision: main
+          - env: prod-1
             app: gateway-shared
             revision: main
           - env: stage-1
@@ -855,6 +860,9 @@ spec:
           - env: prod-1
             app: obs-youtube
             revision: main
+          - env: prod-1
+            app: obs-facebook
+            revision: main
           - env: stage-1
             app: obs-youtube
             revision: main
@@ -935,6 +943,9 @@ spec:
             revision: main
           - env: prod-1
             app: playout-youtube
+            revision: main
+          - env: prod-1
+            app: playout-facebook
             revision: main
           - env: stage-1
             app: playout-youtube
