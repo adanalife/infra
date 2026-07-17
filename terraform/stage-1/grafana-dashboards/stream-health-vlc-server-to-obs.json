@@ -1,5 +1,5 @@
 {
-  "title": "01 — Stream Health: vlc-server ↔ OBS",
+  "title": "91 — Service Health: vlc-server (stream)",
   "uid": "stream-health",
   "tags": ["tripbot", "vlc-server", "obs", "stream"],
   "schemaVersion": 39,

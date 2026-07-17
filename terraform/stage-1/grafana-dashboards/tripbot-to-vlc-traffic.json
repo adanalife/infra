@@ -1,5 +1,5 @@
 {
-  "title": "11 — TripBot ↔ VLC Traffic",
+  "title": "92 — tripbot ↔ vlc-server traffic",
   "uid": "tripbot-vlc-traffic",
   "tags": ["tripbot", "vlc-server", "traces"],
   "schemaVersion": 39,

@@ -1,5 +1,5 @@
 {
-  "title": "04 — Service Health: Onscreens Server",
+  "title": "03 — Service Health: onscreens-server",
   "uid": "onscreens-server-service-health",
   "tags": ["tripbot", "onscreens-server", "service-health"],
   "schemaVersion": 39,
