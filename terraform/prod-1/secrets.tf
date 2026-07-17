@@ -103,6 +103,7 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 # is CI-readable at refresh; the Deny below keeps CI out):
 #   - /k8s/obs/twitch-stream-key   (Twitch dashboard → Stream, prod channel)
 #   - /k8s/obs/youtube-stream-key  (YouTube Studio, prod channel)
+#   - /k8s/obs/facebook-stream-key (Facebook Live Producer persistent key, prod Page)
 #   - /k8s/grafana-cloud-metrics-write
 #   - /k8s/external-dns/aws-credentials (hand-seeded from PGP outputs)
 
