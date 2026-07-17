@@ -13,7 +13,7 @@ kubectl -n kube-system port-forward svc/traefik 9000:9000
 open http://localhost:9000/dashboard/
 ```
 
-(The trailing slash matters — Traefik's dashboard handler is strict about it.)
+(The trailing slash matters on the port-forward path — Traefik's dashboard handler is strict about it. The prod LAN Ingress at `traefik.prod.whereisdana.today/` attaches a `replacePathRegex` middleware that rewrites bare `/` → `/dashboard/` so the host root works directly — see `prod-1/dashboard-middleware.yaml`.)
 
 ## Metrics
 
