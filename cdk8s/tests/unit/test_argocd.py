@@ -181,6 +181,10 @@ def test_minipc_apps_autosync_except_prod_obs():
     obs_patch = obs["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "obs-twitch"))' in obs_patch
     assert '(and (eq .env "prod-1") (eq .app "obs-youtube"))' in obs_patch
+    # selfHeal per-env: stage OFF (console scale-up sticks), prod ON
+    assert '{{- if (eq .env "stage-1") }}' in obs_patch
+    assert "selfHeal: false" in obs_patch
+    assert "selfHeal: true" in obs_patch
     # one Application per (env, platform), each reconciling its own dist file
     elements = obs["spec"]["generators"][0]["list"]["elements"]
     assert {(e["env"], e["app"]) for e in elements} == {
@@ -307,6 +311,10 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     patch = po["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "playout-twitch"))' in patch
     assert '(and (eq .env "prod-1") (eq .app "playout-youtube"))' in patch
+    # selfHeal per-env: stage OFF (console scale-up sticks), prod ON
+    assert '{{- if (eq .env "stage-1") }}' in patch
+    assert "selfHeal: false" in patch
+    assert "selfHeal: true" in patch
     # the public repo needs no deploy key, and the dev cluster runs no playout
     dev = _synth(**_DEV)
     with pytest.raises(StopIteration):
@@ -332,11 +340,14 @@ def test_mediamtx_appset_autosyncs_both_envs():
         ("stage-1", "mediamtx-youtube"),
         ("stage-1", "mediamtx-facebook"),
     }
-    # ...but unlike them it autosyncs with selfHeal on (relay restarts are cheap)
+    # ...autosyncing (a merged dist change deploys itself), with selfHeal per-env
+    # like the other stream sets: OFF on stage so a console/hand scale-up of a
+    # relay sticks, ON in prod so the live relay matches git.
     patch = mtx["spec"]["templatePatch"]
     assert "prune: true" in patch
+    assert '{{- if (eq .env "stage-1") }}' in patch
+    assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
-    assert "selfHeal: false" not in patch
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "mediamtx")
 

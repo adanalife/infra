@@ -498,10 +498,11 @@ class ArgoCD(Construct):
         )
         # The MediaMTX relays (infra-authored, one Application per (env,
         # platform) reconciling its own <env>-mediamtx-<platform>.k8s.yaml —
-        # the obs shape). Unlike supporting/data this unit AUTOSYNCS with
-        # selfHeal: a relay restart is cheap (the publisher + OBS reconnect),
-        # so a merged dist change deploys itself and drift gets reverted — no
-        # holdout, no selfheal_off_envs (nothing here is hand-scaled).
+        # the obs shape). Autosyncs so a merged dist change deploys itself; on
+        # prod selfHeal reverts drift too (a relay restart is cheap — the
+        # publisher + OBS reconnect). selfHeal is off on stage
+        # (selfheal_off_envs) so the console's per-platform scale-up of a relay
+        # sticks instead of being reverted to the git replicas.
         if self.mediamtx_envs:
             self._application_set(
                 id="appset-mediamtx",
@@ -513,6 +514,7 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 preserve_on_deletion=True,
             )
         # The UPS monitor (observe-only NUT client) — a cluster-SINGLETON, not
@@ -651,10 +653,11 @@ class ArgoCD(Construct):
         if self.obs_envs:
             # One Application per (env, platform) — {{.env}}-obs-{{platform}},
             # each reconciling its own dist file — so a single platform's OBS
-            # can be paused/synced/scaled without touching its siblings (the
-            # console's per-platform kill switch flips selfHeal per app). The
+            # can be paused/synced/scaled without touching its siblings. The
             # platform fan-out reads the infra env config, which matches the
             # obs repo's (twitch+youtube on the minipc envs, twitch on dev).
+            # selfHeal is off on stage (selfheal_off_envs) so the console's
+            # per-platform scale-up sticks; prod keeps selfHeal on.
             self._application_set(
                 id="appset-obs",
                 name="obs",
@@ -671,6 +674,7 @@ class ArgoCD(Construct):
                     ("prod-1", "obs-youtube"),
                 ),
                 selfheal=self._selfheal,
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -678,7 +682,9 @@ class ArgoCD(Construct):
         if self.playout_envs:
             # One Application per (env, platform) — the obs shape, each
             # reconciling its own {{.env}}-playout-<platform>.k8s.yaml from
-            # the playout repo's dist (fan-out from PLAYOUT_PLATFORMS).
+            # the playout repo's dist (fan-out from PLAYOUT_PLATFORMS). selfHeal
+            # is off on stage (selfheal_off_envs) so the console's per-platform
+            # scale-up sticks; prod keeps selfHeal on.
             self._application_set(
                 id="appset-playout",
                 name="playout",
@@ -700,6 +706,7 @@ class ArgoCD(Construct):
                     ("prod-1", "playout-youtube"),
                 ),
                 selfheal=self._selfheal,
+                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 repo_url=PLAYOUT_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,

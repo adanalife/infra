@@ -495,7 +495,11 @@ spec:
       syncPolicy:
         automated:
           prune: true
+    {{- if (eq .env "stage-1") }}
+          selfHeal: false
+    {{- else }}
           selfHeal: true
+    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -907,7 +911,11 @@ spec:
       syncPolicy:
         automated:
           prune: true
+    {{- if (eq .env "stage-1") }}
+          selfHeal: false
+    {{- else }}
           selfHeal: true
+    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -981,7 +989,11 @@ spec:
       syncPolicy:
         automated:
           prune: true
+    {{- if (eq .env "stage-1") }}
+          selfHeal: false
+    {{- else }}
           selfHeal: true
+    {{- end }}
     {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
