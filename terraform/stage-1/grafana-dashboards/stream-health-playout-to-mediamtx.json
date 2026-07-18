@@ -19,15 +19,21 @@
       {
         "name": "platform",
         "label": "Platform",
-        "type": "custom",
-        "query": "twitch,youtube",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__DS_PROMETHEUS__"
+        },
+        "query": "label_values(playout_pipeline_running_time_ms{service_name=\"playout\"}, service_platform)",
         "current": {
           "text": "twitch",
           "value": "twitch"
         },
         "includeAll": true,
         "allValue": ".*",
-        "multi": false
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
       },
       {
         "name": "deployment_environment",
