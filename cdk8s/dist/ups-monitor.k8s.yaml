@@ -31,8 +31,10 @@ data:
     PASSWORD = os.environ.get("NUT_PASS", "")
     POLL_OK = int(os.environ.get("POLL_INTERVAL", "30"))
     POLL_OB = int(os.environ.get("POLL_INTERVAL_ONBATTERY", "10"))
-    RUNTIME_FLOOR = int(os.environ.get("RUNTIME_THRESHOLD", "120"))
+    RUNTIME_FLOOR = int(os.environ.get("RUNTIME_THRESHOLD", "300"))
     CONFIRM = int(os.environ.get("CONFIRM_POLLS", "2"))
+    UNREACH_CONFIRM = int(os.environ.get("UNREACHABLE_CONFIRM", "3"))
+    SHUTDOWN_TIMEOUT = int(os.environ.get("SHUTDOWN_TIMEOUT", "90"))
     NODE = os.environ.get("TALOS_NODE", "")
     TALOSCONFIG = os.environ.get("TALOSCONFIG", "/talos/talosconfig")
     TALOSCTL = os.environ.get("TALOSCTL", "/opt/talos/talosctl")
@@ -72,20 +74,47 @@ data:
         return [TALOSCTL, "--talosconfig", TALOSCONFIG, "shutdown", "--nodes", NODE]
 
 
+    def trigger_shutdown(reason):
+        # Run the graceful shutdown. Returns True only when it succeeds — a failure
+        # (timeout, non-zero rc) leaves the trigger UNLATCHED so the next poll
+        # retries rather than abandoning the node to a hard crash.
+        cmd_str = " ".join(shutdown_cmd())
+        if DRY_RUN or not NODE:
+            log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd_str}")
+            return False  # never latch in dry-run: keep observing
+        log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd_str}")
+        try:
+            r = subprocess.run(
+                shutdown_cmd(), capture_output=True, text=True, timeout=SHUTDOWN_TIMEOUT
+            )
+            log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
+            if r.returncode == 0:
+                return True
+            log("talosctl returned non-zero — will retry next poll")
+        except Exception as e:
+            log(f"talosctl FAILED: {e} — will retry next poll")
+        return False
+
+
     log(
-        f"ups-monitor STAGE 2 — graceful shutdown on OB+LB or runtime<{RUNTIME_FLOOR}s "
-        f"(confirmed {CONFIRM}x). DRY_RUN={DRY_RUN} NODE={NODE or '(unset)'}"
+        f"ups-monitor STAGE 2 — graceful shutdown on runtime<{RUNTIME_FLOOR}s, OB+LB, "
+        f"or NUT unreachable x{UNREACH_CONFIRM} while on battery (confirmed {CONFIRM}x). "
+        f"DRY_RUN={DRY_RUN} NODE={NODE or '(unset)'}"
     )
     confirm = 0
+    unreach = 0
+    was_on_battery = False
     triggered = False
     while True:
         interval = POLL_OK
         try:
             v = query()
+            unreach = 0  # a successful read clears the blind streak
             status = v.get("ups.status", "")
             tokens = status.split()
             on_batt = "OB" in tokens
             low_batt = "LB" in tokens
+            was_on_battery = on_batt
             rt = v.get("battery.runtime", "")
             runtime = int(rt) if rt.isdigit() else None
             line = (
@@ -98,24 +127,26 @@ data:
                 confirm = confirm + 1 if (low_batt or runtime_low) else 0
                 if confirm >= CONFIRM and not triggered:
                     reason = "OB+LB" if low_batt else f"runtime<{RUNTIME_FLOOR}s"
-                    cmd_str = " ".join(shutdown_cmd())
-                    if DRY_RUN or not NODE:
-                        log(f"!! TRIGGER ({reason}) x{confirm} — DRY_RUN, would run: {cmd_str}")
-                    else:
-                        log(f"!! TRIGGER ({reason}) x{confirm} — ARMED, running: {cmd_str}")
-                        triggered = True
-                        try:
-                            r = subprocess.run(
-                                shutdown_cmd(), capture_output=True, text=True, timeout=60
-                            )
-                            log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
-                        except Exception as e:
-                            log(f"talosctl FAILED: {e}")
+                    triggered = trigger_shutdown(f"{reason} x{confirm}")
             else:
                 confirm = 0
             log(line + (f" [on-battery confirm={confirm}/{CONFIRM}]" if on_batt else ""))
         except Exception as e:
-            log(f"ups.status=UNREACHABLE: {e}")
+            # Fail-safe: if we were last on battery and the NUT server has now gone
+            # dark, the NAS most likely lost power too — the outage is ongoing and
+            # we're blind. Shut down before the battery dies unseen. A blip on
+            # utility power never reaches this: was_on_battery gates it.
+            if was_on_battery:
+                interval = POLL_OB
+                unreach += 1
+                if unreach >= UNREACH_CONFIRM and not triggered:
+                    triggered = trigger_shutdown(
+                        f"NUT unreachable x{unreach} while on battery"
+                    )
+            blind = (
+                f" [on-battery blind={unreach}/{UNREACH_CONFIRM}]" if was_on_battery else ""
+            )
+            log(f"ups.status=UNREACHABLE: {e}{blind}")
         time.sleep(interval)
 ---
 apiVersion: external-secrets.io/v1
@@ -180,9 +211,13 @@ spec:
             - name: TALOS_NODE
               value: 192.168.40.111
             - name: RUNTIME_THRESHOLD
-              value: "120"
+              value: "300"
             - name: CONFIRM_POLLS
               value: "2"
+            - name: UNREACHABLE_CONFIRM
+              value: "3"
+            - name: SHUTDOWN_TIMEOUT
+              value: "90"
             - name: TALOSCONFIG
               value: /talos/talosconfig
             - name: TALOSCTL
