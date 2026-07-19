@@ -110,6 +110,35 @@ def test_shutdown_is_confirmed_and_dry_run_gated():
     assert "INSTCMD" not in script and "SET VAR" not in script
 
 
+def test_runtime_threshold_has_margin():
+    # The primary trigger must fire with battery to spare, not at the cliff:
+    # the 2026-07-19 outage fired at 81s left and talosctl timed out mid-drain.
+    # Keep the runtime floor comfortably above the shutdown timeout.
+    env = _env(_synth())
+    assert int(env["RUNTIME_THRESHOLD"]) >= 300
+    assert int(env["RUNTIME_THRESHOLD"]) > int(env["SHUTDOWN_TIMEOUT"])
+
+
+def test_unreachable_fallback_gated_on_prior_on_battery():
+    # Losing the NUT server after we last saw on-battery is itself a trigger
+    # (the NAS likely lost power too), but a blip on utility power must not be.
+    script = _script(_synth())
+    assert "UNREACHABLE_CONFIRM" in _env(_synth())
+    assert "was_on_battery" in script
+    # the fail-safe shutdown lives in the except branch, gated by was_on_battery
+    except_branch = script.split("except Exception")[1]
+    assert "was_on_battery" in except_branch
+    assert "trigger_shutdown" in except_branch
+
+
+def test_shutdown_retries_on_failure():
+    # A failed/timed-out talosctl must NOT latch the trigger — the node can't be
+    # abandoned to a hard crash after one bad attempt (the 2026-07-19 failure).
+    script = _script(_synth())
+    assert "returncode == 0" in script  # only a clean rc latches
+    assert "will retry next poll" in script
+
+
 def test_targets_only_the_minipc_node():
     assert _env(_synth())["TALOS_NODE"] == "192.168.40.111"
 

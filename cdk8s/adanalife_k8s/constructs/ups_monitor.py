@@ -19,11 +19,26 @@ shutdown when the battery is genuinely about to die.
 
 STAGE 1 (shipped): observe-only logging.
 
-STAGE 2 (this file): the graceful-shutdown trigger — on a sustained on-battery +
-low-battery condition (`OB LB`, or estimated runtime below RUNTIME_THRESHOLD),
-confirmed over CONFIRM_POLLS consecutive fast polls, run
+STAGE 2 (this file): the graceful-shutdown trigger. It fires on any of three
+conditions, each confirmed over CONFIRM_POLLS consecutive fast polls, and runs
 `talosctl shutdown --nodes <node>` so the node powers off cleanly before the
-battery dies. A clean shutdown protects etcd + the Talos STATE/OS partition from
+battery dies:
+
+1. estimated runtime below RUNTIME_THRESHOLD — the primary trigger, set with
+   real margin (this UPS holds ~10 min; talosctl needs the better part of a
+   minute) so the node shuts down while battery remains, not at the cliff;
+2. the low-battery flag `OB LB` — a backstop for when the runtime var is absent
+   or the UPS asserts LB early;
+3. the NUT server going unreachable for UNREACHABLE_CONFIRM consecutive polls
+   *after we last saw on-battery* — losing the Synology mid-outage almost always
+   means the NAS lost power too and we're now blind, so shut down as a fail-safe
+   rather than ride an unseen battery to a hard crash. A blip while on utility
+   power never triggers this (the last-known state must be on-battery).
+
+If the shutdown command errors or returns non-zero, the trigger does NOT latch —
+the next poll retries — so a single timed-out `talosctl` (what happened in the
+2026-07-19 outage, fired too late with 81s of runtime left) can't leave the node
+to crash. A clean shutdown protects etcd + the Talos STATE/OS partition from
 hard-power-cut corruption (the kind of unclean crash that caused the 2026-06-15
 outage), so the node comes back cleanly. Note it does NOT save the prod postgres
 data while that DB is on an ephemeral local-path volume — durable storage is the
@@ -68,8 +83,17 @@ POLL_INTERVAL_ONBATTERY = "10"  # faster reads while on battery (quicker reactio
 # The minipc Talos node — the control-plane / etcd / DB node this shuts down. The
 # rpi5 worker isn't on this UPS, so it's deliberately out of scope.
 TALOS_NODE = "192.168.40.111"
-RUNTIME_THRESHOLD = "120"  # shut down once estimated runtime drops below this (s)
+# Shut down once estimated runtime drops below this (s). Set well above the time
+# `talosctl shutdown` needs (SHUTDOWN_TIMEOUT) so the node powers off with
+# battery to spare — the 2026-07-19 outage fired at 81s left and the shutdown
+# timed out before the battery died, hard-crashing the node.
+RUNTIME_THRESHOLD = "300"
 CONFIRM_POLLS = "2"  # require the trigger condition this many polls in a row
+# Consecutive unreachable polls, while the last-known state was on-battery,
+# before the fail-safe shutdown fires (the NUT server dying mid-outage means the
+# NAS lost power too and we're blind). Only arms after an on-battery read.
+UNREACHABLE_CONFIRM = "3"
+SHUTDOWN_TIMEOUT = "90"  # seconds allowed for a single `talosctl shutdown`
 TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
 TALOSCTL_PATH = "/opt/talos/talosctl"  # placed by the initContainer
 # ARMED — the trigger executes the real `talosctl shutdown`. Flip to "true" for
@@ -126,8 +150,10 @@ USER = os.environ.get("NUT_USER", "")
 PASSWORD = os.environ.get("NUT_PASS", "")
 POLL_OK = int(os.environ.get("POLL_INTERVAL", "30"))
 POLL_OB = int(os.environ.get("POLL_INTERVAL_ONBATTERY", "10"))
-RUNTIME_FLOOR = int(os.environ.get("RUNTIME_THRESHOLD", "120"))
+RUNTIME_FLOOR = int(os.environ.get("RUNTIME_THRESHOLD", "300"))
 CONFIRM = int(os.environ.get("CONFIRM_POLLS", "2"))
+UNREACH_CONFIRM = int(os.environ.get("UNREACHABLE_CONFIRM", "3"))
+SHUTDOWN_TIMEOUT = int(os.environ.get("SHUTDOWN_TIMEOUT", "90"))
 NODE = os.environ.get("TALOS_NODE", "")
 TALOSCONFIG = os.environ.get("TALOSCONFIG", "/talos/talosconfig")
 TALOSCTL = os.environ.get("TALOSCTL", "/opt/talos/talosctl")
@@ -167,20 +193,47 @@ def shutdown_cmd():
     return [TALOSCTL, "--talosconfig", TALOSCONFIG, "shutdown", "--nodes", NODE]
 
 
+def trigger_shutdown(reason):
+    # Run the graceful shutdown. Returns True only when it succeeds — a failure
+    # (timeout, non-zero rc) leaves the trigger UNLATCHED so the next poll
+    # retries rather than abandoning the node to a hard crash.
+    cmd_str = " ".join(shutdown_cmd())
+    if DRY_RUN or not NODE:
+        log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd_str}")
+        return False  # never latch in dry-run: keep observing
+    log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd_str}")
+    try:
+        r = subprocess.run(
+            shutdown_cmd(), capture_output=True, text=True, timeout=SHUTDOWN_TIMEOUT
+        )
+        log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
+        if r.returncode == 0:
+            return True
+        log("talosctl returned non-zero — will retry next poll")
+    except Exception as e:
+        log(f"talosctl FAILED: {e} — will retry next poll")
+    return False
+
+
 log(
-    f"ups-monitor STAGE 2 — graceful shutdown on OB+LB or runtime<{RUNTIME_FLOOR}s "
-    f"(confirmed {CONFIRM}x). DRY_RUN={DRY_RUN} NODE={NODE or '(unset)'}"
+    f"ups-monitor STAGE 2 — graceful shutdown on runtime<{RUNTIME_FLOOR}s, OB+LB, "
+    f"or NUT unreachable x{UNREACH_CONFIRM} while on battery (confirmed {CONFIRM}x). "
+    f"DRY_RUN={DRY_RUN} NODE={NODE or '(unset)'}"
 )
 confirm = 0
+unreach = 0
+was_on_battery = False
 triggered = False
 while True:
     interval = POLL_OK
     try:
         v = query()
+        unreach = 0  # a successful read clears the blind streak
         status = v.get("ups.status", "")
         tokens = status.split()
         on_batt = "OB" in tokens
         low_batt = "LB" in tokens
+        was_on_battery = on_batt
         rt = v.get("battery.runtime", "")
         runtime = int(rt) if rt.isdigit() else None
         line = (
@@ -193,24 +246,26 @@ while True:
             confirm = confirm + 1 if (low_batt or runtime_low) else 0
             if confirm >= CONFIRM and not triggered:
                 reason = "OB+LB" if low_batt else f"runtime<{RUNTIME_FLOOR}s"
-                cmd_str = " ".join(shutdown_cmd())
-                if DRY_RUN or not NODE:
-                    log(f"!! TRIGGER ({reason}) x{confirm} — DRY_RUN, would run: {cmd_str}")
-                else:
-                    log(f"!! TRIGGER ({reason}) x{confirm} — ARMED, running: {cmd_str}")
-                    triggered = True
-                    try:
-                        r = subprocess.run(
-                            shutdown_cmd(), capture_output=True, text=True, timeout=60
-                        )
-                        log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
-                    except Exception as e:
-                        log(f"talosctl FAILED: {e}")
+                triggered = trigger_shutdown(f"{reason} x{confirm}")
         else:
             confirm = 0
         log(line + (f" [on-battery confirm={confirm}/{CONFIRM}]" if on_batt else ""))
     except Exception as e:
-        log(f"ups.status=UNREACHABLE: {e}")
+        # Fail-safe: if we were last on battery and the NUT server has now gone
+        # dark, the NAS most likely lost power too — the outage is ongoing and
+        # we're blind. Shut down before the battery dies unseen. A blip on
+        # utility power never reaches this: was_on_battery gates it.
+        if was_on_battery:
+            interval = POLL_OB
+            unreach += 1
+            if unreach >= UNREACH_CONFIRM and not triggered:
+                triggered = trigger_shutdown(
+                    f"NUT unreachable x{unreach} while on battery"
+                )
+        blind = (
+            f" [on-battery blind={unreach}/{UNREACH_CONFIRM}]" if was_on_battery else ""
+        )
+        log(f"ups.status=UNREACHABLE: {e}{blind}")
     time.sleep(interval)
 """
 
@@ -288,6 +343,8 @@ class UpsMonitor(Construct):
                 k8s.EnvVar(name="TALOS_NODE", value=TALOS_NODE),
                 k8s.EnvVar(name="RUNTIME_THRESHOLD", value=RUNTIME_THRESHOLD),
                 k8s.EnvVar(name="CONFIRM_POLLS", value=CONFIRM_POLLS),
+                k8s.EnvVar(name="UNREACHABLE_CONFIRM", value=UNREACHABLE_CONFIRM),
+                k8s.EnvVar(name="SHUTDOWN_TIMEOUT", value=SHUTDOWN_TIMEOUT),
                 k8s.EnvVar(name="TALOSCONFIG", value=TALOSCONFIG_PATH),
                 k8s.EnvVar(name="TALOSCTL", value=TALOSCTL_PATH),
                 # The single arming gate in the pod spec. "true" = log-only.
