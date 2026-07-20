@@ -36,11 +36,76 @@
   },
   "panels": [
     {
+      "id": 300,
+      "type": "stat",
+      "title": "NATS control plane",
+      "description": "1 = this service's NATS connection is up; 0 = down, so its playback commands / live events are being dropped even though the process is running. Catches the boot-race where a consumer starts before NATS is reachable and stays deaf until restart. Aggregated across platform instances (min: red if any is down). No data reads as disconnected.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (deployment_environment) (nats_connected{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NATS DISCONNECTED",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NATS connected",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 10,
       "type": "stat",
       "title": "Stream",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "gridPos": { "x": 0, "y": 3, "w": 4, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -63,7 +128,7 @@
       "type": "stat",
       "title": "Data fresh (last 1m)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 4, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 4, "y": 3, "w": 5, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "(time() - max by (deployment_environment) (timestamp(last_over_time(http_server_request_duration_seconds_count{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[10m])))) < bool 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -86,7 +151,7 @@
       "type": "stat",
       "title": "Requests / sec",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 9, "y": 3, "w": 5, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "sum by (deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -98,7 +163,7 @@
       "type": "stat",
       "title": "Error rate (5xx)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 14, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 14, "y": 3, "w": 5, "h": 4 },
       "targets": [
         {
           "refId": "A",
@@ -123,7 +188,7 @@
       "type": "stat",
       "title": "DB pool inuse",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 19, "y": 0, "w": 5, "h": 4 },
+      "gridPos": { "x": 19, "y": 3, "w": 5, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "sum by (deployment_environment) (db_sql_connection_open{service_name=\"tripbot\", service_platform=~\"$platform\", status=\"inuse\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -135,7 +200,7 @@
       "type": "timeseries",
       "title": "HTTP server latency (p50 / p95 / p99)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50 [{{deployment_environment}}]" },
         { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(http_server_request_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 [{{deployment_environment}}]" },
@@ -148,7 +213,7 @@
       "type": "timeseries",
       "title": "Requests by status code",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "sum by (http_response_status_code, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{http_response_status_code}} [{{deployment_environment}}]" }
       ],
@@ -159,7 +224,7 @@
       "type": "timeseries",
       "title": "Outbound HTTP latency (p95)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, server_address, deployment_environment) (rate(http_client_request_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "→ {{server_address}} [{{deployment_environment}}]" }
       ],
@@ -170,7 +235,7 @@
       "type": "timeseries",
       "title": "DB connection pool",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "db_sql_connection_open{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}", "legendFormat": "{{status}} [{{deployment_environment}}]" }
       ],
@@ -181,7 +246,7 @@
       "type": "logs",
       "title": "Recent errors & warnings",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
-      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | service_platform=~\"$platform\" | detected_level=~\"error|warn\"" }
       ],
@@ -192,7 +257,7 @@
       "type": "stat",
       "title": "OBS FPS",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 30, "w": 6, "h": 4 },
+      "gridPos": { "x": 0, "y": 33, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (obs_active_fps{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -204,7 +269,7 @@
       "type": "stat",
       "title": "Output bitrate",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 30, "w": 6, "h": 4 },
+      "gridPos": { "x": 6, "y": 33, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "8 * max by (deployment_environment) (rate(obs_stream_output_bytes{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))" }
       ],
@@ -216,7 +281,7 @@
       "type": "stat",
       "title": "Stream-output skipped /s",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 30, "w": 6, "h": 4 },
+      "gridPos": { "x": 12, "y": 33, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -238,7 +303,7 @@
       "type": "stat",
       "title": "Congestion / reconnecting",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 18, "y": 30, "w": 6, "h": 4 },
+      "gridPos": { "x": 18, "y": 33, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}) + max by (deployment_environment) (obs_stream_output_reconnecting{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -260,7 +325,7 @@
       "type": "timeseries",
       "title": "OBS frame health",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 37, "w": 24, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "rate(obs_render_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "render skipped/s [{{deployment_environment}}]" },
         { "refId": "B", "expr": "rate(obs_output_skipped_frames{service_name=\"vlc-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])", "legendFormat": "output skipped/s [{{deployment_environment}}]" },
@@ -279,7 +344,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 45,
         "w": 6,
         "h": 4
       },
@@ -331,7 +396,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 42,
+        "y": 45,
         "w": 6,
         "h": 4
       },
@@ -383,7 +448,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 42,
+        "y": 45,
         "w": 6,
         "h": 4
       },
@@ -439,7 +504,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 42,
+        "y": 45,
         "w": 6,
         "h": 4
       },
@@ -491,7 +556,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 46,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -534,7 +599,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 46,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -573,7 +638,7 @@
       "title": "Twitch Chat Connected",
       "description": "Whether the bot is connected to Twitch chat (IRC). 1=connected, 0=disconnected. Drives the TripbotTwitchDisconnected alert.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 54, "w": 6, "h": 4 },
+      "gridPos": { "x": 0, "y": 57, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_connected{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -597,7 +662,7 @@
       "title": "Bot token · time remaining",
       "description": "Seconds until tripbot_twitch_token_expires_at_seconds{account=\"bot\"}. Renders as duration. Red when expired (negative) or 0 (missing); yellow under 30m; green over 1h. Drives the TripbotTokenExpired alert.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 54, "w": 6, "h": 4 },
+      "gridPos": { "x": 6, "y": 57, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\", service_platform=~\"$platform\", account=\"bot\", deployment_environment=~\"$deployment_environment\"}) - time()", "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -621,7 +686,7 @@
       "title": "Broadcaster token · time remaining",
       "description": "Seconds until tripbot_twitch_token_expires_at_seconds{account=\"broadcaster\"}. Renders as duration. Red when expired (negative) or 0 (missing); yellow under 30m; green over 1h. Drives the TripbotTokenExpired alert.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 54, "w": 6, "h": 4 },
+      "gridPos": { "x": 12, "y": 57, "w": 6, "h": 4 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment) (tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\", service_platform=~\"$platform\", account=\"broadcaster\", deployment_environment=~\"$deployment_environment\"}) - time()", "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -645,7 +710,7 @@
       "title": "Twitch token · time until expiry by account",
       "description": "Seconds-remaining per account over time. Sawtooths down toward 0 between refreshes, snaps back to ~4h on each refresh. A line trending below 0 = the refresh cron is missing its window — the failure mode the TripbotTokenExpired alert catches.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 61, "w": 24, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "tripbot_twitch_token_expires_at_seconds{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"} - time()", "legendFormat": "{{account}} [{{deployment_environment}}]" }
       ],
