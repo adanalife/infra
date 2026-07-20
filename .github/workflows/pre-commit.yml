@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
       # terraform_fmt hook needs the terraform binary on PATH.
       - uses: hashicorp/setup-terraform@v4
       # no-commit-to-branch guards local commits; in CI the checkout is the
