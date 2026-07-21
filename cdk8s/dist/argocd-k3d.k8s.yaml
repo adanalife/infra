@@ -298,11 +298,11 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: development
-            app: obs-twitch
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/obs.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/development-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -313,7 +313,7 @@ spec:
       project: obs
       source:
         repoURL: https://github.com/adanalife/obs.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"

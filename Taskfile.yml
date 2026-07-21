@@ -229,6 +229,15 @@ tasks:
       - cp ../../tripbot/pkg/contract/contract.json contract.json
       - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
 
+  # platforms.json is the fleet-wide supported-platform set, owned by
+  # platform-gateway (its Go adapter registry is the source of truth). cdk8s
+  # reads it into SUPPORTED_PLATFORMS (the mediamtx relay fan-out + every env's
+  # platforms); never hand-edit it here.
+  platforms:sync:
+    desc: Re-sync platforms.json from the sibling platform-gateway checkout (the fleet-wide source of truth)
+    cmds:
+      - cp ../platform-gateway/platforms.json platforms.json
+
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
   tf:stage:apply:

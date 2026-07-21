@@ -10,6 +10,26 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+# The fleet-wide supported-platform set, owned by platform-gateway (its Go
+# adapter registry is the source of truth) and synced into this repo's
+# platforms.json via `task platforms:sync`. Drives the per-platform mediamtx
+# relay fan-out + every env's `platforms` (validated a subset below). The
+# gateway/obs/playout Applications self-discover from their own repos' indexes,
+# not from this file. Never hand-edit platforms.json — add an adapter in the
+# gateway + re-sync.
+_PLATFORMS_FILE = Path(__file__).resolve().parents[2] / "platforms.json"
+
+
+def _load_supported_platforms() -> tuple[str, ...]:
+    import json
+
+    with _PLATFORMS_FILE.open() as f:
+        return tuple(json.load(f)["platforms"])
+
+
+SUPPORTED_PLATFORMS = _load_supported_platforms()
 
 
 @dataclass(frozen=True)
@@ -64,8 +84,8 @@ class EnvConfig:
     # Size of the node-local corpus PVC. The regenerated _opt/clips corpus is
     # ~630 GB; this leaves headroom without crowding the other local-path PVCs.
     dashcam_local_size: str = "700Gi"
-    # Streaming platforms present in this env (obs instances). twitch everywhere;
-    # youtube currently stage-only while the bot side is built out.
+    # Platforms this env runs a per-platform mediamtx relay for. Set from
+    # SUPPORTED_PLATFORMS on the minipc envs; twitch-only on the test envs.
     platforms: tuple[str, ...] = ("twitch",)
 
     @property
@@ -121,15 +141,12 @@ ENVS: dict[str, EnvConfig] = {
         # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
         # take years of irreplaceable data.
         data_namespace="prod-1-data",
-        # youtube is staged here so Argo creates the prod-youtube Applications,
-        # but the tripbot repo renders that stack at replicas=0 (parked_platforms)
-        # until stage-youtube is shut down and prod-youtube is turned on — the
-        # minipc never runs two youtube stacks at once. facebook is staged the
-        # same way: Argo creates the prod-facebook Applications (obs + mediamtx
-        # relay via this list), and the app repos render the stack parked at
-        # replicas=0 until it's unparked for a go-live. This list is the Argo
-        # fan-out contract; it must match the platforms tripbot's cdk8s emits.
-        platforms=("twitch", "youtube", "facebook"),
+        # The full supported set gets a per-platform mediamtx relay here; a new
+        # platform gets one automatically on the next sync. The gateway/obs/
+        # playout workloads self-discover from their own repos' indexes and park
+        # at replicas:0 until a console scale-up, so this list only governs the
+        # infra-authored relay fan-out.
+        platforms=SUPPORTED_PLATFORMS,
     ),
     "stage-1": EnvConfig(
         name="stage-1",
@@ -150,12 +167,9 @@ ENVS: dict[str, EnvConfig] = {
         # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
         # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
         data_namespace="stage-1-data",
-        # This list is the Argo/mediamtx fan-out for stage: every platform
-        # here gets a mediamtx relay + an obs Application. facebook is the
-        # active burn-in platform (streaming to the ADL Staging Page);
-        # youtube/twitch stay listed so their Applications keep existing —
-        # their app repos declare them parked at replicas:0.
-        platforms=("youtube", "twitch", "facebook"),
+        # Full supported set → one mediamtx relay per platform on stage too
+        # (the gateway/obs/playout Applications self-discover from their repos).
+        platforms=SUPPORTED_PLATFORMS,
     ),
     "development": EnvConfig(
         name="development",
@@ -178,6 +192,16 @@ ENVS: dict[str, EnvConfig] = {
         platforms=("twitch",),
     ),
 }
+
+
+# Guard: an env can only list platforms the gateway has an adapter for.
+for _name, _env in ENVS.items():
+    _unknown = tuple(p for p in _env.platforms if p not in SUPPORTED_PLATFORMS)
+    if _unknown:
+        raise ValueError(
+            f"{_name}: platforms {_unknown} not in SUPPORTED_PLATFORMS "
+            f"{SUPPORTED_PLATFORMS} — add an adapter in platform-gateway + run `task platforms:sync`"
+        )
 
 
 def load_env(name: str) -> EnvConfig:

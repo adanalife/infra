@@ -220,16 +220,16 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert "selfHeal: true" in obs_patch
     assert "selfHeal: false" not in obs_patch
     assert _ignores_replicas(obs)
-    # one Application per (env, platform), each reconciling its own dist file
-    elements = obs["spec"]["generators"][0]["list"]["elements"]
-    assert {(e["env"], e["app"]) for e in elements} == {
-        ("prod-1", "obs-twitch"),
-        ("prod-1", "obs-youtube"),
-        ("prod-1", "obs-facebook"),
-        ("stage-1", "obs-twitch"),
-        ("stage-1", "obs-youtube"),
-        ("stage-1", "obs-facebook"),
+    # obs self-discovers its units from the obs repo's committed discovery index
+    # (git files generator), scoped per-env — the obs repo decides which
+    # platforms exist, no infra-side platform map.
+    gen = obs["spec"]["generators"][0]["git"]
+    assert {f["path"] for f in gen["files"]} == {
+        "cdk8s/dist/apps/prod-1-*.json",
+        "cdk8s/dist/apps/stage-1-*.json",
     }
+    assert gen["repoURL"] == "https://github.com/adanalife/obs.git"
+    assert gen["revision"] == "main"
     src = obs["spec"]["template"]["spec"]["source"]
     assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
     # supporting + data + identity stay manual everywhere
@@ -296,27 +296,17 @@ def test_video_pipeline_appset_both_envs_cross_repo():
 def test_platform_gateway_appset_per_platform_cross_repo():
     objs = _synth()
     pg = _appset(objs, "platform-gateway")
-    elements = pg["spec"]["generators"][0]["list"]["elements"]
-    # one Application per gateway instance (PLATFORM_GATEWAY_PLATFORMS — the
-    # cross-repo contract with the gateway repo's env.platforms) plus the
-    # per-env shared unit carrying the once-per-namespace ExternalSecrets
-    apps = {(e["env"], e["app"]) for e in elements}
-    assert {a for a in apps if a[0] == "prod-1"} == {
-        ("prod-1", "gateway-twitch"),
-        ("prod-1", "gateway-youtube"),
-        ("prod-1", "gateway-facebook"),
-        ("prod-1", "gateway-shared"),
+    # gateway self-discovers its units from the PRIVATE gateway repo's committed
+    # discovery index (git files generator) — one Application per gateway-<platform>
+    # the gateway synthed plus the per-env gateway-shared unit, no infra-side
+    # platform map to keep in sync with the adapter set. Scoped per-env.
+    gen = pg["spec"]["generators"][0]["git"]
+    assert {f["path"] for f in gen["files"]} == {
+        "cdk8s/dist/apps/prod-1-*.json",
+        "cdk8s/dist/apps/stage-1-*.json",
     }
-    assert {a[1] for a in apps if a[0] == "stage-1"} == {
-        "gateway-twitch",
-        "gateway-youtube",
-        "gateway-tiktok",
-        "gateway-facebook",
-        "gateway-instagram",
-        "gateway-shared",
-    }
-    # trunk-based repo: every element tracks main
-    assert all(e["revision"] == "main" for e in elements)
+    assert gen["repoURL"] == "git@github.com:adanalife/platform-gateway.git"
+    assert gen["revision"] == "main"
     src = pg["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "git@github.com:adanalife/platform-gateway.git"
     assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
@@ -333,18 +323,17 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     po = _appset(objs, "playout")
     src = po["spec"]["template"]["spec"]["source"]
     assert src["repoURL"] == "https://github.com/adanalife/playout.git"
-    # one Application per (env, platform), each reconciling its own dist file
-    # (PLAYOUT_PLATFORMS — stage runs the facebook burn-in, youtube parked)
+    # playout self-discovers its units from the playout repo's committed discovery
+    # index (git files generator) — one Application per playout-<platform> the
+    # playout repo synthed, no infra-side platform map. Scoped per-env.
     assert src["directory"]["include"] == "{{.env}}-{{.app}}.k8s.yaml"
-    elements = po["spec"]["generators"][0]["list"]["elements"]
-    assert {(e["env"], e["app"]) for e in elements} == {
-        ("prod-1", "playout-twitch"),
-        ("prod-1", "playout-youtube"),
-        ("prod-1", "playout-facebook"),
-        ("stage-1", "playout-youtube"),
-        ("stage-1", "playout-facebook"),
+    gen = po["spec"]["generators"][0]["git"]
+    assert {f["path"] for f in gen["files"]} == {
+        "cdk8s/dist/apps/prod-1-*.json",
+        "cdk8s/dist/apps/stage-1-*.json",
     }
-    assert all(e["revision"] == "main" for e in elements)
+    assert gen["repoURL"] == "https://github.com/adanalife/playout.git"
+    assert gen["revision"] == "main"
     # prod playout feeds the live stream at cutover — deliberate manual sync
     patch = po["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "playout-twitch"))' in patch
@@ -376,9 +365,13 @@ def test_mediamtx_appset_autosyncs_both_envs():
         ("prod-1", "mediamtx-twitch"),
         ("prod-1", "mediamtx-youtube"),
         ("prod-1", "mediamtx-facebook"),
+        ("prod-1", "mediamtx-instagram"),
+        ("prod-1", "mediamtx-tiktok"),
         ("stage-1", "mediamtx-twitch"),
         ("stage-1", "mediamtx-youtube"),
         ("stage-1", "mediamtx-facebook"),
+        ("stage-1", "mediamtx-instagram"),
+        ("stage-1", "mediamtx-tiktok"),
     }
     # ...autosyncing (a merged dist change deploys itself) with selfHeal ON on
     # both envs — the relay is never parked (always replicas:1, cheap), so its

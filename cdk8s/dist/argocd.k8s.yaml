@@ -445,12 +445,20 @@ spec:
             app: mediamtx-youtube
           - env: prod-1
             app: mediamtx-facebook
-          - env: stage-1
-            app: mediamtx-youtube
+          - env: prod-1
+            app: mediamtx-instagram
+          - env: prod-1
+            app: mediamtx-tiktok
           - env: stage-1
             app: mediamtx-twitch
           - env: stage-1
+            app: mediamtx-youtube
+          - env: stage-1
             app: mediamtx-facebook
+          - env: stage-1
+            app: mediamtx-instagram
+          - env: stage-1
+            app: mediamtx-tiktok
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -755,38 +763,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: gateway-twitch
-            revision: main
-          - env: prod-1
-            app: gateway-youtube
-            revision: main
-          - env: prod-1
-            app: gateway-facebook
-            revision: main
-          - env: prod-1
-            app: gateway-shared
-            revision: main
-          - env: stage-1
-            app: gateway-twitch
-            revision: main
-          - env: stage-1
-            app: gateway-youtube
-            revision: main
-          - env: stage-1
-            app: gateway-tiktok
-            revision: main
-          - env: stage-1
-            app: gateway-facebook
-            revision: main
-          - env: stage-1
-            app: gateway-instagram
-            revision: main
-          - env: stage-1
-            app: gateway-shared
-            revision: main
+    - git:
+        repoURL: git@github.com:adanalife/platform-gateway.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -797,7 +779,7 @@ spec:
       project: platform-gateway
       source:
         repoURL: git@github.com:adanalife/platform-gateway.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -852,26 +834,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: obs-twitch
-            revision: main
-          - env: prod-1
-            app: obs-youtube
-            revision: main
-          - env: prod-1
-            app: obs-facebook
-            revision: main
-          - env: stage-1
-            app: obs-youtube
-            revision: main
-          - env: stage-1
-            app: obs-twitch
-            revision: main
-          - env: stage-1
-            app: obs-facebook
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/obs.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -882,7 +850,7 @@ spec:
       project: obs
       source:
         repoURL: https://github.com/adanalife/obs.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -937,23 +905,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: playout-twitch
-            revision: main
-          - env: prod-1
-            app: playout-youtube
-            revision: main
-          - env: prod-1
-            app: playout-facebook
-            revision: main
-          - env: stage-1
-            app: playout-youtube
-            revision: main
-          - env: stage-1
-            app: playout-facebook
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/playout.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -964,7 +921,7 @@ spec:
       project: playout
       source:
         repoURL: https://github.com/adanalife/playout.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
