@@ -1,19 +1,32 @@
 {
   "title": "04 — Service Health: platform-gateway",
   "uid": "platform-gateway-service-health",
-  "tags": ["tripbot", "platform-gateway", "service-health"],
+  "tags": [
+    "tripbot",
+    "platform-gateway",
+    "service-health"
+  ],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "cluster",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__DS_PROMETHEUS__"
+        },
         "query": "label_values(kube_pod_info, cluster)",
-        "current": { "text": "All", "value": "$__all" },
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
         "includeAll": true,
         "multi": false,
         "refresh": 2,
@@ -23,8 +36,11 @@
         "name": "platform",
         "label": "Platform",
         "type": "custom",
-        "query": "twitch,youtube",
-        "current": { "text": "twitch", "value": "twitch" },
+        "query": "twitch,youtube,facebook",
+        "current": {
+          "text": "twitch",
+          "value": "twitch"
+        },
         "includeAll": false,
         "multi": false
       }
@@ -35,33 +51,87 @@
       "id": 99,
       "type": "text",
       "title": "About this dashboard",
-      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 4 },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 24,
+        "h": 4
+      },
       "options": {
         "mode": "markdown",
         "content": "`gateway-$platform` is the per-platform API gateway (the `platform_gateway_*` metrics from `internal/metrics`, [platform-gateway#14](https://github.com/adanalife/platform-gateway/pull/14)). Unlike tripbot's OTel-push metrics, these are **annotation-scraped** (`prometheus.io/scrape` on the pod), so they carry `cluster`/`namespace`/`pod` — filtered here by `pod=~\"gateway-$platform.*\"`. Only **prod-1** ships to Grafana Cloud (stage-1 is dropped at the Alloy layer), so panels populate once prod `gateway-twitch` is live (post-cutover). **The Twitch Helix row is the cutover-parity replacement** for the `twitch_helix_*` panels on the Twitch Chat Activity dashboard, which go stale once tripbot routes Helix calls through the gateway. Helix-row panels are twitch-only (`pod=~\"gateway-twitch.*\"`); a youtube gateway leaves them empty."
       }
     },
-
-    { "id": 100, "type": "row", "title": "Façade", "collapsed": false, "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 } },
-
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Façade",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 1
+      }
+    },
     {
       "id": 1,
       "type": "stat",
       "title": "Up (last 1m)",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
       "targets": [
-        { "refId": "A", "expr": "(time() - max(timestamp(last_over_time(platform_gateway_up{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))) < bool 60" }
+        {
+          "refId": "A",
+          "expr": "(time() - max(timestamp(last_over_time(platform_gateway_up{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))) < bool 60"
+        }
       ],
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "red", "value": null },
-            { "color": "green", "value": 1 }
-          ]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "STALE", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "STALE",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
           ]
         },
         "overrides": []
@@ -71,31 +141,85 @@
       "id": 2,
       "type": "stat",
       "title": "Requests / sec",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))" }
+        {
+          "refId": "A",
+          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))"
+        }
       ],
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "decimals": 2, "unit": "reqps" }, "overrides": [] }
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
       "type": "stat",
       "title": "Upstream failures (502) / sec",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"502\"}[5m]))" }
+        {
+          "refId": "A",
+          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"502\"}[5m]))"
+        }
       ],
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "fieldConfig": {
         "defaults": {
-          "decimals": 3, "unit": "reqps",
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null },
-            { "color": "red", "value": 0.001 }
-          ]}
+          "decimals": 3,
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          }
         },
         "overrides": []
       }
@@ -104,68 +228,203 @@
       "id": 4,
       "type": "stat",
       "title": "Not-supported (501) / sec",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"501\"}[5m]))" }
+        {
+          "refId": "A",
+          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"501\"}[5m]))"
+        }
       ],
-      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "decimals": 3, "unit": "reqps" }, "overrides": [] }
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3,
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 5,
       "type": "timeseries",
       "title": "Requests / sec by op",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        { "refId": "A", "expr": "sum by (op) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))", "legendFormat": "{{op}}" }
+        {
+          "refId": "A",
+          "expr": "sum by (op) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))",
+          "legendFormat": "{{op}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 6,
       "type": "timeseries",
       "title": "Requests / sec by status",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        { "refId": "A", "expr": "sum by (status) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))", "legendFormat": "{{status}}" }
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "Request latency by op (p50 / p95)",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))", "legendFormat": "p50 {{op}}" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))", "legendFormat": "p95 {{op}}" }
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))",
+          "legendFormat": "p50 {{op}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))",
+          "legendFormat": "p95 {{op}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 0 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
     },
-
-    { "id": 101, "type": "row", "title": "Twitch Helix (cutover parity)", "collapsed": false, "gridPos": { "x": 0, "y": 21, "w": 24, "h": 1 } },
-
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Twitch Helix (cutover parity)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 1
+      }
+    },
     {
       "id": 10,
       "type": "stat",
       "title": "Helix rate remaining",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 22, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
-        { "refId": "A", "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})" }
+        {
+          "refId": "A",
+          "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})"
+        }
       ],
-      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "red", "value": null },
-            { "color": "orange", "value": 100 },
-            { "color": "green", "value": 300 }
-          ]}
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 100
+              },
+              {
+                "color": "green",
+                "value": 300
+              }
+            ]
+          }
         },
         "overrides": []
       }
@@ -174,18 +433,46 @@
       "id": 11,
       "type": "stat",
       "title": "Helix errors (5m)",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 22, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 25,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m]))" }
+        {
+          "refId": "A",
+          "expr": "sum(increase(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m]))"
+        }
       ],
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null },
-            { "color": "red", "value": 1 }
-          ]}
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         },
         "overrides": []
       }
@@ -194,35 +481,220 @@
       "id": 12,
       "type": "timeseries",
       "title": "Helix rate budget over time",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 26, "w": 12, "h": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        { "refId": "A", "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})", "legendFormat": "remaining" },
-        { "refId": "B", "expr": "max(platform_gateway_helix_ratelimit_limit{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})", "legendFormat": "limit" }
+        {
+          "refId": "A",
+          "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})",
+          "legendFormat": "remaining"
+        },
+        {
+          "refId": "B",
+          "expr": "max(platform_gateway_helix_ratelimit_limit{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})",
+          "legendFormat": "limit"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 13,
       "type": "timeseries",
       "title": "Helix errors by endpoint and status (per min)",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 26, "w": 12, "h": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        { "refId": "A", "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status}})" }
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "legendFormat": "{{endpoint}} ({{status}})"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 700,
       "type": "table",
       "title": "Recent traces (platform-gateway)",
       "description": "Most recent traces for the gateway. Only prod-1 ships traces to Grafana Cloud, so rows appear once the prod gateway is live.",
-      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
-      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 10 },
+      "datasource": {
+        "type": "tempo",
+        "uid": "__DS_TEMPO__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 10
+      },
       "targets": [
-        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"platform-gateway\" } | select(resource.deployment.environment)", "limit": 20 }
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"platform-gateway\" } | select(resource.deployment.environment)",
+          "limit": 20
+        }
       ]
+    },
+    {
+      "id": 301,
+      "type": "stat",
+      "title": "Running version",
+      "description": "Running gateway build version from platform_gateway_build_info (ldflags-stamped). One row per live version; two rows means a rollout in flight or version skew across platform instances.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "platform_gateway_build_info{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}",
+          "legendFormat": "{{version}}"
+        }
+      ],
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 302,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Wall-clock age of the most-recently-started gateway pod (time() - max pod start), from kube-state-metrics. Resets on every deploy/restart; a value that keeps resetting means the pod is cycling. Scoped to the selected cluster + platform.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - max(kube_pod_start_time{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "no pods"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 303,
+      "type": "stat",
+      "title": "Pod restarts",
+      "description": "Total container restarts across the gateway pods in the selected cluster/platform (kube-state-metrics). Green at 0; any restart turns it red — a crash-loop or OOMKill signal the request metrics can not show.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(kube_pod_container_status_restarts_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }
