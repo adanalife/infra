@@ -233,11 +233,11 @@
       "id": 40,
       "type": "logs",
       "title": "Chat feed (live)",
-      "description": "Twitch chat messages as they arrive, rendered as `username: message` for live-chat scannability. Emitted by pkg/chatbot/log/log.go as OTel log records under scope_name=\"twitch-chat\".",
+      "description": "Chat messages as they arrive, rendered as `[platform] username: message` for live-chat scannability. All platforms log under scope_name=\"twitch-chat\" (a historical constant in pkg/chatbot/log/log.go); the real platform is the service_platform label, prepended here as a per-line tag.",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 12, "y": 16, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | service_platform=~\"$platform\" | scope_name=\"twitch-chat\" | line_format \"{{ __timestamp__ | date \\\"15:04:05\\\" }} {{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
+        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | service_platform=~\"$platform\" | scope_name=\"twitch-chat\" | line_format \"{{ __timestamp__ | date \\\"15:04:05\\\" }} [{{ .service_platform }}] {{ .twitch_user }}: {{ __line__ }}\" | drop scope_name, twitch_channel, twitch_user, detected_level" }
       ],
       "options": { "showTime": false, "wrapLogMessage": true, "sortOrder": "Ascending", "dedupStrategy": "none", "enableLogDetails": false, "showLabels": false, "showCommonLabels": false, "showLogContextToggle": false }
     },

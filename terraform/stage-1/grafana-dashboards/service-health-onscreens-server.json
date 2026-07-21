@@ -47,7 +47,7 @@
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 24,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -99,6 +99,19 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 301,
+      "type": "stat",
+      "title": "Running version",
+      "description": "service.version from the OTel resource (set at deploy via OTEL_RESOURCE_ATTRIBUTES). One row per live version — two rows means a rollout in flight or a version skew across platform instances.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "group by (service_version) (target_info{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
+      ],
+      "options": { "colorMode": "none", "graphMode": "none", "textMode": "name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
     },
     {
       "id": 99,
@@ -291,6 +304,17 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 700,
+      "type": "table",
+      "title": "Recent traces (onscreens-server)",
+      "description": "Most recent traces for this service. The deployment_environment column disambiguates rows when the env selector is set to All.",
+      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
+      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"onscreens-server\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)", "limit": 20 }
+      ]
     }
   ]
 }
