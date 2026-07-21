@@ -45,9 +45,9 @@
         "uid": "__DS_PROMETHEUS__"
       },
       "gridPos": {
-        "x": 0,
+        "x": 6,
         "y": 0,
-        "w": 18,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -106,12 +106,48 @@
       "title": "Running version",
       "description": "service.version from the OTel resource (set at deploy via OTEL_RESOURCE_ATTRIBUTES). One row per live version — two rows means a rollout in flight or a version skew across platform instances.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 3 },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 3 },
       "targets": [
         { "refId": "A", "expr": "group by (service_version) (target_info{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
       ],
       "options": { "colorMode": "none", "graphMode": "none", "textMode": "name", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 302,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Wall-clock age of the most-recently-started pod for this service (time() - max pod start), from kube-state-metrics. Resets on every deploy/restart; a value that keeps resetting means the pod is cycling. Scoped to the selected env (KSM namespace == deployment_environment) and platform.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(kube_pod_start_time{namespace=~\"$deployment_environment\", pod=~\"tripbot-$platform.*\", pod!~\"tripbot-console.*\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s", "noValue": "no pods" }, "overrides": [] }
+    },
+    {
+      "id": 303,
+      "type": "stat",
+      "title": "Pod restarts",
+      "description": "Total container restarts across this service's pods in the selected env/platform (kube-state-metrics). Green at 0; any restart turns it red — a crash-loop or OOMKill signal the process-level metrics can't show.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "sum(kube_pod_container_status_restarts_total{namespace=~\"$deployment_environment\", pod=~\"tripbot-$platform.*\", pod!~\"tripbot-console.*\"})" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
     },
     {
       "id": 10,
