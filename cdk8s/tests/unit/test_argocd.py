@@ -44,6 +44,27 @@ def _project(objs, name):
     )
 
 
+def _respects_ignore_replicas(appset):
+    """True when the appset's sync skips the ignored fields (.spec.replicas) too,
+    not just the diff — RespectIgnoreDifferences=true in syncOptions. Without it a
+    sync writes the manifest's replicas (0 = parked) and scales a live pod down."""
+    opts = appset["spec"]["template"]["spec"]["syncPolicy"].get("syncOptions", [])
+    return "RespectIgnoreDifferences=true" in opts
+
+
+def test_replica_owned_appsets_respect_the_ignore_on_sync():
+    """Every appset that ignores .spec.replicas must also RespectIgnoreDifferences
+    on sync — otherwise ignoreDifferences only hides the diff, and an actual sync
+    of the parked-at-0 dist scales the live pod down (the prod outage this pairs
+    with: infra#877 shipped the ignore without the respect)."""
+    for kwargs in ({}, _DEV):  # minipc + k3d dev
+        appsets = [o for o in _synth(**kwargs) if o["kind"] == "ApplicationSet"]
+        owned = [a for a in appsets if _ignores_replicas(a)]
+        assert owned, "expected at least the workload appsets to own replicas"
+        for a in owned:
+            assert _respects_ignore_replicas(a), a["metadata"]["name"]
+
+
 def _ignores_replicas(appset):
     """True when the appset's Application template ignores every Deployment's
     .spec.replicas — the runtime-owned-replicas contract (a console/hand scale
