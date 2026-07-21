@@ -281,15 +281,28 @@
     {
       "id": 52,
       "type": "state-timeline",
-      "title": "Dashcam state (US state over time)",
-      "description": "Which US state the dashcam playhead is in over the time range, from tripbot_current_state. Only one state reads 1 at a time, so each band is a segment spent in that state; an unresolved playhead reads as \"unknown\". One lane per state visited in the window.",
+      "title": "Dashcam streaming by platform",
+      "description": "One lane per platform, colored by the platform's brand color. A band means that platform's playout is actively streaming the dashcam (tripbot_current_state resolves to a US state); a gap means it's dark. Surfaces per-platform streaming presence now that each platform runs its own playout. Per-state detail lives on the tripbot service-health dashboard; this launch view trades it for per-platform brand color.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 25, "w": 24, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment, service_platform, state) (tripbot_current_state{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}) == 1", "legendFormat": "{{state}} · {{service_platform}}" }
+        { "refId": "A", "expr": "max by (service_platform) (tripbot_current_state{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}) == 1", "legendFormat": "{{service_platform}}" }
       ],
-      "options": { "mergeValues": false, "showValue": "never", "alignValue": "left", "rowHeight": 0.9, "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false } },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "noValue": "no data" }, "overrides": [] }
+      "options": { "mergeValues": true, "showValue": "never", "alignValue": "left", "rowHeight": 0.9, "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed" },
+          "noValue": "not streaming",
+          "mappings": [ { "type": "value", "options": { "1": { "text": "streaming" } } } ]
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "twitch" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "#9146ff" } } ] },
+          { "matcher": { "id": "byName", "options": "youtube" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "#ff4e45" } } ] },
+          { "matcher": { "id": "byName", "options": "facebook" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "#1877f2" } } ] },
+          { "matcher": { "id": "byName", "options": "instagram" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "#e1306c" } } ] },
+          { "matcher": { "id": "byName", "options": "tiktok" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "#25f4ee" } } ] }
+        ]
+      }
     }
   ]
 }
