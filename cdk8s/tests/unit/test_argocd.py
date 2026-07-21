@@ -44,6 +44,18 @@ def _project(objs, name):
     )
 
 
+def _ignores_replicas(appset):
+    """True when the appset's Application template ignores every Deployment's
+    .spec.replicas — the runtime-owned-replicas contract (a console/hand scale
+    sticks; selfHeal never reconciles the count)."""
+    diffs = appset["spec"]["template"]["spec"]["ignoreDifferences"]
+    return any(
+        d.get("kind") == "Deployment"
+        and ".spec.replicas" in d.get("jqPathExpressions", [])
+        for d in diffs
+    )
+
+
 def test_minipc_default_has_both_uis_and_both_envs():
     objs = _synth()
     classes = {
@@ -168,16 +180,13 @@ def test_minipc_apps_autosync_except_prod_obs():
     # ...and tripbot-apps carries no obs unit — OBS is delivered by the
     # obs repo's own appset (OBS_REVISIONS), so there's no obs carve-out here.
     assert "obs" not in patch
-    # selfHeal is per-env: stage is OFF (a hand/console scale sticks so
-    # components can be parked at 0 to free the minipc), prod stays ON (the live
-    # stream must match git) — except the parked prod facebook stack, which the
-    # console scales live and so keeps selfHeal off. Both branches render in the
-    # goTemplate conditional.
-    assert '(eq .env "stage-1")' in patch
-    assert '(and (eq .env "prod-1") (eq .app "tripbot-facebook"))' in patch
-    assert '(and (eq .env "prod-1") (eq .app "onscreens-facebook"))' in patch
-    assert "selfHeal: false" in patch
+    # selfHeal is uniformly ON (both minipc envs match git for image/config/
+    # existence drift) — no per-env or per-app selfHeal carve-out. Scaling no
+    # longer fights selfHeal because the replica count is runtime-owned: Argo
+    # ignores .spec.replicas on the app Deployments, so a console scale sticks.
     assert "selfHeal: true" in patch
+    assert "selfHeal: false" not in patch
+    assert _ignores_replicas(_appset(objs, "tripbot-apps"))
     # the live-encoder holdout moved with OBS to the obs appset: each prod-1 obs
     # platform is a deliberate manual sync (a sync restarts the live stream),
     # the rest autosync.
@@ -185,13 +194,11 @@ def test_minipc_apps_autosync_except_prod_obs():
     obs_patch = obs["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "obs-twitch"))' in obs_patch
     assert '(and (eq .env "prod-1") (eq .app "obs-youtube"))' in obs_patch
-    # selfHeal: stage OFF (console scale-up sticks), prod ON — except the parked
-    # prod facebook stack, which is scaled live by the console and so keeps
-    # selfHeal off too.
-    assert '(eq .env "stage-1")' in obs_patch
-    assert '(and (eq .env "prod-1") (eq .app "obs-facebook"))' in obs_patch
-    assert "selfHeal: false" in obs_patch
+    # selfHeal uniformly ON here too; obs replicas are runtime-owned (a console
+    # scale-up of a parked platform sticks).
     assert "selfHeal: true" in obs_patch
+    assert "selfHeal: false" not in obs_patch
+    assert _ignores_replicas(obs)
     # one Application per (env, platform), each reconciling its own dist file
     elements = obs["spec"]["generators"][0]["list"]["elements"]
     assert {(e["env"], e["app"]) for e in elements} == {
@@ -321,12 +328,11 @@ def test_playout_appset_cross_repo_with_prod_holdout():
     patch = po["spec"]["templatePatch"]
     assert '(and (eq .env "prod-1") (eq .app "playout-twitch"))' in patch
     assert '(and (eq .env "prod-1") (eq .app "playout-youtube"))' in patch
-    # selfHeal: stage OFF (console scale-up sticks), prod ON — except the parked
-    # prod facebook stack, which the console scales live and so keeps selfHeal off.
-    assert '(eq .env "stage-1")' in patch
-    assert '(and (eq .env "prod-1") (eq .app "playout-facebook"))' in patch
-    assert "selfHeal: false" in patch
+    # selfHeal uniformly ON; playout replicas are runtime-owned so a console
+    # scale-up of a parked platform sticks.
     assert "selfHeal: true" in patch
+    assert "selfHeal: false" not in patch
+    assert _ignores_replicas(po)
     # the public repo needs no deploy key, and the dev cluster runs no playout
     dev = _synth(**_DEV)
     with pytest.raises(StopIteration):
@@ -353,14 +359,14 @@ def test_mediamtx_appset_autosyncs_both_envs():
         ("stage-1", "mediamtx-youtube"),
         ("stage-1", "mediamtx-facebook"),
     }
-    # ...autosyncing (a merged dist change deploys itself), with selfHeal per-env
-    # like the other stream sets: OFF on stage so a console/hand scale-up of a
-    # relay sticks, ON in prod so the live relay matches git.
+    # ...autosyncing (a merged dist change deploys itself) with selfHeal ON on
+    # both envs — the relay is never parked (always replicas:1, cheap), so its
+    # count stays git-owned: no ignore_replicas, unlike the parkable workloads.
     patch = mtx["spec"]["templatePatch"]
     assert "prune: true" in patch
-    assert '{{- if (eq .env "stage-1") }}' in patch
-    assert "selfHeal: false" in patch
     assert "selfHeal: true" in patch
+    assert "selfHeal: false" not in patch
+    assert not _ignores_replicas(mtx)
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "mediamtx")
 

@@ -92,15 +92,6 @@ AUTOSYNC_ENVS = ("stage-1", "prod-1")
 # OBS_REVISIONS) — the live-encoder manual-sync holdout lives on that appset
 # (("prod-1", "obs")), not on tripbot-apps, which no longer carries any obs unit.
 AUTOSYNC_HOLDOUTS: tuple[tuple[str, str], ...] = ()
-# Envs whose apps autosync but with selfHeal OFF — Argo still deploys git/dist
-# changes, but it won't revert hand/console live edits, so a manual `kubectl
-# scale` (or a console start/stop button) sticks. Stage only: it's where
-# components are scaled up/down by hand to keep the minipc free for prod + the
-# shared transcode job. prod must always match git, so it keeps selfHeal on.
-# Paired with unmanaged replicas in the tripbot deploy manifests (stage omits
-# spec.replicas via EnvConfig.manual_replicas), so an autosync on a main
-# merge doesn't reset a scaled-down component either.
-SELFHEAL_OFF_ENVS = ("stage-1",)
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
 # Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
@@ -443,13 +434,10 @@ class ArgoCD(Construct):
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
             selfheal=self._selfheal,
-            selfheal_off_envs=SELFHEAL_OFF_ENVS,
-            # prod facebook is parked until a console scale-up brings it live, so
-            # its Applications keep selfHeal off (the scale must stick).
-            selfheal_off_apps=(
-                ("prod-1", "tripbot-facebook"),
-                ("prod-1", "onscreens-facebook"),
-            ),
+            # Replica count is runtime-owned: dist parks every app Deployment at
+            # replicas:0, the console's per-platform scale button brings one live,
+            # and Argo ignores .spec.replicas so the scale sticks with selfHeal on.
+            ignore_replicas=True,
             # Every tripbot env tracks main (release-please gates prod by the
             # versions.yaml image pin, not by a branch).
             repo_url=TRIPBOT_REPO_URL,
@@ -504,11 +492,11 @@ class ArgoCD(Construct):
         )
         # The MediaMTX relays (infra-authored, one Application per (env,
         # platform) reconciling its own <env>-mediamtx-<platform>.k8s.yaml —
-        # the obs shape). Autosyncs so a merged dist change deploys itself; on
-        # prod selfHeal reverts drift too (a relay restart is cheap — the
-        # publisher + OBS reconnect). selfHeal is off on stage
-        # (selfheal_off_envs) so the console's per-platform scale-up of a relay
-        # sticks instead of being reverted to the git replicas.
+        # the obs shape). Autosyncs so a merged dist change deploys itself, and
+        # selfHeal reverts drift on every env (a relay restart is cheap — the
+        # publisher + OBS reconnect). The relay is never parked (it's cheap and
+        # always runs at replicas:1), so its count stays git-owned — no
+        # ignore_replicas here, unlike the parkable platform workloads.
         if self.mediamtx_envs:
             self._application_set(
                 id="appset-mediamtx",
@@ -520,7 +508,6 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
-                selfheal_off_envs=SELFHEAL_OFF_ENVS,
                 preserve_on_deletion=True,
             )
         # The UPS monitor (observe-only NUT client) — a cluster-SINGLETON, not
@@ -580,13 +567,10 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
-                # selfHeal off on stage so a hand/console scale sticks — same
-                # posture as the tripbot apps + gateway sets. NOTE: the appset's
-                # ignoreApplicationDifferences on /spec/syncPolicy means an
-                # EXISTING Application keeps its old policy; a one-time
-                # `kubectl -n argocd patch application <app>` (or app
-                # delete+regen) is needed after this lands.
-                selfheal_off_envs=SELFHEAL_OFF_ENVS,
+                # Runtime-owned replicas so a hand/console scale of the console
+                # sticks (e.g. parking it on stage to free the minipc) with
+                # selfHeal on — Argo ignores .spec.replicas. dist births it at 1.
+                ignore_replicas=True,
                 repo_url=CONSOLE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
@@ -609,11 +593,10 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
-                # selfHeal off on stage so scaling the embed responder up/down
-                # (console button or kubectl) sticks instead of being reverted
-                # to the git replicas within seconds. Same one-time
-                # existing-Application patch caveat as the console set above.
-                selfheal_off_envs=SELFHEAL_OFF_ENVS,
+                # Runtime-owned replicas so scaling the embed responder up/down
+                # (console button or kubectl) sticks with selfHeal on — Argo
+                # ignores .spec.replicas. dist births it at its declared count.
+                ignore_replicas=True,
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
@@ -621,10 +604,10 @@ class ArgoCD(Construct):
         # platform) sourcing the PRIVATE platform-gateway repo's committed
         # dist (<env>-gateway-<platform>.k8s.yaml), plus a per-env
         # {{.env}}-gateway-shared Application for the once-per-namespace
-        # ExternalSecrets every instance references. Per-platform so the
-        # console's kill switch can flip one platform's selfHeal without
-        # dropping drift-reversion for the others. Per-env revision (main for
-        # every env), same autosync posture as the apps/console sets.
+        # ExternalSecrets every instance references. Per-platform so the console
+        # can scale one platform's gateway without touching its siblings; the
+        # replica count is runtime-owned (ignore_replicas). Per-env revision
+        # (main for every env), same autosync posture as the apps/console sets.
         if self.platform_gateway_envs:
             self._application_set(
                 id="appset-platform-gateway",
@@ -646,15 +629,9 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
-                # selfHeal off on stage so a hand `kubectl scale gateway-* 0`
-                # sticks (the minipc gets freed for prod by hand) — same posture
-                # as the tripbot apps set. Paired with the stage gateways omitting
-                # spec.replicas (platform-gateway EnvConfig.manual_replicas), so an
-                # autosync on a main merge doesn't reset a scaled-down gateway.
-                selfheal_off_envs=SELFHEAL_OFF_ENVS,
-                # prod facebook is parked until a console scale-up brings it live,
-                # so gateway-facebook keeps selfHeal off (the scale must stick).
-                selfheal_off_apps=(("prod-1", "gateway-facebook"),),
+                # Runtime-owned replicas: gateways park at 0 in dist and scale up
+                # via the console; Argo ignores .spec.replicas so the scale sticks.
+                ignore_replicas=True,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -665,8 +642,8 @@ class ArgoCD(Construct):
             # can be paused/synced/scaled without touching its siblings. The
             # platform fan-out reads the infra env config, which matches the
             # obs repo's (twitch+youtube on the minipc envs, twitch on dev).
-            # selfHeal is off on stage (selfheal_off_envs) so the console's
-            # per-platform scale-up sticks; prod keeps selfHeal on.
+            # Replica count is runtime-owned (ignore_replicas) so a console
+            # scale-up sticks with selfHeal on.
             self._application_set(
                 id="appset-obs",
                 name="obs",
@@ -683,10 +660,9 @@ class ArgoCD(Construct):
                     ("prod-1", "obs-youtube"),
                 ),
                 selfheal=self._selfheal,
-                selfheal_off_envs=SELFHEAL_OFF_ENVS,
-                # prod facebook is parked until a console scale-up brings it live,
-                # so obs-facebook keeps selfHeal off (the scale must stick).
-                selfheal_off_apps=(("prod-1", "obs-facebook"),),
+                # Runtime-owned replicas: obs parks at 0 in dist and scales up via
+                # the console; Argo ignores .spec.replicas so the scale sticks.
+                ignore_replicas=True,
                 repo_url=OBS_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -694,9 +670,9 @@ class ArgoCD(Construct):
         if self.playout_envs:
             # One Application per (env, platform) — the obs shape, each
             # reconciling its own {{.env}}-playout-<platform>.k8s.yaml from
-            # the playout repo's dist (fan-out from PLAYOUT_PLATFORMS). selfHeal
-            # is off on stage (selfheal_off_envs) so the console's per-platform
-            # scale-up sticks; prod keeps selfHeal on.
+            # the playout repo's dist (fan-out from PLAYOUT_PLATFORMS). Replica
+            # count is runtime-owned (ignore_replicas) so a console scale-up
+            # sticks with selfHeal on.
             self._application_set(
                 id="appset-playout",
                 name="playout",
@@ -718,10 +694,9 @@ class ArgoCD(Construct):
                     ("prod-1", "playout-youtube"),
                 ),
                 selfheal=self._selfheal,
-                selfheal_off_envs=SELFHEAL_OFF_ENVS,
-                # prod facebook is parked until a console scale-up brings it live,
-                # so playout-facebook keeps selfHeal off (the scale must stick).
-                selfheal_off_apps=(("prod-1", "playout-facebook"),),
+                # Runtime-owned replicas: playout parks at 0 in dist and scales up
+                # via the console; Argo ignores .spec.replicas so the scale sticks.
+                ignore_replicas=True,
                 repo_url=PLAYOUT_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
                 preserve_on_deletion=True,
@@ -850,8 +825,7 @@ class ArgoCD(Construct):
         automated_envs: tuple[str, ...] = (),
         automated_holdouts: tuple[tuple[str, str], ...] = (),
         selfheal: bool = True,
-        selfheal_off_envs: tuple[str, ...] = (),
-        selfheal_off_apps: tuple[tuple[str, str], ...] = (),
+        ignore_replicas: bool = False,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
         create_namespace: bool = False,
@@ -872,7 +846,15 @@ class ArgoCD(Construct):
         (env, app) pairs back OUT of an automated env (prod OBS: a pod-template
         change restarts the live stream, so its deploys stay a deliberate sync).
         `selfheal=False` keeps autosync but stops Argo reverting live drift, so a
-        hand-edit sticks — used on the throwaway k3d dev instance."""
+        hand-edit sticks — used on the throwaway k3d dev instance.
+
+        `ignore_replicas` adds an ignoreDifferences on every Deployment's
+        `.spec.replicas`, so a hand/console scale sticks permanently while
+        selfHeal keeps healing image/config/existence drift. Set on the
+        per-platform workload sets (apps/obs/playout/gateway): their replica
+        count is runtime-owned (0 = parked / N = live), the console's scale
+        button is the gesture, and the ignore lives in the rendered Application
+        template so it survives appset regeneration."""
         sync_options = [
             # Env namespaces are owned by bootstrap (CreateNamespace=false); a
             # singleton with its own namespace (the UPS monitor's `ups`) opts into
@@ -955,6 +937,22 @@ class ArgoCD(Construct):
                 },
             ],
         }
+        if ignore_replicas:
+            # A platform workload's replica count is runtime-owned: 0 = parked,
+            # N = live, flipped by the console's scale button. Argo never
+            # reconciles .spec.replicas, so a scale sticks; selfHeal still heals
+            # image/config/existence drift. Unlike the /spec/syncPolicy brake
+            # below, this ignore lives in the rendered Application template, so it
+            # survives appset regeneration. dist parks every workload at
+            # replicas:0, so a fresh cluster comes up parked and a re-sync/regen
+            # preserves the live count.
+            spec["ignoreDifferences"].append(
+                {
+                    "group": "apps",
+                    "kind": "Deployment",
+                    "jqPathExpressions": [".spec.replicas"],
+                }
+            )
         appset_spec: dict = {
             "goTemplate": True,
             "goTemplateOptions": ["missingkey=error"],
@@ -995,31 +993,13 @@ class ArgoCD(Construct):
                 ]
                 held = f"(or {' '.join(clauses)})" if len(clauses) > 1 else clauses[0]
                 cond = f"and ({cond}) (not {held})"
-            # selfHeal is per-env when selfheal_off_envs is set: those envs render
-            # selfHeal:false (a hand/console live edit sticks); the rest follow the
-            # instance `selfheal`. selfheal_off_apps carves individual (env, app)
-            # pairs to selfHeal:false even inside a selfHeal-on env (the prod
-            # facebook stack: parked at replicas:0, brought live by a console
-            # scale-up, so its Applications must not revert the hand scale while
-            # the rest of prod keeps selfHeal on). Otherwise it's the static value.
-            if selfheal and (selfheal_off_envs or selfheal_off_apps):
-                off_terms = [f'(eq .env "{e}")' for e in selfheal_off_envs]
-                off_terms += [
-                    f'(and (eq .env "{env}") (eq .app "{app}"))'
-                    for env, app in selfheal_off_apps
-                ]
-                off_cond = (
-                    f"or {' '.join(off_terms)}" if len(off_terms) > 1 else off_terms[0]
-                )
-                selfheal_block = (
-                    "{{- if " + off_cond + " }}\n"
-                    "      selfHeal: false\n"
-                    "{{- else }}\n"
-                    "      selfHeal: true\n"
-                    "{{- end }}\n"
-                )
-            else:
-                selfheal_block = f"      selfHeal: {'true' if selfheal else 'false'}\n"
+            # selfHeal follows the instance `selfheal` flag uniformly — on for the
+            # real envs (prod-1/stage-1 both match git), off only on the throwaway
+            # k3d dev instance. There is no per-env/per-app selfHeal carve-out:
+            # scaling no longer fights selfHeal (Argo ignores .spec.replicas on
+            # platform workloads via ignore_replicas), so a console scale sticks
+            # with selfHeal fully on.
+            selfheal_block = f"      selfHeal: {'true' if selfheal else 'false'}\n"
             appset_spec["templatePatch"] = (
                 "{{- if " + cond + " }}\n"
                 "spec:\n"
