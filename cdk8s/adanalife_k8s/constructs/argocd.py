@@ -129,15 +129,6 @@ VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
-# The gateway instances each env runs — a cross-repo contract with the gateway
-# repo's cdk8s config (ENVS[env].platforms): it must track the dist files that
-# repo emits, or the appset would generate Applications pointing at files that
-# don't exist (or miss new ones). Dormant platforms (parked at replicas:0)
-# still get an Application — the manifest exists either way.
-PLATFORM_GATEWAY_PLATFORMS = {
-    "prod-1": ("twitch", "youtube", "facebook"),
-    "stage-1": ("twitch", "youtube", "tiktok", "facebook", "instagram"),
-}
 # The obs repo — the OBS streaming encoder, extracted from tripbot's cdk8s into
 # its own repo. PUBLIC, so Argo fetches it over anonymous HTTPS — no deploy key /
 # repo Secret (unlike the private console/video-pipeline/gateway SSH sources, so
@@ -171,13 +162,6 @@ OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
 PLAYOUT_PROJECT = "playout"
 PLAYOUT_REPO_URL = "https://github.com/adanalife/playout.git"
 PLAYOUT_REVISIONS = {"stage-1": "main", "prod-1": "main"}
-# The playout instances each env runs — a cross-repo contract with the playout
-# repo's cdk8s config (ENVS[env].platforms), like PLATFORM_GATEWAY_PLATFORMS.
-# Stage runs the facebook burn-in, with youtube parked in the playout repo.
-PLAYOUT_PLATFORMS = {
-    "prod-1": ("twitch", "youtube", "facebook"),
-    "stage-1": ("youtube", "facebook"),
-}
 # Envs running the per-platform MediaMTX relays (infra-authored,
 # dist/<env>-mediamtx-<platform>.k8s.yaml) — the minipc envs, matching where playout
 # deploys. Unlike the other infra units (supporting/data, manual sync), the
@@ -225,31 +209,18 @@ def _project_namespaces(envs: tuple[str, ...]) -> list[str]:
     return seen
 
 
-def _platform_elements(
-    envs: tuple[str, ...],
-    component: str,
-    revisions: dict[str, str] | None = None,
-    platforms_by_env: dict[str, tuple[str, ...]] | None = None,
-) -> list[dict]:
-    """One {env, app} element per (env, platform) for a per-platform appset
-    (app = "<component>-<platform>") — the obs/playout/gateway/mediamtx shape.
-    Platforms come from the infra env config unless the source repo's platform
-    set differs (playout/gateway carry their own cross-repo contract maps).
-    `revisions` adds the per-env revision for cross-repo sources; infra-sourced
-    sets (mediamtx) omit it."""
+def _platform_elements(envs: tuple[str, ...], component: str) -> list[dict]:
+    """One {env, app} element per (env, platform) for the infra-authored
+    per-platform List appset (app = "<component>-<platform>"). Platforms come
+    from the infra env config (SUPPORTED_PLATFORMS on the minipc envs). Used by
+    the mediamtx relay set; the cross-repo per-platform sets (gateway/obs/
+    playout) self-discover from their repo's dist/apps index instead."""
     from adanalife_k8s.config import load_env
 
     elements: list[dict] = []
     for env_name in envs:
-        if platforms_by_env is not None:
-            platforms = platforms_by_env[env_name]
-        else:
-            platforms = load_env(env_name).platforms
-        for platform in platforms:
-            element = {"env": env_name, "app": f"{component}-{platform}"}
-            if revisions is not None:
-                element["revision"] = revisions[env_name]
-            elements.append(element)
+        for platform in load_env(env_name).platforms:
+            elements.append({"env": env_name, "app": f"{component}-{platform}"})
     return elements
 
 
@@ -600,30 +571,26 @@ class ArgoCD(Construct):
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
-        # The cross-repo platform-gateway unit: one Application per (env,
-        # platform) sourcing the PRIVATE platform-gateway repo's committed
-        # dist (<env>-gateway-<platform>.k8s.yaml), plus a per-env
-        # {{.env}}-gateway-shared Application for the once-per-namespace
-        # ExternalSecrets every instance references. Per-platform so the console
-        # can scale one platform's gateway without touching its siblings; the
-        # replica count is runtime-owned (ignore_replicas). Per-env revision
-        # (main for every env), same autosync posture as the apps/console sets.
+        # The cross-repo platform-gateway unit: one Application per unit that the
+        # PRIVATE platform-gateway repo synthed, self-discovered from its
+        # committed discovery index (dist/apps/<env>-<app>.json) — every
+        # gateway-<platform> the gateway emits plus the per-env
+        # {{.env}}-gateway-shared unit for the once-per-namespace ExternalSecrets
+        # every instance references. No infra-side platform map to keep in sync
+        # with the gateway's adapter set. Per-platform so the console can scale
+        # one platform's gateway without touching its siblings; the replica count
+        # is runtime-owned (ignore_replicas). Every env tracks main.
         if self.platform_gateway_envs:
             self._application_set(
                 id="appset-platform-gateway",
                 name="platform-gateway",
                 project=PLATFORM_GATEWAY_PROJECT,
-                elements=_platform_elements(
-                    self.platform_gateway_envs,
-                    "gateway",
-                    PLATFORM_GATEWAY_REVISIONS,
-                    # + the shared unit, riding the same appset as a pseudo
-                    # platform — it's just another dist file to reconcile.
-                    platforms_by_env={
-                        e: PLATFORM_GATEWAY_PLATFORMS[e] + ("shared",)
-                        for e in self.platform_gateway_envs
-                    },
+                discover_globs=tuple(
+                    f"cdk8s/dist/apps/{env}-*.json"
+                    for env in self.platform_gateway_envs
                 ),
+                discover_repo=PLATFORM_GATEWAY_REPO_URL,
+                discover_revision="main",
                 app_name_tmpl="{{.env}}-{{.app}}",
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
@@ -633,22 +600,25 @@ class ArgoCD(Construct):
                 # via the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
                 repo_url=PLATFORM_GATEWAY_REPO_URL,
-                target_revision_tmpl="{{.revision}}",
+                target_revision_tmpl="main",
                 preserve_on_deletion=True,
             )
         if self.obs_envs:
-            # One Application per (env, platform) — {{.env}}-obs-{{platform}},
-            # each reconciling its own dist file — so a single platform's OBS
-            # can be paused/synced/scaled without touching its siblings. The
-            # platform fan-out reads the infra env config, which matches the
-            # obs repo's (twitch+youtube on the minipc envs, twitch on dev).
-            # Replica count is runtime-owned (ignore_replicas) so a console
-            # scale-up sticks with selfHeal on.
+            # One Application per unit the obs repo synthed, self-discovered from
+            # its committed discovery index (dist/apps/<env>-obs-<platform>.json)
+            # — so a single platform's OBS can be paused/synced/scaled without
+            # touching its siblings, and the obs repo (not an infra map) decides
+            # which platforms exist. Replica count is runtime-owned
+            # (ignore_replicas) so a console scale-up sticks with selfHeal on.
             self._application_set(
                 id="appset-obs",
                 name="obs",
                 project=OBS_PROJECT,
-                elements=_platform_elements(self.obs_envs, "obs", OBS_REVISIONS),
+                discover_globs=tuple(
+                    f"cdk8s/dist/apps/{env}-*.json" for env in self.obs_envs
+                ),
+                discover_repo=OBS_REPO_URL,
+                discover_revision="main",
                 app_name_tmpl="{{.env}}-{{.app}}",
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
@@ -664,25 +634,26 @@ class ArgoCD(Construct):
                 # the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
                 repo_url=OBS_REPO_URL,
-                target_revision_tmpl="{{.revision}}",
+                target_revision_tmpl="main",
                 preserve_on_deletion=True,
             )
         if self.playout_envs:
-            # One Application per (env, platform) — the obs shape, each
-            # reconciling its own {{.env}}-playout-<platform>.k8s.yaml from
-            # the playout repo's dist (fan-out from PLAYOUT_PLATFORMS). Replica
-            # count is runtime-owned (ignore_replicas) so a console scale-up
-            # sticks with selfHeal on.
+            # One Application per unit the playout repo synthed, self-discovered
+            # from its committed discovery index
+            # (dist/apps/<env>-playout-<platform>.json) — the obs shape, each
+            # reconciling its own {{.env}}-playout-<platform>.k8s.yaml, with the
+            # playout repo (not an infra map) deciding which platforms exist.
+            # Replica count is runtime-owned (ignore_replicas) so a console
+            # scale-up sticks with selfHeal on.
             self._application_set(
                 id="appset-playout",
                 name="playout",
                 project=PLAYOUT_PROJECT,
-                elements=_platform_elements(
-                    self.playout_envs,
-                    "playout",
-                    PLAYOUT_REVISIONS,
-                    platforms_by_env=PLAYOUT_PLATFORMS,
+                discover_globs=tuple(
+                    f"cdk8s/dist/apps/{env}-*.json" for env in self.playout_envs
                 ),
+                discover_repo=PLAYOUT_REPO_URL,
+                discover_revision="main",
                 app_name_tmpl="{{.env}}-{{.app}}",
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
@@ -698,7 +669,7 @@ class ArgoCD(Construct):
                 # via the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
                 repo_url=PLAYOUT_REPO_URL,
-                target_revision_tmpl="{{.revision}}",
+                target_revision_tmpl="main",
                 preserve_on_deletion=True,
             )
         # UI exposure. The tailnet Ingress is minipc-only (tailscale-operator). The
