@@ -93,6 +93,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -323,6 +324,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret

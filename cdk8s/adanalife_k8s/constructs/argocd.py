@@ -864,6 +864,15 @@ class ArgoCD(Construct):
         ]
         if prune_disabled:
             sync_options.append("Prune=false")  # never delete stateful resources
+        if ignore_replicas:
+            # ignoreDifferences alone only hides .spec.replicas from the DIFF (and
+            # from selfHeal) — an actual sync still writes every manifest field,
+            # so a sync of the dist (which parks every workload at replicas:0)
+            # scales a live pod straight down to 0. RespectIgnoreDifferences drops
+            # the ignored fields from the apply too, so a sync leaves a live
+            # replica count alone; a brand-new Deployment still births at the
+            # manifest's 0 (there's no live object to ignore against yet).
+            sync_options.append("RespectIgnoreDifferences=true")
 
         # The generator: a static List of hand-declared elements, or — for the
         # apps set — a git files generator that self-discovers one element per
@@ -939,13 +948,15 @@ class ArgoCD(Construct):
         }
         if ignore_replicas:
             # A platform workload's replica count is runtime-owned: 0 = parked,
-            # N = live, flipped by the console's scale button. Argo never
-            # reconciles .spec.replicas, so a scale sticks; selfHeal still heals
-            # image/config/existence drift. Unlike the /spec/syncPolicy brake
-            # below, this ignore lives in the rendered Application template, so it
-            # survives appset regeneration. dist parks every workload at
-            # replicas:0, so a fresh cluster comes up parked and a re-sync/regen
-            # preserves the live count.
+            # N = live, flipped by the console's scale button. This ignore keeps
+            # .spec.replicas out of the diff (so selfHeal won't revert a scale)
+            # and — paired with RespectIgnoreDifferences=true in syncOptions above
+            # — out of the apply too (so a sync of the parked-at-0 dist doesn't
+            # scale a live pod down); selfHeal still heals image/config/existence
+            # drift. Unlike the /spec/syncPolicy brake below, this ignore lives in
+            # the rendered Application template, so it survives appset
+            # regeneration. dist parks every workload at replicas:0, so a fresh
+            # cluster comes up parked and a re-sync/regen preserves the live count.
             spec["ignoreDifferences"].append(
                 {
                     "group": "apps",
