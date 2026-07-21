@@ -212,6 +212,17 @@
         { "refId": "A", "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m])) * 60", "legendFormat": "{{endpoint}} ({{status}})" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 700,
+      "type": "table",
+      "title": "Recent traces (platform-gateway)",
+      "description": "Most recent traces for the gateway. Only prod-1 ships traces to Grafana Cloud, so rows appear once the prod gateway is live.",
+      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
+      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"platform-gateway\" } | select(resource.deployment.environment)", "limit": 20 }
+      ]
     }
   ]
 }
