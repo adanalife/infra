@@ -112,6 +112,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: terraform fmt
-        uses: dflook/terraform-fmt-check@v2
+        uses: dflook/terraform-fmt-check@v3
         with:
           path: ${{ matrix.terraform-dirs }}
