@@ -31,6 +31,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The synth job pushes a re-synthed dist/ commit back to the PR branch, so it
+# needs write access to repo contents. No other scopes are required.
+permissions:
+  contents: write
+
 defaults:
   run:
     working-directory: cdk8s
