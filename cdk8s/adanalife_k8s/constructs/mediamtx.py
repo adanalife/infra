@@ -156,6 +156,16 @@ class Mediamtx(Construct):
                         },
                     ),
                     spec=k8s.PodSpec(
+                        # Prod's relay is on the live-stream path (playout → OBS),
+                        # so it joins the prod-stream tier (value 1000): under node
+                        # pressure the scheduler preempts default-priority
+                        # co-tenants rather than a relay carrying a broadcast. Prod
+                        # only — stage relays stay default-priority (the
+                        # most-preemptible tier), by design. The PriorityClass is
+                        # delivered by the tripbot-identity unit.
+                        priority_class_name=(
+                            "prod-stream" if env.name == "prod-1" else None
+                        ),
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
                         ),
