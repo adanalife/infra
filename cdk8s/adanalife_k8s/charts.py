@@ -27,6 +27,7 @@ from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
+from adanalife_k8s.priority import emit_priority_classes
 from adanalife_k8s.supporting import emit_supporting
 
 
@@ -37,10 +38,13 @@ class SupportingChart(Chart):
     before apps. The ESO SecretStore these reference is in DataChart (the
     synced-first unit).
 
-    tripbot's identity-level Secrets (DB creds + twitch/maps/discord) and the
-    prod-stream PriorityClass/ResourceQuota are NOT here anymore — they moved to
-    the tripbot repo's cdk8s (`<env>-tripbot-identity.k8s.yaml`), delivered by the
-    `tripbot-identity` ApplicationSet. The apps reference those Secrets by name.
+    The cluster's scheduling priority tiers (prod-stream / prod-support) are
+    owned here — cluster-scoped policy referenced by name across every app repo,
+    emitted in the prod-1 chart (see priority.py). tripbot's identity-level
+    Secrets (DB creds + twitch/maps/discord) and the co-tenant ResourceQuota stay
+    in the tripbot repo's cdk8s (`<env>-tripbot-identity.k8s.yaml`), delivered by
+    the `tripbot-identity` ApplicationSet; the apps reference those Secrets by
+    name.
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
@@ -49,6 +53,9 @@ class SupportingChart(Chart):
 
         # shared observability secrets + cert-manager issuers (eso envs only)
         emit_supporting(self, env)
+
+        # Cluster-wide scheduling priority tiers (prod-1 only; cluster-scoped).
+        emit_priority_classes(self, env)
 
         # When postgres is isolated in its own namespace, its ESO SecretStore went
         # with it (DataChart) — so the app namespace needs its OWN store for the
