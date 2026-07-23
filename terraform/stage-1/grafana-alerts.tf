@@ -1,4 +1,4 @@
-// Grafana Cloud alert rules for the vlc-server → OBS broadcast chain.
+// Grafana Cloud alert rules for the tripbot → OBS broadcast chain.
 //
 // Provisioned via terraform: the rules show up in Grafana's Alerting → Alert
 // rules UI under the "TripBot" folder + "stream-health" rule group. The root
@@ -13,7 +13,7 @@
 locals {
   alert_eval_interval_seconds = 60
 
-  // Streaming platforms with a per-platform vlc-server/OBS stack (twitch,
+  // Streaming platforms with a per-platform OBS stack (twitch,
   // youtube, …). Drives the dynamic per-platform "stream metrics absent"
   // canary below — add a platform here when it gets its own encoder and it
   // gains lost-visibility coverage automatically. The other stream-health
@@ -577,7 +577,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "vlc-server"
+      service  = "obs"
     }
 
     data {
@@ -589,7 +589,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(vlc_player_lost_pictures{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(vlc_player_lost_pictures{service_name=\"tripbot\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -631,7 +631,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "vlc-server"
+      service  = "obs"
     }
 
     data {
@@ -643,7 +643,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(obs_stream_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(obs_stream_output_skipped_frames{service_name=\"tripbot\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -692,7 +692,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "vlc-server"
+      service  = "obs"
       // Muted: fires continuously from routine iGPU contention on the shared
       // single-node minipc (co-tenant stage/video-pipeline load) with no
       // per-firing action to take. Kept (still evaluates + shows in the Alerting
@@ -710,7 +710,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(obs_render_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(obs_render_skipped_frames{service_name=\"tripbot\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -752,7 +752,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "vlc-server"
+      service  = "obs"
       // Muted: fires continuously from routine iGPU contention on the shared
       // single-node minipc (co-tenant stage/video-pipeline load) with no
       // per-firing action to take. Kept (still evaluates + shows in the Alerting
@@ -770,7 +770,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(obs_output_skipped_frames{service_name=\"vlc-server\"}[5m]))"
+        expr          = "max by (service_platform, deployment_environment) (rate(obs_output_skipped_frames{service_name=\"tripbot\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -839,7 +839,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform) (avg_over_time(rate(obs_render_skipped_frames{service_name=\"vlc-server\", deployment_environment=\"prod-1\"}[5m])[1h:1m]))"
+        expr          = "max by (service_platform) (avg_over_time(rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -880,7 +880,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "warning"
-      service  = "vlc-server"
+      service  = "obs"
     }
 
     data {
@@ -892,7 +892,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (obs_stream_output_congestion{service_name=\"vlc-server\"})"
+        expr          = "max by (service_platform, deployment_environment) (obs_stream_output_congestion{service_name=\"tripbot\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -961,7 +961,7 @@ resource "grafana_rule_group" "stream_health" {
       }
       labels = {
         severity = "critical"
-        service  = "vlc-server"
+        service  = "obs"
       }
 
       data {
@@ -973,7 +973,7 @@ resource "grafana_rule_group" "stream_health" {
         datasource_uid = data.grafana_data_source.prometheus.uid
         model = jsonencode({
           refId         = "A"
-          expr          = "absent(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\", service_platform=\"${rule.value}\"})"
+          expr          = "absent(obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\", service_platform=\"${rule.value}\"})"
           instant       = true
           intervalMs    = 60000
           maxDataPoints = 43200
@@ -1015,7 +1015,7 @@ resource "grafana_rule_group" "stream_health" {
     }
     labels = {
       severity = "critical"
-      service  = "vlc-server"
+      service  = "obs"
     }
 
     data {
@@ -1027,7 +1027,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform) (obs_stream_output_reconnecting{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
+        expr          = "max by (service_platform) (obs_stream_output_reconnecting{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1091,7 +1091,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\"})"
+        expr          = "max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1165,7 +1165,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=\"prod-1\", service_platform=\"twitch\"}) - max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        expr          = "max(obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\", service_platform=\"twitch\"}) - max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
