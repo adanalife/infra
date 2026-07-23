@@ -464,10 +464,11 @@ class ArgoCD(Construct):
         # The MediaMTX relays (infra-authored, one Application per (env,
         # platform) reconciling its own <env>-mediamtx-<platform>.k8s.yaml —
         # the obs shape). Autosyncs so a merged dist change deploys itself, and
-        # selfHeal reverts drift on every env (a relay restart is cheap — the
-        # publisher + OBS reconnect). The relay is never parked (it's cheap and
-        # always runs at replicas:1), so its count stays git-owned — no
-        # ignore_replicas here, unlike the parkable platform workloads.
+        # selfHeal reverts image/config/existence drift on every env (a relay
+        # restart is cheap — the publisher + OBS reconnect). Its replica count is
+        # runtime-owned (ignore_replicas) so the console mode switch can park the
+        # relay outside dark/live — it's only needed while something is
+        # broadcasting or warming up — and the scale sticks with selfHeal on.
         if self.mediamtx_envs:
             self._application_set(
                 id="appset-mediamtx",
@@ -480,6 +481,7 @@ class ArgoCD(Construct):
                 automated_envs=autosync_envs,
                 selfheal=self._selfheal,
                 preserve_on_deletion=True,
+                ignore_replicas=True,
             )
         # The UPS monitor (observe-only NUT client) — a cluster-SINGLETON, not
         # per-env, so it's a one-element set with static templates (no .env). It's

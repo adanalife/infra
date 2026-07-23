@@ -480,6 +480,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -498,6 +499,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   syncPolicy:
     preserveResourcesOnDeletion: true
   templatePatch: |
