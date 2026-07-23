@@ -94,6 +94,7 @@ spec:
               name: config
               readOnly: true
               subPath: mediamtx.yml
+      priorityClassName: prod-stream
       securityContext:
         seccompProfile:
           type: RuntimeDefault
