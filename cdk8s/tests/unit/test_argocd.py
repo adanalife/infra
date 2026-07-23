@@ -374,13 +374,14 @@ def test_mediamtx_appset_autosyncs_both_envs():
         ("stage-1", "mediamtx-tiktok"),
     }
     # ...autosyncing (a merged dist change deploys itself) with selfHeal ON on
-    # both envs — the relay is never parked (always replicas:1, cheap), so its
-    # count stays git-owned: no ignore_replicas, unlike the parkable workloads.
+    # both envs. Its replica count is runtime-owned (ignore_replicas) like the
+    # other parkable workloads, so the console mode switch can park the relay
+    # outside dark/live and the scale sticks with selfHeal on.
     patch = mtx["spec"]["templatePatch"]
     assert "prune: true" in patch
     assert "selfHeal: true" in patch
     assert "selfHeal: false" not in patch
-    assert not _ignores_replicas(mtx)
+    assert _ignores_replicas(mtx)
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "mediamtx")
 
