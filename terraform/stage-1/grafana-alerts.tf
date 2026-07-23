@@ -226,7 +226,7 @@ resource "grafana_rule_group" "go_runtime" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|vlc-server|onscreens-server\"})"
+        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|onscreens-server\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -279,7 +279,7 @@ resource "grafana_rule_group" "go_runtime" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|vlc-server|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|vlc-server|onscreens-server\"} offset 1h)"
+        expr          = "max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"} offset 1h)"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -579,60 +579,6 @@ resource "grafana_rule_group" "stream_health" {
   name             = "stream-health"
   folder_uid       = grafana_folder.tripbot.uid
   interval_seconds = local.alert_eval_interval_seconds
-
-  rule {
-    name            = "VLC: high lost-frame rate"
-    for             = "5m"
-    keep_firing_for = "10m" // bursty rate metric — hold firing through dips so it doesn't flap
-    condition       = "C"
-    no_data_state   = "OK"
-    exec_err_state  = "Error"
-
-    annotations = {
-      summary     = "vlc-server is losing frames"
-      description = "Sustained lost-frame rate > 1/s for 5m on vlc-server. Check libvlc decode health, host CPU, and disk I/O on the dashcam video store."
-    }
-    labels = {
-      severity = "warning"
-      service  = "obs"
-    }
-
-    data {
-      ref_id = "A"
-      relative_time_range {
-        from = 300
-        to   = 0
-      }
-      datasource_uid = data.grafana_data_source.prometheus.uid
-      model = jsonencode({
-        refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(vlc_player_lost_pictures{service_name=\"tripbot\"}[5m]))"
-        instant       = true
-        intervalMs    = 60000
-        maxDataPoints = 43200
-      })
-    }
-    data {
-      ref_id         = "C"
-      datasource_uid = "__expr__"
-      relative_time_range {
-        from = 0
-        to   = 0
-      }
-      model = jsonencode({
-        refId      = "C"
-        type       = "threshold"
-        expression = "A"
-        conditions = [{
-          type      = "query"
-          evaluator = { type = "gt", params = [1] }
-          operator  = { type = "and" }
-          query     = { params = ["A"] }
-          reducer   = { type = "last", params = [] }
-        }]
-      })
-    }
-  }
 
   rule {
     name            = "OBS: stream output skipping frames"
