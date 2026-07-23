@@ -22,7 +22,6 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_pv,
     emit_dashcam_pvc,
 )
-from adanalife_k8s.constructs.arc import Arc
 from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
@@ -185,19 +184,6 @@ class UpsMonitorChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         UpsMonitor(self)
-
-
-class ArcChart(Chart):
-    """ARC supporting resources (namespaces + runner ResourceQuota + GitHub App
-    ExternalSecret) — a cluster-singleton, env-agnostic, synthed to
-    dist/arc.k8s.yaml and delivered by a minipc-only Argo Application (gated off
-    the k3d dev instance, which has no rpi5 — see constructs/argocd.py). The ARC
-    Helm charts themselves are Argo Applications in the platform stack
-    (helm_platform.arc_components); see constructs/arc.py for the split."""
-
-    def __init__(self, scope: Construct, id: str):
-        super().__init__(scope, id)
-        Arc(self)
 
 
 class ArgoCDChart(Chart):
