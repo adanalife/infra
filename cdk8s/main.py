@@ -18,7 +18,6 @@ import os
 from cdk8s import App
 
 from adanalife_k8s.charts import (
-    ArcChart,
     ArgoCDChart,
     DashcamLocalizeChart,
     DashcamPVChart,
@@ -98,7 +97,6 @@ if not only:
         lan_host=f"argocd.{load_env('development').dns_base}",
         lan_tls=False,
         ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
-        arc=False,  # no rpi5 on the k3d dev cluster — self-hosted runners are minipc-only
     )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
@@ -109,11 +107,6 @@ if not only:
     # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
     # NUT server). See constructs/ups_monitor.py.
     UpsMonitorChart(app, "ups-monitor")
-    # ARC self-hosted-runner supporting resources (namespaces + runner quota +
-    # GitHub App ExternalSecret) — cluster-singleton, env-agnostic. Delivered by a
-    # minipc-only Argo Application (the k3d dev Argo passes arc=False — no rpi5
-    # there). The ARC Helm charts ride the platform stack. See constructs/arc.py.
-    ArcChart(app, "arc")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

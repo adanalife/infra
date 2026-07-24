@@ -25,7 +25,6 @@ _DEV = dict(
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
     ups_monitor=False,
-    arc=False,  # no rpi5 on the k3d dev cluster
 )
 
 
