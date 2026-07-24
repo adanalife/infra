@@ -47,63 +47,50 @@ destinations:
       create: false
       name: grafana-cloud-metrics-write
       namespace: monitoring
-    # Cloud-only trims. These are write_relabel_config blocks on this
-    # destination's remote_write endpoint, so they gate what ships to
-    # Grafana Cloud without touching what localMetrics receives. Every
-    # drop here exists purely for the free tier's active-series cap —
-    # series with real signal that we'd keep if the cloud were free.
-    # Zero-signal noise (dup-timestamp xpum series, rollout-churn
-    # labels, Cilium internals) is dropped at the source rules instead,
-    # before the fan-out.
+    # Cloud allowlist. This destination's remote_write feeds Grafana
+    # Cloud's capped free tier (15K active-series hard cap); localMetrics
+    # (VictoriaMetrics) receives the full scrape unfiltered, so anything
+    # dropped here stays queryable there. OTLP-push app metrics
+    # (tripbot/obs/playout/onscreens) bypass this pipeline entirely — they
+    # push straight to the cloud OTLP endpoint — so the cloud holds all of
+    # those regardless of these rules.
+    #
+    # The keep rule is an allowlist: it ships only the scraped series that
+    # cloud alerts and dashboards depend on, and drops every other scraped
+    # series from the cloud. Kept families:
+    #   platform_gateway_*  — service-health-platform-gateway dashboard +
+    #                         the gateway-health alert (platform_gateway_up).
+    #   paths* / rtsp_sessions*  — mediamtx relay; the
+    #                         stream-health-playout-to-mediamtx dashboard +
+    #                         the relay-health alerts.
+    #   kube_pod_{info,start_time,container_status_restarts_total}  — the
+    #                         per-service pod-health rows on service-health-*.
+    # Everything else scraped is local-VM-only: node_* (node-exporter-full),
+    # container_*/machine_* (cadvisor), the rest of kube_* (kubernetes-views),
+    # cilium_*, traefik_*, coredns_*, certmanager_*, external(_)dns_*,
+    # externalsecret_*, xpum_* (igpu-performance), windows_*. View those
+    # dashboards against the VictoriaMetrics datasource. Only two scraped
+    # series feed any alert — paths and platform_gateway_up — and both are
+    # kept, so no alert goes blind.
     metricProcessingRules: |-
       write_relabel_config {
-        // stage-1 namespaces don't ship to the cloud — prod-1 metrics
-        // only from this shared cluster. stage-1 logs + events still
-        // ship (Loki, not Mimir), and stage-1 series land in
-        // localMetrics.
+        // stage-1 namespaces never ship to the cloud — prod-1 only from
+        // this shared cluster. Runs before the keep-list: a stage-1 series
+        // whose name is on the allowlist (e.g. a stage mediamtx `paths`)
+        // would otherwise slip through. stage-1 logs + events still ship
+        // (Loki, not Mimir); stage-1 metrics land in localMetrics.
         source_labels = ["namespace"]
         regex = "stage-1(-platform)?"
         action = "drop"
       }
       write_relabel_config {
-        // Launch-day trim: "cool but not essential" series kept out of
-        // the cloud for cap headroom (15K hard cap).
-        //
-        // Cilium: keep policy / network / drop counters; drop the
-        // feature-flag info gauges, BPF-map internals, FQDN-cache
-        // stats, controller heartbeats, drift checker, and
-        // cilium_endpoint (per-endpoint cardinality grows with pods).
-        //
-        // external-dns: nothing here is alert-relevant — Route53 record
-        // presence is checked via cert-manager + the smoke tests.
-        //
-        // cert-manager: keep only the expiration / ready / renewal
-        // timestamps that ops actually queries.
-        //
-        // CoreDNS: drop histogram buckets (no p95 DNS latency charts in
-        // the cloud). Counts and sums still ship for rate panels.
+        // The allowlist. `keep` drops every scraped series whose __name__
+        // isn't matched (regexes are fully anchored, RE2). Add a family
+        // only when a cloud dashboard or alert queries it — the default
+        // answer for a new scraped metric is local-VM-only.
         source_labels = ["__name__"]
-        regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
-        action = "drop"
-      }
-      write_relabel_config {
-        // 2026-07-15 headroom trim — nothing in any dashboard or alert
-        // references these:
-        //   envoy_*     (~500): Cilium's envoy L7 proxy internals; no L7
-        //               policies in use here.
-        //   node_nfs_*  (~200): per-op NFS client counters from the
-        //               dashcam mount; NFS health is watched via the
-        //               video-pipeline job metrics, not per-op counters.
-        source_labels = ["__name__"]
-        regex = "envoy_.+|node_nfs_.+"
-        action = "drop"
-      }
-      write_relabel_config {
-        // VictoriaMetrics self-monitoring (~1100 series) stays local —
-        // it's the health of the local store; the cloud never needs it.
-        source_labels = ["job"]
-        regex = "victoria-metrics"
-        action = "drop"
+        regex = "platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total"
+        action = "keep"
       }
 
   localMetrics:
