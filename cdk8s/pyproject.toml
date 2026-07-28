@@ -12,6 +12,8 @@ dependencies = [
 dev = [
     "pytest>=8",
     "kubernetes>=31",
+    # the contract tests read the rendered dist/ manifests back as YAML
+    "pyyaml>=6",
 ]
 
 [tool.uv]
