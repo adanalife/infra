@@ -1674,7 +1674,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
+          {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
 
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
@@ -1697,7 +1697,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/tripbot/bin/obs-media-restart
+          {{.HOME}}/adanalife/obs/bin/obs-media-restart
 
   vlc:vnc:up:
     desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
