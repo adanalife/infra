@@ -156,7 +156,7 @@
       "gridPos": { "x": 0, "y": 37, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "Onscreens-server runs as a second supervisord program in the vlc-server container today (see tripbot#568) but emits its own `service.name=onscreens-server` OTel resource. Treating it as a standalone service here so the dashboard keeps working as-is when it eventually moves to its own pod. Bulk of the request traffic is OBS browser sources polling `/onscreens/state.json`; chatbot-driven `show`/`hide` calls are the spikier minority."
+        "content": "Onscreens-server runs as its own per-platform Deployment (`onscreens-twitch`, `onscreens-tiktok`, …) and emits a `service.name=onscreens-server` OTel resource. Bulk of the request traffic is OBS browser sources polling `/onscreens/state.json`; chatbot-driven `show`/`hide` calls are the spikier minority."
       }
     },
     {

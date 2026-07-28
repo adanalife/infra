@@ -1,7 +1,7 @@
 {
   "title": "11 — HTTP Routes",
   "uid": "http-routes",
-  "tags": ["tripbot", "vlc-server", "http"],
+  "tags": ["tripbot", "http"],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "30s",
@@ -53,7 +53,7 @@
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "Tables and breakdowns group by **`http_request_method`** (not `http_route`) because otelhttp's middleware doesn't know route templates without help from the framework. Negroni doesn't expose the matched route, so `http_route` is empty for every request and the table collapses to one row. Once `otelhttp.WithRouteTag` is wired per route registration in tripbot's `pkg/server` + `pkg/vlc-server`, swap method → route here."
+        "content": "Tables and breakdowns group by **`http_request_method`** (not `http_route`) because otelhttp's middleware doesn't know route templates without help from the framework. Negroni doesn't expose the matched route, so `http_route` is empty for every request and the table collapses to one row. Once `otelhttp.WithRouteTag` is wired per route registration in tripbot's `pkg/server`, swap method → route here."
       }
     },
     {

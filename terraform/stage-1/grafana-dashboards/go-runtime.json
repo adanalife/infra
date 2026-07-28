@@ -1,7 +1,7 @@
 {
   "title": "09 — Go Runtime",
   "uid": "go-runtime",
-  "tags": ["tripbot", "vlc-server", "go"],
+  "tags": ["tripbot", "go"],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "30s",
