@@ -13,12 +13,26 @@
 locals {
   alert_eval_interval_seconds = 60
 
-  // Streaming platforms with a per-platform OBS stack (twitch,
-  // youtube, …). Drives the dynamic per-platform "stream metrics absent"
-  // canary below — add a platform here when it gets its own encoder and it
-  // gains lost-visibility coverage automatically. The other stream-health
-  // rules self-scale via `by (service_platform)` and don't need this list.
-  stream_platforms = ["twitch", "youtube"]
+  // Streaming platforms, read from the repo's platforms.json rather than
+  // restated here. That file is the fleet-wide supported set — generated from
+  // the gateway's provider.SupportedPlatforms and synced in via
+  // `task platforms:sync` — and it already drives the per-platform mediamtx
+  // relay fan-out, so a platform added there gains lost-visibility coverage on
+  // the next apply with no edit to this file.
+  //
+  // Drives the dynamic per-platform "stream metrics absent" canary below, the
+  // rule that reports when tripbot stops emitting obs_* at all and every other
+  // stream-health rule for that platform silently goes blind. The other
+  // stream-health rules self-scale via `by (service_platform)` and don't need
+  // the list.
+  //
+  // Deliberately the desired set, not an observed one: a platform is listed even
+  // while parked, because the canary is gated on the console reporting that
+  // platform's OBS as meant to be up. Discovering platforms from live metrics
+  // instead would be self-defeating — a platform whose telemetry has vanished is
+  // exactly what this canary exists to catch, and it would drop out of its own
+  // coverage at the moment it broke.
+  stream_platforms = jsondecode(file("${path.module}/../../platforms.json"))["platforms"]
 
   // Mode gate. AND a stream-health rule's query with this to silence it while
   // the component it watches is intentionally parked — the console scales a
