@@ -1077,38 +1077,51 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // The #1 stream-health alert: catches the silent half-open RTMP state
-  // where OBS reports outputActive=true but Twitch's API shows the channel
-  // offline. OBS's built-in reconnect only fires on a detected drop;
-  // when Twitch's ingest goes away without the FIN/RST making it back, OBS
-  // keeps streaming into the void. First seen in prod on 2026-05-27 ~30h
-  // into a session — manual recovery was StopStream+StartStream via OBS
-  // WebSocket; tripbot's watchdog automates that (3-miss debounce, 10m
-  // cooldown). This alert fires regardless of the watchdog so we know
-  // immediately, not after 3 minutes of detection lag + restart sequence.
+  // The #1 stream-health alert: catches the state where OBS reports
+  // outputActive=true while the platform shows the channel offline. OBS's
+  // built-in reconnect only fires on a drop it detects, so when the far end goes
+  // away without the FIN/RST making it back, OBS keeps streaming into the void.
+  // First seen in prod on 2026-05-27 ~30h into a session — manual recovery was
+  // StopStream+StartStream via OBS WebSocket; tripbot's watchdog automates that
+  // for twitch (3-miss debounce, 10m cooldown). This alert fires regardless of
+  // the watchdog so we know immediately, not after 3 minutes of detection lag +
+  // restart sequence — and on the platforms with no watchdog it is the only
+  // thing that reports the state at all.
   //
-  // Twitch-only: the OBS side is scoped to service_platform="twitch" because
-  // the only liveness signal we have is tripbot_twitch_channel_live (Twitch).
-  // Without that scope, max(obs_streaming_active) would span every platform, so
-  // the youtube encoder streaming would mask or fake a twitch silent-disconnect.
-  // A youtube equivalent needs a tripbot_youtube_channel_live metric first (the
-  // youtube stream is currently unlisted/botless) — tracked separately.
+  // Per-platform, keyed on tripbot_channel_live: every tripbot stamps its series
+  // with service_platform, so one rule covers every encoder and a new platform
+  // arrives covered as soon as it reports liveness. The platforms that need this
+  // most are the ones with no preview window — TikTok pushed into the Streamlabs
+  // restream ingest for hours on 2026-07-27 with nothing reporting whether the
+  // room behind it was still there.
   //
-  // Expression: max() drops all labels so the two tripbot gauges
-  // (obs_streaming_active and tripbot_twitch_channel_live) subtract cleanly.
-  // 1 = silent disconnect; 0 = aligned; -1 = harmless inverse (OBS=0/Twitch=1;
-  // impossible to reach steady-state). The obs_twitch_mode_gate silences it
-  // when twitch OBS is parked, so a console-dark twitch doesn't page.
+  // Expression: `by (service_platform)` on both sides keeps the subtraction
+  // per-platform, so one encoder's state can't mask or fake another's. Per
+  // platform: 1 = silent disconnect; 0 = aligned; -1 = harmless inverse
+  // (OBS=0/platform=1, not reachable in steady state). A platform reporting no
+  // liveness at all drops out of the match rather than reading as offline — the
+  // lost-visibility canary above is what reports that. obs_mode_gate joins on
+  // service_platform, so each platform is armed only while the console says its
+  // OBS is meant to be up.
+  //
+  // The `or` supplies twitch from tripbot_twitch_channel_live until a tripbot
+  // carrying tripbot_channel_live reaches prod: `or` contributes only label sets
+  // the left side lacks, so the legacy gauge is ignored the moment the generic
+  // one appears for twitch. It exists so this rule is correct in both states and
+  // applying it early can't leave the #1 stream alert silently unarmed; it comes
+  // out with the legacy metric. The legacy gauge carries no service_platform
+  // label at all (it predates stamping the platform onto datapoints), so
+  // label_replace supplies the "twitch" it has to match on.
   rule {
-    name           = "OBS: silent disconnect (Twitch sees us offline)"
+    name           = "OBS: silent disconnect (platform sees us offline)"
     for            = "3m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Stream offline on Twitch while OBS thinks it's streaming"
-      description = "obs_streaming_active=1 but tripbot_twitch_channel_live=0 for 3m. RTMP socket is silently half-open — Twitch dropped its end and OBS didn't notice. Tripbot's watchdog should StopStream+StartStream within ~3-4m of detection; if it doesn't, run the manual recovery via OBS WebSocket: StopStream then 3s then StartStream. See tripbot pkg/obs/silent_disconnect_watchdog.go."
+      summary     = "Stream offline on {{ $labels.service_platform }} while OBS thinks it's streaming"
+      description = "obs_streaming_active=1 but tripbot_channel_live=0 for 3m on {{ $labels.service_platform }} — we are streaming into the void and nobody is watching what OBS is sending. Recovery differs by platform. twitch: the RTMP socket is half-open (the platform dropped its end without OBS noticing) and tripbot's watchdog should StopStream+StartStream within ~3-4m; if it doesn't, do it by hand via OBS WebSocket (StopStream, 3s, StartStream) — see tripbot pkg/obs/watchdog. tiktok: no watchdog, and reconnecting the push is NOT enough — a room reaped after a push gap longer than the relay target's idleTimeout is gone for good, so re-mint it from the console (stop then start the TikTok egress), which binds a fresh portrait relay target before the push resumes. youtube: check the broadcast in YouTube Studio, then restart the obs-youtube stream."
     }
     labels = {
       severity = "critical"
@@ -1124,7 +1137,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "(max(obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\", service_platform=\"twitch\"}) - max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})) ${local.obs_twitch_mode_gate}"
+        expr          = "(max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) - (max by (service_platform) (tripbot_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) or label_replace(max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"}), \"service_platform\", \"twitch\", \"\", \"\"))) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
