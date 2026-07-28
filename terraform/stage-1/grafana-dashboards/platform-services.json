@@ -1,5 +1,5 @@
 {
-  "title": "12 — Platform Services",
+  "title": "13 — Platform Services",
   "uid": "platform-services",
   "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium"],
   "schemaVersion": 39,
