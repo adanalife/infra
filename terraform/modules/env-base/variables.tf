@@ -1,11 +1,22 @@
 # Everything stage-1 and prod-1 provision identically: CI + developer IAM,
 # external-dns IAM, Route53 zones, the static site (S3 + CloudFront + ACM),
-# RDS, and the default VPC. Env-specific resources belong in the calling
-# root, not behind conditionals here.
+# RDS, the default VPC, the postgres WAL archive, and the ESO reader.
+# Env-specific resources belong in the calling root, not behind conditionals
+# here.
 
 variable "core_account_id" {
   type        = string
   description = "The AWS account ID for the core account"
+}
+
+variable "account_name" {
+  type        = string
+  description = "Env-scoped account name, e.g. stage-1"
+}
+
+variable "full_account_name" {
+  type        = string
+  description = "Org-prefixed account name, e.g. adanalife-stage-1. Prefixes globally-unique resource names."
 }
 
 variable "external_dns_role" {
@@ -38,6 +49,8 @@ locals {
 }
 
 data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
 
 # a secret string between CloudFront and S3 to control access
 resource "random_password" "static_site_secret" {
