@@ -345,7 +345,7 @@ resource "grafana_rule_group" "host_storage" {
 
     annotations = {
       summary     = "minipc durable SSD is throwing I/O errors (Postgres/NATS/vlc volume)"
-      description = "A service on the minipc logged \"input/output error\" — the signature of the Samsung T5 USB SSD dropping off the bus (xfs shuts down; prod+stage Postgres go CreateContainerError). Recovery: reboot the node to re-enumerate the disk and replay the xfs log — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today reboot` (reboot does NOT wipe the UserVolume). The hourly S3 pg_dump is the backstop; the root fix is the physical USB link (USB4/rear port + known-good short cable). Runbook: vault/infra/minipc-ssd-migration-runbook.md."
+      description = "A service on the minipc logged \"input/output error\" — the signature of the Samsung T5 USB SSD dropping off the bus (xfs shuts down; prod+stage Postgres go CreateContainerError). Recovery: reboot the node to re-enumerate the disk and replay the xfs log — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today reboot` (reboot does NOT wipe the UserVolume). The hourly S3 pg_dump is the backstop; the root fix is the physical USB link (USB4/rear port + known-good short cable)."
     }
     labels = {
       severity = "critical"
@@ -1249,7 +1249,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Tripbot has been disconnected from Twitch chat (IRC) for 5m"
-      description = "tripbot_twitch_connected has been 0 for 5m — the bot is not in chat. Readiness no longer gates on the Twitch connection, so the pod is healthy but silent. Check tripbot logs for IRC reconnect errors, verify the bot OAuth token is still valid, and confirm Twitch IRC ingest isn't degraded."
+      description = "tripbot_twitch_connected has been 0 for 5m — the bot is not in chat. Readiness does not gate on the Twitch connection, so the pod is healthy but silent. Check tripbot logs for IRC reconnect errors, verify the bot OAuth token is still valid, and confirm Twitch IRC ingest isn't degraded."
     }
     labels = {
       severity = "critical"
