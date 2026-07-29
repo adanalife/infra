@@ -1,11 +1,11 @@
 # Grafana Cloud dashboards-as-code via the grafana/grafana provider.
 #
 # The provider auths against the Grafana Cloud stack URL using a service
-# account API token, both pulled from `stage-1/grafana-cloud-api` (see
-# grafana-cloud.tf for the SM container + bootstrap notes). The provider
-# block lives here (not providers.tf) so prod-1's symlink to providers.tf
-# doesn't inherit a provider it has no resources for — same shape as the
-# cloudflare provider in cloudflare-pages.tf.
+# account API token, both pulled from the `/stage-1/grafana-cloud-api` SSM
+# parameter (declared in secrets.tf). The provider block lives here rather
+# than providers.tf so prod-1 — which keeps providers.tf identical but has no
+# Grafana resources — doesn't inherit a provider it can't authenticate, same
+# shape as the cloudflare provider in cloudflare-pages.tf.
 #
 # Dashboard JSON lives in ./grafana-dashboards/. Each `grafana_dashboard`
 # resource references a JSON file via `file()`; the JSON is the same
