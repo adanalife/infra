@@ -69,6 +69,15 @@ class EnvConfig:
     nfs_pv_name: str = (
         "vlc-dashcam-nfs"  # PVs bind 1:1 — stage needs its own (vlc-dashcam-nfs-stage)
     )
+    # --- background-music share -------------------------------------------------
+    # A second, much smaller export on the same NAS holding the album beds OBS
+    # plays as background audio (see the obs repo's OBS_BACKGROUND_AUDIO). It gets
+    # its own PV rather than a subPath off the dashcam one because the dashcam PV
+    # points at the clips corpus itself, not the share root — and mixing music
+    # into the corpus directory would put it in the localize Job's path. Rendered
+    # on the same envs as the dashcam PV (dashcam_mode == "nfs").
+    music_nfs_path: str = ""  # from $MUSIC_NFS_PATH at synth
+    music_pv_name: str = "obs-music-nfs"  # stage needs its own (PVs bind 1:1)
     # --- node-local dashcam corpus (the NFS<->local serving toggle) -------------
     # When True, a node-local `vlc-dashcam-local` PVC (local-path, on the minipc)
     # is emitted beside the NFS PVC, and the one-shot copy Job (DashcamLocalizeChart)
@@ -159,6 +168,7 @@ ENVS: dict[str, EnvConfig] = {
         postgres_storage_class="local-path",
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
+        music_pv_name="obs-music-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
         # same as prod — the corpus regen is complete, so the temporary
         # STAGE_NFS_PATH override that let stage run ahead on the in-progress
@@ -227,5 +237,6 @@ def load_env(name: str) -> EnvConfig:
             env,
             nfs_server=os.environ.get("NFS_SERVER", "<NFS server address>"),
             nfs_path=nfs_path,
+            music_nfs_path=os.environ.get("MUSIC_NFS_PATH", "<music export path>"),
         )
     return env

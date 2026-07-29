@@ -18,6 +18,6 @@ dist/.*
 # reviewable; CI/setup runs the import.
 imports/
 # Per-machine host-specific config injected at synth time — the real dashcam NFS
-# coords for `task k8s:<env>:dashcam-pv`. Host-specific, kept out of git (the
+# coords for `task k8s:<env>:nfs-pv`. Host-specific, kept out of git (the
 # committed dist/ carries placeholders). Copy dashcam-nfs.local.env.example.
 dashcam-nfs.local.env

@@ -23,6 +23,7 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_pvc,
 )
 from adanalife_k8s.constructs.mediamtx import Mediamtx
+from adanalife_k8s.constructs.music import emit_music_pv, emit_music_pvc
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
@@ -70,6 +71,9 @@ class SupportingChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
+            # The background-music share OBS mounts — same story: namespace-local
+            # claim, so it follows the app namespace rather than the data one.
+            emit_music_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -85,7 +89,7 @@ class DataChart(Chart):
     (it's a dependency: tripbot/vlc need postgres + the dashcam PVC).
 
     The dashcam *PV* is NOT here — it's host-specific bootstrap infra kept out of
-    Argo entirely (see DashcamPVChart). Only the PVC lives here; it binds to the
+    Argo entirely (see NfsPVChart). Only the PVC lives here; it binds to the
     out-of-band PV by name.
 
     Lands in env.data_ns — the app namespace by default (byte-identical render),
@@ -117,7 +121,7 @@ class DataChart(Chart):
         Postgres(self, env=env)
 
         # --- dashcam PVC (nfs envs only; no-op on hostPath local/dev). The PV it
-        #     binds to is provisioned out-of-band via DashcamPVChart. Mounted by
+        #     binds to is provisioned out-of-band via NfsPVChart. Mounted by
         #     vlc (namespace-local), so it can only live in the app namespace:
         #     co-located here, but moved to SupportingChart when the DB is isolated
         #     in a different namespace. ---
@@ -126,6 +130,9 @@ class DataChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
+            # The background-music share OBS mounts (see SupportingChart for the
+            # isolated-DB case).
+            emit_music_pvc(self, env)
 
 
 class MediamtxChart(Chart):
@@ -144,27 +151,29 @@ class MediamtxChart(Chart):
         Mediamtx(self, env=env, platform=platform)
 
 
-class DashcamPVChart(Chart):
-    """The dashcam NFS PersistentVolume (cluster-scoped) — host-specific bootstrap
-    infra deliberately kept OUT of Argo. Synthed to its own
-    dist/<env>-dashcam-pv.k8s.yaml, which no ApplicationSet includes (the apps set
-    matches `<env>-<component>-<platform>.k8s.yaml`; supporting/data match their
-    own per-env files), and provisioned once per
-    cluster via `task k8s:<env>:dashcam-pv` with the real NFS coords from the
+class NfsPVChart(Chart):
+    """The cluster-scoped NFS PersistentVolumes — the dashcam corpus and the
+    background-music share. Host-specific bootstrap infra deliberately kept OUT of
+    Argo. Synthed to its own dist/<env>-nfs-pv.k8s.yaml, which no ApplicationSet
+    includes (the apps set matches `<env>-<component>-<platform>.k8s.yaml`;
+    supporting/data match their own per-env files), and provisioned once per
+    cluster via `task k8s:<env>:nfs-pv` with the real NFS coords from the
     gitignored cdk8s/dashcam-nfs.local.env. The committed golden carries
-    placeholders. The matching PVC lives in DataChart (Argo binds it by name).
+    placeholders. The matching PVCs live in DataChart / SupportingChart (Argo
+    binds them by name).
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
+        emit_music_pv(self, env)
 
 
 class DashcamLocalizeChart(Chart):
     """The one-shot Job that copies the NFS corpus onto the node-local cache PVC —
     host-specific (carries the NFS coords), so it's kept OUT of Argo in its own
     dist/<env>-dashcam-localize.k8s.yaml (globbed by no ApplicationSet, same as
-    DashcamPVChart) and applied on demand via `task k8s:<env>:dashcam-localize` with
+    NfsPVChart) and applied on demand via `task k8s:<env>:dashcam-localize` with
     the real coords injected at synth. Rendered only when dashcam_local_enabled, so
     it never lands in dist for an env that hasn't adopted local serving."""
 

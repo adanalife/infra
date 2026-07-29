@@ -20,7 +20,7 @@ from cdk8s import App
 from adanalife_k8s.charts import (
     ArgoCDChart,
     DashcamLocalizeChart,
-    DashcamPVChart,
+    NfsPVChart,
     DataChart,
     MediamtxChart,
     PlatformArgoChart,
@@ -31,7 +31,7 @@ from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
 
 # outdir honors CDK8S_OUTDIR so a caller can synth to a throwaway dir without
-# touching the committed dist/ — used by `task k8s:<env>:dashcam-pv`, which synths
+# touching the committed dist/ — used by `task k8s:<env>:nfs-pv`, which synths
 # the PV with real (gitignored) NFS coords and applies it out of band.
 app = App(outdir=os.environ.get("CDK8S_OUTDIR", "dist"))
 
@@ -58,10 +58,10 @@ for name in targets:
             )
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
     # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
-    # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist
+    # don't glob it). Applied via `task k8s:<env>:nfs-pv`. Committed dist
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
-        DashcamPVChart(app, f"{name}-dashcam-pv", env=env)
+        NfsPVChart(app, f"{name}-nfs-pv", env=env)
     # The NFS->local corpus copy Job (only when an env adopts local serving) — also
     # host-specific + outside Argo, its own dist/<env>-dashcam-localize.k8s.yaml
     # applied via `task k8s:<env>:dashcam-localize`. The matching vlc-dashcam-local
