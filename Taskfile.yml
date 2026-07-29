@@ -16,23 +16,34 @@ tasks:
   # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
   # the safe read-only way to compare cdk8s output against the live cluster.
   # ---------------------------------------------------------------------------
+  cdk8s:cli:
+    desc: Install the pinned cdk8s CLI into cdk8s/node_modules from the committed package-lock.json
+    dir: cdk8s
+    cmds:
+      - mise exec -- npm ci
+    # npm ci stamps node_modules/.package-lock.json; skip the reinstall while it
+    # is newer than the lockfile it was built from.
+    status:
+      - test node_modules/.package-lock.json -nt package-lock.json
+
   cdk8s:imports:
     desc: Generate the typed k8s + CRD constructs (cdk8s import) into imports/ — gitignored, needed before synth/test on a fresh checkout
     dir: cdk8s
+    deps: [cdk8s:cli]
     # Skip if already generated (import is slow). Both dirs must exist: k8s is the
     # core API, io/ holds the ESO + cert-manager CRD constructs (per cdk8s.yaml).
     status:
       - test -d imports/k8s
       - test -d imports/io
     cmds:
-      - mise exec -- uv run cdk8s import
+      - mise exec -- uv run npx cdk8s import
 
   cdk8s:synth:
     desc: Synthesize infra's deploy units (offline) -> cdk8s/dist/<env>-{supporting,data}.k8s.yaml + argocd (the tripbot app/job manifests + dashcam-cv live in their own repos now)
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
-      - mise exec -- uv run cdk8s synth
+      - mise exec -- uv run npx cdk8s synth
 
   cdk8s:synth:platform:
     desc: Synthesize apps + the platform Helm stack (needs helm + network)
@@ -41,7 +52,7 @@ tasks:
     env:
       CDK8S_PLATFORM: "1"
     cmds:
-      - mise exec -- uv run cdk8s synth
+      - mise exec -- uv run npx cdk8s synth
 
   # The dashcam NFS PersistentVolume is host-specific bootstrap infra kept OUT of
   # Argo (its own DashcamPVChart -> dist/<env>-dashcam-pv.k8s.yaml, not globbed by
@@ -184,7 +195,7 @@ tasks:
       NFS_SERVER: '<NFS server address>'
       NFS_PATH: '<export path>'
     cmds:
-      - mise exec -- uv run cdk8s synth
+      - mise exec -- uv run npx cdk8s synth
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
 
   # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the

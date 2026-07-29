@@ -62,8 +62,7 @@ jobs:
           ref: ${{ github.head_ref || github.ref }}
           token: ${{ steps.app-token.outputs.token || github.token }}
 
-      # Toolchain via mise (cdk8s/.mise.toml pins python / node / cdk8s-cli /
-      # helm).
+      # Toolchain via mise (cdk8s/.mise.toml pins python / node / helm).
       - uses: jdx/mise-action@v4
         with:
           working_directory: cdk8s
@@ -74,8 +73,11 @@ jobs:
       - name: Install Python deps
         run: uv sync
 
+      - name: Install the cdk8s CLI
+        run: mise exec -- npm ci
+
       - name: Generate typed k8s constructs (cdk8s import)
-        run: mise exec -- uv run cdk8s import
+        run: mise exec -- uv run npx cdk8s import
 
       # Unit tests + the contract test.
       - name: Run tests
@@ -87,7 +89,7 @@ jobs:
         env:
           NFS_SERVER: '<NFS server address>'
           NFS_PATH: '<export path>'
-        run: mise exec -- uv run cdk8s synth
+        run: mise exec -- uv run npx cdk8s synth
 
       # PRs: push the regenerated dist/ back to the branch. Synth is
       # deterministic, so the re-run triggered by this commit finds dist/
