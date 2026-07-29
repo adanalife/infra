@@ -108,12 +108,6 @@ resource "aws_ssm_parameter" "mirror" {
 # via `task stage:allowlist:add-current-ip`. Consumed by the Cloudflare Access
 # policy on tripbot — see cloudflare-tunnel.tf. Separate from the map so the
 # placeholder is a valid (empty) allowlist — jsondecode works pre-seed.
-# It lived in the mirror map during the migration — keep its state instance.
-moved {
-  from = aws_ssm_parameter.mirror["stage-1/allowlist-cidrs"]
-  to   = aws_ssm_parameter.stage_1_allowlist_cidrs
-}
-
 resource "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
   name        = "/stage-1/allowlist-cidrs"
   description = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
