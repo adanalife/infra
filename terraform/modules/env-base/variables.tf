@@ -1,7 +1,8 @@
 # Everything stage-1 and prod-1 provision identically: CI + developer IAM,
 # external-dns IAM, Route53 zones, the static site (S3 + CloudFront + ACM),
-# RDS, the default VPC, and the postgres WAL archive. Env-specific resources
-# belong in the calling root, not behind conditionals here.
+# RDS, the default VPC, the postgres WAL archive, and the ESO reader.
+# Env-specific resources belong in the calling root, not behind conditionals
+# here.
 
 variable "core_account_id" {
   type        = string

@@ -64,3 +64,23 @@ moved {
   from = aws_ssm_parameter.postgres_wal_s3
   to   = module.env_base.aws_ssm_parameter.postgres_wal_s3
 }
+
+moved {
+  from = aws_iam_user.eso_reader
+  to   = module.env_base.aws_iam_user.eso_reader
+}
+
+moved {
+  from = aws_iam_access_key.eso_reader
+  to   = module.env_base.aws_iam_access_key.eso_reader
+}
+
+moved {
+  from = aws_iam_policy.allow_eso_read_k8s_secrets
+  to   = module.env_base.aws_iam_policy.allow_eso_read_k8s_secrets
+}
+
+moved {
+  from = aws_iam_user_policy_attachment.eso_reader
+  to   = module.env_base.aws_iam_user_policy_attachment.eso_reader
+}
