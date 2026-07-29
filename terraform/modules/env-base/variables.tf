@@ -1,8 +1,8 @@
 # Everything stage-1 and prod-1 provision identically: CI + developer IAM,
 # external-dns IAM, Route53 zones, the static site (S3 + CloudFront + ACM),
-# RDS, the default VPC, the postgres WAL archive, and the ESO reader.
-# Env-specific resources belong in the calling root, not behind conditionals
-# here.
+# RDS, the default VPC, the postgres WAL archive, the ESO reader, and the GCP
+# identity/WIF/API set. Env-specific resources belong in the calling root, not
+# behind conditionals here.
 
 variable "core_account_id" {
   type        = string
@@ -17,6 +17,11 @@ variable "account_name" {
 variable "full_account_name" {
   type        = string
   description = "Org-prefixed account name, e.g. adanalife-stage-1. Prefixes globally-unique resource names."
+}
+
+variable "gcp_project" {
+  type        = string
+  description = "GCP project ID this environment manages, e.g. tripbot-stage"
 }
 
 variable "external_dns_role" {
