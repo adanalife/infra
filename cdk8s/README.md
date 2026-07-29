@@ -6,20 +6,23 @@ stays authoritative for cloud; this manages **only** Kubernetes.
 
 ## Setup
 
-Tools are pinned via mise (`.mise.toml`): python, node, cdk8s-cli, helm. Python
-deps via uv.
+Tools are pinned via mise (`.mise.toml`): python, node, helm. Python deps via
+uv. The cdk8s CLI is an npm devDependency pinned in `package-lock.json`, so its
+jsii toolchain resolves the same way on every machine and in CI — kept in
+lockstep with tripbot's.
 
 ```bash
-mise install            # python, node, cdk8s-cli, helm
+mise install            # python, node, helm
 uv sync                 # python deps into .venv
-cdk8s import            # generate typed k8s constructs into imports/ (gitignored)
+npm ci                  # cdk8s CLI into node_modules/ (gitignored)
+npx cdk8s import        # generate typed k8s constructs into imports/ (gitignored)
 ```
 
 ## Develop
 
 ```bash
-uv run cdk8s synth                 # -> dist/<env>-<component>-<platform>.k8s.yaml (+ -supporting/-data/-job-*), all envs, fast, offline
-CDK8S_ENV=stage-1 uv run cdk8s synth   # one env (handy for diffing a single env)
+uv run npx cdk8s synth                 # -> dist/<env>-<component>-<platform>.k8s.yaml (+ -supporting/-data/-job-*), all envs, fast, offline
+CDK8S_ENV=stage-1 uv run npx cdk8s synth   # one env (handy for diffing a single env)
 uv run pytest -q                   # unit + contract tests
 ```
 
@@ -28,7 +31,7 @@ via `helm template`, so it needs helm + network and is opt-in:
 
 ```bash
 # platform stack (cilium / ESO / traefik / cert-manager / monitoring / nats / external-dns / tailscale):
-CDK8S_PLATFORM=1 uv run cdk8s synth   # -> dist/platform-*.k8s.yaml + dist/<env>-platform.k8s.yaml
+CDK8S_PLATFORM=1 uv run npx cdk8s synth   # -> dist/platform-*.k8s.yaml + dist/<env>-platform.k8s.yaml
 ```
 
 NFS coordinates for the dashcam PV are threaded in at synth from `$NFS_SERVER` /
