@@ -45,8 +45,8 @@ All the Argo config is authored in cdk8s (no hand-written YAML) and synthesized 
 - a repo-registration **`ExternalSecret`** (IaC — see step 2).
 
 The dashcam **PV** is deliberately **not** in Argo — it's host-specific bootstrap
-infra synthed to `dist/<env>-dashcam-pv.k8s.yaml` (which no ApplicationSet globs)
-and applied once per cluster via `task k8s:<env>:dashcam-pv`. Only the matching PVC
+infra synthed to `dist/<env>-nfs-pv.k8s.yaml` (which no ApplicationSet globs)
+and applied once per cluster via `task k8s:<env>:nfs-pv`. Only the matching PVC
 is Argo-managed (in the data unit); it binds to the named PV.
 
 Argo CD itself is installed by the **cdk8s platform layer** (`PlatformChart`,
