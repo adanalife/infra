@@ -510,9 +510,9 @@ tasks:
   # The one-liner cold-start: create the cluster, install the platform stack +
   # Argo CD (platform:up pulls in bootstrap-secrets as a dep), then Argo-sync
   # the apps in dependency order. Each step is the canonical task; failures
-  # short-circuit the chain. Replaces the old cluster:rebuild (which ended in the
-  # now-superseded `cdk8s:dev:apply` — Argo owns the apps, so an imperative apply
-  # just fights it with an SSA field-ownership conflict).
+  # short-circuit the chain. The chain ends in an Argo sync, not an imperative
+  # apply — Argo owns the apps, so `kubectl apply` of the same manifests just
+  # fights it with an SSA field-ownership conflict.
   k8s:dev:up:
     desc: "cold-start the dev env from nothing: create cluster -> install platform + Argo -> sync apps"
     aliases: ["k8s:dev:cluster:rebuild"]
@@ -749,19 +749,17 @@ tasks:
       - k8s:stage:rollout:obs
       - k8s:stage:rollout:onscreens
 
-  # NOTE: the dev rollout:* tasks were removed — they pointed at pre-per-platform
-  # deployment names (deploy/tripbot, not deploy/tripbot-twitch) so they no
-  # longer matched anything, and a bare restart under imagePullPolicy: Always
-  # just re-pulls CI's :main. Use `task k8s:dev:deploy` to run a local build,
-  # `task k8s:dev:sync` to revert to CI images, and a plain
+  # There are deliberately no dev rollout:* tasks: under imagePullPolicy: Always
+  # a bare restart just re-pulls CI's :main. Use `task k8s:dev:deploy` to run a
+  # local build, `task k8s:dev:sync` to revert to CI images, and a plain
   # `kubectl rollout restart deploy/<app>-twitch -n development` for a bare bounce.
 
   # The app workloads for prod-1/stage-1 are delivered by Argo CD from
-  # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md) — there is no
-  # `k8s:{prod,stage}:apply` for apps anymore. dev (k3d) is likewise Argo-managed
-  # by its own in-cluster Argo (`task k8s:dev:argo:sync`). The legacy Kustomize app overlays (k8s/apps,
-  # k8s/overlays) are gone. What remains below is the stage env-PLATFORM install
-  # (external-dns + NATS), which has NOT cut over to cdk8s yet.
+  # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md), so there is no
+  # `k8s:{prod,stage}:apply` for apps. dev (k3d) is likewise Argo-managed by its
+  # own in-cluster Argo (`task k8s:dev:argo:sync`). What remains below is the
+  # stage env-PLATFORM install (external-dns + NATS), which has NOT cut over to
+  # cdk8s yet.
 
   k8s:stage:platform-env:up:
     desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
@@ -1603,15 +1601,12 @@ tasks:
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
 
-  # Local kubectl port-forward wrappers for OBS / vlc-server VNC. The
-  # host-access LoadBalancer overlays (k8s/apps/{obs,vlc-server}/overlays/local)
-  # already expose VNC at host ports 5902 / 5903 via klipper-lb when the
-  # local overlay is applied — these tasks are the cluster-agnostic
-  # alternative when that overlay isn't in play (e.g. on development, or
-  # when iterating without applying the local overlay). Backgrounded
-  # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
-  # find it. Re-running :up overwrites the PID file; if :down can't
-  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs-"`.
+  # Local kubectl port-forward wrappers for OBS / vlc-server VNC — the
+  # cluster-agnostic way in, working on any env without a host-access
+  # LoadBalancer. The backgrounded kubectl PID is parked under
+  # /tmp/adanalife-tasks/ so :down can find it. Re-running :up overwrites the PID
+  # file; if :down can't find a lingering kubectl, fall back to
+  # `pkill -f "port-forward svc/obs-"`.
   obs:vnc:up:
     desc: start a local kubectl port-forward to OBS VNC at localhost:5902 (override PLATFORM=, default twitch)
     preconditions:
@@ -2074,11 +2069,11 @@ tasks:
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
         echo "Next: task tripbot:stage:db:seed:vectors  (NS=prod-1-data for prod)"
 
-  # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
-  # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
-  # most recent S3 dump written by the postgres-backup CronJob (pg_dump -Fc).
+  # prod-1 Postgres restore — the recovery path when the live PVC is gone or
+  # corrupt, restoring from the most recent S3 dump written by the
+  # postgres-backup CronJob (pg_dump -Fc).
   #
-  # The CronJob (k8s/apps/postgres/overlays/prod-1/backup-cronjob.yaml) writes
+  # The CronJob (emitted by cdk8s/adanalife_k8s/constructs/postgres.py) writes
   # to tiered prefixes under the bucket — see #584. Lifecycle rules vary by tier:
   #   hourly/   every hour,            expires at 2 days
   #   daily/    04:00 UTC,             expires at 30 days

@@ -1,8 +1,8 @@
 # KEEP-IN-SYNC: k8s/monitoring/{development,prod-1}/values.yml
 #
 # Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
-# in-cluster collectors that fill the dashboards landed in
-# terraform/development/grafana-dashboards/:
+# in-cluster collectors that fill the dashboards defined in
+# terraform/stage-1/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
@@ -73,8 +73,8 @@ destinations:
     # container_*/machine_* (cadvisor), the rest of kube_* (kubernetes-views),
     # cilium_*, traefik_*, coredns_*, certmanager_*, external(_)dns_*,
     # externalsecret_*, windows_*. Those dashboards need a VictoriaMetrics
-    # datasource in Grafana Cloud, which does not exist yet (PDC agent is a
-    # tracked TODO) — until it does, query VM by port-forward. Only two
+    # datasource in Grafana Cloud, which does not exist yet (it needs the PDC
+    # agent) — until it does, query VM by port-forward. Only two
     # scraped series feed any alert — paths and platform_gateway_up — and both
     # are kept, so no alert goes blind.
     metricProcessingRules: |-

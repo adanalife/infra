@@ -1,10 +1,7 @@
 # SSM Parameter Store — stage-1 parameters + CI grants.
 #
-# Migrated from AWS Secrets Manager 2026-07 (SM bills $0.40/secret/month;
-# standard-tier parameters are free). The SM containers, their version
-# resources, and the per-secret SM CI grants were deleted in the migration's
-# final phase; live values were copied by bin/migrate-sm-to-ssm.sh and the
-# full pre-migration corpus is archived offline (encrypted, 2026-07-03).
+# Parameter Store, not Secrets Manager: standard-tier parameters are free where
+# SM bills $0.40/secret/month.
 #
 # This file is the single bookkeeping point for "what parameters exist in
 # this AWS account." Topic files (grafana-alerts.tf, eso.tf, etc.) keep their

@@ -167,8 +167,8 @@ an adopted release against the live cluster: Argo owns the objects via
 server-side apply, and helm's apply fails with `argocd-controller`
 field-manager conflicts. The remaining `helm upgrade --install` steps in
 `task k8s:<env>:platform:up` exist for day-0 bring-up of an empty cluster only
-(where Argo adopts them afterwards); retiring them in favor of an
-argo-sync-based bring-up is tracked in the vault infra TODO.
+(where Argo adopts them afterwards). Retiring them in favor of an
+argo-sync-based bring-up is still open.
 
 ### Adoption (deliberate, NOT merge-and-forget)
 

@@ -15,8 +15,8 @@
 # allowlist. Deliberately NOT annotation-discovered: prometheus.io/*
 # podAnnotations here would make annotationAutodiscovery scrape the
 # FULL exposition (~3600 series) alongside hostMetrics' allowlisted
-# ~700 — a duplicate that alone ate a quarter of the Grafana Cloud
-# active-series cap until removed on 2026-07-16.
+# ~700 — a duplicate that on its own eats a quarter of the Grafana
+# Cloud active-series cap.
 
 # Bind to :9101 instead of the chart default :9100 — traefik in
 # prod-1 runs with hostNetwork: true and already binds host port

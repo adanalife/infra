@@ -14,15 +14,12 @@ traffic to the NAS is masqueraded by Cilium to the minipc node IP
 (192.168.40.111), the IP allowlisted on the Synology.
 
 The reader (stdlib socket) logs in, does `GET VAR ups ups.status` (+ charge /
-runtime), logs every transition, and — STAGE 2 — triggers a graceful node
-shutdown when the battery is genuinely about to die.
+runtime), logs every transition, and triggers a graceful node shutdown when the
+battery is genuinely about to die.
 
-STAGE 1 (shipped): observe-only logging.
-
-STAGE 2 (this file): the graceful-shutdown trigger. It fires on any of three
-conditions, each confirmed over CONFIRM_POLLS consecutive fast polls, and runs
-`talosctl shutdown --nodes <node>` so the node powers off cleanly before the
-battery dies:
+The shutdown trigger fires on any of three conditions, each confirmed over
+CONFIRM_POLLS consecutive fast polls, and runs `talosctl shutdown --nodes <node>`
+so the node powers off cleanly before the battery dies:
 
 1. estimated runtime below RUNTIME_THRESHOLD — the primary trigger, set with
    real margin (this UPS holds ~10 min; talosctl needs the better part of a
@@ -40,10 +37,9 @@ the next poll retries — so a single timed-out `talosctl` (what happened in the
 2026-07-19 outage, fired too late with 81s of runtime left) can't leave the node
 to crash. A clean shutdown protects etcd + the Talos STATE/OS partition from
 hard-power-cut corruption (the kind of unclean crash that caused the 2026-06-15
-outage), so the node comes back cleanly. Note it does NOT save the prod postgres
-data while that DB is on an ephemeral local-path volume — durable storage is the
-separate fix that protects the data (shipped: the T5 UserVolume); this protects
-the cluster.
+outage), so the node comes back cleanly. It protects the cluster, not the app
+data — data durability comes from the T5 UserVolume the PVs are provisioned on
+(talos/adanalife-minipc/controlplane.patch.yaml).
 
 **ARMED.** `DRY_RUN=false`: the trigger executes the real shutdown. The
 credential is the `ups-talosconfig` Secret, delivered by the ExternalSecret

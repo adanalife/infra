@@ -129,8 +129,7 @@ _STAGE_ROLE = "arn:aws:iam::413585268653:role/ExternalDNSRole"
 _PROD_ROLE = "arn:aws:iam::704461573429:role/ExternalDNSRole"
 
 
-# Per-env table. Mirrors the Kustomize overlays; the source of truth once those
-# overlays are retired. Values cross-checked against k8s/apps/*/overlays/<env>.
+# Per-env table — the source of truth for env-varying config.
 ENVS: dict[str, EnvConfig] = {
     "prod-1": EnvConfig(
         name="prod-1",
@@ -170,9 +169,7 @@ ENVS: dict[str, EnvConfig] = {
         nfs_pv_name="vlc-dashcam-nfs-stage",
         music_pv_name="obs-music-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
-        # same as prod — the corpus regen is complete, so the temporary
-        # STAGE_NFS_PATH override that let stage run ahead on the in-progress
-        # corpus has collapsed. Stage keeps its own PV name (PVs bind 1:1).
+        # same as prod, but keeps its own PV name (PVs bind 1:1).
         # Stage rehearses DB-in-its-own-namespace: postgres + its SecretStore land
         # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
         # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
