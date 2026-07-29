@@ -1,6 +1,6 @@
 """Postgres — the tripbot StatefulSet (pgvector/pg16) + headless Service.
 
-Reproduces k8s/apps/postgres/base + overlays. The StatefulSet is the
+The StatefulSet is the
 *fidelity-critical* object here: on prod-1 it owns a 50Gi `local-path-retain`
 PVC holding years of irreplaceable data (chat history since 2019, miles,
 events). This construct is applied via SSA to ADOPT the live prod StatefulSet,

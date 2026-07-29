@@ -1,8 +1,7 @@
 # SSM Parameter Store — platform parameters + CI grants (core account).
 #
-# Migrated from AWS Secrets Manager 2026-07 — same shape as stage-1/secrets.tf
-# (see its header for the pattern); this file is the single bookkeeping point
-# for "what parameters exist in this workspace."
+# Same shape as stage-1/secrets.tf (see its header for the pattern); this file
+# is the single bookkeeping point for "what parameters exist in this workspace."
 #
 # First-apply flow (chicken-and-egg with the github provider):
 #   1. `task tf:platform:apply -- -target=aws_ssm_parameter.github_automation_app_key`

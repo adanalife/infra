@@ -3,11 +3,8 @@
 # entries differ — see each file's map. Prod-only parameters that belong to
 # topic files stay there: argocd.tf, tailscale.tf, postgres-backup.tf.)
 #
-# Migrated from AWS Secrets Manager 2026-07 (SM bills $0.40/secret/month;
-# standard-tier parameters are free). The SM containers, their version
-# resources, and the per-secret SM CI grants were deleted in the migration's
-# final phase; live values were copied by bin/migrate-sm-to-ssm.sh and the
-# full pre-migration corpus is archived offline (encrypted, 2026-07-03).
+# Parameter Store, not Secrets Manager: standard-tier parameters are free where
+# SM bills $0.40/secret/month.
 #
 # See stage-1/secrets.tf's header for the per-parameter pattern, seeding
 # syntax, and the fresh-account first-apply flow. Short version:
