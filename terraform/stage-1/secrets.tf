@@ -7,8 +7,8 @@
 # full pre-migration corpus is archived offline (encrypted, 2026-07-03).
 #
 # This file is the single bookkeeping point for "what parameters exist in
-# this AWS account." Topic files (grafana-cloud.tf, grafana-alerts.tf, etc.)
-# keep their consumer-side resources but don't declare parameters.
+# this AWS account." Topic files (grafana-alerts.tf, eso.tf, etc.) keep their
+# consumer-side resources but don't declare parameters.
 #
 # Per-parameter pattern:
 #   - Out-of-band values: an entry in `ssm_parameters` below. The terraform-
