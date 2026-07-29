@@ -1,7 +1,7 @@
 {
   "title": "00 — Launch / Stream at a Glance",
   "uid": "stream-at-a-glance",
-  "tags": ["tripbot", "vlc-server", "obs", "stream", "launch"],
+  "tags": ["tripbot", "obs", "stream", "launch"],
   "schemaVersion": 39,
   "timezone": "browser",
   "editable": true,
@@ -27,7 +27,7 @@
         "name": "deployment_environment",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info{service_name=~\"tripbot|vlc-server\"}, deployment_environment)",
+        "query": "label_values(target_info{service_name=\"tripbot\"}, deployment_environment)",
         "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
@@ -221,11 +221,11 @@
     {
       "id": 30,
       "type": "logs",
-      "title": "Recent errors & warnings (tripbot + vlc-server)",
+      "title": "Recent errors \u0026 warnings (tripbot)",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
       "gridPos": { "x": 0, "y": 16, "w": 12, "h": 9 },
       "targets": [
-        { "refId": "A", "expr": "{service_name=~\"tripbot|vlc-server\", deployment_environment=~\"$deployment_environment\"} | service_platform=~\"$platform\" | detected_level=~\"error|warn\"" }
+        { "refId": "A", "expr": "{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} | service_platform=~\"$platform\" | detected_level=~\"error|warn\"" }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "sortOrder": "Descending" }
     },
