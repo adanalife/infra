@@ -1097,10 +1097,12 @@ resource "grafana_rule_group" "stream_health" {
   // away without the FIN/RST making it back, OBS keeps streaming into the void.
   // First seen in prod on 2026-05-27 ~30h into a session — manual recovery was
   // StopStream+StartStream via OBS WebSocket; tripbot's watchdog automates that
-  // for twitch (3-miss debounce, 10m cooldown). This alert fires regardless of
-  // the watchdog so we know immediately, not after 3 minutes of detection lag +
-  // restart sequence — and on the platforms with no watchdog it is the only
-  // thing that reports the state at all.
+  // for twitch (3-miss debounce, 10m cooldown) and re-mints the reaped room for
+  // tiktok (5-miss debounce, 30m cooldown — a re-mint costs a fresh LIVE that
+  // viewers have to rejoin, so it is slower to reach for). This alert fires
+  // regardless of the watchdog so we know immediately, not after the detection
+  // lag + recovery sequence — and on the platforms with no watchdog it is the
+  // only thing that reports the state at all.
   //
   // Per-platform, keyed on tripbot_channel_live: every tripbot stamps its series
   // with service_platform, so one rule covers every encoder and a new platform
@@ -1135,7 +1137,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Stream offline on {{ $labels.service_platform }} while OBS thinks it's streaming"
-      description = "obs_streaming_active=1 but tripbot_channel_live=0 for 3m on {{ $labels.service_platform }} — we are streaming into the void and nobody is watching what OBS is sending. Recovery differs by platform. twitch: the RTMP socket is half-open (the platform dropped its end without OBS noticing) and tripbot's watchdog should StopStream+StartStream within ~3-4m; if it doesn't, do it by hand via OBS WebSocket (StopStream, 3s, StartStream) — see tripbot pkg/obs/watchdog. tiktok: no watchdog, and reconnecting the push is NOT enough — a room reaped after a push gap longer than the relay target's idleTimeout is gone for good, so re-mint it from the console (stop then start the TikTok egress), which binds a fresh portrait relay target before the push resumes. youtube: check the broadcast in YouTube Studio, then restart the obs-youtube stream."
+      description = "obs_streaming_active=1 but tripbot_channel_live=0 for 3m on {{ $labels.service_platform }} — we are streaming into the void and nobody is watching what OBS is sending. Recovery differs by platform. twitch: the RTMP socket is half-open (the platform dropped its end without OBS noticing) and tripbot's watchdog should StopStream+StartStream within ~3-4m; if it doesn't, do it by hand via OBS WebSocket (StopStream, 3s, StartStream) — see tripbot pkg/obs/watchdog. tiktok: reconnecting the push is NOT enough — a room reaped after a push gap longer than the relay target's idleTimeout is gone for good, so the room has to be re-minted; tripbot's watchdog does that through the gateway (stop then start the egress) within ~6-7m, and if it doesn't, do it by hand from the console's TikTok egress controls. youtube: check the broadcast in YouTube Studio, then restart the obs-youtube stream."
     }
     labels = {
       severity = "critical"
@@ -1180,9 +1182,9 @@ resource "grafana_rule_group" "stream_health" {
   }
 
   // Notification rule paired with the silent-disconnect alert: fires when
-  // the watchdog actually forced a restart. Even a single increment is
-  // meaningful — the watchdog only fires after the 3-minute debounce,
-  // so any counter increase means we genuinely saw the silent half-open
+  // the watchdog actually forced a recovery. Even a single increment is
+  // meaningful — the watchdog only fires after a multi-minute debounce,
+  // so any counter increase means we genuinely saw the silent-disconnect
   // state in prod. Warning (not critical) because the stream is back by
   // the time this fires; the critical alert above is the page-worthy one.
   rule {
@@ -1194,7 +1196,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS silent-disconnect watchdog auto-recovered a stream"
-      description = "tripbot_obs_silent_disconnect_restarts_total incremented in the last 5m — the watchdog detected OBS thinking it was streaming while Twitch reported offline, and forced a StopStream+StartStream. The stream is back up; check tripbot logs for the restart sequence and Loki for any pattern across recurrences."
+      description = "tripbot_obs_silent_disconnect_restarts_total incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery: a StopStream+StartStream on twitch, an egress re-mint on tiktok. The counter is per-platform, so service_platform on the series says which. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
     }
     labels = {
       severity = "warning"
