@@ -1701,13 +1701,19 @@ resource "grafana_rule_group" "gate_health" {
 # quiet failures — the first looks like a healthy silence, the second like a
 # successful save.
 #
-# Those two query the gateway's OTLP-pushed copy of its metrics, not the
-# annotation scrape: the scrape reaches Grafana Cloud 20 minutes to an hour
-# after the fact, which is later than an alert rule evaluating here can use.
-# Both copies exist, so the query has to pin one — deployment_environment is
-# the discriminator, since it comes from the pushed OTel resource and the
-# scraped copy carries namespace instead. Matching neither label would alert
-# twice, once on stale data.
+# All four scope to prod with namespace, the label the annotation scrape
+# attaches — the gateway's metrics arrive that way, not over OTLP. The scrape
+# is fresh enough to alert on: measured across the six prod gateways,
+# time() - timestamp(platform_gateway_up) sits at 14-54s. The 20min-1h
+# staleness worth avoiding belongs to KSM series, not to allowlisted pod
+# scrapes, so check time() - timestamp(<metric>) before ruling a scraped
+# family out rather than assuming either way.
+#
+# Note the scrape reaches Grafana Cloud only because the cloud destination's
+# metricProcessingRules keep-regex in k8s/monitoring/prod-1/values.yml names
+# platform_gateway_* — that allowlist is load-bearing for these rules. Renaming
+# the family or narrowing the regex silently drops them, and with
+# no_data_state OK a dropped family reads as "nothing wrong".
 resource "grafana_rule_group" "gateway_health" {
   name             = "gateway-health"
   folder_uid       = grafana_folder.tripbot.uid
@@ -1827,7 +1833,7 @@ resource "grafana_rule_group" "gateway_health" {
 
     annotations = {
       summary     = "A prod gateway hit its hourly Sentry cap — errors are being thrown away"
-      description = "platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\"} rose on {{ $labels.instance }} — that gateway threw errors away instead of reporting them, so Sentry has gone quiet for a reason that looks exactly like healthy. Read the pod's logs for the window rather than trusting Sentry's issue list, which is missing whatever the cap swallowed. A cap hit almost always means one error repeating fast: find that one and fix it rather than raising the cap. The cooldown label is the ordinary case and deliberately not alerted on — it only says a repeat was withheld inside the fingerprint window. no_data is OK because the series is absent until the OTLP push reaches prod."
+      description = "platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\"} rose on {{ $labels.job }} ({{ $labels.pod }}) — that gateway threw errors away instead of reporting them, so Sentry has gone quiet for a reason that looks exactly like healthy. Read the pod's logs for the window rather than trusting Sentry's issue list, which is missing whatever the cap swallowed. A cap hit almost always means one error repeating fast: find that one and fix it rather than raising the cap. The cooldown label is the ordinary case and deliberately not alerted on — it only says a repeat was withheld inside the fingerprint window. no_data is OK because the counter is absent until a platform-gateway release carries it to prod (prod runs the pinned image, not main)."
     }
     labels = {
       severity = "warning"
@@ -1843,7 +1849,7 @@ resource "grafana_rule_group" "gateway_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum by (instance) (increase(platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\", deployment_environment=\"prod-1\"}[15m]))"
+        expr          = "sum by (job, pod) (increase(platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\", namespace=\"prod-1\"}[15m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1879,7 +1885,7 @@ resource "grafana_rule_group" "gateway_health" {
 
     annotations = {
       summary     = "{{ $labels.platform }} is holding a different {{ $labels.field }} than the one we saved"
-      description = "platform_gateway_metadata_drift has been 1 for 15m on {{ $labels.platform }}/{{ $labels.field }} — the platform is holding something other than the operator's saved value, so an edit that the console reported as saved did not take. The store is write-side only: it records what was last sent, which stops being true when the platform rejects the write. Most likely a missing scope on the write path (the pending Twitch re-consent makes title edits 401 with channel:manage:broadcast absent) or a value truncated upstream past a limit the field declaration does not know about. Check the platform's card in the console — it shows stored beside live — then the gateway pod's logs for the failed write. A value changed in the platform's own UI drifts the same way and is benign; re-save from the console to converge. no_data is OK: an unreachable platform records nothing rather than claiming agreement, and the series is absent until the OTLP push reaches prod."
+      description = "platform_gateway_metadata_drift has been 1 for 15m on {{ $labels.platform }}/{{ $labels.field }} — the platform is holding something other than the operator's saved value, so an edit that the console reported as saved did not take. The store is write-side only: it records what was last sent, which stops being true when the platform rejects the write. Most likely a missing scope on the write path (the pending Twitch re-consent makes title edits 401 with channel:manage:broadcast absent) or a value truncated upstream past a limit the field declaration does not know about. Check the platform's card in the console — it shows stored beside live — then the gateway pod's logs for the failed write. A value changed in the platform's own UI drifts the same way and is benign; re-save from the console to converge. no_data is OK: an unreachable platform records nothing rather than claiming agreement, and the gauge is absent until a platform-gateway release carries it to prod (prod runs the pinned image, not main)."
     }
     labels = {
       severity = "warning"
@@ -1895,7 +1901,7 @@ resource "grafana_rule_group" "gateway_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (platform, field) (platform_gateway_metadata_drift{deployment_environment=\"prod-1\"})"
+        expr          = "max by (platform, field) (platform_gateway_metadata_drift{namespace=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
