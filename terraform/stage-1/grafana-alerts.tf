@@ -1691,9 +1691,23 @@ resource "grafana_rule_group" "gate_health" {
 
 # Gateway health — the per-platform API gateway sits on tripbot's critical path
 # (every Helix / Data-API call routes through it). Two complementary prod-scoped
-# signals: the consumer-side reachability gauge tripbot emits (catches "the bot
-# can't reach the gateway") and an absent() canary on the gateway's own scraped
-# liveness gauge (catches "the gateway process is gone"). Both critical.
+# liveness signals: the consumer-side reachability gauge tripbot emits (catches
+# "the bot can't reach the gateway") and an absent() canary on the gateway's own
+# scraped liveness gauge (catches "the gateway process is gone"). Both critical.
+#
+# The two warnings after them watch things the gateway can get wrong while
+# perfectly alive: withholding errors from Sentry once its hourly cap is hit,
+# and holding metadata that disagrees with what the operator saved. Both are
+# quiet failures — the first looks like a healthy silence, the second like a
+# successful save.
+#
+# Those two query the gateway's OTLP-pushed copy of its metrics, not the
+# annotation scrape: the scrape reaches Grafana Cloud 20 minutes to an hour
+# after the fact, which is later than an alert rule evaluating here can use.
+# Both copies exist, so the query has to pin one — deployment_environment is
+# the discriminator, since it comes from the pushed OTel resource and the
+# scraped copy carries namespace instead. Matching neither label would alert
+# twice, once on stale data.
 resource "grafana_rule_group" "gateway_health" {
   name             = "gateway-health"
   folder_uid       = grafana_folder.tripbot.uid
@@ -1778,6 +1792,110 @@ resource "grafana_rule_group" "gateway_health" {
       model = jsonencode({
         refId         = "A"
         expr          = "absent(platform_gateway_up{namespace=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+  rule {
+    name           = "Gateway: Sentry throttle is dropping errors"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "A prod gateway hit its hourly Sentry cap — errors are being thrown away"
+      description = "platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\"} rose on {{ $labels.instance }} — that gateway threw errors away instead of reporting them, so Sentry has gone quiet for a reason that looks exactly like healthy. Read the pod's logs for the window rather than trusting Sentry's issue list, which is missing whatever the cap swallowed. A cap hit almost always means one error repeating fast: find that one and fix it rather than raising the cap. The cooldown label is the ordinary case and deliberately not alerted on — it only says a repeat was withheld inside the fingerprint window. no_data is OK because the series is absent until the OTLP push reaches prod."
+    }
+    labels = {
+      severity = "warning"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (instance) (increase(platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\", deployment_environment=\"prod-1\"}[15m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+  rule {
+    name           = "Gateway: platform disagrees with saved metadata"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.platform }} is holding a different {{ $labels.field }} than the one we saved"
+      description = "platform_gateway_metadata_drift has been 1 for 15m on {{ $labels.platform }}/{{ $labels.field }} — the platform is holding something other than the operator's saved value, so an edit that the console reported as saved did not take. The store is write-side only: it records what was last sent, which stops being true when the platform rejects the write. Most likely a missing scope on the write path (the pending Twitch re-consent makes title edits 401 with channel:manage:broadcast absent) or a value truncated upstream past a limit the field declaration does not know about. Check the platform's card in the console — it shows stored beside live — then the gateway pod's logs for the failed write. A value changed in the platform's own UI drifts the same way and is benign; re-save from the console to converge. no_data is OK: an unreachable platform records nothing rather than claiming agreement, and the series is absent until the OTLP push reaches prod."
+    }
+    labels = {
+      severity = "warning"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (platform, field) (platform_gateway_metadata_drift{deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
