@@ -1691,9 +1691,19 @@ resource "grafana_rule_group" "gate_health" {
 
 # Gateway health — the per-platform API gateway sits on tripbot's critical path
 # (every Helix / Data-API call routes through it). Two complementary prod-scoped
-# signals: the consumer-side reachability gauge tripbot emits (catches "the bot
-# can't reach the gateway") and an absent() canary on the gateway's own scraped
-# liveness gauge (catches "the gateway process is gone"). Both critical.
+# liveness signals: the consumer-side reachability gauge tripbot emits (catches
+# "the bot can't reach the gateway") and an absent() canary on the gateway's own
+# scraped liveness gauge (catches "the gateway process is gone"). Both critical.
+# The Sentry-throttle rule after them watches the gateway's error reporting
+# rather than its liveness, and is a warning.
+#
+# The throttle rule queries the gateway's OTLP-pushed copy of its metrics, not
+# the annotation scrape: the scrape reaches Grafana Cloud 20 minutes to an hour
+# after the fact, which is later than an alert rule evaluating here can use.
+# Both copies exist, so the query has to pin one — deployment_environment is
+# the discriminator, since it comes from the pushed OTel resource and the
+# scraped copy carries namespace instead. Matching neither label would alert
+# twice, once on stale data.
 resource "grafana_rule_group" "gateway_health" {
   name             = "gateway-health"
   folder_uid       = grafana_folder.tripbot.uid
@@ -1778,6 +1788,58 @@ resource "grafana_rule_group" "gateway_health" {
       model = jsonencode({
         refId         = "A"
         expr          = "absent(platform_gateway_up{namespace=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+  rule {
+    name           = "Gateway: Sentry throttle is dropping errors"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "A prod gateway hit its hourly Sentry cap — errors are being thrown away"
+      description = "platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\"} rose on {{ $labels.instance }} — that gateway threw errors away instead of reporting them, so Sentry has gone quiet for a reason that looks exactly like healthy. Read the pod's logs for the window rather than trusting Sentry's issue list, which is missing whatever the cap swallowed. A cap hit almost always means one error repeating fast: find that one and fix it rather than raising the cap. The cooldown label is the ordinary case and deliberately not alerted on — it only says a repeat was withheld inside the fingerprint window. no_data is OK because the series is absent until the OTLP push reaches prod."
+    }
+    labels = {
+      severity = "warning"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (instance) (increase(platform_gateway_sentry_events_dropped_total{reason=\"hourly_cap\", deployment_environment=\"prod-1\"}[15m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
