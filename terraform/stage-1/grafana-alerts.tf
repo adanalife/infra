@@ -1476,6 +1476,83 @@ resource "grafana_rule_group" "stream_health" {
       })
     }
   }
+
+  // Album bed dead air — the album is the live bed and its play order is empty.
+  // This is a different failure from the two SomaFM rules above, which watch
+  // obs_background_audio_playing: that gauge is OBS's view of the *source*, and
+  // here it reads perfectly healthy — OBS is playing a track. What's broken is
+  // that nothing queues the next one, so the stream goes silent the instant the
+  // current track ends, with no error, no log line, and a green source. That is
+  // how prod TikTok lost eight minutes on 2026-07-29 before anyone noticed, and
+  // the only way to see it at the time was reading OBS mp3-decoder lines.
+  //
+  // album=1 AND tracks=0 is the whole condition. Both gauges are written inside
+  // beds.Store on every bed switch and at startup detection — including the arm
+  // where reading OBS fails — so they always agree with what the console's
+  // now-playing line and !song report.
+  //
+  // Every platform, not Twitch-only: the album is TikTok's default bed and any
+  // platform can be switched onto it from the console. Hence obs_mode_gate
+  // rather than obs_twitch_mode_gate — a parked platform's tripbot keeps running
+  // and reports a bed it cannot actually play, so gating per-platform on
+  // console_platform_component_up is what keeps those instances quiet.
+  //
+  // for=2m, shorter than the 5m SomaFM rule: silence starts the moment a track
+  // ends, so the wait exists only to ride out a switch caught mid-write, not to
+  // confirm a sustained condition. critical for the same reason dead air on the
+  // Twitch bed is — a music-led slow-TV stream with no music is off the air.
+  rule {
+    name           = "OBS: album bed dead air (empty play order)"
+    for            = "2m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Album background-audio bed is on air with an empty play order"
+      description = "tripbot_background_audio_bed{bed=\"album\"} is 1 while tripbot_background_audio_album_tracks is 0 — the album bed is selected but no tracks are queued, so the stream falls silent when the current track ends and OBS reports nothing wrong. Usual cause: tripbot came up while OBS was already on the album bed and never built a play order. Recovery: re-pick the bed in the console (that path rescans the share), or !audio album from chat as an admin. If the share itself is the problem, check the obs-music PVC is Bound. See vault tripbot/monitoring.md and obs/gotchas.md."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_platform, deployment_environment) (tripbot_background_audio_bed{service_name=\"tripbot\", deployment_environment=\"prod-1\", bed=\"album\"}) == 1 and on (service_platform) (max by (service_platform) (tripbot_background_audio_album_tracks{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) == 0) ${local.obs_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 # Relay health — MediaMTX is the RTSP hop between playout (publisher) and OBS
