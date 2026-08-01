@@ -685,7 +685,7 @@
       "id": 31,
       "type": "stat",
       "title": "Twitch Chat Connected",
-      "description": "Whether the bot is connected to Twitch chat (IRC). 1=connected, 0=disconnected. Drives the TripbotTwitchDisconnected alert.",
+      "description": "Whether the bot is receiving Twitch chat over gateway-twitch's inbound poll. 1=receiving, 0=not. Drives the TripbotTwitchDisconnected alert.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 57, "w": 6, "h": 4 },
       "targets": [
