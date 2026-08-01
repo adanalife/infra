@@ -135,15 +135,24 @@ resource "aws_route53_record" "secondary_staging" {
   records = ["static.stage.${var.secondary_domain}"]
 }
 
-# guessr, the dashcam guessing game. Points at the Pages project declared
+# guessr, the dashcam guessing game. Point at the Pages projects declared
 # in terraform/prod-1/cloudflare-pages-guessr.tf; Cloudflare validates the
-# custom-domain TLS cert against this record.
+# custom-domain TLS certs against these records. Production moves only at a
+# release tag; staging carries whatever is on main.
 resource "aws_route53_record" "guessr" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "guessr.${var.domain}"
   type    = "CNAME"
   ttl     = "300"
   records = ["adanalife-guessr.pages.dev"]
+}
+
+resource "aws_route53_record" "guessr_staging" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "stage.guessr.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["adanalife-guessr-staging.pages.dev"]
 }
 
 resource "aws_route53_record" "primary_www_acm_cert_validation" {
