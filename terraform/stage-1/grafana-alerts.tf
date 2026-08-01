@@ -1248,8 +1248,8 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Tripbot has been disconnected from Twitch chat (IRC) for 5m"
-      description = "tripbot_twitch_connected has been 0 for 5m — the bot is not in chat. Readiness does not gate on the Twitch connection, so the pod is healthy but silent. Check tripbot logs for IRC reconnect errors, verify the bot OAuth token is still valid, and confirm Twitch IRC ingest isn't degraded."
+      summary     = "Tripbot has not been receiving Twitch chat for 5m"
+      description = "tripbot_twitch_connected has been 0 for 5m — the bot is not receiving chat. Readiness does not gate on the chat connection, so the pod is healthy but silent. Chat reaches tripbot over gateway-twitch's inbound poll: compare against platform_gateway_chat_connected to localise the fault (gateway 1 / tripbot 0 puts it in the path between them), check gateway-twitch logs for failing inbound_chat requests, and verify gateway-twitch's Twitch token is still valid."
     }
     labels = {
       severity = "critical"
