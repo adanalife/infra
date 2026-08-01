@@ -29,6 +29,34 @@ resource "cloudflare_pages_project" "guessr_staging" {
   # Actions. Unlike dana-lol-staging next door, this project was created
   # that way from the start, so it needs no `ignore_changes = [source]` to
   # tolerate a dead git source block.
+
+  # The answer coordinates for this tier, which the game's one endpoint
+  # (functions/api/score.js) scores guesses against — the round manifest the
+  # browser downloads carries no lat/lng. Its own database rather than
+  # prod's: the round sets diverge the moment one is regenerated and the
+  # other isn't, and terraform state is split per environment anyway.
+  #
+  # Both configs, because this project serves both. Every merge to main is a
+  # production deploy here, and per-PR previews land on branch aliases of
+  # this same project.
+  deployment_configs = {
+    production = {
+      d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers_staging.id } }
+    }
+    preview = {
+      d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers_staging.id } }
+    }
+  }
+}
+
+# Seeded by `task answers:stage:push` from the guessr repo. See the production
+# copy in terraform/prod-1/cloudflare-pages-guessr.tf for why nothing
+# automated can populate it.
+resource "cloudflare_d1_database" "guessr_answers_staging" {
+  account_id = var.cloudflare_account_id
+  name       = "adanalife-guessr-answers-staging"
+
+  primary_location_hint = "wnam"
 }
 
 resource "cloudflare_pages_domain" "guessr_staging" {
