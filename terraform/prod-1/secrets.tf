@@ -115,6 +115,12 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 # headers". Fresh-account bootstrap: create + seed the parameter before the
 # first plan that needs it. KEEP-IN-SYNC: stage-1/secrets.tf.
 
+# Token scopes, kept here because prod-1 has no seeding-notes block: Zone:Edit,
+# Pages:Edit, D1:Edit, DNS:Edit, Zone Settings:Edit. D1 is account-scoped and
+# was added for guessr's answers database (cloudflare-pages-guessr.tf); without
+# it the create fails 401 "Authentication error" rather than naming the missing
+# permission. Editing an existing token's permissions in the Cloudflare
+# dashboard keeps the same secret, so widening scopes needs no reseed here.
 data "aws_ssm_parameter" "cloudflare_api_token" {
   name = "/prod-1/cloudflare-api-token"
 }

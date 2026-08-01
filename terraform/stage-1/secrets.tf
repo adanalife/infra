@@ -38,7 +38,12 @@
 #
 # Seeding notes for the non-obvious ones:
 #   - stage-1/cloudflare-api-token — token scopes: Zone:Edit, Tunnel:Edit,
-#     Pages:Edit, Access:Apps and Policies:Edit, DNS:Edit, Zone Settings:Edit.
+#     Pages:Edit, D1:Edit, Access:Apps and Policies:Edit, DNS:Edit,
+#     Zone Settings:Edit. D1 is account-scoped and was added for guessr's
+#     answers database (cloudflare-pages-guessr.tf); without it the create
+#     fails 401 "Authentication error" rather than saying which permission is
+#     missing. Editing an existing token's permissions in the Cloudflare
+#     dashboard keeps the same secret, so widening scopes needs no reseed here.
 #   - stage-1/grafana-cloud-api — JSON {"GRAFANA_CLOUD_URL": "https://<stack>.grafana.net",
 #     "GRAFANA_CLOUD_API_TOKEN": ..., "GRAFANA_CLOUD_STACK_SLUG": ...}. Mint a
 #     stack service account (Admin role) + token; slug = the URL subdomain.
