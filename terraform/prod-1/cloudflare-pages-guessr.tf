@@ -20,6 +20,38 @@ resource "cloudflare_pages_project" "guessr" {
   # Direct Upload — deploys go through `wrangler pages deploy` from
   # GitHub Actions. Matches the blog's projects; see cloudflare-pages.tf
   # for why the git integration is avoided.
+
+  # The answer coordinates, which is what makes the game's one endpoint
+  # (functions/api/score.js) possible: the round manifest the browser
+  # downloads carries no lat/lng, so a score can't be read out of devtools
+  # or forged. Preview gets the same database — the previews that matter
+  # land in the staging project, but a preview deploy here with no binding
+  # would fail every guess rather than say why.
+  deployment_configs = {
+    production = {
+      d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
+    }
+    preview = {
+      d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
+    }
+  }
+}
+
+# Seeded out-of-band, by `task answers:prod:push` from the guessr repo — the
+# coords come from the dashcam corpus, which only Dana's laptop can reach, so
+# there is nothing for CI or terraform to populate this from. Empty until that
+# push runs, and a deploy against an empty table serves "unknown round" for
+# every guess.
+#
+# Free tier covers this comfortably: ~300 rows, one indexed read per guess,
+# against 5 GB of storage and 5M row-reads a day.
+resource "cloudflare_d1_database" "guessr_answers" {
+  account_id = var.cloudflare_account_id
+  name       = "adanalife-guessr-answers"
+
+  # Same continent as the corpus and the players; D1 has no multi-region
+  # story worth buying at this size.
+  primary_location_hint = "wnam"
 }
 
 resource "cloudflare_pages_domain" "guessr" {
