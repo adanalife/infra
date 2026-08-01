@@ -136,9 +136,9 @@ resource "aws_route53_record" "secondary_staging" {
 }
 
 # guessr, the dashcam guessing game. Point at the Pages projects declared
-# in terraform/prod-1/cloudflare-pages-guessr.tf; Cloudflare validates the
-# custom-domain TLS certs against these records. Production moves only at a
-# release tag; staging carries whatever is on main.
+# in terraform/{prod-1,stage-1}/cloudflare-pages-guessr.tf; Cloudflare
+# validates the custom-domain TLS certs against these records. Production
+# moves only at a release tag; staging carries whatever is on main.
 resource "aws_route53_record" "guessr" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "guessr.${var.domain}"
