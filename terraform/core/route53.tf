@@ -160,10 +160,13 @@ resource "aws_route53_record" "guessr_staging" {
 # heard on stream, so without these a typo fails at DNS — before the site gets a
 # chance to be forgiving about it.
 #
-# A deliberate handful rather than an enumeration of the space: Cloudflare
-# issues a certificate per custom domain, so each entry has a real cost. These
-# are the spellings a person actually produces from memory — the correct English
-# word, and one dropped or doubled letter.
+# A deliberate handful rather than an enumeration of the space, though not for
+# want of room: Cloudflare's Universal SSL issues and renews a certificate per
+# custom domain for free, Pages allows 100 custom domains per project, and
+# Route53 bills per zone and per query rather than per record. So the list is a
+# judgement about which spellings a person actually produces from memory — the
+# correct English word, and one dropped or doubled letter — and not a budget.
+# Adding another later costs a line in each of two files and nothing else.
 #
 # Keep in sync with cloudflare_pages_domain.guessr_aliases in
 # terraform/prod-1/cloudflare-pages-guessr.tf. The CNAME resolves the hostname
