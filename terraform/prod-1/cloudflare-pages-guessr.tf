@@ -88,3 +88,32 @@ resource "cloudflare_pages_domain" "guessr_aliases" {
   project_name = cloudflare_pages_project.guessr.name
   name         = "${each.key}.${var.primary_domain}"
 }
+
+# Cloudflare Web Analytics for the game: the "did anyone visit" half of knowing
+# how it is doing. The other half — how they played, where they dropped off,
+# which frames are brutal — is already in the D1 `plays` table and is read back
+# by `task stats:prod` in the guessr repo. This counts the people who never
+# guessed, whom that table cannot see.
+#
+# Cookieless and IP-less, which is why it and not Google: the game's privacy
+# story is a localStorage disclosure (a player id and a typed handle) and an
+# analytics tool that sets a cookie or stores an address would change that.
+#
+# auto_install is off because it only works for orange-clouded sites, and
+# dana.lol's DNS authority is Route53 — the zone is not in Cloudflare at all,
+# so there is no edge injection to turn on. The beacon goes in web/index.html
+# by hand instead, keyed on the site_tag below.
+resource "cloudflare_web_analytics_site" "guessr" {
+  account_id   = var.cloudflare_account_id
+  host         = cloudflare_pages_domain.guessr.name
+  auto_install = false
+}
+
+# The token the beacon in guessr's web/index.html carries. Not a secret — it is
+# served to every visitor in the page source, and it identifies which site a
+# hit belongs to rather than authorising anything. Output because the beacon is
+# hand-placed: apply this, then paste the value into the game.
+output "guessr_web_analytics_token" {
+  description = "Cloudflare Web Analytics site tag for the beacon in guessr's web/index.html"
+  value       = cloudflare_web_analytics_site.guessr.site_tag
+}
