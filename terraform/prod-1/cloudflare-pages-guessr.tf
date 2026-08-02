@@ -59,3 +59,23 @@ resource "cloudflare_pages_domain" "guessr" {
   project_name = cloudflare_pages_project.guessr.name
   name         = "guessr.${var.primary_domain}"
 }
+
+# The misspellings, so a near miss serves the game instead of a certificate
+# error. Keep the list in sync with aws_route53_record.guessr_aliases in
+# terraform/core/route53.tf, which carries the reasoning and the CNAMEs — a
+# Pages domain with no DNS record never validates, and a CNAME with no Pages
+# domain reaches a project that refuses to answer for the hostname.
+#
+# The aliases *serve* the game rather than redirecting to guessr.dana.lol.
+# Cloudflare's redirect rules need the zone to live in Cloudflare and dana.lol's
+# authority is Route53, so a 301 would mean a Pages Function in front of every
+# request — for a canonical URL the game already has: the share string is a
+# hardcoded https://guessr.dana.lol, whatever host it was played on, and the
+# page carries a rel=canonical for crawlers.
+resource "cloudflare_pages_domain" "guessr_aliases" {
+  for_each = toset(["guesser", "guesr", "gessr", "guessrr", "guess"])
+
+  account_id   = var.cloudflare_account_id
+  project_name = cloudflare_pages_project.guessr.name
+  name         = "${each.key}.${var.primary_domain}"
+}

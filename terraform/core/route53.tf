@@ -155,6 +155,30 @@ resource "aws_route53_record" "guessr_staging" {
   records = ["adanalife-guessr-staging.pages.dev"]
 }
 
+# Near misses at "guessr", pointed at the same production project. The name is
+# a misspelling to begin with and the game spreads by people retyping a URL they
+# heard on stream, so without these a typo fails at DNS — before the site gets a
+# chance to be forgiving about it.
+#
+# A deliberate handful rather than an enumeration of the space: Cloudflare
+# issues a certificate per custom domain, so each entry has a real cost. These
+# are the spellings a person actually produces from memory — the correct English
+# word, and one dropped or doubled letter.
+#
+# Keep in sync with cloudflare_pages_domain.guessr_aliases in
+# terraform/prod-1/cloudflare-pages-guessr.tf. The CNAME resolves the hostname
+# and validates the cert; the Pages domain is what makes the project answer for
+# it. One without the other is a dead name.
+resource "aws_route53_record" "guessr_aliases" {
+  for_each = toset(["guesser", "guesr", "gessr", "guessrr", "guess"])
+
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "${each.key}.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["adanalife-guessr.pages.dev"]
+}
+
 resource "aws_route53_record" "primary_www_acm_cert_validation" {
   name    = var.primary_www_acm_dns_name
   records = [var.primary_www_acm_dns_record]
