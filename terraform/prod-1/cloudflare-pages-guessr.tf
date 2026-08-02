@@ -52,6 +52,15 @@ resource "cloudflare_d1_database" "guessr_answers" {
   # Same continent as the corpus and the players; D1 has no multi-region
   # story worth buying at this size.
   primary_location_hint = "wnam"
+
+  # Declared rather than left to default, and load-bearing: the API returns this
+  # object on every read, so an absent block reads as "set it to null" and every
+  # subsequent plan carries an update that the API then rejects with
+  # `Invalid property: read_replication => Expected object, received null`.
+  # Any change to this file inherits that failure until the block is here.
+  read_replication = {
+    mode = "disabled"
+  }
 }
 
 resource "cloudflare_pages_domain" "guessr" {
