@@ -160,17 +160,29 @@ resource "aws_route53_record" "guessr_staging" {
 # heard on stream, so without these a typo fails at DNS — before the site gets a
 # chance to be forgiving about it.
 #
-# A deliberate handful rather than an enumeration of the space: Cloudflare
-# issues a certificate per custom domain, so each entry has a real cost. These
-# are the spellings a person actually produces from memory — the correct English
-# word, and one dropped or doubled letter.
+# A deliberate handful rather than an enumeration of the space, though not for
+# want of room: Cloudflare's Universal SSL issues and renews a certificate per
+# custom domain for free, Pages allows 100 custom domains per project, and
+# Route53 bills per zone and per query rather than per record. So the list is a
+# judgement about which spellings a person actually produces from memory, not a
+# budget: the categories below are the ways a name like this gets mistyped, and
+# adding another later costs a line in each of two files and nothing else.
 #
 # Keep in sync with cloudflare_pages_domain.guessr_aliases in
 # terraform/prod-1/cloudflare-pages-guessr.tf. The CNAME resolves the hostname
 # and validates the cert; the Pages domain is what makes the project answer for
 # it. One without the other is a dead name.
 resource "aws_route53_record" "guessr_aliases" {
-  for_each = toset(["guesser", "guesr", "gessr", "guessrr", "guess"])
+  for_each = toset([
+    # the correct English word, and the word people remember
+    "guesser", "guess", "guessers",
+    # a dropped, doubled or tripled letter
+    "guesr", "gessr", "guessrr", "guesssr",
+    # adjacent letters swapped -- "geuss" is the classic one
+    "geussr", "gusesr",
+    # the other agent-noun ending, and a plural of the brand
+    "guessor", "guessrs",
+  ])
 
   zone_id = aws_route53_zone.primary.zone_id
   name    = "${each.key}.${var.domain}"

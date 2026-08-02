@@ -73,7 +73,16 @@ resource "cloudflare_pages_domain" "guessr" {
 # hardcoded https://guessr.dana.lol, whatever host it was played on, and the
 # page carries a rel=canonical for crawlers.
 resource "cloudflare_pages_domain" "guessr_aliases" {
-  for_each = toset(["guesser", "guesr", "gessr", "guessrr", "guess"])
+  for_each = toset([
+    # the correct English word, and the word people remember
+    "guesser", "guess", "guessers",
+    # a dropped, doubled or tripled letter
+    "guesr", "gessr", "guessrr", "guesssr",
+    # adjacent letters swapped -- "geuss" is the classic one
+    "geussr", "gusesr",
+    # the other agent-noun ending, and a plural of the brand
+    "guessor", "guessrs",
+  ])
 
   account_id   = var.cloudflare_account_id
   project_name = cloudflare_pages_project.guessr.name
