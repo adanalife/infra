@@ -57,6 +57,12 @@ resource "cloudflare_d1_database" "guessr_answers_staging" {
   name       = "adanalife-guessr-answers-staging"
 
   primary_location_hint = "wnam"
+
+  # Required, not cosmetic — see the production copy for what omitting it does
+  # to every plan that touches this file.
+  read_replication = {
+    mode = "disabled"
+  }
 }
 
 resource "cloudflare_pages_domain" "guessr_staging" {
