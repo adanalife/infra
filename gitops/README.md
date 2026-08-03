@@ -99,6 +99,37 @@ To flip an env's **apps** to continuous reconciliation, add it to
 `AUTOSYNC_ENVS` in `argocd.py`, re-synth + commit, re-apply. stage-1 is already
 there; prod-1 is held out deliberately. The **data** units stay manual forever.
 
+## Removing an AppProject or ApplicationSet
+
+`task gitops:apply` is a plain `kubectl apply`, so it **never deletes**. Dropping
+a top-level Argo object from `cdk8s/dist` leaves the live one running, and an
+orphaned ApplicationSet keeps regenerating its Applications — deleting the child
+looks like it silently fails, because the generator puts it straight back.
+(Removing an *element* from a generator does prune; the appset controller owns
+that. Only top-level object removal strands.)
+
+`task gitops:prune` reports what's live in `argocd` but no longer declared:
+
+```sh
+task gitops:prune                 # read-only report
+task gitops:prune CONFIRM=yes     # delete, --cascade=orphan
+```
+
+It reads every manifest listed in the task's `GITOPS_MANIFESTS` var — currently
+`argocd.k8s.yaml` + `platform-argo.k8s.yaml`. **A new manifest declaring
+AppProjects or ApplicationSets must be added there**, or its objects get reported
+as orphans. Argo's built-in `default` AppProject is skipped via
+`GITOPS_PRUNE_SKIP`; it belongs to no manifest and is the fallback project.
+
+Deletion is `--cascade=orphan` on purpose: removing an ApplicationSet otherwise
+takes its generated Applications and their workloads with it, which is how
+[#847](https://github.com/adanalife/infra/pull/847/changes) dropped the prod
+stream for ~1 minute. The generated Applications survive the prune and are swept
+deliberately afterwards with `argocd app delete <name> --cascade=false`. This is
+also why pruning is its own gesture rather than a `--prune` flag on
+`gitops:apply` — a synth bug that dropped an appset would otherwise delete prod
+workloads on the next apply.
+
 ## Emergency stop (pausing an autosynced app)
 
 Autosynced Applications selfHeal: a `kubectl scale --replicas=0` is reverted

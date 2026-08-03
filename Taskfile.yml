@@ -235,6 +235,77 @@ tasks:
     cmds:
       - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
 
+  # `gitops:apply` is a plain `kubectl apply`, which never deletes. Dropping an
+  # AppProject or ApplicationSet from cdk8s/dist therefore leaves the live object
+  # running, and an orphaned ApplicationSet keeps regenerating its Applications —
+  # so a delete of the child appears to silently fail. Removing an *element* from
+  # a generator does prune (the appset controller owns that); only top-level
+  # object removal strands.
+  #
+  # Pruning is a separate, opt-in gesture rather than a flag on gitops:apply: a
+  # synth bug that drops an appset would otherwise cascade-delete prod workloads
+  # on the next apply. Deletion uses --cascade=orphan so generated Applications
+  # (and the workloads under them) survive; sweep those deliberately afterwards.
+  gitops:prune:
+    desc: "Report Argo AppProjects/ApplicationSets live in-cluster but no longer declared in cdk8s/dist. Read-only unless CONFIRM=yes."
+    silent: true
+    preconditions:
+      - *minipc-context-guard
+    vars:
+      # Every manifest that declares top-level Argo objects for the minipc.
+      # Missing one here reports its objects as orphaned, so a new such manifest
+      # must be added. argocd-k3d.k8s.yaml is deliberately absent — it targets the
+      # dev cluster, which the context guard already forbids.
+      GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
+      # Argo CD ships this AppProject with the install; it is owned by no manifest
+      # and is the fallback project, so pruning it would break every Application
+      # that does not name a project.
+      GITOPS_PRUNE_SKIP: default
+    cmds:
+      - |
+        set -euo pipefail
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        : > "$tmp/rendered"
+        for manifest in {{.GITOPS_MANIFESTS}}; do
+          test -f "$manifest" || { echo "$manifest not found — run task cdk8s:synth first"; exit 1; }
+          # `kubectl apply --dry-run=client -o name` renders every doc as
+          # <resource>.<group>/<name>, which is enough to diff against the live
+          # objects and keeps this to kubectl — the one tool the task already needs.
+          kubectl apply -f "$manifest" --dry-run=client -o name >> "$tmp/rendered"
+        done
+        found=0
+        for kind in AppProject ApplicationSet; do
+          resource=$(echo "$kind" | tr '[:upper:]' '[:lower:]')
+          sed -n "s|^${resource}\.argoproj\.io/||p" "$tmp/rendered" | sort -u > "$tmp/declared"
+          kubectl get "$kind" -n argocd \
+            -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' \
+            | sed '/^$/d' | sort -u > "$tmp/live"
+          # Live minus declared. Never the reverse: something declared but absent
+          # is just an unapplied change, which gitops:apply fixes.
+          comm -13 "$tmp/declared" "$tmp/live" > "$tmp/orphans"
+          while read -r name; do
+            [ -n "$name" ] || continue
+            case " {{.GITOPS_PRUNE_SKIP}} " in *" $name "*) continue ;; esac
+            found=1
+            created=$(kubectl get "$kind" -n argocd "$name" -o 'jsonpath={.metadata.creationTimestamp}')
+            echo "  orphaned $kind/$name (created $created)"
+            if [ "${CONFIRM:-}" = "yes" ]; then
+              kubectl delete "$kind" -n argocd "$name" --cascade=orphan
+            fi
+          done < "$tmp/orphans"
+        done
+        if [ "$found" -eq 0 ]; then
+          echo "no orphaned AppProjects or ApplicationSets — the cluster matches cdk8s/dist"
+        elif [ "${CONFIRM:-}" != "yes" ]; then
+          echo
+          echo "nothing deleted. Re-run with CONFIRM=yes to delete the above (--cascade=orphan)."
+        else
+          echo
+          echo "deleted. Any Applications they generated are now orphaned — review with"
+          echo "  kubectl get application -n argocd"
+          echo "and remove the unwanted ones with: argocd app delete <name> --cascade=false"
+        fi
+
   contract:sync:
     desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
     dir: cdk8s
