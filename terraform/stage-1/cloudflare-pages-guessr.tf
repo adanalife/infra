@@ -39,12 +39,34 @@ resource "cloudflare_pages_project" "guessr_staging" {
   # Both configs, because this project serves both. Every merge to main is a
   # production deploy here, and per-PR previews land on branch aliases of
   # this same project.
+  #
+  # The Discord webhook backs the coord-report button, as a Pages binding because
+  # the endpoint reads it per request. Staging gets it so the button can be
+  # exercised end to end before a tag ships it — the production copy in
+  # terraform/prod-1/cloudflare-pages-guessr.tf carries the rest of the
+  # reasoning, including why this reuses the alerts webhook instead of minting
+  # one.
+  #
+  # Both tiers post to the same channel, so the endpoint has to say which tier a
+  # report came from or a staging test is indistinguishable from a real report.
   deployment_configs = {
     production = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers_staging.id } }
+      env_vars = {
+        DISCORD_WEBHOOK = {
+          type  = "secret_text"
+          value = data.aws_ssm_parameter.discord_alerts_webhook.value
+        }
+      }
     }
     preview = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers_staging.id } }
+      env_vars = {
+        DISCORD_WEBHOOK = {
+          type  = "secret_text"
+          value = data.aws_ssm_parameter.discord_alerts_webhook.value
+        }
+      }
     }
   }
 }

@@ -119,6 +119,19 @@ data "aws_ssm_parameter" "cloudflare_api_token" {
   name = "/prod-1/cloudflare-api-token"
 }
 
+# Read by guessr's production Pages project, which hands it to the coord-report
+# endpoint as a Function binding (cloudflare-pages-guessr.tf). Third consumer of
+# this one value, after Grafana's contact point and tripbot's !report — rotating
+# it means re-applying everything that reads it, which is what the
+# alert-delivery-failure rule in stage-1/grafana-alerts.tf already says.
+#
+# Literal name for the reason the block comment above gives: this parameter is a
+# managed mirror entry, and a data source pointing at the mirror resource defers
+# to apply time whenever any entry is added to the map.
+data "aws_ssm_parameter" "discord_alerts_webhook" {
+  name = "/k8s/tripbot/discord-alerts-webhook"
+}
+
 # ============================================================================
 # CI grants
 # ============================================================================
