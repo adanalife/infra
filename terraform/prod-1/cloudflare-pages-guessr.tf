@@ -27,12 +27,42 @@ resource "cloudflare_pages_project" "guessr" {
   # or forged. Preview gets the same database — the previews that matter
   # land in the staging project, but a preview deploy here with no binding
   # would fail every guess rather than say why.
+  #
+  # The Discord webhook is for the coord-report button: a player who recognises
+  # a street can say the round's coordinates are wrong, and a Pages Function is
+  # what posts that somewhere it will be read. It has to arrive as a *Pages*
+  # binding rather than a GitHub Actions secret, because the endpoint reads it at
+  # request time, long after any workflow has finished — the release
+  # notifications in guessr's release.yml read an Actions secret and the two are
+  # not interchangeable.
+  #
+  # It reuses the existing alerts webhook rather than minting one. That parameter
+  # already carries two consumers (Grafana's discord-alerts contact point and
+  # tripbot's !report command), and a player reporting bad coordinates is the
+  # same kind of thing as a !report — both are somebody telling us something is
+  # wrong, in a channel that is read rather than watched.
   deployment_configs = {
     production = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
+      env_vars = {
+        DISCORD_WEBHOOK = {
+          type  = "secret_text"
+          value = data.aws_ssm_parameter.discord_alerts_webhook.value
+        }
+      }
     }
     preview = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
+      # Previews of *this* project get it too, for the same reason they get the
+      # database: a binding missing here fails at request time on a URL somebody
+      # is actually clicking through, which reads as a broken button rather than
+      # an unconfigured preview.
+      env_vars = {
+        DISCORD_WEBHOOK = {
+          type  = "secret_text"
+          value = data.aws_ssm_parameter.discord_alerts_webhook.value
+        }
+      }
     }
   }
 }
