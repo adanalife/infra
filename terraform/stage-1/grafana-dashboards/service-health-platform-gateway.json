@@ -59,7 +59,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "`gateway-$platform` is the per-platform API gateway (the `platform_gateway_*` metrics from `internal/metrics`, [platform-gateway#14](https://github.com/adanalife/platform-gateway/pull/14)). Unlike tripbot's OTel-push metrics, these are **annotation-scraped** (`prometheus.io/scrape` on the pod), so they carry `cluster`/`namespace`/`pod` — filtered here by `pod=~\"gateway-$platform.*\"`. Only **prod-1** ships to Grafana Cloud (stage-1 is dropped at the Alloy layer), so panels populate once prod `gateway-twitch` is live (post-cutover). **The Twitch Helix row is the cutover-parity replacement** for the `twitch_helix_*` panels on the Twitch Chat Activity dashboard, which go stale once tripbot routes Helix calls through the gateway. Helix-row panels are twitch-only (`pod=~\"gateway-twitch.*\"`); a youtube gateway leaves them empty."
+        "content": "`gateway-$platform` is the per-platform API gateway (the `platform_gateway_*` metrics from `internal/metrics`, [platform-gateway#14](https://github.com/adanalife/platform-gateway/pull/14)). Unlike tripbot's OTel-push metrics, these are **annotation-scraped** (`prometheus.io/scrape` on the pod), so they carry `cluster`/`namespace`/`pod` — filtered here by `pod=~\"gateway-$platform.*\"`. Only **prod-1** ships to Grafana Cloud (stage-1 is dropped at the Alloy layer), so only prod `gateway-twitch` populates these panels. **The Twitch Helix row is the only place Twitch Helix metrics live** — the gateway is the single Helix caller, and the tripbot-side `twitch_helix_*` panels that used to sit on the Twitch Chat Activity dashboard are gone. Helix-row panels are twitch-only (`pod=~\"gateway-twitch.*\"`); a youtube gateway leaves them empty."
       }
     },
     {
@@ -368,7 +368,7 @@
     {
       "id": 101,
       "type": "row",
-      "title": "Twitch Helix (cutover parity)",
+      "title": "Twitch Helix",
       "collapsed": false,
       "gridPos": {
         "x": 0,
