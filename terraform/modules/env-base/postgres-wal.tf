@@ -1,8 +1,8 @@
 # S3 bucket + IAM user + access key + SSM parameter for CNPG's
 # barman-cloud WAL archiving on adanalife-minipc.
 #
-# Shape (cloned from prod-1/postgres-backup.tf):
-#   - Bucket `${local.full_account_name}-postgres-wal` holds WAL segments
+# Shape:
+#   - Bucket `${var.full_account_name}-postgres-wal` holds WAL segments
 #     and base backups. Versioning on; public access blocked; SSE-S3.
 #     Barman owns object retention (retentionPolicy on the ObjectStore),
 #     so the lifecycle only cleans noncurrent versions and aborted
@@ -20,7 +20,7 @@
 # archive command can authenticate.
 
 resource "aws_s3_bucket" "postgres_wal" {
-  bucket = "${local.full_account_name}-postgres-wal"
+  bucket = "${var.full_account_name}-postgres-wal"
 }
 
 resource "aws_s3_bucket_versioning" "postgres_wal" {
@@ -118,7 +118,7 @@ resource "aws_ssm_parameter" "postgres_wal_s3" {
   value = jsonencode({
     ACCESS_KEY_ID     = aws_iam_access_key.postgres_wal.id
     SECRET_ACCESS_KEY = aws_iam_access_key.postgres_wal.secret
-    REGION            = var.region
+    REGION            = data.aws_region.current.region
     DESTINATION_PATH  = "s3://${aws_s3_bucket.postgres_wal.bucket}/"
   })
 }

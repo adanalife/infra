@@ -1,5 +1,5 @@
 {
-  "title": "03 — Service Health: onscreens-server",
+  "title": "04 — Service Health: onscreens-server",
   "uid": "onscreens-server-service-health",
   "tags": ["tripbot", "onscreens-server", "service-health"],
   "schemaVersion": 39,
@@ -45,9 +45,9 @@
         "uid": "__DS_PROMETHEUS__"
       },
       "gridPos": {
-        "x": 0,
+        "x": 6,
         "y": 0,
-        "w": 24,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -101,13 +101,62 @@
       }
     },
     {
+      "id": 301,
+      "type": "stat",
+      "title": "Running version",
+      "description": "service.version from the OTel resource (set at deploy via OTEL_RESOURCE_ATTRIBUTES). One row per live version — two rows means a rollout in flight or a version skew across platform instances.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "group by (service_version) (target_info{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
+      ],
+      "options": { "colorMode": "none", "graphMode": "none", "textMode": "name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 302,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Wall-clock age of the most-recently-started pod for this service (time() - max pod start), from kube-state-metrics. Resets on every deploy/restart; a value that keeps resetting means the pod is cycling. Scoped to the selected env (KSM namespace == deployment_environment) and platform.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(kube_pod_start_time{namespace=~\"$deployment_environment\", pod=~\"onscreens-$platform.*\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s", "noValue": "no pods" }, "overrides": [] }
+    },
+    {
+      "id": 303,
+      "type": "stat",
+      "title": "Pod restarts",
+      "description": "Total container restarts across this service's pods in the selected env/platform (kube-state-metrics). Green at 0; any restart turns it red — a crash-loop or OOMKill signal the process-level metrics can't show.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "sum(kube_pod_container_status_restarts_total{namespace=~\"$deployment_environment\", pod=~\"onscreens-$platform.*\"})" }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 99,
       "type": "text",
       "title": "About this dashboard",
       "gridPos": { "x": 0, "y": 37, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "Onscreens-server runs as a second supervisord program in the vlc-server container today (see tripbot#568) but emits its own `service.name=onscreens-server` OTel resource. Treating it as a standalone service here so the dashboard keeps working as-is when it eventually moves to its own pod. Bulk of the request traffic is OBS browser sources polling `/onscreens/state.json`; chatbot-driven `show`/`hide` calls are the spikier minority."
+        "content": "Onscreens-server runs as its own per-platform Deployment (`onscreens-twitch`, `onscreens-tiktok`, …) and emits a `service.name=onscreens-server` OTel resource. Bulk of the request traffic is OBS browser sources polling `/onscreens/state.json`; chatbot-driven `show`/`hide` calls are the spikier minority."
       }
     },
     {
@@ -291,6 +340,17 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 700,
+      "type": "table",
+      "title": "Recent traces (onscreens-server)",
+      "description": "Most recent traces for this service. The deployment_environment column disambiguates rows when the env selector is set to All.",
+      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
+      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"onscreens-server\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)", "limit": 20 }
+      ]
     }
   ]
 }

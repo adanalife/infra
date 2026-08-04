@@ -64,3 +64,14 @@ output "ci_user_secret" {
 output "ci_role_arn" {
   value = module.env_base.ci_role_arn
 }
+
+output "eso_reader_access_key" {
+  value     = module.env_base.eso_reader_access_key_id
+  sensitive = true
+}
+
+# the PGP-encrypted secret; `task k8s:<env>:bootstrap-secrets` consumes it
+output "eso_reader_secret" {
+  value     = module.env_base.eso_reader_encrypted_secret
+  sensitive = true
+}

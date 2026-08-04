@@ -73,10 +73,12 @@ def test_container_spec_matches_render():
     assert c["securityContext"]["allowPrivilegeEscalation"] is False
     assert c["ports"][0] == {"name": "postgres", "containerPort": 5432}
     assert c["envFrom"][0]["secretRef"]["name"] == "postgres-secret"
+    # Shell form, not a bare argv: POSTGRES_USER comes from envFrom, which
+    # kubelet's $(VAR) probe substitution does not cover.
     assert c["livenessProbe"]["exec"]["command"] == [
-        "pg_isready",
-        "-U",
-        "$(POSTGRES_USER)",
+        "sh",
+        "-c",
+        'exec pg_isready -U "$POSTGRES_USER"',
     ]
     assert c["readinessProbe"]["tcpSocket"]["port"] == "postgres"
     mount = c["volumeMounts"][0]

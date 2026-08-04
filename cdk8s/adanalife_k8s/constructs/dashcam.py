@@ -3,7 +3,7 @@ the namespace PersistentVolumeClaim that the vlc-server pods mount read-only.
 
 These are DATA infra (they outlive the stateless app workloads), so they stay in
 infra even though the vlc-server *app* manifests now live in the tripbot repo:
-the PV/PVC are emitted into infra's DataChart / DashcamPVChart, while the vlc
+the PV/PVC are emitted into infra's DataChart / NfsPVChart, while the vlc
 Deployment that mounts the `vlc-dashcam` claim is synthesized from the tripbot
 repo and references it by name (a cross-repo coupling on the claim name, same as
 the materialized-Secret names).
@@ -21,7 +21,7 @@ def emit_dashcam_pvc(scope: Construct, env: EnvConfig) -> None:
     """The dashcam PVC — Argo-managed, emitted into DataChart (not the vlc app) so
     the stateless vlc Deployment can churn without disturbing it. Binds 1:1 by
     name (volumeName + storageClassName "") to the cluster-scoped NFS PV that's
-    provisioned out-of-band — see emit_dashcam_pv / `task k8s:<env>:dashcam-pv`.
+    provisioned out-of-band — see emit_dashcam_pv / `task k8s:<env>:nfs-pv`.
     No host specifics here, so it's safe in the committed dist. No-op on hostPath
     envs (local/dev), where the dashcam volume is an inline hostPath. Shared
     across platforms (ReadOnlyMany), so it stays a single non-per-platform PVC."""
@@ -46,9 +46,9 @@ def emit_dashcam_pvc(scope: Construct, env: EnvConfig) -> None:
 def emit_dashcam_pv(scope: Construct, env: EnvConfig) -> None:
     """The dashcam NFS PersistentVolume — cluster-scoped, host-specific bootstrap
     infrastructure deliberately kept OUTSIDE Argo's reconcile loop. It lives in
-    its own DashcamPVChart -> dist/<env>-dashcam-pv.k8s.yaml, which neither the
+    its own NfsPVChart -> dist/<env>-nfs-pv.k8s.yaml, which neither the
     apps nor data ApplicationSet globs, and is provisioned once per cluster via
-    `task k8s:<env>:dashcam-pv`. That task synths this with the real NFS coords
+    `task k8s:<env>:nfs-pv`. That task synths this with the real NFS coords
     from the gitignored cdk8s/dashcam-nfs.local.env; the committed golden carries
     the `<NFS server address>` / `<export path>` placeholders, so no host
     specifics ever land in git. Reclaim policy is Retain — the corpus lives on

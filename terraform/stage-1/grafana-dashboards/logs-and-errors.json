@@ -1,7 +1,7 @@
 {
-  "title": "07 — Logs & Errors",
+  "title": "08 — Logs & Errors",
   "uid": "logs-errors",
-  "tags": ["tripbot", "vlc-server", "logs"],
+  "tags": ["tripbot", "logs"],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "30s",

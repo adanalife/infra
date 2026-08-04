@@ -56,3 +56,15 @@ output "external_dns_user_name" {
 output "ci_terraform_role_name" {
   value = module.ci.ci_terraform_role_name
 }
+
+output "eso_reader_access_key_id" {
+  value     = aws_iam_access_key.eso_reader.id
+  sensitive = true
+}
+
+# Decrypt via `terraform output -raw eso_reader_secret | base64 -d |
+# keybase pgp decrypt` and feed into `task k8s:<env>:bootstrap-secrets`.
+output "eso_reader_encrypted_secret" {
+  value     = aws_iam_access_key.eso_reader.encrypted_secret
+  sensitive = true
+}

@@ -4,9 +4,9 @@
 # baked in) that the bundled HelmChartConfig dance can't easily reach.
 #
 # Workloads route through this via `ingressClassName: traefik` (set
-# on each app's Ingress, e.g. k8s/apps/tripbot/base/ingress.yaml).
-# The bundled Traefik lived in `kube-system` and was the default
-# IngressClass; this release matches both for drop-in compatibility.
+# on each app's Ingress). Installed into `kube-system` and registered
+# as the default IngressClass, matching the bundled Traefik it
+# replaces, so existing Ingresses need no change.
 
 deployment:
   # Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's

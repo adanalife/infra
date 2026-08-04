@@ -1,5 +1,4 @@
-# Cloudflare Tunnel + Access for the local k3d cluster
-# (treated as "stage-1" until a real prod cluster exists).
+# Cloudflare Tunnel + Access for stage-1.
 #
 # Public ingress flow:
 #   user → {tripbot,vlc}.whalecore.com
@@ -7,8 +6,6 @@
 #        → tunnel → in-cluster cloudflared Deployment
 #        → http://<svc>.default.svc.cluster.local:8080
 #
-# Companion stage-1 manifests are at k8s/platform/cloudflared/.
-# Operator runbook is in infra/README.md → "exposing services publicly".
 #
 # Why whalecore.com (and not a subzone of whereisdana.today): Cloudflare
 # Free only allows zone creation for root domains. Subdomain zones

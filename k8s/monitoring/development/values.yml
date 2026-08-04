@@ -1,6 +1,6 @@
 # Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
-# in-cluster collectors that fill the dashboards landed in
-# terraform/development/grafana-dashboards/:
+# in-cluster collectors that fill the dashboards defined in
+# terraform/stage-1/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
@@ -235,14 +235,9 @@ annotationAutodiscovery:
       regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
       action = "drop"
     }
-    rule {
-      // No-op in development (no Intel iGPU here) — kept to stay in sync
-      // with prod-1/values.yml. See that file for the v1.3.6 duplicate-
-      // emission rationale.
-      source_labels = ["__name__"]
-      regex = "xpum_per_engine_ratio|xpum_frequency_mhz"
-      action = "drop"
-    }
+    // No xpum_* drop rule, matching prod-1/values.yml — see that file for why
+    // the duplicate-emission warning is preferable to losing the metrics.
+    // Moot in development regardless: no Intel iGPU on the dev cluster.
 
 # kube-state-metrics is off by default in v4.x; deploying it here, then
 # clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's

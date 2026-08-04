@@ -15,7 +15,10 @@
 # GITHUB_TOKEN can't be used for those jobs because commits/PRs it creates
 # never trigger workflow runs, and cross-repo dispatch needs real auth.
 # Consumers: infra cdk8s-synth.yml (auto-synth push-back), infra bump-prs.yml
-# (prod version-bump PRs), tripbot release.yml (repository_dispatch to infra).
+# (prod version-bump PRs), tripbot release.yml (repository_dispatch to infra),
+# and release-please.yml in the release repos — as an ordinary actor the App
+# gets the release PR's checks run unheld (github-actions[bot] parks them at
+# action_required) and its tag fires release.yml without an explicit dispatch.
 
 provider "github" {
   owner = "adanalife"
@@ -28,7 +31,16 @@ provider "github" {
 
 locals {
   # Repos the automation App serves; it must be installed on each.
-  automation_repos = toset(["infra", "tripbot"])
+  automation_repos = toset([
+    "infra",
+    "tripbot",
+    "tripbot-console",
+    "obs",
+    "platform-gateway",
+    "website",
+    "video-pipeline",
+    "guessr",
+  ])
 }
 
 # App ID is not sensitive → Actions variable (vars.AUTOMATION_APP_ID).

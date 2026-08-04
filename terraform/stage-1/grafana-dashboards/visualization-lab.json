@@ -16,7 +16,7 @@
         "hide": false,
         "iconColor": "rgba(0, 211, 255, 1)",
         "target": {
-          "expr": "(max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}) - max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"} offset 5m)) > 0",
+          "expr": "(max by (deployment_environment) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}) - max by (deployment_environment) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"} offset 5m)) > 0",
           "step": "1m"
         },
         "titleFormat": "Stream started",
@@ -30,7 +30,7 @@
         "name": "deployment_environment",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info{service_name=~\"tripbot|vlc-server\"}, deployment_environment)",
+        "query": "label_values(target_info{service_name=\"tripbot\"}, deployment_environment)",
         "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
@@ -59,7 +59,7 @@
       "gridPos": { "x": 0, "y": 42, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/vlc data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
+        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/OBS data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. **The two Helix-errors panels read `platform_gateway_helix_errors_total`** (the platform-gateway is the single Helix caller), which is annotation-scraped and so carries `pod`, not `deployment_environment` — the env variable does not filter them. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
       }
     },
     {
@@ -97,7 +97,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"})",
+          "expr": "max by (deployment_environment) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})",
           "legendFormat": "[{{deployment_environment}}]"
         }
       ],
@@ -162,8 +162,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, status_code) (rate(twitch_helix_errors_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
-          "legendFormat": "{{endpoint}} ({{status_code}})"
+          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "legendFormat": "{{endpoint}} ({{status}})"
         }
       ],
       "options": {
@@ -237,7 +237,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "avg_over_time(obs_streaming_active{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[1d]) * 24",
+          "expr": "avg_over_time(obs_streaming_active{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1d]) * 24",
           "legendFormat": "hours/day"
         }
       ],
@@ -270,8 +270,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, status_code) (rate(twitch_helix_errors_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
-          "legendFormat": "{{endpoint}} ({{status_code}})"
+          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "legendFormat": "{{endpoint}} ({{status}})"
         }
       ],
       "options": {
@@ -301,7 +301,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "8 * rate(obs_stream_output_bytes{service_name=\"vlc-server\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])",
+          "expr": "8 * rate(obs_stream_output_bytes{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])",
           "legendFormat": "bitrate [{{deployment_environment}}]"
         }
       ],

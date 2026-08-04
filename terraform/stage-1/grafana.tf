@@ -1,11 +1,11 @@
 # Grafana Cloud dashboards-as-code via the grafana/grafana provider.
 #
 # The provider auths against the Grafana Cloud stack URL using a service
-# account API token, both pulled from `stage-1/grafana-cloud-api` (see
-# grafana-cloud.tf for the SM container + bootstrap notes). The provider
-# block lives here (not providers.tf) so prod-1's symlink to providers.tf
-# doesn't inherit a provider it has no resources for — same shape as the
-# cloudflare provider in cloudflare-pages.tf.
+# account API token, both pulled from the `/stage-1/grafana-cloud-api` SSM
+# parameter (declared in secrets.tf). The provider block lives here rather
+# than providers.tf so prod-1 — which keeps providers.tf identical but has no
+# Grafana resources — doesn't inherit a provider it can't authenticate, same
+# shape as the cloudflare provider in cloudflare-pages.tf.
 #
 # Dashboard JSON lives in ./grafana-dashboards/. Each `grafana_dashboard`
 # resource references a JSON file via `file()`; the JSON is the same
@@ -78,10 +78,9 @@ locals {
   # here in display order for readability only (a set is unordered).
   dashboard_files = toset([
     "launch-stream-at-a-glance",
-    "stream-health-vlc-server-to-obs",
-    "stream-health-playout-to-mediamtx", # playout OTLP push + MediaMTX relay scrape — the dashcam publish path that replaces vlc-server (playout 0.6.0 metrics)
+    "stream-health-playout-to-mediamtx", # playout OTLP push + MediaMTX relay scrape — the dashcam publish path into the relay (playout 0.6.0 metrics)
+    "stream-health-obs-to-platforms",    # the egress half: obs_* per-platform frame/bitrate/congestion health, emitted by tripbot
     "service-health-tripbot",
-    "service-health-vlc-server",
     "service-health-onscreens-server",
     "service-health-platform-gateway", # gateway façade request metrics + the Twitch Helix rate-limit/error panels that replace tripbot's in-process ones at cutover (platform-gateway#14)
     "igpu-performance",                # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
@@ -89,10 +88,14 @@ locals {
     "logs-and-errors",
     "go-runtime",
     "postgres-pool",
-    "tripbot-to-vlc-traffic",
     "http-routes",
     "application-latency-commands-and-db",
     "platform-services",
+    # The vlc-server graveyard (titled 90/92 so they sort below everything).
+    # vlc-server was deleted 2026-07-17 (tripbot#1135) and emits nothing;
+    # these two chart only vlc-server-labeled series and are permanently dark.
+    "service-health-vlc-server",
+    "tripbot-to-vlc-traffic",
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}

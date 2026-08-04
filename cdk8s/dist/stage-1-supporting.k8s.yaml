@@ -166,3 +166,17 @@ spec:
       storage: 1Ti
   storageClassName: ""
   volumeName: vlc-dashcam-nfs-stage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obs-music
+  namespace: stage-1
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ""
+  volumeName: obs-music-nfs-stage
