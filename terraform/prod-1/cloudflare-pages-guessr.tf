@@ -41,9 +41,18 @@ resource "cloudflare_pages_project" "guessr" {
   # tripbot's !report command), and a player reporting bad coordinates is the
   # same kind of thing as a !report — both are somebody telling us something is
   # wrong, in a channel that is read rather than watched.
+  #
+  # CLIPS is the round-set media, which the game reads at request time rather than
+  # carrying: functions/clips/[[path]].js streams each clip out of the bucket, so a
+  # round set no longer arrives by deploy. Without this binding every round is a
+  # black pane — and because Pages answers a path it holds no file for with the
+  # site's own HTML at status 200, a deployment missing it reads as healthy
+  # everywhere except the screen. Referenced rather than named here, unlike the
+  # staging copy, because cloudflare-r2-guessr-clips.tf is in this same state.
   deployment_configs = {
     production = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
+      r2_buckets   = { CLIPS = { name = cloudflare_r2_bucket.guessr_clips.name } }
       env_vars = {
         DISCORD_WEBHOOK = {
           type  = "secret_text"
@@ -53,6 +62,7 @@ resource "cloudflare_pages_project" "guessr" {
     }
     preview = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
+      r2_buckets   = { CLIPS = { name = cloudflare_r2_bucket.guessr_clips.name } }
       # Previews of *this* project get it too, for the same reason they get the
       # database: a binding missing here fails at request time on a URL somebody
       # is actually clicking through, which reads as a broken button rather than
