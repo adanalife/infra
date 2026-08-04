@@ -31,7 +31,16 @@ provider "github" {
 
 locals {
   # Repos the automation App serves; it must be installed on each.
-  automation_repos = toset(["infra", "tripbot", "video-pipeline", "guessr"])
+  automation_repos = toset([
+    "infra",
+    "tripbot",
+    "tripbot-console",
+    "obs",
+    "platform-gateway",
+    "website",
+    "video-pipeline",
+    "guessr",
+  ])
 }
 
 # App ID is not sensitive → Actions variable (vars.AUTOMATION_APP_ID).
