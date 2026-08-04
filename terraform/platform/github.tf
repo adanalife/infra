@@ -73,8 +73,8 @@ resource "github_actions_secret" "automation_app_private_key" {
 # excluded by author instead, in each repo's changelog-number.yml. Seeding this
 # means the next gate that needs the App does not have to relearn any of it.
 resource "github_dependabot_secret" "automation_app_private_key" {
-  for_each        = local.automation_repos
-  repository      = each.value
-  secret_name     = "AUTOMATION_APP_PRIVATE_KEY"
-  plaintext_value = data.aws_ssm_parameter.github_automation_app_key.value
+  for_each    = local.automation_repos
+  repository  = each.value
+  secret_name = "AUTOMATION_APP_PRIVATE_KEY"
+  value       = data.aws_ssm_parameter.github_automation_app_key.value
 }
