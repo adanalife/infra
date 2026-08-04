@@ -24,9 +24,7 @@ resource "cloudflare_pages_project" "guessr" {
   # The answer coordinates, which is what makes the game's one endpoint
   # (functions/api/score.js) possible: the round manifest the browser
   # downloads carries no lat/lng, so a score can't be read out of devtools
-  # or forged. Preview gets the same database — the previews that matter
-  # land in the staging project, but a preview deploy here with no binding
-  # would fail every guess rather than say why.
+  # or forged.
   #
   # The Discord webhook is for the coord-report button: a player who recognises
   # a street can say the round's coordinates are wrong, and a Pages Function is
@@ -49,24 +47,21 @@ resource "cloudflare_pages_project" "guessr" {
   # site's own HTML at status 200, a deployment missing it reads as healthy
   # everywhere except the screen. Referenced rather than named here, unlike the
   # staging copy, because cloudflare-r2-guessr-clips.tf is in this same state.
+  #
+  # Production is the only environment declared, so a preview deploy of *this*
+  # project gets no bindings and would fail every guess. Nothing deploys one —
+  # per-PR previews land on the staging project
+  # (terraform/stage-1/cloudflare-pages-guessr.tf) and a tag deploys this one to
+  # its production environment — and a second environment cannot be declared
+  # anyway: the cloudflare provider serializes two deployment_configs
+  # environments holding identical binding values by emitting the second as `{}`,
+  # which Cloudflare rejects with `Invalid R2 bucket name ()`. That fails the
+  # whole PATCH, so the bindings below don't land either. Still true in 5.22.0,
+  # so a provider bump doesn't lift this.
   deployment_configs = {
     production = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
       r2_buckets   = { CLIPS = { name = cloudflare_r2_bucket.guessr_clips.name } }
-      env_vars = {
-        DISCORD_WEBHOOK = {
-          type  = "secret_text"
-          value = data.aws_ssm_parameter.discord_alerts_webhook.value
-        }
-      }
-    }
-    preview = {
-      d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers.id } }
-      r2_buckets   = { CLIPS = { name = cloudflare_r2_bucket.guessr_clips.name } }
-      # Previews of *this* project get it too, for the same reason they get the
-      # database: a binding missing here fails at request time on a URL somebody
-      # is actually clicking through, which reads as a broken button rather than
-      # an unconfigured preview.
       env_vars = {
         DISCORD_WEBHOOK = {
           type  = "secret_text"
