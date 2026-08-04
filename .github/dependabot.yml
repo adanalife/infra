@@ -3,10 +3,25 @@
 
 version: 2
 updates:
+  # Minor and patch bumps batch into one PR per run; a major is left out of
+  # every group so it arrives on its own, where a breaking change is
+  # attributable to a single dependency instead of hiding among a dozen safe
+  # ones. Security updates ignore `groups` entirely and always arrive alone.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: daily
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  # The provider bumps carry no group, deliberately: a provider minor can
+  # rewrite a plan, and the review here is reading that plan against real
+  # infrastructure. One provider per PR keeps a surprising diff attributable,
+  # and keeps a prod-1 plan from riding along with a core one.
   - package-ecosystem: terraform
     directory: terraform/core
     schedule:
@@ -27,3 +42,10 @@ updates:
     directory: cdk8s
     schedule:
       interval: daily
+    groups:
+      cdk8s:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
