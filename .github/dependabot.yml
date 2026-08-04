@@ -20,22 +20,47 @@ updates:
       actions:
         patterns:
           - "*"
-  # The provider bumps carry no group, deliberately: a provider minor can
-  # rewrite a plan, and the review here is reading that plan against real
-  # infrastructure. One provider per PR keeps a surprising diff attributable,
-  # and keeps a prod-1 plan from riding along with a core one.
+  # Providers group per directory, never across them: the review here is reading
+  # a plan against real infrastructure, so one PR per environment keeps a
+  # surprising diff attributable to one env's state and keeps a prod-1 plan from
+  # riding along with a core one. The group name carries the env so the PR title
+  # says which plan it is.
+  #
+  # Majors stay ungrouped: a provider major can rewrite a plan wholesale, and
+  # that review wants a single dependency in front of it.
   - package-ecosystem: terraform
     directory: terraform/core
     schedule:
       interval: daily
+    groups:
+      core-providers:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: terraform
     directory: terraform/stage-1
     schedule:
       interval: daily
+    groups:
+      stage-1-providers:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: terraform
     directory: terraform/prod-1
     schedule:
       interval: daily
+    groups:
+      prod-1-providers:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   # The cdk8s CLI and its jsii toolchain. Dependabot has no mise backend, so
   # this is only reachable because the CLI is pinned in package-lock.json
   # rather than cdk8s/.mise.toml. cdk8s-synth re-synths on the bump PR, so a
