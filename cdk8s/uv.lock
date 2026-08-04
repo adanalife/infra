@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     { name = "kubernetes" },
     { name = "pytest" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -27,6 +28,7 @@ requires-dist = [
 dev = [
     { name = "kubernetes", specifier = ">=31" },
     { name = "pytest", specifier = ">=8" },
+    { name = "pyyaml", specifier = ">=6" },
 ]
 
 [[package]]
