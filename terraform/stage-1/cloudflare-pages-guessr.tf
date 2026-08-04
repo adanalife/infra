@@ -82,6 +82,26 @@ resource "cloudflare_pages_project" "guessr_staging" {
       }
     }
   }
+
+  # deployment_configs is set on the project by hand; terraform can't write it.
+  # Serializing an update, the cloudflare provider emits any binding value that
+  # matches its sibling environment's as `{}` — which is every binding here,
+  # since both environments carry the same three — Cloudflare answers `Invalid R2
+  # bucket name ()`, and the whole PATCH fails, so nothing lands (5.19.1 through
+  # 5.22.0, whose encoders are byte-identical). Deleting the block instead is
+  # worse: an absent deployment_configs plans as unknown, which the provider
+  # cannot convert at all.
+  #
+  # So the block above is a declaration of what this project is meant to carry,
+  # and changing a binding means the dashboard — Workers & Pages →
+  # adanalife-guessr-staging → Settings → Bindings, then a redeploy for it to
+  # take effect. Both environments need each binding: main deploys to this
+  # project's production environment and per-PR previews land on its branch
+  # aliases. Drop this lifecycle block when the provider can write bindings again
+  # and the next plan will show whatever drifted.
+  lifecycle {
+    ignore_changes = [deployment_configs]
+  }
 }
 
 # Seeded by `task answers:stage:push` from the guessr repo. See the production
