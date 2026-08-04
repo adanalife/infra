@@ -57,3 +57,24 @@ resource "github_actions_secret" "automation_app_private_key" {
   secret_name = "AUTOMATION_APP_PRIVATE_KEY"
   value       = data.aws_ssm_parameter.github_automation_app_key.value
 }
+
+# The same key again, in Dependabot's store rather than Actions'.
+#
+# Two stores exist because a Dependabot-authored `pull_request` event is not
+# granted Actions secrets — so a workflow that mints the App token sees
+# `vars.AUTOMATION_APP_ID` resolve (variables *are* granted) while
+# `secrets.AUTOMATION_APP_PRIVATE_KEY` arrives empty, and
+# create-github-app-token fails the run on a required check. That is the whole
+# reason a bump PR could sit red on a gate that had nothing to do with the bump.
+#
+# Mirroring the key here is what makes a token-minting gate work on a bump PR at
+# all. It is deliberately not the fix for jobs that had no business running on
+# one — a bump PR carries no changelog fragment to number, so that job is
+# excluded by author instead, in each repo's changelog-number.yml. Seeding this
+# means the next gate that needs the App does not have to relearn any of it.
+resource "github_dependabot_secret" "automation_app_private_key" {
+  for_each        = local.automation_repos
+  repository      = each.value
+  secret_name     = "AUTOMATION_APP_PRIVATE_KEY"
+  plaintext_value = data.aws_ssm_parameter.github_automation_app_key.value
+}
