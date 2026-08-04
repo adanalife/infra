@@ -49,9 +49,21 @@ resource "cloudflare_pages_project" "guessr_staging" {
   #
   # Both tiers post to the same channel, so the endpoint has to say which tier a
   # report came from or a staging test is indistinguishable from a real report.
+  #
+  # CLIPS is the round-set media, which the game reads at request time rather than
+  # carrying: functions/clips/[[path]].js streams each clip out of the bucket, so a
+  # round set no longer arrives by deploy. Without this binding every round is a
+  # black pane — and because Pages answers a path it holds no file for with the
+  # site's own HTML at status 200, a deployment missing it reads as healthy
+  # everywhere except the screen. By name rather than by reference: the bucket is
+  # declared in terraform/prod-1/cloudflare-r2-guessr-clips.tf, where the
+  # cloudflare provider already lives, and state is split per environment so there
+  # is nothing here to point at. One bucket for all three tiers is deliberate —
+  # that file says why the media is shared where the answers are not.
   deployment_configs = {
     production = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers_staging.id } }
+      r2_buckets   = { CLIPS = { name = "adanalife-guessr-clips" } }
       env_vars = {
         DISCORD_WEBHOOK = {
           type  = "secret_text"
@@ -61,6 +73,7 @@ resource "cloudflare_pages_project" "guessr_staging" {
     }
     preview = {
       d1_databases = { ANSWERS = { id = cloudflare_d1_database.guessr_answers_staging.id } }
+      r2_buckets   = { CLIPS = { name = "adanalife-guessr-clips" } }
       env_vars = {
         DISCORD_WEBHOOK = {
           type  = "secret_text"
