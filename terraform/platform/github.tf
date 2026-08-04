@@ -58,23 +58,19 @@ resource "github_actions_secret" "automation_app_private_key" {
   value       = data.aws_ssm_parameter.github_automation_app_key.value
 }
 
-# The same key again, in Dependabot's store rather than Actions'.
+# Dependabot keeps a secret store of its own, and nothing here writes to it.
 #
-# Two stores exist because a Dependabot-authored `pull_request` event is not
-# granted Actions secrets — so a workflow that mints the App token sees
-# `vars.AUTOMATION_APP_ID` resolve (variables *are* granted) while
-# `secrets.AUTOMATION_APP_PRIVATE_KEY` arrives empty, and
-# create-github-app-token fails the run on a required check. That is the whole
-# reason a bump PR could sit red on a gate that had nothing to do with the bump.
+# Worth knowing before adding it back: a Dependabot-authored `pull_request` event
+# is granted Actions *variables* but not Actions *secrets*, so a workflow minting
+# the App token on such a PR sees `vars.AUTOMATION_APP_ID` resolve while
+# `secrets.AUTOMATION_APP_PRIVATE_KEY` arrives empty and the mint step fails.
+# Mirroring the key into Dependabot's store is the fix for a gate that genuinely
+# needs the App on a bump PR — and it costs the App a `dependabot_secrets`
+# permission it does not have (the installation carries actions, actions_variables,
+# contents, metadata, pull_requests, secrets), which means an org-level approval of
+# the permission change, not just a terraform edit.
 #
-# Mirroring the key here is what makes a token-minting gate work on a bump PR at
-# all. It is deliberately not the fix for jobs that had no business running on
-# one — a bump PR carries no changelog fragment to number, so that job is
-# excluded by author instead, in each repo's changelog-number.yml. Seeding this
-# means the next gate that needs the App does not have to relearn any of it.
-resource "github_dependabot_secret" "automation_app_private_key" {
-  for_each    = local.automation_repos
-  repository  = each.value
-  secret_name = "AUTOMATION_APP_PRIVATE_KEY"
-  value       = data.aws_ssm_parameter.github_automation_app_key.value
-}
+# No gate needs it today. The jobs that were failing had no business running on a
+# bump PR at all — a bump carries no changelog fragment to number, and cannot move
+# a contract file synced from a sibling repo — so each is excluded by author in its
+# own workflow instead. That keeps the App key out of Dependabot-triggered runs.
