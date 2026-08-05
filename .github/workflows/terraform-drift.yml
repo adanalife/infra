@@ -73,6 +73,6 @@ jobs:
         if: steps.gcp_auth.outcome == 'success'
         run: echo "GOOGLE_OAUTH_ACCESS_TOKEN=${{ steps.gcp_auth.outputs.access_token }}" >> "$GITHUB_ENV"
       - name: Check for drift
-        uses: dflook/terraform-check@v2
+        uses: dflook/terraform-check@v3
         with:
           path: ${{ matrix.terraform-dirs }}
