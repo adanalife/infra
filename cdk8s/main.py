@@ -23,6 +23,7 @@ from adanalife_k8s.charts import (
     NfsPVChart,
     DataChart,
     MediamtxChart,
+    MusicLocalizeChart,
     PlatformArgoChart,
     SupportingChart,
     UpsMonitorChart,
@@ -62,6 +63,11 @@ for name in targets:
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
         NfsPVChart(app, f"{name}-nfs-pv", env=env)
+        # The NFS->local music mirror Job — same shape (host-specific, outside
+        # Argo), its own dist/<env>-music-localize.k8s.yaml applied via
+        # `task k8s:<env>:music-localize`. Fills the obs-music-local claim the
+        # album bed plays from; re-run after staging new albums.
+        MusicLocalizeChart(app, f"{name}-music-localize", env=env)
     # The NFS->local corpus copy Job (only when an env adopts local serving) — also
     # host-specific + outside Argo, its own dist/<env>-dashcam-localize.k8s.yaml
     # applied via `task k8s:<env>:dashcam-localize`. The matching vlc-dashcam-local

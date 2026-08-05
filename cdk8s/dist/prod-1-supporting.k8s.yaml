@@ -211,3 +211,16 @@ spec:
       storage: 50Gi
   storageClassName: ""
   volumeName: obs-music-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obs-music-local
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-path

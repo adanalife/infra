@@ -23,7 +23,12 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_pvc,
 )
 from adanalife_k8s.constructs.mediamtx import Mediamtx
-from adanalife_k8s.constructs.music import emit_music_pv, emit_music_pvc
+from adanalife_k8s.constructs.music import (
+    emit_music_local_pvc,
+    emit_music_localize_job,
+    emit_music_pv,
+    emit_music_pvc,
+)
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
@@ -71,9 +76,12 @@ class SupportingChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
-            # The background-music share OBS mounts — same story: namespace-local
-            # claim, so it follows the app namespace rather than the data one.
+            # The background-music volumes OBS and tripbot mount — same story:
+            # namespace-local claims, so they follow the app namespace rather than
+            # the data one. The local one is what the bed plays from; the NFS one is
+            # the staging side it's mirrored from.
             emit_music_pvc(self, env)
+            emit_music_local_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -130,9 +138,11 @@ class DataChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
-            # The background-music share OBS mounts (see SupportingChart for the
-            # isolated-DB case).
+            # The background-music volumes OBS and tripbot mount — the node-local
+            # one the bed plays from, plus the NFS one it's mirrored from (see
+            # SupportingChart for the isolated-DB case).
             emit_music_pvc(self, env)
+            emit_music_local_pvc(self, env)
 
 
 class MediamtxChart(Chart):
@@ -180,6 +190,19 @@ class DashcamLocalizeChart(Chart):
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
         emit_dashcam_localize_job(self, env)
+
+
+class MusicLocalizeChart(Chart):
+    """The one-shot Job that mirrors the NFS music share onto the node-local
+    `obs-music-local` PVC the album bed plays from — host-specific (carries the NAS
+    coords), so like DashcamLocalizeChart it stays OUT of Argo in its own
+    dist/<env>-music-localize.k8s.yaml and is applied on demand via
+    `task k8s:<env>:music-localize`. Run it after staging new albums onto the share
+    with `bin/stage-streambeats` (tripbot repo)."""
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        emit_music_localize_job(self, env)
 
 
 class UpsMonitorChart(Chart):

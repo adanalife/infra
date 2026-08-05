@@ -1,0 +1,69 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: music-localize
+  namespace: prod-1
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      containers:
+        - command:
+            - sh
+            - -c
+            - |
+              set -eu
+              SRC="${SRC:-/nfs}"
+              DST="${DST:-/local}"
+              TMP=$DST/.partial
+              mkdir -p "$TMP"
+              cd "$SRC"
+
+              fsize() {
+                if [ -f "$1" ]; then
+                  wc -c <"$1" | tr -d ' '
+                else
+                  echo -1
+                fi
+              }
+
+              echo "music-localize: $(find . -type f | wc -l | tr -d ' ') file(s) on NFS -> $DST"
+              find . -type f -print | while read -r f; do
+                if [ "$(fsize "$f")" = "$(fsize "$DST/$f")" ]; then
+                  continue
+                fi
+                echo "music-localize: $f"
+                mkdir -p "$DST/$(dirname "$f")"
+                cp "$f" "$TMP/staging"
+                mv "$TMP/staging" "$DST/$f"
+              done
+              rmdir "$TMP" 2>/dev/null || true
+              echo "music-localize done: $(find "$DST" -type f | wc -l | tr -d ' ') file(s) local"
+          image: ghcr.io/adanalife/mirror/ubuntu:24.04
+          name: localize
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /nfs
+              name: nfs
+              readOnly: true
+            - mountPath: /local
+              name: local
+      nodeSelector:
+        kubernetes.io/hostname: adanalife-minipc
+      priorityClassName: dashcam-cv-low
+      restartPolicy: Never
+      volumes:
+        - name: nfs
+          nfs:
+            path: <music export path>
+            readOnly: true
+            server: <NFS server address>
+        - name: local
+          persistentVolumeClaim:
+            claimName: obs-music-local
