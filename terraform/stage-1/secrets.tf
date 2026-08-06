@@ -47,6 +47,9 @@
 #     token above cannot reach it: Grafana → Testing & synthetics → Config →
 #     Access tokens. The tenant is already installed; generating a token does
 #     not re-install it.
+#   - stage-1/cloudflare-d1-read — a bare token. Scope it to D1 read and
+#     nothing else. D1 tokens cannot be scoped per-database, so this reaches
+#     both tiers' databases; read-only is what bounds it.
 #   - k8s/grafana-cloud-otlp — JSON {"OTEL_EXPORTER_OTLP_ENDPOINT": ...,
 #     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Basic <base64(id:key)>"}.
 #   - k8s/sentry-* — JSON {"SENTRY_DSN": "https://<key>@<org>.ingest.sentry.io/<project>"}.
@@ -77,6 +80,7 @@ locals {
     "stage-1/cloudflare-api-token"         = "Cloudflare API token used by the cloudflare provider."
     "stage-1/grafana-cloud-api"            = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
     "stage-1/grafana-sm-access"            = "Synthetic Monitoring access token for the grafana provider's sm_access_token."
+    "stage-1/cloudflare-d1-read"           = "Cloudflare API token, D1 read only, for the Grafana Infinity datasource over guessr's play data."
     "stage-1/ntfy-critical-webhook"        = "ntfy webhook URL for the Grafana independent critical-alert contact point."
     "stage-1/healthchecks-deadman-ping"    = "healthchecks.io ping URL for the Grafana alerting deadman switch."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
@@ -210,6 +214,13 @@ data "aws_ssm_parameter" "grafana_cloud_api" {
 # API, with a token minted from its own settings page. See grafana-guessr.tf.
 data "aws_ssm_parameter" "grafana_sm_access" {
   name = "/stage-1/grafana-sm-access"
+}
+
+# Read-only against D1, for the Grafana datasource that charts guessr's play
+# data. Scoped to D1 alone: the databases it can reach hold every recorded
+# guess, and nothing charting them needs to write.
+data "aws_ssm_parameter" "cloudflare_d1_read" {
+  name = "/stage-1/cloudflare-d1-read"
 }
 
 data "aws_ssm_parameter" "discord_alerts_webhook" {
