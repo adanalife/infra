@@ -113,6 +113,17 @@ resource "cloudflare_d1_database" "guessr_answers" {
   read_replication = {
     mode = "disabled"
   }
+
+  # The hint is create-time-only and the provider never reads it back into
+  # state (observed on 5.22.0), so a declared value plans as an addition — and
+  # an addition to a create-time attribute is a forced REPLACEMENT of this
+  # database, which holds `plays`: the one table nothing can regenerate.
+  # Ignored so the declaration keeps documenting what the database was created
+  # with, without arming a destroy the moment prod-1's provider catches up to
+  # stage-1's (where the plan-time replacement was first observed).
+  lifecycle {
+    ignore_changes = [primary_location_hint]
+  }
 }
 
 resource "cloudflare_pages_domain" "guessr" {
