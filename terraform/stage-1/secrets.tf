@@ -57,6 +57,12 @@
 #     tripbot's !report command (via ESO). Same value seeded in adanalife-prod.
 #   - k8s/*/ghcr-pull-token — JSON {"username": ..., "token": ...} — a
 #     fine-grained GitHub token with read:packages on the package.
+#   - k8s/guessr/cloudflare-publish — JSON {"CLOUDFLARE_API_TOKEN": ...,
+#     "CLOUDFLARE_ACCOUNT_ID": ...}. Token scopes: Workers R2 Storage:Edit +
+#     D1:Edit. Consumed by the guessr round-generation CronJob in
+#     video-pipeline's cdk8s; publish.sh only ever names the staging D1 —
+#     D1 tokens cannot be scoped per-database, so that posture lives in the
+#     script, not the token.
 #   - ESO picks up new values within 1h; force with
 #     `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`.
 
@@ -80,6 +86,7 @@ locals {
     "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
     "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
     "k8s/tripbot/discord-bot-token"        = "Discord bot token for the staging tripbot Discord session."
+    "k8s/guessr/cloudflare-publish"        = "Cloudflare token pair for the guessr round-generation CronJob (video-pipeline cdk8s). Keys: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID."
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
