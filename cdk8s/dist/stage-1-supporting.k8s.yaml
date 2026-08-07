@@ -35,23 +35,6 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: sentry-vlc-server
-  namespace: stage-1
-spec:
-  dataFrom:
-    - extract:
-        key: /k8s/sentry-vlc-server
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: SecretStore
-    name: aws-parameterstore
-  target:
-    creationPolicy: Owner
-    name: sentry-vlc-server
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
   name: sentry-onscreens-server
   namespace: stage-1
 spec:
