@@ -16,4 +16,10 @@ module "env_base" {
   secondary_subdomain                = local.secondary_subdomain
   static_site_public_dir             = var.static_site_public_dir
   primary_acm_cert_alternative_names = var.primary_acm_cert_alternative_names
+
+  # A deliberate divergence from the prod-1 sibling, not drift: stage is where
+  # a broken trust policy is cheap to discover, so keyless CI auth proves out
+  # here before prod-1 or core opt in. Mirror this line once the infra
+  # workflows actually federate into stage.
+  github_oidc_subjects = ["repo:adanalife/infra:*"]
 }
