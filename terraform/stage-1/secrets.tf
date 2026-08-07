@@ -133,6 +133,26 @@ resource "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
   }
 }
 
+# JSON array of email addresses, e.g. ["you@example.com"]. Whoever may open
+# guessr's /admin/ — the Access policy in cloudflare-pages-guessr.tf includes
+# one rule per address, and Access mails a one-time PIN to it. Here rather than
+# in the terraform because this repo is public and these are personal addresses.
+#
+# Same shape as the allowlist above, and the same reason for being outside the
+# map: the placeholder has to be valid JSON that jsondecode can read pre-seed.
+# Unlike the allowlist, the empty placeholder is NOT a usable value — a policy
+# with no rules is rejected — so the policy carries a precondition that says so.
+resource "aws_ssm_parameter" "guessr_admin_emails" {
+  name        = "/stage-1/guessr-admin-emails"
+  description = "Email addresses allowed through Cloudflare Access to guessr's /admin/. JSON array of addresses."
+  type        = "SecureString"
+  value       = "[]"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # k8s/postgres/credentials — terraform OWNS the value: random_pet generates a
 # passphrase-style password, jsonencode wraps it with the user/db fields. ESO
 # materializes it into the `postgres-secret` Secret in the stage-1-data
@@ -204,6 +224,10 @@ data "aws_ssm_parameter" "cloudflare_api_token" {
 
 data "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
   name = aws_ssm_parameter.stage_1_allowlist_cidrs.name
+}
+
+data "aws_ssm_parameter" "guessr_admin_emails" {
+  name = aws_ssm_parameter.guessr_admin_emails.name
 }
 
 data "aws_ssm_parameter" "grafana_cloud_api" {
