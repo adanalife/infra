@@ -26,6 +26,12 @@ data "grafana_synthetic_monitoring_probes" "main" {}
 # Two minutes rather than one, over three probes: Grafana Cloud bills a check
 # per probe per execution, and this pace leaves room for a second check without
 # revisiting the quota.
+#
+# Probe names are AWS-region-derived, not city-of-your-choosing — the data
+# source keys on the exact name, and a wrong one fails the plan. The current
+# list is `GET /api/v1/probe/list` on the SM API. Both coasts plus one
+# transatlantic: a Cloudflare edge failure is regional, so a single-origin
+# check reports green through one.
 resource "grafana_synthetic_monitoring_check" "guessr" {
   job       = "guessr"
   target    = "https://guessr.dana.lol/api/leaderboard?board=daily"
@@ -33,8 +39,8 @@ resource "grafana_synthetic_monitoring_check" "guessr" {
   frequency = 120000
   timeout   = 10000
   probes = [
-    data.grafana_synthetic_monitoring_probes.main.probes["Atlanta"],
-    data.grafana_synthetic_monitoring_probes.main.probes["NewYork"],
+    data.grafana_synthetic_monitoring_probes.main.probes["NorthVirginia"],
+    data.grafana_synthetic_monitoring_probes.main.probes["Oregon"],
     data.grafana_synthetic_monitoring_probes.main.probes["London"],
   ]
   labels = {
