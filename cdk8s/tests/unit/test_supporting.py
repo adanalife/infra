@@ -25,8 +25,8 @@ def _by(objs, kind, name):
 def test_shared_observability_secrets_and_issuers_on_eso_env():
     objs = _synth("prod-1")
     es = {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
-    # cross-cutting observability secrets vlc/onscreens/tripbot envFrom
-    assert {"grafana-cloud-otlp", "sentry-tripbot", "sentry-vlc-server"} <= es
+    # cross-cutting observability secrets onscreens/tripbot envFrom
+    assert {"grafana-cloud-otlp", "sentry-tripbot", "sentry-onscreens-server"} <= es
     # cert-manager app issuers (LE staging + prod) + their Route53 creds
     issuers = {o["metadata"]["name"] for o in objs if o["kind"] == "Issuer"}
     assert {"letsencrypt-staging-route53", "letsencrypt-route53"} <= issuers
