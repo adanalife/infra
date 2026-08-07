@@ -30,7 +30,7 @@ resource "aws_route53_record" "primary_naked_redirect" {
 
 resource "aws_cloudfront_distribution" "primary_naked_redirect" {
   origin {
-    domain_name = aws_s3_bucket.primary_naked_redirect.website_endpoint
+    domain_name = aws_s3_bucket_website_configuration.primary_naked_redirect.website_endpoint
     origin_id   = local.s3_origin_id
 
     custom_origin_config {
@@ -114,7 +114,7 @@ resource "aws_route53_record" "secondary_naked_redirect" {
 
 resource "aws_cloudfront_distribution" "secondary_naked_redirect" {
   origin {
-    domain_name = aws_s3_bucket.secondary_naked_redirect.website_endpoint
+    domain_name = aws_s3_bucket_website_configuration.secondary_naked_redirect.website_endpoint
     origin_id   = local.s3_origin_id_secondary
 
     custom_origin_config {
@@ -192,7 +192,7 @@ resource "aws_route53_record" "status_redirect" {
 
 resource "aws_cloudfront_distribution" "status_redirect" {
   origin {
-    domain_name = aws_s3_bucket.status_redirect.website_endpoint
+    domain_name = aws_s3_bucket_website_configuration.status_redirect.website_endpoint
     origin_id   = local.s3_origin_id_status
 
     custom_origin_config {
