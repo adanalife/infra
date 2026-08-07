@@ -29,6 +29,12 @@ provider "grafana" {
   # aliased provider because every Grafana resource in this environment shares
   # one stack. See grafana-guessr.tf for the check itself.
   sm_access_token = data.aws_ssm_parameter.grafana_sm_access.value
+  # SM access tokens are region-scoped, and the provider's default sm_url is
+  # the region-less endpoint, which rejects a regional token as
+  # "invalid API token" — a 403 that reads like a bad credential. The region
+  # is the tail of the stack's Prometheus host
+  # (prometheus-prod-66-prod-us-east-3 → us-east-3).
+  sm_url = "https://synthetic-monitoring-api-us-east-3.grafana.net"
 }
 
 # Datasource UIDs follow the pattern grafanacloud-<slug>-{prom,logs,traces}
