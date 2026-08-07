@@ -1,11 +1,11 @@
 # CI outputs (ci_user_access_key, ci_user_secret, ci_role_arn) live in ci.tf.
 
 output "default_vpc_cidr_block" {
-  value = module.default_vpc.default_vpc_cidr_block
+  value = aws_default_vpc.default.cidr_block
 }
 
 output "default_vpc_id" {
-  value = module.default_vpc.default_vpc_id
+  value = aws_default_vpc.default.id
 }
 
 output "primary_zone_id" {
