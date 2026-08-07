@@ -146,3 +146,166 @@ spec:
       targetPort: postgres
   selector:
     app: postgres
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: pg
+    app.kubernetes.io/part-of: tripbot
+  name: pg-app-creds
+  namespace: stage-1-data
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-parameterstore
+    kind: SecretStore
+  target:
+    name: pg-app-creds
+    template:
+      type: kubernetes.io/basic-auth
+      data:
+        username: "{{ .username }}"
+        password: "{{ .password }}"
+  data:
+    - secretKey: username
+      remoteRef:
+        key: /k8s/postgres/credentials
+        property: user
+    - secretKey: password
+      remoteRef:
+        key: /k8s/postgres/credentials
+        property: password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: pg
+    app.kubernetes.io/part-of: tripbot
+  name: postgres-wal-s3-credentials
+  namespace: stage-1-data
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-parameterstore
+    kind: SecretStore
+  target:
+    name: postgres-wal-s3
+    template:
+      type: Opaque
+      data:
+        ACCESS_KEY_ID: "{{ .ACCESS_KEY_ID }}"
+        SECRET_ACCESS_KEY: "{{ .SECRET_ACCESS_KEY }}"
+        REGION: "{{ .REGION }}"
+  data:
+    - secretKey: ACCESS_KEY_ID
+      remoteRef:
+        key: /k8s/postgres/wal-s3-credentials
+        property: ACCESS_KEY_ID
+    - secretKey: SECRET_ACCESS_KEY
+      remoteRef:
+        key: /k8s/postgres/wal-s3-credentials
+        property: SECRET_ACCESS_KEY
+    - secretKey: REGION
+      remoteRef:
+        key: /k8s/postgres/wal-s3-credentials
+        property: REGION
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  labels:
+    app.kubernetes.io/name: pg
+    app.kubernetes.io/part-of: tripbot
+  name: pg-store
+  namespace: stage-1-data
+spec:
+  configuration:
+    destinationPath: s3://adanalife-stage-1-postgres-wal/
+    s3Credentials:
+      accessKeyId:
+        name: postgres-wal-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: postgres-wal-s3
+        key: SECRET_ACCESS_KEY
+      region:
+        name: postgres-wal-s3
+        key: REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: 30d
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  labels:
+    app.kubernetes.io/name: pg
+    app.kubernetes.io/part-of: tripbot
+  name: pg
+  namespace: stage-1-data
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.14-202607130907-standard-bookworm
+  storage:
+    size: 10Gi
+    storageClass: local-path
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 2Gi
+  postgresql:
+    parameters:
+      archive_timeout: 5min
+      maintenance_work_mem: 128MB
+      max_parallel_maintenance_workers: "0"
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: pg-store
+        serverName: pg-stage-1-v1
+  bootstrap:
+    initdb:
+      database: tripbot
+      owner: tripbot
+      secret:
+        name: pg-app-creds
+      import:
+        type: microservice
+        databases:
+          - tripbot
+        source:
+          externalCluster: legacy
+  externalClusters:
+    - name: legacy
+      connectionParameters:
+        host: postgres
+        user: tripbot
+        dbname: tripbot
+      password:
+        name: pg-app-creds
+        key: password
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  labels:
+    app.kubernetes.io/name: pg
+    app.kubernetes.io/part-of: tripbot
+  name: pg-daily
+  namespace: stage-1-data
+spec:
+  schedule: 0 0 4 * * *
+  cluster:
+    name: pg
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  immediate: true
+  backupOwnerReference: self
