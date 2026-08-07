@@ -223,16 +223,28 @@ resource "cloudflare_zero_trust_access_policy" "guessr_admin" {
   ]
 
   # An Access policy with no include rules is not a policy, and the API's own
-  # error for it says nothing about where the list comes from. Seed the
-  # parameter first:
+  # error for it says nothing about where the list comes from -- hence this
+  # precondition, which names the parameter instead.
   #
+  # It takes two applies, and the order is the part worth writing down. The
+  # parameter is terraform's (secrets.tf), so seeding it by hand first is what
+  # NOT to do: `put-parameter` creates it outside state and the next apply dies
+  # on `ParameterAlreadyExists` before reaching anything here. Let terraform
+  # create it empty, which fails on this precondition, then fill it and go again:
+  #
+  #   task tf:stage:apply    # creates the parameter, stops here
   #   aws-vault exec adanalife-stage -- aws ssm put-parameter \
   #     --name /stage-1/guessr-admin-emails --type SecureString --overwrite \
   #     --value '["you@example.com"]'
+  #   task tf:stage:apply    # the policy, the application, the AUD output
+  #
+  # Already seeded it by hand? `terraform import
+  # aws_ssm_parameter.guessr_admin_emails /stage-1/guessr-admin-emails` adopts it
+  # in one step, and `ignore_changes = [value]` means the addresses survive.
   lifecycle {
     precondition {
       condition     = length(local.guessr_admin_emails) > 0
-      error_message = "Seed /stage-1/guessr-admin-emails with a JSON array of email addresses before applying."
+      error_message = "Seed /stage-1/guessr-admin-emails with a JSON array of email addresses, then apply again — see the runbook above this precondition."
     }
   }
 }
