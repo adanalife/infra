@@ -10,6 +10,26 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+# The fleet-wide supported-platform set, owned by platform-gateway (its Go
+# adapter registry is the source of truth) and synced into this repo's
+# platforms.json via `task platforms:sync`. Drives the per-platform mediamtx
+# relay fan-out + every env's `platforms` (validated a subset below). The
+# gateway/obs/playout Applications self-discover from their own repos' indexes,
+# not from this file. Never hand-edit platforms.json — add an adapter in the
+# gateway + re-sync.
+_PLATFORMS_FILE = Path(__file__).resolve().parents[2] / "platforms.json"
+
+
+def _load_supported_platforms() -> tuple[str, ...]:
+    import json
+
+    with _PLATFORMS_FILE.open() as f:
+        return tuple(json.load(f)["platforms"])
+
+
+SUPPORTED_PLATFORMS = _load_supported_platforms()
 
 
 @dataclass(frozen=True)
@@ -53,6 +73,15 @@ class EnvConfig:
     nfs_pv_name: str = (
         "vlc-dashcam-nfs"  # PVs bind 1:1 — stage needs its own (vlc-dashcam-nfs-stage)
     )
+    # --- background-music share -------------------------------------------------
+    # A second, much smaller export on the same NAS holding the album beds OBS
+    # plays as background audio (see the obs repo's OBS_BACKGROUND_AUDIO). It gets
+    # its own PV rather than a subPath off the dashcam one because the dashcam PV
+    # points at the clips corpus itself, not the share root — and mixing music
+    # into the corpus directory would put it in the localize Job's path. Rendered
+    # on the same envs as the dashcam PV (dashcam_mode == "nfs").
+    music_nfs_path: str = ""  # from $MUSIC_NFS_PATH at synth
+    music_pv_name: str = "obs-music-nfs"  # stage needs its own (PVs bind 1:1)
     # --- node-local dashcam corpus (the NFS<->local serving toggle) -------------
     # When True, a node-local `vlc-dashcam-local` PVC (local-path, on the minipc)
     # is emitted beside the NFS PVC, and the one-shot copy Job (DashcamLocalizeChart)
@@ -68,8 +97,8 @@ class EnvConfig:
     # Size of the node-local corpus PVC. The regenerated _opt/clips corpus is
     # ~630 GB; this leaves headroom without crowding the other local-path PVCs.
     dashcam_local_size: str = "700Gi"
-    # Streaming platforms present in this env (obs instances). twitch everywhere;
-    # youtube currently stage-only while the bot side is built out.
+    # Platforms this env runs a per-platform mediamtx relay for. Set from
+    # SUPPORTED_PLATFORMS on the minipc envs; twitch-only on the test envs.
     platforms: tuple[str, ...] = ("twitch",)
 
     @property
@@ -104,8 +133,7 @@ _STAGE_ROLE = "arn:aws:iam::413585268653:role/ExternalDNSRole"
 _PROD_ROLE = "arn:aws:iam::704461573429:role/ExternalDNSRole"
 
 
-# Per-env table. Mirrors the Kustomize overlays; the source of truth once those
-# overlays are retired. Values cross-checked against k8s/apps/*/overlays/<env>.
+# Per-env table — the source of truth for env-varying config.
 ENVS: dict[str, EnvConfig] = {
     "prod-1": EnvConfig(
         name="prod-1",
@@ -125,12 +153,12 @@ ENVS: dict[str, EnvConfig] = {
         # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
         # take years of irreplaceable data.
         data_namespace="prod-1-data",
-        # youtube is staged here so Argo creates the prod-youtube Applications,
-        # but the tripbot repo renders that stack at replicas=0 (parked_platforms)
-        # until stage-youtube is shut down and prod-youtube is turned on — the
-        # minipc never runs two youtube stacks at once. This list is the Argo
-        # fan-out contract; it must match the platforms tripbot's cdk8s emits.
-        platforms=("twitch", "youtube"),
+        # The full supported set gets a per-platform mediamtx relay here; a new
+        # platform gets one automatically on the next sync. The gateway/obs/
+        # playout workloads self-discover from their own repos' indexes and park
+        # at replicas:0 until a console scale-up, so this list only governs the
+        # infra-authored relay fan-out.
+        platforms=SUPPORTED_PLATFORMS,
     ),
     "stage-1": EnvConfig(
         name="stage-1",
@@ -144,23 +172,16 @@ ENVS: dict[str, EnvConfig] = {
         cnpg=True,
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
+        music_pv_name="obs-music-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
-        # same as prod — the corpus regen is complete, so the temporary
-        # STAGE_NFS_PATH override that let stage run ahead on the in-progress
-        # corpus has collapsed. Stage keeps its own PV name (PVs bind 1:1).
+        # same as prod, but keeps its own PV name (PVs bind 1:1).
         # Stage rehearses DB-in-its-own-namespace: postgres + its SecretStore land
         # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
         # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
         data_namespace="stage-1-data",
-        # The YouTube platform stack burns in on stage first (tripbot-youtube
-        # binds chat once a broadcast is live; vlc-youtube self-sustains;
-        # obs-youtube boots idle — the streaming toggle is prod-twitch-only).
-        # prod follows once the stage burn-in + dual-iGPU-encode validation
-        # pass.
-        #
-        # twitch is back ON (2026-06-19) to test the platform-gateway end to
-        # end: stage tripbot-twitch routes its Helix calls through gateway-twitch.
-        platforms=("youtube", "twitch"),
+        # Full supported set → one mediamtx relay per platform on stage too
+        # (the gateway/obs/playout Applications self-discover from their repos).
+        platforms=SUPPORTED_PLATFORMS,
     ),
     "development": EnvConfig(
         name="development",
@@ -183,6 +204,16 @@ ENVS: dict[str, EnvConfig] = {
         platforms=("twitch",),
     ),
 }
+
+
+# Guard: an env can only list platforms the gateway has an adapter for.
+for _name, _env in ENVS.items():
+    _unknown = tuple(p for p in _env.platforms if p not in SUPPORTED_PLATFORMS)
+    if _unknown:
+        raise ValueError(
+            f"{_name}: platforms {_unknown} not in SUPPORTED_PLATFORMS "
+            f"{SUPPORTED_PLATFORMS} — add an adapter in platform-gateway + run `task platforms:sync`"
+        )
 
 
 def load_env(name: str) -> EnvConfig:
@@ -208,5 +239,6 @@ def load_env(name: str) -> EnvConfig:
             env,
             nfs_server=os.environ.get("NFS_SERVER", "<NFS server address>"),
             nfs_path=nfs_path,
+            music_nfs_path=os.environ.get("MUSIC_NFS_PATH", "<music export path>"),
         )
     return env

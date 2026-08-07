@@ -53,10 +53,6 @@ REPOS = {
     "argo": "https://argoproj.github.io/argo-helm",
     "cloudnative-pg": "https://cloudnative-pg.github.io/charts",
     "victoria-metrics": "https://victoriametrics.github.io/helm-charts/",
-    # OCI registry (no scheme) — the ARC charts. Argo renders these in-cluster;
-    # cdk8s.Helm can't `helm template` an OCI ref, so the ARC components are
-    # Argo-only (never fed to PlatformChart). See arc_components below.
-    "actions-runner": "ghcr.io/actions/actions-runner-controller-charts",
 }
 
 # --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
@@ -87,9 +83,6 @@ VERSIONS = {
     # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
     # live minipc release.
     "victoria-metrics-single": "0.42.0",
-    # ARC — controller + runner scale set share one release version.
-    "arc-controller": "0.14.2",
-    "arc-runner-set": "0.14.2",
 }
 
 
@@ -366,35 +359,6 @@ def env_components(env: EnvConfig) -> list[HelmComponent]:
             "nats",
             platform_ns,
             value_files=("nats/values.yml", f"nats/{env.name}/values.yml"),
-        ),
-    ]
-
-
-def arc_components() -> list[HelmComponent]:
-    """The Actions Runner Controller releases — controller (arc-systems) + one
-    arm64 runner scale set registered to the tripbot repo (arc-runners). minipc
-    only; the runner pods land on the rpi5 (placement is in the values files).
-
-    OCI charts: Argo renders them in-cluster, so these are emitted ONLY by
-    argo_platform (Applications), never by PlatformChart (cdk8s.Helm can't
-    `helm template` an OCI ref). The supporting namespaces / quota / GitHub App
-    ExternalSecret are a separate deploy unit (constructs/arc.py)."""
-    return [
-        HelmComponent(
-            "arc-controller",
-            "actions-runner",
-            "gha-runner-scale-set-controller",
-            "arc-controller",
-            "arc-systems",
-            value_files=("arc/controller/values.yml",),
-        ),
-        HelmComponent(
-            "arc-arm64-tripbot",
-            "actions-runner",
-            "gha-runner-scale-set",
-            "arc-runner-set",
-            "arc-runners",
-            value_files=("arc/runners/values.yml",),
         ),
     ]
 

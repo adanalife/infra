@@ -1,0 +1,87 @@
+# The fast per-PR gates, in one job.
+#
+# GitHub bills Actions per job, rounded up to the whole minute, so a handful of
+# 10-second checks in separate workflows cost a minute each. Running them as
+# steps of one `gates` job collapses that to a single billed minute while
+# keeping every check's failure message intact.
+#
+# `gates` always reports, even when an individual step is inapplicable, so it is
+# safe to mark required in branch protection — a path-filtered *workflow* would
+# hang as "Expected" and block merges instead.
+#
+# Deliberately NOT folded in: cdk8s-synth.yml, which needs `contents: write` to
+# push a re-synthed dist/ back to the PR branch. Job-level permissions apply to
+# every step, so merging it would put a write token in scope for the read-only
+# gates. There is no changelog-fragment step here — this repo ships no releases
+# and has no towncrier setup.
+name: pr-gates
+
+on:
+  pull_request:
+    branches: [main]
+    # `edited` is what makes the title check re-run when a title is fixed.
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Conventional Commits enforcement for the SQUASH SUBJECT. The commit-msg
+      # pre-commit hook only guards local commits; because PRs squash-merge, the
+      # PR *title* becomes the commit subject written to history.
+      - name: Conventional PR title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v7
+
+      # Guards the fleet-wide platform-set contract: platform-gateway owns
+      # platforms.json (its Go adapter registry is the source of truth) and
+      # every repo syncs a copy via `task platforms:sync`. Unguarded by changed
+      # paths on purpose — it catches the gateway adding or removing a platform
+      # we haven't re-synced, which touches nothing in this repo. The daily
+      # drift sweep lives in platforms-contract.yml.
+      #
+      # The gateway repo is private, so read it with an org-scoped automation
+      # app token (least privilege: platform-gateway only), not GITHUB_TOKEN.
+      #
+      # Skipped on Dependabot PRs, which cannot answer the question this asks. A
+      # Dependabot `pull_request` event is granted Actions variables but not
+      # Actions secrets, so the private key arrives empty and the mint fails with
+      # "The 'private-key' input must be set to a non-empty string" — a red
+      # required check on every bump. Nothing is lost by not asking: platforms.json
+      # only ever moves by `task platforms:sync`, which no dependency bump runs,
+      # and gateway-side drift is caught daily by platforms-contract.yml regardless
+      # of what any PR does.
+      - name: Mint automation app token
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: platform-gateway
+
+      - name: Assert platforms.json matches platform-gateway/main
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api "repos/${{ github.repository_owner }}/platform-gateway/contents/platforms.json?ref=main" \
+            -H "Accept: application/vnd.github.raw" > gateway-platforms.json
+          if ! diff -u gateway-platforms.json platforms.json; then
+            echo "::error::platforms.json is out of sync with platform-gateway/main — run 'task platforms:sync' and commit."
+            exit 1
+          fi
+          rm -f gateway-platforms.json

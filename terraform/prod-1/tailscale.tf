@@ -95,7 +95,7 @@ resource "tailscale_acl" "this" {
       // cluster node, so it survives every wipe/re-register with no manual
       // clicks. Operator proxies wear tag:k8s too but advertise no routes, so
       // this only ever matches the subnet-router node itself.
-      // This must match TS_ROUTES in talos/adanalife-minipc/tailscale.patch.yaml
+      // This must match TS_ROUTES in talos/adanalife-minipc/tailscale.patch.sops.yaml
       // — the node's current-location LAN subnet (Maine/tallman). On a move,
       // update both to the new subnet (Texas/shadyglen was 192.168.1.0/24).
       "autoApprovers": {
@@ -179,7 +179,7 @@ resource "aws_ssm_parameter" "tailscale_operator_oauth" {
 # (re)install.
 #
 # ⚠️ The node reads this from its SOPS-sealed machine config
-#    (talos/adanalife-minipc/tailscale.patch.yaml → ExtensionServiceConfig
+#    (talos/adanalife-minipc/tailscale.patch.sops.yaml → ExtensionServiceConfig
 #    TS_AUTHKEY), NOT via ESO — k8s/ESO don't exist yet at node-join time. So
 #    after TF mints or rotates this key you must re-seal the new value into
 #    that patch (`task talos:minipc:secrets:encrypt`) and commit.

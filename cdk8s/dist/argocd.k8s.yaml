@@ -39,10 +39,6 @@ spec:
       namespace: stage-1-data
     - server: https://kubernetes.default.svc
       namespace: ups
-    - server: https://kubernetes.default.svc
-      namespace: arc-systems
-    - server: https://kubernetes.default.svc
-      namespace: arc-runners
   clusterResourceWhitelist:
     - group: ""
       kind: PersistentVolume
@@ -200,56 +196,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: tripbot-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: vlc-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: tripbot-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: vlc-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: prod-1
-            app: onscreens-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: tripbot-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: vlc-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: onscreens-youtube
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: tripbot-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: vlc-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: stage-1
-            app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/tripbot.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -259,8 +211,8 @@ spec:
     spec:
       project: tripbot
       source:
-        repoURL: "{{.repo}}"
-        targetRevision: "{{.revision}}"
+        repoURL: https://github.com/adanalife/tripbot.git
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -271,6 +223,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -289,17 +242,17 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
       syncPolicy:
         automated:
           prune: true
-    {{- if (eq .env "stage-1") }}
-          selfHeal: false
-    {{- else }}
           selfHeal: true
-    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -486,10 +439,22 @@ spec:
             app: mediamtx-twitch
           - env: prod-1
             app: mediamtx-youtube
+          - env: prod-1
+            app: mediamtx-facebook
+          - env: prod-1
+            app: mediamtx-instagram
+          - env: prod-1
+            app: mediamtx-tiktok
+          - env: stage-1
+            app: mediamtx-twitch
           - env: stage-1
             app: mediamtx-youtube
           - env: stage-1
-            app: mediamtx-twitch
+            app: mediamtx-facebook
+          - env: stage-1
+            app: mediamtx-instagram
+          - env: stage-1
+            app: mediamtx-tiktok
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -511,6 +476,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -529,6 +495,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   syncPolicy:
     preserveResourcesOnDeletion: true
   templatePatch: |
@@ -596,59 +566,6 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: arc
-  namespace: argocd
-spec:
-  goTemplate: true
-  goTemplateOptions:
-    - missingkey=error
-  generators:
-    - list:
-        elements:
-          - {}
-  ignoreApplicationDifferences:
-    - jsonPointers:
-        - /spec/syncPolicy
-  template:
-    metadata:
-      name: arc
-    spec:
-      project: infra
-      source:
-        repoURL: git@github.com:adanalife/infra.git
-        targetRevision: main
-        path: cdk8s/dist
-        directory:
-          include: arc.k8s.yaml
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: arc-runners
-      syncPolicy:
-        syncOptions:
-          - CreateNamespace=false
-          - ServerSideApply=true
-      ignoreDifferences:
-        - group: external-secrets.io
-          kind: ExternalSecret
-          jqPathExpressions:
-            - .spec.target.deletionPolicy
-            - .spec.data[]?.remoteRef.conversionStrategy
-            - .spec.data[]?.remoteRef.decodingStrategy
-            - .spec.data[]?.remoteRef.metadataPolicy
-            - .spec.data[]?.remoteRef.nullBytePolicy
-            - .spec.dataFrom[]?.extract.conversionStrategy
-            - .spec.dataFrom[]?.extract.decodingStrategy
-            - .spec.dataFrom[]?.extract.metadataPolicy
-            - .spec.dataFrom[]?.extract.nullBytePolicy
-        - group: apps
-          kind: StatefulSet
-          jqPathExpressions:
-            - .spec.volumeClaimTemplates[]?.apiVersion
-            - .spec.volumeClaimTemplates[]?.kind
----
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
   name: tripbot-console
   namespace: argocd
 spec:
@@ -683,6 +600,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -701,17 +619,17 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
       syncPolicy:
         automated:
           prune: true
-    {{- if (eq .env "stage-1") }}
-          selfHeal: false
-    {{- else }}
           selfHeal: true
-    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -751,6 +669,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -769,17 +688,17 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
       syncPolicy:
         automated:
           prune: true
-    {{- if (eq .env "stage-1") }}
-          selfHeal: false
-    {{- else }}
           selfHeal: true
-    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -792,35 +711,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: gateway-twitch
-            revision: main
-          - env: prod-1
-            app: gateway-youtube
-            revision: main
-          - env: prod-1
-            app: gateway-shared
-            revision: main
-          - env: stage-1
-            app: gateway-twitch
-            revision: main
-          - env: stage-1
-            app: gateway-youtube
-            revision: main
-          - env: stage-1
-            app: gateway-tiktok
-            revision: main
-          - env: stage-1
-            app: gateway-facebook
-            revision: main
-          - env: stage-1
-            app: gateway-instagram
-            revision: main
-          - env: stage-1
-            app: gateway-shared
-            revision: main
+    - git:
+        repoURL: git@github.com:adanalife/platform-gateway.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -831,7 +727,7 @@ spec:
       project: platform-gateway
       source:
         repoURL: git@github.com:adanalife/platform-gateway.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -842,6 +738,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -860,6 +757,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   syncPolicy:
     preserveResourcesOnDeletion: true
   templatePatch: |
@@ -868,11 +769,7 @@ spec:
       syncPolicy:
         automated:
           prune: true
-    {{- if (eq .env "stage-1") }}
-          selfHeal: false
-    {{- else }}
           selfHeal: true
-    {{- end }}
     {{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -885,20 +782,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: obs-twitch
-            revision: main
-          - env: prod-1
-            app: obs-youtube
-            revision: main
-          - env: stage-1
-            app: obs-youtube
-            revision: main
-          - env: stage-1
-            app: obs-twitch
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/obs.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -909,7 +798,7 @@ spec:
       project: obs
       source:
         repoURL: https://github.com/adanalife/obs.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -920,6 +809,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -938,6 +828,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   syncPolicy:
     preserveResourcesOnDeletion: true
   templatePatch: |
@@ -959,17 +853,12 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: prod-1
-            app: playout-twitch
-            revision: main
-          - env: prod-1
-            app: playout-youtube
-            revision: main
-          - env: stage-1
-            app: playout-youtube
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/playout.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/prod-1-*.json
+          - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -980,7 +869,7 @@ spec:
       project: playout
       source:
         repoURL: https://github.com/adanalife/playout.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -991,6 +880,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -1009,6 +899,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   syncPolicy:
     preserveResourcesOnDeletion: true
   templatePatch: |

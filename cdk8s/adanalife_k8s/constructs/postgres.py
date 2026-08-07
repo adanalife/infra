@@ -1,6 +1,6 @@
 """Postgres — the tripbot StatefulSet (pgvector/pg16) + headless Service.
 
-Reproduces k8s/apps/postgres/base + overlays. The StatefulSet is the
+The StatefulSet is the
 *fidelity-critical* object here: on prod-1 it owns a 50Gi `local-path-retain`
 PVC holding years of irreplaceable data (chat history since 2019, miles,
 events). This construct is applied via SSA to ADOPT the live prod StatefulSet,
@@ -159,8 +159,16 @@ class Postgres(Construct):
             # this — kubelet creates subPath dirs root:root 0755.
             env=[k8s.EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata")],
             # pg_isready answers protocol-level — catches "up but not serving".
+            # Run it through a shell so the role name comes from the container's
+            # runtime environment. kubelet's own $(VAR) substitution in a probe
+            # command only resolves *static* `env:` entries (literal `value:`) —
+            # never envFrom/valueFrom — and POSTGRES_USER arrives via envFrom on
+            # postgres-secret, so a bare $(POSTGRES_USER) reaches pg_isready as a
+            # literal and postgres logs a FATAL role lookup for it every period.
             liveness_probe=k8s.Probe(
-                exec=k8s.ExecAction(command=["pg_isready", "-U", "$(POSTGRES_USER)"]),
+                exec=k8s.ExecAction(
+                    command=["sh", "-c", 'exec pg_isready -U "$POSTGRES_USER"']
+                ),
                 initial_delay_seconds=10,
                 period_seconds=30,
                 timeout_seconds=5,

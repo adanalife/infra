@@ -134,6 +134,24 @@ spec:
               key: secret-access-key
               name: cert-manager-aws-credentials
 ---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: prod-stream
+  namespace: prod-1
+description: Live-stream workloads — outrank default-priority co-tenants; preempt them under node pressure.
+globalDefault: false
+value: 1000
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: prod-support
+  namespace: prod-1
+description: Prod support workloads (the console) — outrank default-priority co-tenants and preempt them under node pressure, but stay below the live-stream tier (prod-stream).
+globalDefault: false
+value: 900
+---
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
@@ -178,4 +196,31 @@ spec:
   resources:
     requests:
       storage: 700Gi
+  storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obs-music
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ""
+  volumeName: obs-music-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obs-music-local
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
   storageClassName: local-path

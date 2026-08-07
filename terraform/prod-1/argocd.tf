@@ -1,5 +1,5 @@
 # Argo CD — prod-1-only (Argo runs on the adanalife-minipc; the in-cluster
-# aws-parameterstore-cluster ClusterSecretStore reads this prod account). Kept
+# aws-parameterstore-cluster ClusterSecretStore reads this prod account). Lives
 # in its own file rather than secrets.tf so the KEEP-IN-SYNC sibling
 # terraform/stage-1/secrets.tf doesn't diverge — same reasoning as tailscale.tf.
 #

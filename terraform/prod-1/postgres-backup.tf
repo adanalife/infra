@@ -1,4 +1,4 @@
-# S3 bucket + IAM user + access key + SM container for the
+# S3 bucket + IAM user + access key + SSM parameter for the
 # in-cluster postgres backup CronJob on adanalife-minipc.
 #
 # Shape:
@@ -12,18 +12,18 @@
 #   - Dedicated IAM user `PostgresBackupUser` under /bots/ (matching
 #     the ExternalDNSUser shape from iam.tf) with PutObject scoped
 #     to the bucket. No console access; access key only.
-#   - SM container `k8s/postgres/backup-s3-credentials` holds the
+#   - SSM parameter `/k8s/postgres/backup-s3-credentials` holds the
 #     access key id + secret access key + bucket name + region.
 #     Terraform OWNS the value here (same shape as the postgres
 #     credentials in secrets.tf) — rotation = taint the access key
 #     resource + apply.
 #   - ESO in-cluster materializes this into the `postgres-backup-s3`
-#     K8s Secret via k8s/apps/postgres/overlays/prod-1/backup-external-secret.yaml.
+#     K8s Secret, via the ExternalSecret emitted by
+#     cdk8s/adanalife_k8s/constructs/postgres.py.
 #
-# CI lifecycle grants for this SM container live in secrets.tf
-# alongside the other ci_terraform_*_manage blocks (read added to
-# the bulk policy, dedicated manage policy with PutSecretValue
-# since terraform writes the value).
+# The CI grants for this parameter live in secrets.tf alongside the
+# other ci_terraform_* blocks — read plus ssm:PutParameter, since
+# terraform writes the value.
 #
 # First-apply note: the IAM access key is brand-new at apply time;
 # IAM eventual consistency can take a minute before the first job

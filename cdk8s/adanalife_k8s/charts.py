@@ -22,12 +22,18 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_pv,
     emit_dashcam_pvc,
 )
-from adanalife_k8s.constructs.arc import Arc
 from adanalife_k8s.constructs.cnpg import CnpgCluster
 from adanalife_k8s.constructs.mediamtx import Mediamtx
+from adanalife_k8s.constructs.music import (
+    emit_music_local_pvc,
+    emit_music_localize_job,
+    emit_music_pv,
+    emit_music_pvc,
+)
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
+from adanalife_k8s.priority import emit_priority_classes
 from adanalife_k8s.supporting import emit_supporting
 
 
@@ -38,10 +44,13 @@ class SupportingChart(Chart):
     before apps. The ESO SecretStore these reference is in DataChart (the
     synced-first unit).
 
-    tripbot's identity-level Secrets (DB creds + twitch/maps/discord) and the
-    prod-stream PriorityClass/ResourceQuota are NOT here anymore — they moved to
-    the tripbot repo's cdk8s (`<env>-tripbot-identity.k8s.yaml`), delivered by the
-    `tripbot-identity` ApplicationSet. The apps reference those Secrets by name.
+    The cluster's scheduling priority tiers (prod-stream / prod-support) are
+    owned here — cluster-scoped policy referenced by name across every app repo,
+    emitted in the prod-1 chart (see priority.py). tripbot's identity-level
+    Secrets (DB creds + twitch/maps/discord) and the co-tenant ResourceQuota stay
+    in the tripbot repo's cdk8s (`<env>-tripbot-identity.k8s.yaml`), delivered by
+    the `tripbot-identity` ApplicationSet; the apps reference those Secrets by
+    name.
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
@@ -50,6 +59,9 @@ class SupportingChart(Chart):
 
         # shared observability secrets + cert-manager issuers (eso envs only)
         emit_supporting(self, env)
+
+        # Cluster-wide scheduling priority tiers (prod-1 only; cluster-scoped).
+        emit_priority_classes(self, env)
 
         # When postgres is isolated in its own namespace, its ESO SecretStore went
         # with it (DataChart) — so the app namespace needs its OWN store for the
@@ -65,6 +77,12 @@ class SupportingChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
+            # The background-music volumes OBS and tripbot mount — same story:
+            # namespace-local claims, so they follow the app namespace rather than
+            # the data one. The local one is what the bed plays from; the NFS one is
+            # the staging side it's mirrored from.
+            emit_music_pvc(self, env)
+            emit_music_local_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -80,7 +98,7 @@ class DataChart(Chart):
     (it's a dependency: tripbot/vlc need postgres + the dashcam PVC).
 
     The dashcam *PV* is NOT here — it's host-specific bootstrap infra kept out of
-    Argo entirely (see DashcamPVChart). Only the PVC lives here; it binds to the
+    Argo entirely (see NfsPVChart). Only the PVC lives here; it binds to the
     out-of-band PV by name.
 
     Lands in env.data_ns — the app namespace by default (byte-identical render),
@@ -118,7 +136,7 @@ class DataChart(Chart):
             CnpgCluster(self, env=env)
 
         # --- dashcam PVC (nfs envs only; no-op on hostPath local/dev). The PV it
-        #     binds to is provisioned out-of-band via DashcamPVChart. Mounted by
+        #     binds to is provisioned out-of-band via NfsPVChart. Mounted by
         #     vlc (namespace-local), so it can only live in the app namespace:
         #     co-located here, but moved to SupportingChart when the DB is isolated
         #     in a different namespace. ---
@@ -127,6 +145,11 @@ class DataChart(Chart):
             # The node-local corpus cache rides alongside the NFS PVC, same
             # namespace (no-op unless dashcam_local_enabled).
             emit_dashcam_local_pvc(self, env)
+            # The background-music volumes OBS and tripbot mount — the node-local
+            # one the bed plays from, plus the NFS one it's mirrored from (see
+            # SupportingChart for the isolated-DB case).
+            emit_music_pvc(self, env)
+            emit_music_local_pvc(self, env)
 
 
 class MediamtxChart(Chart):
@@ -145,33 +168,48 @@ class MediamtxChart(Chart):
         Mediamtx(self, env=env, platform=platform)
 
 
-class DashcamPVChart(Chart):
-    """The dashcam NFS PersistentVolume (cluster-scoped) — host-specific bootstrap
-    infra deliberately kept OUT of Argo. Synthed to its own
-    dist/<env>-dashcam-pv.k8s.yaml, which no ApplicationSet includes (the apps set
-    matches `<env>-<component>-<platform>.k8s.yaml`; supporting/data match their
-    own per-env files), and provisioned once per
-    cluster via `task k8s:<env>:dashcam-pv` with the real NFS coords from the
+class NfsPVChart(Chart):
+    """The cluster-scoped NFS PersistentVolumes — the dashcam corpus and the
+    background-music share. Host-specific bootstrap infra deliberately kept OUT of
+    Argo. Synthed to its own dist/<env>-nfs-pv.k8s.yaml, which no ApplicationSet
+    includes (the apps set matches `<env>-<component>-<platform>.k8s.yaml`;
+    supporting/data match their own per-env files), and provisioned once per
+    cluster via `task k8s:<env>:nfs-pv` with the real NFS coords from the
     gitignored cdk8s/dashcam-nfs.local.env. The committed golden carries
-    placeholders. The matching PVC lives in DataChart (Argo binds it by name).
+    placeholders. The matching PVCs live in DataChart / SupportingChart (Argo
+    binds them by name).
     """
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
+        emit_music_pv(self, env)
 
 
 class DashcamLocalizeChart(Chart):
     """The one-shot Job that copies the NFS corpus onto the node-local cache PVC —
     host-specific (carries the NFS coords), so it's kept OUT of Argo in its own
     dist/<env>-dashcam-localize.k8s.yaml (globbed by no ApplicationSet, same as
-    DashcamPVChart) and applied on demand via `task k8s:<env>:dashcam-localize` with
+    NfsPVChart) and applied on demand via `task k8s:<env>:dashcam-localize` with
     the real coords injected at synth. Rendered only when dashcam_local_enabled, so
     it never lands in dist for an env that hasn't adopted local serving."""
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
         emit_dashcam_localize_job(self, env)
+
+
+class MusicLocalizeChart(Chart):
+    """The one-shot Job that mirrors the NFS music share onto the node-local
+    `obs-music-local` PVC the album bed plays from — host-specific (carries the NAS
+    coords), so like DashcamLocalizeChart it stays OUT of Argo in its own
+    dist/<env>-music-localize.k8s.yaml and is applied on demand via
+    `task k8s:<env>:music-localize`. Run it after staging new albums onto the share
+    with `bin/stage-streambeats` (tripbot repo)."""
+
+    def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
+        super().__init__(scope, id, namespace=env.namespace or None)
+        emit_music_localize_job(self, env)
 
 
 class UpsMonitorChart(Chart):
@@ -185,19 +223,6 @@ class UpsMonitorChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         UpsMonitor(self)
-
-
-class ArcChart(Chart):
-    """ARC supporting resources (namespaces + runner ResourceQuota + GitHub App
-    ExternalSecret) — a cluster-singleton, env-agnostic, synthed to
-    dist/arc.k8s.yaml and delivered by a minipc-only Argo Application (gated off
-    the k3d dev instance, which has no rpi5 — see constructs/argocd.py). The ARC
-    Helm charts themselves are Argo Applications in the platform stack
-    (helm_platform.arc_components); see constructs/arc.py for the split."""
-
-    def __init__(self, scope: Construct, id: str):
-        super().__init__(scope, id)
-        Arc(self)
 
 
 class ArgoCDChart(Chart):

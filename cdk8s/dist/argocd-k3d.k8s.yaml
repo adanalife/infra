@@ -67,20 +67,11 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: development
-            app: tripbot-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: development
-            app: vlc-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
-          - env: development
-            app: onscreens-twitch
-            repo: https://github.com/adanalife/tripbot.git
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/tripbot.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/development-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -90,8 +81,8 @@ spec:
     spec:
       project: tripbot
       source:
-        repoURL: "{{.repo}}"
-        targetRevision: "{{.revision}}"
+        repoURL: https://github.com/adanalife/tripbot.git
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -102,6 +93,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -120,6 +112,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   templatePatch: |
     {{- if (eq .env "development") }}
     spec:
@@ -302,11 +298,11 @@ spec:
   goTemplateOptions:
     - missingkey=error
   generators:
-    - list:
-        elements:
-          - env: development
-            app: obs-twitch
-            revision: main
+    - git:
+        repoURL: https://github.com/adanalife/obs.git
+        revision: main
+        files:
+          - path: cdk8s/dist/apps/development-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
         - /spec/syncPolicy
@@ -317,7 +313,7 @@ spec:
       project: obs
       source:
         repoURL: https://github.com/adanalife/obs.git
-        targetRevision: "{{.revision}}"
+        targetRevision: main
         path: cdk8s/dist
         directory:
           include: "{{.env}}-{{.app}}.k8s.yaml"
@@ -328,6 +324,7 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
       ignoreDifferences:
         - group: external-secrets.io
           kind: ExternalSecret
@@ -346,6 +343,10 @@ spec:
           jqPathExpressions:
             - .spec.volumeClaimTemplates[]?.apiVersion
             - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
   syncPolicy:
     preserveResourcesOnDeletion: true
   templatePatch: |

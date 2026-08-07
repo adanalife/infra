@@ -15,7 +15,10 @@
 # GITHUB_TOKEN can't be used for those jobs because commits/PRs it creates
 # never trigger workflow runs, and cross-repo dispatch needs real auth.
 # Consumers: infra cdk8s-synth.yml (auto-synth push-back), infra bump-prs.yml
-# (prod version-bump PRs), tripbot release.yml (repository_dispatch to infra).
+# (prod version-bump PRs), tripbot release.yml (repository_dispatch to infra),
+# and release-please.yml in the release repos — as an ordinary actor the App
+# gets the release PR's checks run unheld (github-actions[bot] parks them at
+# action_required) and its tag fires release.yml without an explicit dispatch.
 
 provider "github" {
   owner = "adanalife"
@@ -28,7 +31,16 @@ provider "github" {
 
 locals {
   # Repos the automation App serves; it must be installed on each.
-  automation_repos = toset(["infra", "tripbot"])
+  automation_repos = toset([
+    "infra",
+    "tripbot",
+    "tripbot-console",
+    "obs",
+    "platform-gateway",
+    "website",
+    "video-pipeline",
+    "guessr",
+  ])
 }
 
 # App ID is not sensitive → Actions variable (vars.AUTOMATION_APP_ID).
@@ -45,3 +57,20 @@ resource "github_actions_secret" "automation_app_private_key" {
   secret_name = "AUTOMATION_APP_PRIVATE_KEY"
   value       = data.aws_ssm_parameter.github_automation_app_key.value
 }
+
+# Dependabot keeps a secret store of its own, and nothing here writes to it.
+#
+# Worth knowing before adding it back: a Dependabot-authored `pull_request` event
+# is granted Actions *variables* but not Actions *secrets*, so a workflow minting
+# the App token on such a PR sees `vars.AUTOMATION_APP_ID` resolve while
+# `secrets.AUTOMATION_APP_PRIVATE_KEY` arrives empty and the mint step fails.
+# Mirroring the key into Dependabot's store is the fix for a gate that genuinely
+# needs the App on a bump PR — and it costs the App a `dependabot_secrets`
+# permission it does not have (the installation carries actions, actions_variables,
+# contents, metadata, pull_requests, secrets), which means an org-level approval of
+# the permission change, not just a terraform edit.
+#
+# No gate needs it today. The jobs that were failing had no business running on a
+# bump PR at all — a bump carries no changelog fragment to number, and cannot move
+# a contract file synced from a sibling repo — so each is excluded by author in its
+# own workflow instead. That keeps the App key out of Dependabot-triggered runs.

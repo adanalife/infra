@@ -1,14 +1,11 @@
 # SSM Parameter Store — stage-1 parameters + CI grants.
 #
-# Migrated from AWS Secrets Manager 2026-07 (SM bills $0.40/secret/month;
-# standard-tier parameters are free). The SM containers, their version
-# resources, and the per-secret SM CI grants were deleted in the migration's
-# final phase; live values were copied by bin/migrate-sm-to-ssm.sh and the
-# full pre-migration corpus is archived offline (encrypted, 2026-07-03).
+# Parameter Store, not Secrets Manager: standard-tier parameters are free where
+# SM bills $0.40/secret/month.
 #
 # This file is the single bookkeeping point for "what parameters exist in
-# this AWS account." Topic files (grafana-cloud.tf, grafana-alerts.tf, etc.)
-# keep their consumer-side resources but don't declare parameters.
+# this AWS account." Topic files (grafana-alerts.tf, eso.tf, etc.) keep their
+# consumer-side resources but don't declare parameters.
 #
 # Per-parameter pattern:
 #   - Out-of-band values: an entry in `ssm_parameters` below. The terraform-
@@ -60,6 +57,12 @@
 #     tripbot's !report command (via ESO). Same value seeded in adanalife-prod.
 #   - k8s/*/ghcr-pull-token — JSON {"username": ..., "token": ...} — a
 #     fine-grained GitHub token with read:packages on the package.
+#   - k8s/guessr/cloudflare-publish — JSON {"CLOUDFLARE_API_TOKEN": ...,
+#     "CLOUDFLARE_ACCOUNT_ID": ...}. Token scopes: Workers R2 Storage:Edit +
+#     D1:Edit. Consumed by the guessr round-generation CronJob in
+#     video-pipeline's cdk8s; publish.sh only ever names the staging D1 —
+#     D1 tokens cannot be scoped per-database, so that posture lives in the
+#     script, not the token.
 #   - ESO picks up new values within 1h; force with
 #     `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`.
 
@@ -83,6 +86,7 @@ locals {
     "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
     "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
     "k8s/tripbot/discord-bot-token"        = "Discord bot token for the staging tripbot Discord session."
+    "k8s/guessr/cloudflare-publish"        = "Cloudflare token pair for the guessr round-generation CronJob (video-pipeline cdk8s). Keys: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID."
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
@@ -108,12 +112,6 @@ resource "aws_ssm_parameter" "mirror" {
 # via `task stage:allowlist:add-current-ip`. Consumed by the Cloudflare Access
 # policy on tripbot — see cloudflare-tunnel.tf. Separate from the map so the
 # placeholder is a valid (empty) allowlist — jsondecode works pre-seed.
-# It lived in the mirror map during the migration — keep its state instance.
-moved {
-  from = aws_ssm_parameter.mirror["stage-1/allowlist-cidrs"]
-  to   = aws_ssm_parameter.stage_1_allowlist_cidrs
-}
-
 resource "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
   name        = "/stage-1/allowlist-cidrs"
   description = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
@@ -167,6 +165,8 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 #         --overwrite --value "$STREAM_KEY"
 #   - /k8s/obs/youtube-stream-key — YouTube RTMPS key for the staging Brand
 #     Account (YouTube Studio → Go live → Stream). Same put-parameter shape.
+#   - /k8s/obs/facebook-stream-key — Facebook Live RTMPS key for the stage
+#     facebook burn-in Page. Same put-parameter shape.
 #   - /k8s/grafana-cloud-metrics-write — Grafana Cloud Mimir/Loki credentials
 #     for the in-cluster k8s-monitoring chart (Alloy). JSON:
 #     {"PROMETHEUS_HOST": ..., "PROMETHEUS_USERNAME": "<prom instance ID>",

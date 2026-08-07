@@ -1,5 +1,5 @@
 {
-  "title": "06 \u2014 Stream Health: playout \u2194 MediaMTX",
+  "title": "01 \u2014 Stream Health: playout \u2192 MediaMTX",
   "uid": "stream-health-playout",
   "tags": [
     "tripbot",
@@ -19,15 +19,21 @@
       {
         "name": "platform",
         "label": "Platform",
-        "type": "custom",
-        "query": "twitch,youtube",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__DS_PROMETHEUS__"
+        },
+        "query": "label_values(playout_pipeline_running_time_ms{service_name=\"playout\"}, service_platform)",
         "current": {
-          "text": "youtube",
-          "value": "youtube"
+          "text": "twitch",
+          "value": "twitch"
         },
         "includeAll": true,
         "allValue": ".*",
-        "multi": false
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
       },
       {
         "name": "deployment_environment",
@@ -52,12 +58,77 @@
   },
   "panels": [
     {
+      "id": 300,
+      "type": "stat",
+      "title": "NATS control plane",
+      "description": "1 = this service's NATS connection is up; 0 = down, so its playback commands / live events are being dropped even though the process is running. Catches the boot-race where a consumer starts before NATS is reachable and stays deaf until restart. Aggregated across platform instances (min: red if any is down). No data reads as disconnected.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (deployment_environment) (playout_nats_connected{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NATS DISCONNECTED",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NATS connected",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 99,
       "type": "text",
       "title": "About this dashboard",
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 57,
         "w": 24,
         "h": 4
       },
@@ -73,7 +144,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 3,
         "w": 24,
         "h": 1
       }
@@ -88,7 +159,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -152,7 +223,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 5,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -206,7 +277,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -243,7 +314,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 5,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -279,7 +350,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 9,
+        "y": 8,
         "w": 12,
         "h": 8
       },
@@ -336,7 +407,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 9,
+        "y": 8,
         "w": 12,
         "h": 8
       },
@@ -378,7 +449,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 17,
+        "y": 16,
         "w": 12,
         "h": 8
       },
@@ -421,7 +492,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 17,
+        "y": 16,
         "w": 12,
         "h": 8
       },
@@ -465,7 +536,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 24,
         "w": 8,
         "h": 4
       },
@@ -520,7 +591,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 25,
+        "y": 24,
         "w": 8,
         "h": 4
       },
@@ -575,7 +646,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 25,
+        "y": 24,
         "w": 8,
         "h": 4
       },
@@ -630,7 +701,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 28,
         "w": 12,
         "h": 8
       },
@@ -674,7 +745,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 29,
+        "y": 28,
         "w": 12,
         "h": 8
       },
@@ -719,7 +790,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 37,
+        "y": 36,
         "w": 24,
         "h": 1
       }
@@ -735,7 +806,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 38,
+        "y": 37,
         "w": 6,
         "h": 4
       },
@@ -800,7 +871,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 38,
+        "y": 37,
         "w": 6,
         "h": 4
       },
@@ -849,7 +920,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 38,
+        "y": 37,
         "w": 6,
         "h": 4
       },
@@ -886,7 +957,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 38,
+        "y": 37,
         "w": 6,
         "h": 4
       },
@@ -922,7 +993,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 41,
         "w": 12,
         "h": 8
       },
@@ -970,7 +1041,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 42,
+        "y": 41,
         "w": 12,
         "h": 8
       },
@@ -1030,7 +1101,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 49,
         "w": 12,
         "h": 8
       },
@@ -1072,7 +1143,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 50,
+        "y": 49,
         "w": 12,
         "h": 8
       },

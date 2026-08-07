@@ -9,5 +9,11 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.8"
     }
+    # No provider block here — google.tf's resources inherit the default
+    # google provider configured in the calling root.
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
   }
 }

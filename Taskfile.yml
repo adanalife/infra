@@ -16,23 +16,34 @@ tasks:
   # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
   # the safe read-only way to compare cdk8s output against the live cluster.
   # ---------------------------------------------------------------------------
+  cdk8s:cli:
+    desc: Install the pinned cdk8s CLI into cdk8s/node_modules from the committed package-lock.json
+    dir: cdk8s
+    cmds:
+      - mise exec -- npm ci
+    # npm ci stamps node_modules/.package-lock.json; skip the reinstall while it
+    # is newer than the lockfile it was built from.
+    status:
+      - test node_modules/.package-lock.json -nt package-lock.json
+
   cdk8s:imports:
     desc: Generate the typed k8s + CRD constructs (cdk8s import) into imports/ — gitignored, needed before synth/test on a fresh checkout
     dir: cdk8s
+    deps: [cdk8s:cli]
     # Skip if already generated (import is slow). Both dirs must exist: k8s is the
     # core API, io/ holds the ESO + cert-manager CRD constructs (per cdk8s.yaml).
     status:
       - test -d imports/k8s
       - test -d imports/io
     cmds:
-      - mise exec -- uv run cdk8s import
+      - mise exec -- uv run npx cdk8s import
 
   cdk8s:synth:
     desc: Synthesize infra's deploy units (offline) -> cdk8s/dist/<env>-{supporting,data}.k8s.yaml + argocd (the tripbot app/job manifests + dashcam-cv live in their own repos now)
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
-      - mise exec -- uv run cdk8s synth
+      - mise exec -- uv run npx cdk8s synth
 
   cdk8s:synth:platform:
     desc: Synthesize apps + the platform Helm stack (needs helm + network)
@@ -41,24 +52,25 @@ tasks:
     env:
       CDK8S_PLATFORM: "1"
     cmds:
-      - mise exec -- uv run cdk8s synth
+      - mise exec -- uv run npx cdk8s synth
 
-  # The dashcam NFS PersistentVolume is host-specific bootstrap infra kept OUT of
-  # Argo (its own DashcamPVChart -> dist/<env>-dashcam-pv.k8s.yaml, not globbed by
-  # the apps/data ApplicationSets). These tasks synth it with the real NFS coords
-  # from the gitignored cdk8s/dashcam-nfs.local.env and apply just the PV — a
-  # once-per-cluster bootstrap, like seeding secrets. The matching PVC is Argo's
-  # (in the data unit) and binds to this PV by name.
-  k8s:stage:dashcam-pv:
-    desc: provision the stage-1 dashcam NFS PV (cluster-scoped, outside Argo) from cdk8s with real coords
+  # The NFS PersistentVolumes (dashcam corpus + background-music share) are
+  # host-specific bootstrap infra kept OUT of Argo (their own NfsPVChart ->
+  # dist/<env>-nfs-pv.k8s.yaml, not globbed by the apps/data ApplicationSets).
+  # These tasks synth them with the real NFS coords from the gitignored
+  # cdk8s/dashcam-nfs.local.env and apply just the PVs — a once-per-cluster
+  # bootstrap, like seeding secrets. The matching PVCs are Argo's (in the data /
+  # supporting unit) and bind to these PVs by name.
+  k8s:stage:nfs-pv:
+    desc: provision the stage-1 NFS PVs (dashcam + music; cluster-scoped, outside Argo) from cdk8s with real coords
     cmds:
-      - task: k8s:_dashcam-pv:apply
+      - task: k8s:_nfs-pv:apply
         vars: { ENV: stage-1 }
 
-  k8s:prod:dashcam-pv:
-    desc: provision the prod-1 dashcam NFS PV (cluster-scoped, outside Argo) from cdk8s with real coords
+  k8s:prod:nfs-pv:
+    desc: provision the prod-1 NFS PVs (dashcam + music; cluster-scoped, outside Argo) from cdk8s with real coords
     cmds:
-      - task: k8s:_dashcam-pv:apply
+      - task: k8s:_nfs-pv:apply
         vars: { ENV: prod-1 }
 
   # Populate the node-local dashcam corpus cache from NFS (the NFS<->local serving
@@ -75,6 +87,23 @@ tasks:
     desc: copy the prod-1 dashcam corpus NFS -> node-local PVC (the one-shot localize Job)
     cmds:
       - task: k8s:_dashcam-localize:apply
+        vars: { ENV: prod-1 }
+
+  # Mirror the music share onto the node-local PVC the album bed plays from — the
+  # volume that keeps a NAS outage out of the stream path. Run after staging new
+  # albums with tripbot's bin/stage-streambeats, and after a T5 wipe. Re-runnable:
+  # files already present are skipped.
+  # Watch: kubectl -n <env> logs -f job/music-localize
+  k8s:stage:music-localize:
+    desc: copy the stage-1 music share NFS -> node-local PVC (the one-shot localize Job)
+    cmds:
+      - task: k8s:_music-localize:apply
+        vars: { ENV: stage-1 }
+
+  k8s:prod:music-localize:
+    desc: copy the prod-1 music share NFS -> node-local PVC (the one-shot localize Job)
+    cmds:
+      - task: k8s:_music-localize:apply
         vars: { ENV: prod-1 }
 
   # Post-rollout verification: confirm APP's running pods actually carry the
@@ -109,7 +138,7 @@ tasks:
         sel=$(kubectl -n "$ns" get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
         kubectl -n "$ns" get pods -l "$sel" -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
 
-  k8s:_dashcam-pv:apply:
+  k8s:_nfs-pv:apply:
     internal: true
     dir: cdk8s
     deps: [cdk8s:imports]
@@ -124,20 +153,21 @@ tasks:
         sh: 'case "$(kubectl config current-context 2>/dev/null)" in *minipc*|tailscale-operator.*) true ;; *) false ;; esac'
         msg: "refusing: this task targets the minipc (stage/prod) cluster, but the current kube-context is not a minipc context. Run kubectl config use-context admin@adanalife-minipc first."
       - sh: test -f dashcam-nfs.local.env
-        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH"
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH/MUSIC_NFS_PATH"
     cmds:
       - |
         set -euo pipefail
         set -a; . ./dashcam-nfs.local.env; set +a
         : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
         : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        : "${MUSIC_NFS_PATH:?set MUSIC_NFS_PATH in cdk8s/dashcam-nfs.local.env}"
         out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
         # Synth via main.py directly (NOT `cdk8s synth`, which forces output=dist
         # from cdk8s.yaml) so the real coords land in a throwaway dir, never the
-        # committed golden. Apply only the cluster-scoped PV.
+        # committed golden. Apply only the cluster-scoped PVs.
         CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
-        echo "Applying {{.ENV}} dashcam NFS PersistentVolume (cluster-scoped, outside Argo)"
-        kubectl apply -f "$out/{{.ENV}}-dashcam-pv.k8s.yaml"
+        echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (cluster-scoped, outside Argo)"
+        kubectl apply -f "$out/{{.ENV}}-nfs-pv.k8s.yaml"
 
   k8s:_dashcam-localize:apply:
     internal: true
@@ -155,7 +185,7 @@ tasks:
         : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
         out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
         # Synth via main.py directly (real coords land in a throwaway dir, never the
-        # committed golden — same as dashcam-pv). The localize Job only renders when
+        # committed golden — same as nfs-pv). The localize Job only renders when
         # the env has dashcam_local_enabled; if the file is absent, that's the hint.
         CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
         f="$out/{{.ENV}}-dashcam-localize.k8s.yaml"
@@ -165,6 +195,32 @@ tasks:
         echo "Applying {{.ENV}} dashcam localize Job (NFS -> node-local PVC, outside Argo)"
         kubectl apply -f "$f"
         echo "Watch: kubectl -n {{.ENV}} logs -f job/dashcam-localize"
+
+  k8s:_music-localize:apply:
+    internal: true
+    dir: cdk8s
+    deps: [cdk8s:imports]
+    preconditions:
+      - *minipc-context-guard
+      - sh: test -f dashcam-nfs.local.env
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/MUSIC_NFS_PATH"
+    cmds:
+      - |
+        set -euo pipefail
+        set -a; . ./dashcam-nfs.local.env; set +a
+        : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
+        : "${MUSIC_NFS_PATH:?set MUSIC_NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+        # Synth via main.py directly (real coords land in a throwaway dir, never the
+        # committed golden — same as nfs-pv).
+        CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
+        f="$out/{{.ENV}}-music-localize.k8s.yaml"
+        test -f "$f" || { echo "no music localize Job for {{.ENV}} — only nfs envs render one"; exit 1; }
+        # Jobs are largely immutable, so clear any prior run before re-applying.
+        kubectl -n {{.ENV}} delete job music-localize --ignore-not-found
+        echo "Applying {{.ENV}} music localize Job (NFS -> node-local PVC, outside Argo)"
+        kubectl apply -f "$f"
+        echo "Watch: kubectl -n {{.ENV}} logs -f job/music-localize"
 
   # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
   # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.
@@ -184,7 +240,7 @@ tasks:
       NFS_SERVER: '<NFS server address>'
       NFS_PATH: '<export path>'
     cmds:
-      - mise exec -- uv run cdk8s synth
+      - mise exec -- uv run npx cdk8s synth
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
 
   # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
@@ -222,12 +278,92 @@ tasks:
     cmds:
       - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
 
+  # `gitops:apply` is a plain `kubectl apply`, which never deletes. Dropping an
+  # AppProject or ApplicationSet from cdk8s/dist therefore leaves the live object
+  # running, and an orphaned ApplicationSet keeps regenerating its Applications —
+  # so a delete of the child appears to silently fail. Removing an *element* from
+  # a generator does prune (the appset controller owns that); only top-level
+  # object removal strands.
+  #
+  # Pruning is a separate, opt-in gesture rather than a flag on gitops:apply: a
+  # synth bug that drops an appset would otherwise cascade-delete prod workloads
+  # on the next apply. Deletion uses --cascade=orphan so generated Applications
+  # (and the workloads under them) survive; sweep those deliberately afterwards.
+  gitops:prune:
+    desc: "Report Argo AppProjects/ApplicationSets live in-cluster but no longer declared in cdk8s/dist. Read-only unless CONFIRM=yes."
+    silent: true
+    preconditions:
+      - *minipc-context-guard
+    vars:
+      # Every manifest that declares top-level Argo objects for the minipc.
+      # Missing one here reports its objects as orphaned, so a new such manifest
+      # must be added. argocd-k3d.k8s.yaml is deliberately absent — it targets the
+      # dev cluster, which the context guard already forbids.
+      GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
+      # Argo CD ships this AppProject with the install; it is owned by no manifest
+      # and is the fallback project, so pruning it would break every Application
+      # that does not name a project.
+      GITOPS_PRUNE_SKIP: default
+    cmds:
+      - |
+        set -euo pipefail
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        : > "$tmp/rendered"
+        for manifest in {{.GITOPS_MANIFESTS}}; do
+          test -f "$manifest" || { echo "$manifest not found — run task cdk8s:synth first"; exit 1; }
+          # `kubectl apply --dry-run=client -o name` renders every doc as
+          # <resource>.<group>/<name>, which is enough to diff against the live
+          # objects and keeps this to kubectl — the one tool the task already needs.
+          kubectl apply -f "$manifest" --dry-run=client -o name >> "$tmp/rendered"
+        done
+        found=0
+        for kind in AppProject ApplicationSet; do
+          resource=$(echo "$kind" | tr '[:upper:]' '[:lower:]')
+          sed -n "s|^${resource}\.argoproj\.io/||p" "$tmp/rendered" | sort -u > "$tmp/declared"
+          kubectl get "$kind" -n argocd \
+            -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' \
+            | sed '/^$/d' | sort -u > "$tmp/live"
+          # Live minus declared. Never the reverse: something declared but absent
+          # is just an unapplied change, which gitops:apply fixes.
+          comm -13 "$tmp/declared" "$tmp/live" > "$tmp/orphans"
+          while read -r name; do
+            [ -n "$name" ] || continue
+            case " {{.GITOPS_PRUNE_SKIP}} " in *" $name "*) continue ;; esac
+            found=1
+            created=$(kubectl get "$kind" -n argocd "$name" -o 'jsonpath={.metadata.creationTimestamp}')
+            echo "  orphaned $kind/$name (created $created)"
+            if [ "${CONFIRM:-}" = "yes" ]; then
+              kubectl delete "$kind" -n argocd "$name" --cascade=orphan
+            fi
+          done < "$tmp/orphans"
+        done
+        if [ "$found" -eq 0 ]; then
+          echo "no orphaned AppProjects or ApplicationSets — the cluster matches cdk8s/dist"
+        elif [ "${CONFIRM:-}" != "yes" ]; then
+          echo
+          echo "nothing deleted. Re-run with CONFIRM=yes to delete the above (--cascade=orphan)."
+        else
+          echo
+          echo "deleted. Any Applications they generated are now orphaned — review with"
+          echo "  kubectl get application -n argocd"
+          echo "and remove the unwanted ones with: argocd app delete <name> --cascade=false"
+        fi
+
   contract:sync:
     desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
     dir: cdk8s
     cmds:
       - cp ../../tripbot/pkg/contract/contract.json contract.json
       - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
+
+  # platforms.json is the fleet-wide supported-platform set, owned by
+  # platform-gateway (its Go adapter registry is the source of truth). cdk8s
+  # reads it into SUPPORTED_PLATFORMS (the mediamtx relay fan-out + every env's
+  # platforms); never hand-edit it here.
+  platforms:sync:
+    desc: Re-sync platforms.json from the sibling platform-gateway checkout (the fleet-wide source of truth)
+    cmds:
+      - cp ../platform-gateway/platforms.json platforms.json
 
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
@@ -488,9 +624,9 @@ tasks:
   # The one-liner cold-start: create the cluster, install the platform stack +
   # Argo CD (platform:up pulls in bootstrap-secrets as a dep), then Argo-sync
   # the apps in dependency order. Each step is the canonical task; failures
-  # short-circuit the chain. Replaces the old cluster:rebuild (which ended in the
-  # now-superseded `cdk8s:dev:apply` — Argo owns the apps, so an imperative apply
-  # just fights it with an SSA field-ownership conflict).
+  # short-circuit the chain. The chain ends in an Argo sync, not an imperative
+  # apply — Argo owns the apps, so `kubectl apply` of the same manifests just
+  # fights it with an SSA field-ownership conflict.
   k8s:dev:up:
     desc: "cold-start the dev env from nothing: create cluster -> install platform + Argo -> sync apps"
     aliases: ["k8s:dev:cluster:rebuild"]
@@ -727,19 +863,17 @@ tasks:
       - k8s:stage:rollout:obs
       - k8s:stage:rollout:onscreens
 
-  # NOTE: the dev rollout:* tasks were removed — they pointed at pre-per-platform
-  # deployment names (deploy/tripbot, not deploy/tripbot-twitch) so they no
-  # longer matched anything, and a bare restart under imagePullPolicy: Always
-  # just re-pulls CI's :main. Use `task k8s:dev:deploy` to run a local build,
-  # `task k8s:dev:sync` to revert to CI images, and a plain
+  # There are deliberately no dev rollout:* tasks: under imagePullPolicy: Always
+  # a bare restart just re-pulls CI's :main. Use `task k8s:dev:deploy` to run a
+  # local build, `task k8s:dev:sync` to revert to CI images, and a plain
   # `kubectl rollout restart deploy/<app>-twitch -n development` for a bare bounce.
 
   # The app workloads for prod-1/stage-1 are delivered by Argo CD from
-  # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md) — there is no
-  # `k8s:{prod,stage}:apply` for apps anymore. dev (k3d) is likewise Argo-managed
-  # by its own in-cluster Argo (`task k8s:dev:argo:sync`). The legacy Kustomize app overlays (k8s/apps,
-  # k8s/overlays) are gone. What remains below is the stage env-PLATFORM install
-  # (external-dns + NATS), which has NOT cut over to cdk8s yet.
+  # cdk8s/dist/<env>-apps.k8s.yaml (see gitops/README.md), so there is no
+  # `k8s:{prod,stage}:apply` for apps. dev (k3d) is likewise Argo-managed by its
+  # own in-cluster Argo (`task k8s:dev:argo:sync`). What remains below is the
+  # stage env-PLATFORM install (external-dns + NATS), which has NOT cut over to
+  # cdk8s yet.
 
   k8s:stage:platform-env:up:
     desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
@@ -1581,15 +1715,12 @@ tasks:
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
 
-  # Local kubectl port-forward wrappers for OBS / vlc-server VNC. The
-  # host-access LoadBalancer overlays (k8s/apps/{obs,vlc-server}/overlays/local)
-  # already expose VNC at host ports 5902 / 5903 via klipper-lb when the
-  # local overlay is applied — these tasks are the cluster-agnostic
-  # alternative when that overlay isn't in play (e.g. on development, or
-  # when iterating without applying the local overlay). Backgrounded
-  # kubectl PID is parked under /tmp/adanalife-tasks/ so :down can
-  # find it. Re-running :up overwrites the PID file; if :down can't
-  # find a lingering kubectl, fall back to `pkill -f "port-forward svc/obs-"`.
+  # Local kubectl port-forward wrappers for OBS / vlc-server VNC — the
+  # cluster-agnostic way in, working on any env without a host-access
+  # LoadBalancer. The backgrounded kubectl PID is parked under
+  # /tmp/adanalife-tasks/ so :down can find it. Re-running :up overwrites the PID
+  # file; if :down can't find a lingering kubectl, fall back to
+  # `pkill -f "port-forward svc/obs-"`.
   obs:vnc:up:
     desc: start a local kubectl port-forward to OBS VNC at localhost:5902 (override PLATFORM=, default twitch)
     preconditions:
@@ -1665,7 +1796,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/tripbot/bin/obs-browser-refresh
+          {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
 
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
@@ -1688,7 +1819,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/tripbot/bin/obs-media-restart
+          {{.HOME}}/adanalife/obs/bin/obs-media-restart
 
   vlc:vnc:up:
     desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
@@ -2052,11 +2183,11 @@ tasks:
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
         echo "Next: task tripbot:stage:db:seed:vectors  (NS=prod-1-data for prod)"
 
-  # prod-1 Postgres restore — part of the wipe-and-rebuild loop. A wipe takes
-  # EPHEMERAL (the postgres PVC) with it, so each rebuild restores from the
-  # most recent S3 dump written by the postgres-backup CronJob (pg_dump -Fc).
+  # prod-1 Postgres restore — the recovery path when the live PVC is gone or
+  # corrupt, restoring from the most recent S3 dump written by the
+  # postgres-backup CronJob (pg_dump -Fc).
   #
-  # The CronJob (k8s/apps/postgres/overlays/prod-1/backup-cronjob.yaml) writes
+  # The CronJob (emitted by cdk8s/adanalife_k8s/constructs/postgres.py) writes
   # to tiered prefixes under the bucket — see #584. Lifecycle rules vary by tier:
   #   hourly/   every hour,            expires at 2 days
   #   daily/    04:00 UTC,             expires at 30 days
