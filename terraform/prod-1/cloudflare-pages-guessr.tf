@@ -161,6 +161,108 @@ resource "cloudflare_pages_domain" "guessr_aliases" {
   name         = "${each.key}.${var.primary_domain}"
 }
 
+# ---------------------------------------------------------------------------
+# The login in front of guessr's admin surface on the production game.
+#
+# /admin/ serves a scheduled day with its answer coordinates joined on, and can
+# throw a round out of a day nobody has played yet. Staging has had this since
+# the surface was closed (terraform/stage-1/cloudflare-pages-guessr.tf, which
+# carries the reasoning this one does not repeat: why the application fronts
+# pages.dev rather than the custom domain, why the emails come from SSM, and the
+# post-apply steps below). That application's destinations are the staging
+# project's hostnames, so it does nothing for this project.
+#
+# What makes production worth reviewing at all is that its schedule is the one a
+# wrong coordinate reaches players through. A day checked on staging is a day
+# checked in the wrong database.
+#
+# No wildcard destination, unlike staging. Per-PR previews land on the staging
+# project and nothing deploys a preview of this one; a branch alias made by hand
+# would carry none of the variables below and so answers 503, which is the safe
+# direction and the reason this does not need to enumerate hostnames nobody
+# creates.
+#
+# AFTER AN APPLY, two values have to reach the Pages project by hand — terraform
+# cannot write them, per the deployment_configs lifecycle block above:
+#
+#   terraform output guessr_prod_admin_access_aud
+#
+# then Workers & Pages → adanalife-guessr → Settings → Variables, ACCESS_AUD to
+# that value and ACCESS_TEAM_DOMAIN to the team domain
+# (<team>.cloudflareaccess.com). Production is the only environment this project
+# declares, so it is the only one to set them on. Then redeploy, because a Pages
+# variable only reaches a build that starts after it. Until that is done /admin/
+# answers 503 here and serves nothing.
+locals {
+  guessr_admin_emails = jsondecode(data.aws_ssm_parameter.guessr_admin_emails.value)
+}
+
+resource "cloudflare_zero_trust_access_application" "guessr_admin" {
+  account_id           = var.cloudflare_account_id
+  name                 = "guessr admin (production)"
+  type                 = "self_hosted"
+  session_duration     = "24h"
+  app_launcher_visible = false
+
+  destinations = [
+    {
+      type = "public"
+      uri  = "${cloudflare_pages_project.guessr.name}.pages.dev/admin"
+    },
+  ]
+
+  policies = [
+    {
+      id         = cloudflare_zero_trust_access_policy.guessr_admin.id
+      precedence = 1
+    },
+  ]
+}
+
+# Allow, not bypass: the point is to know who is looking. With no identity
+# provider configured Access falls back to a one-time PIN mailed to the address,
+# which is the whole setup for a one-person tool.
+#
+# Its own policy rather than the staging one reused, because that resource is in
+# another state and another AWS account's parameter feeds it. Two allowlists is
+# the honest shape anyway: this one governs the schedule players are getting.
+resource "cloudflare_zero_trust_access_policy" "guessr_admin" {
+  account_id = var.cloudflare_account_id
+  name       = "guessr — allow the admin emails (production)"
+  decision   = "allow"
+
+  include = [
+    for email in local.guessr_admin_emails : {
+      email = {
+        email = email
+      }
+    }
+  ]
+
+  # An Access policy with no include rules is not a policy, and the API's own
+  # error for it says nothing about where the list comes from. Seed the
+  # parameter first:
+  #
+  #   aws-vault exec adanalife-prod -- aws ssm put-parameter \
+  #     --name /prod-1/guessr-admin-emails --type SecureString --overwrite \
+  #     --value '["you@example.com"]'
+  lifecycle {
+    precondition {
+      condition     = length(local.guessr_admin_emails) > 0
+      error_message = "Seed /prod-1/guessr-admin-emails with a JSON array of email addresses before applying."
+    }
+  }
+}
+
+# Set ACCESS_AUD on the Pages project to this. The AUD is an application
+# identifier rather than a credential — it is a claim inside every token Access
+# hands a browser — but it is what guessr's middleware pins, so that a token
+# minted for the staging application is not a token for this one.
+output "guessr_prod_admin_access_aud" {
+  value       = cloudflare_zero_trust_access_application.guessr_admin.aud
+  description = "AUD tag of the production guessr admin Access application. Set as ACCESS_AUD on the Pages project."
+}
+
 # Web Analytics for the game — who visits, as opposed to how they play, which
 # is already in the D1 `plays` table and read back by `task stats:prod` in the
 # guessr repo. Enabled on the Pages project itself (Workers & Pages →
