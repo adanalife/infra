@@ -79,14 +79,47 @@ destinations:
     # are kept, so no alert goes blind.
     metricProcessingRules: |-
       write_relabel_config {
+        // The one stage-1 exception, and it needs the marker below because RE2
+        // has no negative lookahead: mark what to spare first, then drop the
+        // stage-1 series that carry no mark.
+        //
+        // guessr's round-generation CronJob lives in stage-1 because it writes
+        // staging's D1, but it is the only thing standing between the game and
+        // a day with no rounds on it, and nothing else can see whether it ran.
+        //
+        // Scoped by metric rather than by CronJob, so it covers every stage-1
+        // CronJob (guessr-rounds and dashcam-cv-fill today) at two series each
+        // against a 15000-series cap. That makes the next batch alert free
+        // rather than another edit here, and the cost stays negligible because
+        // the family is one series per CronJob per metric — it does not scale
+        // with runs, pods or history.
+        source_labels = ["namespace", "__name__"]
+        separator = "/"
+        regex = "stage-1/kube_cronjob_(status_last_successful_time|created)"
+        target_label = "__tmp_cloud_keep"
+        replacement = "yes"
+        action = "replace"
+      }
+      write_relabel_config {
         // stage-1 namespaces never ship to the cloud — prod-1 only from
         // this shared cluster. Runs before the keep-list: a stage-1 series
         // whose name is on the allowlist (e.g. a stage mediamtx `paths`)
         // would otherwise slip through. stage-1 logs + events still ship
         // (Loki, not Mimir); stage-1 metrics land in localMetrics.
-        source_labels = ["namespace"]
-        regex = "stage-1(-platform)?"
+        //
+        // An unmarked stage-1 series joins to "stage-1/" and matches, because
+        // these regexes are fully anchored; a marked one joins to "stage-1/yes"
+        // and survives.
+        source_labels = ["namespace", "__tmp_cloud_keep"]
+        separator = "/"
+        regex = "stage-1(-platform)?/"
         action = "drop"
+      }
+      write_relabel_config {
+        // Drop the marker rather than trusting remote-write to strip __-prefixed
+        // labels for us. One rule, one less assumption.
+        regex = "__tmp_cloud_keep"
+        action = "labeldrop"
       }
       write_relabel_config {
         // The allowlist. `keep` drops every scraped series whose __name__
@@ -94,7 +127,7 @@ destinations:
         // only when a cloud dashboard or alert queries it — the default
         // answer for a new scraped metric is local-VM-only.
         source_labels = ["__name__"]
-        regex = "platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+"
+        regex = "platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created"
         action = "keep"
       }
 
@@ -143,6 +176,15 @@ clusterMetrics:
         - kube_pod_container_status_last_terminated_exitcode
         - kube_pod_status_scheduled
         - kube_namespace_created
+        # CronJob liveness, for the batch-health alert. The chart's default
+        # allowlist carries no kube_cronjob_* at all, so these are absent from
+        # BOTH destinations until named here — the cloud drop-list is a separate
+        # question, handled in the destination's rules above. `created` is the
+        # floor the alert measures from before a CronJob has ever succeeded;
+        # without it a brand-new CronJob that has never run reads as no-data
+        # rather than as overdue. Cluster-wide these are two series per CronJob.
+        - kube_cronjob_status_last_successful_time
+        - kube_cronjob_created
       # Both overlap with cheaper metrics already in the default allowlist:
       # kube_pod_status_reason (~210 series) overlaps with kube_pod_status_phase;
       # kube_deployment_status_condition (~144 series) is rarely queried directly
