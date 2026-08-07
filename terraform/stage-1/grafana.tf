@@ -24,6 +24,11 @@ locals {
 provider "grafana" {
   url  = lookup(local.grafana_creds, "GRAFANA_CLOUD_URL", "https://placeholder.grafana.net")
   auth = lookup(local.grafana_creds, "GRAFANA_CLOUD_API_TOKEN", "placeholder")
+  # Synthetic Monitoring is a separate API behind a separate token; the
+  # dashboard credentials above cannot reach it. Set here rather than on an
+  # aliased provider because every Grafana resource in this environment shares
+  # one stack. See grafana-guessr.tf for the check itself.
+  sm_access_token = data.aws_ssm_parameter.grafana_sm_access.value
 }
 
 # Datasource UIDs follow the pattern grafanacloud-<slug>-{prom,logs,traces}

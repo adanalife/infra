@@ -1,0 +1,305 @@
+{
+  "uid": "guessr-play",
+  "title": "Guessr — how it is being played",
+  "description": "Queries production D1 over Cloudflare's REST API through the guessr-d1 Infinity datasource. Every panel is one SQL statement against `plays`, which holds one row per guess: date, opaque player id, clip, distance, points.",
+  "tags": ["guessr"],
+  "timezone": "utc",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Players, all time",
+      "description": "Distinct player ids that have ever recorded a daily guess. A player who cleared their browser counts twice; there is no account to tell you otherwise.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT COUNT(DISTINCT player_id) AS players FROM plays\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "players", "text": "players", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Guesses, all time",
+      "description": "One row per guess, so five per completed game.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT COUNT(*) AS guesses FROM plays\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "guesses", "text": "guesses", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Median guess error",
+      "description": "Kilometres, over every guess ever recorded. The median rather than the mean: one player who clicks Antarctica moves a mean and not this.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": { "defaults": { "unit": "lengthkm", "decimals": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT km AS median_km FROM plays ORDER BY km LIMIT 1 OFFSET (SELECT COUNT(*) / 2 FROM plays)\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "median_km", "text": "median_km", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Days with a player",
+      "description": "Dates that recorded at least one guess. Against the number of dates the schedule has covered, this is whether anyone turned up.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT COUNT(DISTINCT date) AS days FROM plays\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "days", "text": "days", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Who showed up, and who finished",
+      "description": "Per date. `finished` counts distinct players with all five rounds recorded -- not rows, which is five per finisher.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT date, COUNT(DISTINCT player_id) AS players, COUNT(DISTINCT CASE WHEN rounds = 5 THEN player_id END) AS finished FROM (SELECT date, player_id, COUNT(*) OVER (PARTITION BY date, player_id) AS rounds FROM plays WHERE date <= date('now')) GROUP BY date ORDER BY date\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "date", "text": "date", "type": "timestamp", "timestampFormat": "2006-01-02" },
+            { "selector": "players", "text": "players", "type": "number" },
+            { "selector": "finished", "text": "finished", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "How close they got",
+      "description": "Mean distance and mean points per guess, by date. A day that jumps is a day whose five rounds were badly matched to the ramp, not a day of worse players.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8 }, "min": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_km" },
+            "properties": [{ "id": "unit", "value": "lengthkm" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT date, ROUND(AVG(km), 1) AS avg_km, ROUND(AVG(points), 0) AS avg_points FROM plays WHERE date <= date('now') GROUP BY date ORDER BY date\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "date", "text": "date", "type": "timestamp", "timestampFormat": "2006-01-02" },
+            { "selector": "avg_km", "text": "avg_km", "type": "number" },
+            { "selector": "avg_points", "text": "avg_points", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Drop-off — rounds reached",
+      "description": "Player-days by how many of the five they got through, all time. Round 1 to round 2 is the steepest cliff a puzzle game has; if the 1 bar dwarfs the 5 bar the game is too long or the first round is too hard.",
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 13 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 80 }, "min": 0 }, "overrides": [] },
+      "options": { "xField": "reached" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT rounds AS reached, COUNT(*) AS player_days FROM (SELECT date, player_id, COUNT(*) AS rounds FROM plays WHERE date <= date('now') GROUP BY date, player_id) GROUP BY rounds ORDER BY rounds\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "reached", "text": "reached", "type": "string" },
+            { "selector": "player_days", "text": "player_days", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Retention — days played",
+      "description": "Players by how many separate dates they have played. The 1 bar is everyone who tried it once and never came back, which is the number that decides whether a daily game is a daily game.",
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 13 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 80 }, "min": 0 }, "overrides": [] },
+      "options": { "xField": "days_played" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT days_played, COUNT(*) AS players FROM (SELECT player_id, COUNT(DISTINCT date) AS days_played FROM plays WHERE date <= date('now') GROUP BY player_id) GROUP BY days_played ORDER BY days_played\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "days_played", "text": "days_played", "type": "string" },
+            { "selector": "players", "text": "players", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Clips nobody can place",
+      "description": "Ranked by mean guess error, minimum three guesses. This is the difficulty ramp marked by the people playing it rather than by the locatability score that picked the clip -- a round everyone misses by a thousand kilometres is a bad round, not a hard one, and it is the only signal that says which.",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 13 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_km" },
+            "properties": [{ "id": "unit", "value": "lengthkm" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT image, COUNT(*) AS guesses, ROUND(AVG(km), 0) AS avg_km, ROUND(AVG(points), 0) AS avg_points FROM plays WHERE date <= date('now') GROUP BY image HAVING guesses >= 3 ORDER BY avg_km DESC LIMIT 15\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "image", "text": "clip", "type": "string" },
+            { "selector": "guesses", "text": "guesses", "type": "number" },
+            { "selector": "avg_km", "text": "avg_km", "type": "number" },
+            { "selector": "avg_points", "text": "avg_points", "type": "number" }
+          ]
+        }
+      ]
+    }
+  ]
+}
