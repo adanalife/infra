@@ -60,6 +60,15 @@ locals {
 // per Grafana Cloud org, and applying this makes terraform own it. Edits in
 // the UI will drift and be reverted on the next apply; add sub-policies here,
 // not in the UI.
+//
+// title/message override Grafana's defaults, which render the full label set,
+// the query-refid values (`A=1 C=1`) and four boilerplate links — on a phone
+// that buries the one sentence worth reading. The push preview shows the
+// message content only (the embed carrying the rule link isn't in the
+// preview), so the content has to stand alone: one line per firing alert,
+// summary annotation plus the platform it broke on, nothing else. Keep the
+// summary annotations short for the same reason — the template can only be as
+// brief as the sentence it's handed.
 resource "grafana_contact_point" "discord_alerts" {
   name = "discord-alerts"
 
@@ -67,6 +76,13 @@ resource "grafana_contact_point" "discord_alerts" {
     url                     = data.aws_ssm_parameter.discord_alerts_webhook.value
     use_discord_username    = false // use the webhook's configured username
     disable_resolve_message = false
+
+    title   = "{{ .GroupLabels.alertname }}"
+    message = <<-EOT
+      {{ range .Alerts.Firing }}🔴 {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
+      {{ end }}{{ range .Alerts.Resolved }}✅ {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
+      {{ end }}
+    EOT
   }
 }
 
@@ -981,7 +997,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "OBS {{ $labels.service_platform }} stream output is reconnecting"
+      summary     = "OBS stream output is reconnecting"
       description = "obs-websocket reports the {{ $labels.service_platform }} stream output has been in the reconnecting state for over 1m."
     }
     labels = {
@@ -1046,7 +1062,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Prod {{ $labels.service_platform }} OBS has not been streaming for 10m"
+      summary     = "Prod OBS has not been streaming for 10m"
       description = "obs_streaming_active{deployment_environment=\"prod-1\", service_platform=\"{{ $labels.service_platform }}\"} has been 0 for 10m while the {{ $labels.service_platform }} OBS is meant to be up — it is not broadcasting (stopped, crashed, or never resumed after a restart) and viewers see nothing. Parking the platform from the console (dark/chat-only/off) disarms this; for a planned stop while it's meant to be live, add a Grafana silence. Otherwise check OBS (the obs-{{ $labels.service_platform }} pod / OBS WebSocket) and start the stream. Distinct from the silent-disconnect alert, which is OBS streaming while the platform shows offline."
     }
     labels = {
@@ -1136,7 +1152,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Stream offline on {{ $labels.service_platform }} while OBS thinks it's streaming"
+      summary     = "Stream offline while OBS thinks it's streaming"
       description = "obs_streaming_active=1 but tripbot_channel_live=0 for 3m on {{ $labels.service_platform }} — we are streaming into the void and nobody is watching what OBS is sending. Recovery differs by platform. twitch: the RTMP socket is half-open (the platform dropped its end without OBS noticing) and tripbot's watchdog should StopStream+StartStream within ~3-4m; if it doesn't, do it by hand via OBS WebSocket (StopStream, 3s, StartStream) — see tripbot pkg/obs/watchdog. tiktok: reconnecting the push is NOT enough — a room reaped after a push gap longer than the relay target's idleTimeout is gone for good, so the room has to be re-minted; tripbot's watchdog does that through the gateway (stop then start the egress) within ~6-7m, and if it doesn't, do it by hand from the console's TikTok egress controls. youtube: check the broadcast in YouTube Studio, then restart the obs-youtube stream."
     }
     labels = {
