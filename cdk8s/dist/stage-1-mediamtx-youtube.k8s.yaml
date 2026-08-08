@@ -95,6 +95,8 @@ spec:
               readOnly: true
               subPath: mediamtx.yml
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
       volumes:

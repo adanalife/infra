@@ -170,7 +170,14 @@ class Mediamtx(Construct):
                         priority_class_name=(
                             "prod-stream" if env.name == "prod-1" else None
                         ),
+                        # The `restricted` PodSecurity profile requires
+                        # runAsNonRoot as a spec field, whatever USER the image
+                        # declares. MediaMTX is a static Go binary: every port
+                        # it opens is unprivileged, and its only file is the
+                        # read-only ConfigMap mount, so the uid is free.
                         security_context=k8s.PodSecurityContext(
+                            run_as_non_root=True,
+                            run_as_user=65532,
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
                         ),
                         containers=[container],
