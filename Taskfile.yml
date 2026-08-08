@@ -647,12 +647,12 @@ tasks:
   # Talos cluster; there is no k8s:prod:cluster:*.
 
   # Build the dev app images locally, tag them :dev-local, and import them into
-  # the k3d dev cluster's image store. APP=tripbot|vlc|obs|onscreens builds just
-  # one; omit for all four. The committed manifests still pin CI's :main so a
+  # the k3d dev cluster's image store. APP=tripbot|obs|onscreens builds just
+  # one; omit for all three. The committed manifests still pin CI's :main so a
   # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
   # only for iterating on a LOCAL build.
   k8s:dev:images:build:
-    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|vlc|obs|onscreens for one; default all four)"
+    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
     dir: ../tripbot
     cmds:
       # --project-directory + --env-file mirror bin/devenv so build contexts
@@ -668,7 +668,6 @@ tasks:
         target="{{.APP}}"
         # app : compose-service : image-repo
         all="tripbot:tripbot:adanalife/tripbot \
-             vlc:vlc:adanalife/vlc \
              obs:obs:adanalife/obs \
              onscreens:onscreens-server:adanalife/onscreens-server"
         args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
@@ -690,7 +689,7 @@ tasks:
   # a re-pull. Argo will show the app OutOfSync while you iterate; that's
   # expected. Revert to CI :main (and re-enable selfHeal) with k8s:dev:sync.
   k8s:dev:deploy:
-    desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all four. Revert with k8s:dev:sync"
+    desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all three. Revert with k8s:dev:sync"
     deps:
       - task: k8s:dev:images:build
         vars: { APP: '{{.APP}}' }
@@ -704,7 +703,6 @@ tasks:
         # app : deployment : container : image-repo  (dev platform suffix = twitch;
         # obs's container is named `obs`, the others `<app>-twitch`)
         all="tripbot:tripbot-twitch:tripbot-twitch:adanalife/tripbot \
-             vlc:vlc-twitch:vlc-twitch:adanalife/vlc \
              obs:obs-twitch:obs:adanalife/obs \
              onscreens:onscreens-twitch:onscreens-twitch:adanalife/onscreens-server"
         for row in $all; do
@@ -765,7 +763,7 @@ tasks:
   # Workloads are per-platform (`<app>-<platform>`, e.g. tripbot-twitch),
   # so PLATFORM selects which one to roll — default `twitch` (present in
   # every env's steady state), override `PLATFORM=youtube` for the YouTube
-  # stack. `:all` rolls the default platform's four apps; pass PLATFORM= on
+  # stack. `:all` rolls the default platform's three apps; pass PLATFORM= on
   # the command line to roll a different platform's set.
   k8s:prod:rollout:tripbot:
     desc: restart prod-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
@@ -776,16 +774,6 @@ tasks:
     cmds:
       - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n prod-1
       - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n prod-1 --timeout=120s
-
-  k8s:prod:rollout:vlc-server:
-    desc: restart prod-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
-    preconditions:
-      - *minipc-context-guard
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
-    cmds:
-      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n prod-1
-      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:obs:
     desc: restart prod-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
@@ -808,10 +796,9 @@ tasks:
       - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:all:
-    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
+    desc: restart all three prod-1 app deployments (tripbot + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:prod:rollout:tripbot
-      - k8s:prod:rollout:vlc-server
       - k8s:prod:rollout:obs
       - k8s:prod:rollout:onscreens
 
@@ -824,16 +811,6 @@ tasks:
     cmds:
       - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n stage-1
       - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n stage-1 --timeout=120s
-
-  k8s:stage:rollout:vlc-server:
-    desc: restart stage-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
-    preconditions:
-      - *minipc-context-guard
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
-    cmds:
-      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n stage-1
-      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:obs:
     desc: restart stage-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
@@ -856,10 +833,9 @@ tasks:
       - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:all:
-    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
+    desc: restart all three stage-1 app deployments (tripbot + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:stage:rollout:tripbot
-      - k8s:stage:rollout:vlc-server
       - k8s:stage:rollout:obs
       - k8s:stage:rollout:onscreens
 
@@ -1534,7 +1510,7 @@ tasks:
       - kubectl rollout status statefulset/nats -n prod-1-platform --timeout=120s
       - 'echo "NATS up in prod-1-platform. Connect via nats://nats.prod-1-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n prod-1-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
       # Intel GPU device plugin + XPU Manager. Plugin registers
-      # gpu.intel.com/i915 (+ i915_monitoring) so OBS/vlc-server pods
+      # gpu.intel.com/i915 (+ i915_monitoring) so OBS/playout pods
       # can claim the iGPU as an extended resource without hostPath.
       # XPU Manager scrapes iGPU telemetry off the i915_monitoring
       # device and exposes it on :29999 with the xpum_ prefix; Grafana
@@ -1715,7 +1691,7 @@ tasks:
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
 
-  # Local kubectl port-forward wrappers for OBS / vlc-server VNC — the
+  # Local kubectl port-forward wrapper for OBS VNC — the
   # cluster-agnostic way in, working on any env without a host-access
   # LoadBalancer. The backgrounded kubectl PID is parked under
   # /tmp/adanalife-tasks/ so :down can find it. Re-running :up overwrites the PID
@@ -1799,7 +1775,7 @@ tasks:
           {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
 
   obs:media:restart:
-    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
+    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
@@ -1820,31 +1796,6 @@ tasks:
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-media-restart
-
-  vlc:vnc:up:
-    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
-    preconditions:
-      - *minipc-context-guard
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
-    cmds:
-      - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/vlc-{{.PLATFORM}} 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
-      - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
-
-  vlc:vnc:down:
-    desc: stop the local kubectl port-forward to vlc-server VNC
-    cmds:
-      - |
-        if [ -f /tmp/adanalife-tasks/vlc-vnc.pid ]; then
-          kill "$(cat /tmp/adanalife-tasks/vlc-vnc.pid)" 2>/dev/null || true
-          rm -f /tmp/adanalife-tasks/vlc-vnc.pid
-          echo "vlc-server VNC port-forward stopped"
-        else
-          echo "No vlc-server VNC port-forward PID file found — nothing to stop"
-        fi
 
   # Talos PKI (adanalife-minipc). The generated machine configs + talosconfig
   # hold the cluster CA key, bootstrap/trustd tokens, and etcd encryption
