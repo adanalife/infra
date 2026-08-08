@@ -23,16 +23,16 @@ k8s/nats/
 ```
 
 No kustomizations — `helm upgrade --install ... --create-namespace` from the
-per-env `platform:up` (dev/prod) or `apply` (stage) Taskfile target does
-everything.
+per-env `platform:up` (dev/prod) or `platform-env:up` (stage) Taskfile target
+does everything.
 
 ## Where it lives in the cluster
 
-| Env         | Namespace             | Installed by                |
-|-------------|-----------------------|-----------------------------|
-| development | `development-platform`| `task k8s:dev:platform:up`  |
-| stage-1     | `stage-1-platform`    | `task k8s:stage:apply`      |
-| prod-1      | `prod-1-platform`     | `task k8s:prod:platform:up` |
+| Env         | Namespace             | Installed by                       |
+|-------------|-----------------------|------------------------------------|
+| development | `development-platform`| `task k8s:dev:platform:up`         |
+| stage-1     | `stage-1-platform`    | `task k8s:stage:platform-env:up`   |
+| prod-1      | `prod-1-platform`     | `task k8s:prod:platform:up`        |
 
 stage and prod are co-tenant on the mini-PC; the two NATS instances are
 isolated structurally by namespace, not by topic-name discipline.
