@@ -13,7 +13,7 @@ Emits, for one platform, into the env's app namespace:
     every other protocol disabled) with a single explicit `dashcam` path.
   * Deployment mediamtx-{platform} — at most one replica, Recreate (a relay
     handles one live stream; never run two side by side during a rollout).
-    Stage births parked at replicas:0, activated by a console scale-up.
+    Births parked at replicas:0, activated by a console scale-up.
   * Service mediamtx-{platform} — rtsp/TCP + rtp/rtcp UDP + metrics.
 
 Publishers/readers address it as rtsp://mediamtx-{platform}:8554/dashcam
@@ -140,11 +140,10 @@ class Mediamtx(Construct):
             f"{platform}-deployment",
             metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
             spec=k8s.DeploymentSpec(
-                # Stage relays are declared parked: a console/hand scale-up is
-                # what activates one, and Argo ignores .spec.replicas so the
-                # scale sticks. Prod declares its relay live — it carries the
-                # broadcast.
-                replicas=1 if env.name == "prod-1" else 0,
+                # Relays are declared parked in every env: a console/hand
+                # scale-up is what activates one, and Argo ignores
+                # .spec.replicas so the scale sticks.
+                replicas=0,
                 # One relay per stream — never run two side by side in a rollout.
                 strategy=k8s.DeploymentStrategy(type="Recreate"),
                 selector=k8s.LabelSelector(match_labels=sel),

@@ -1,12 +1,12 @@
 """MediaMTX relay tests — the declared replica count per env.
 
 Replica counts on platform workloads are runtime-owned (the mediamtx appset
-ignores .spec.replicas), so what git declares is only the birth state. Stage
-births parked and a console scale-up activates it; prod declares its relay live
-because it carries the broadcast. A flip either way is silent — the synthed
-dist just changes — so it's asserted here.
+ignores .spec.replicas), so what git declares is only the birth state. Every env
+births parked and a console scale-up activates the relay. A flip either way is
+silent — the synthed dist just changes — so it's asserted here.
 """
 
+import pytest
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import MediamtxChart
@@ -21,9 +21,6 @@ def _replicas(env_name, platform="twitch"):
     return deploys[0]["spec"]["replicas"]
 
 
-def test_stage_relays_are_declared_parked():
-    assert _replicas("stage-1") == 0
-
-
-def test_prod_relays_are_declared_live():
-    assert _replicas("prod-1") == 1
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_relays_are_declared_parked(env_name):
+    assert _replicas(env_name) == 0
