@@ -89,3 +89,21 @@ jobs:
             exit 1
           fi
           rm -f gateway-platforms.json
+
+      # Guards the service-name/port/env-key contract: tripbot owns
+      # contract.json (generated from its pkg/contract Go constants) and this
+      # repo syncs a copy into cdk8s/ via `task contract:sync`. Unguarded by
+      # changed paths for the same reason as platforms.json above — tripbot-side
+      # drift touches nothing here. tripbot is public, so GITHUB_TOKEN reads it;
+      # no app token to mint means no Dependabot skip either.
+      - name: Assert contract.json matches tripbot/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository_owner }}/tripbot/contents/pkg/contract/contract.json?ref=main" \
+            -H "Accept: application/vnd.github.raw" > tripbot-contract.json
+          if ! diff -u tripbot-contract.json cdk8s/contract.json; then
+            echo "::error::cdk8s/contract.json is out of sync with tripbot/main — run 'task contract:sync' and commit."
+            exit 1
+          fi
+          rm -f tripbot-contract.json
