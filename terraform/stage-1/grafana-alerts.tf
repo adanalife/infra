@@ -50,6 +50,15 @@ locals {
   // signal is loud rather than a silent un-arming.
   obs_mode_gate        = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
   obs_twitch_mode_gate = "and on () (console_platform_component_up{component=\"obs\", service_platform=\"twitch\", deployment_environment=\"prod-1\"} > 0)"
+
+  // Relay-side variant of the mode gate, for the playout rules. Keyed on the
+  // mediamtx component rather than obs: mediamtx is up in both dark and live,
+  // and no console mode runs mediamtx without playout, so this arms a playout
+  // rule exactly when playout is running AND has a relay to publish into. The
+  // chat-map mode is the reason it isn't keyed on playout itself — there playout
+  // runs with mediamtx scaled to 0, so it has no publish target and its playhead
+  // isn't expected to advance.
+  relay_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"mediamtx\", deployment_environment=\"prod-1\"} > 0)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -1581,9 +1590,11 @@ resource "grafana_rule_group" "stream_health" {
 # so the relay is the one vantage point that pages for all of them.
 #
 # Scope note: a publisher that stays CONNECTED but frozen (session up, no
-# frames) keeps state="ready" and does NOT fire this — that's the playhead-
-# freeze signal on playout_pipeline_running_time_ms (tracked separately with
-# the playout dashboards+alerts item).
+# frames) keeps state="ready", so the no-publisher rule cannot see it. The
+# playhead-freeze rule in this group covers that half, off
+# playout_pipeline_running_time_ms; the two together cover both ways the
+# dashcam feed goes dead. The NATS rule last in the group watches the control
+# plane both of their runbooks depend on to recover.
 resource "grafana_rule_group" "relay_health" {
   name             = "relay-health"
   folder_uid       = grafana_folder.tripbot.uid
@@ -1711,6 +1722,158 @@ resource "grafana_rule_group" "relay_health" {
           }]
         })
       }
+    }
+  }
+
+  // The frozen-publisher half of the no-publisher page above. When the pipeline
+  // wedges without tearing down the RTSP session, MediaMTX keeps the path
+  // state="ready" and the reader keeps pulling — the last frame just never
+  // changes, so a black/frozen stream reads as healthy from every other
+  // vantage point. playout_pipeline_running_time_ms is the one signal that
+  // proves media is moving: it advances ~1000ms per wallclock second while the
+  // pipeline holds realtime, so a flat window means the playhead has stopped.
+  //
+  // increase() rather than deriv(): the gauge resets to ~0 when a new pipeline
+  // starts, and increase()'s counter-reset handling scores that as forward
+  // progress instead of the sharp negative slope deriv() would see, so a
+  // restart or a redeploy can't page as a freeze. A pod with too little history
+  // to compute an increase drops out of the result for the same reason.
+  //
+  // Threshold with margin instead of == 0: a healthy 5m window yields ~300000ms,
+  // so 10000ms (10s of advance, 3% of realtime) sits two orders of magnitude
+  // below healthy and well below even a badly-degraded-but-progressing pipeline.
+  // The margin absorbs sampling jitter at the window edges without needing the
+  // counter to be exactly flat.
+  //
+  // Per service_platform via `by`, so one platform's wedge can't be masked by
+  // another holding realtime, and a new platform arrives covered. no_data=OK:
+  // a parked or crashed playout stops reporting entirely, which is the
+  // no-publisher rule's page, not this one.
+  rule {
+    name           = "Playout: playhead frozen (stream is a still frame)"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK" // playout not reporting → the no-publisher rule pages, not this
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Playout playhead frozen for 5m — the dashcam feed is a still frame"
+      description = "playout_pipeline_running_time_ms on playout-{{ $labels.service_platform }} advanced less than 10s over a 5m window while the {{ $labels.service_platform }} relay is meant to be up — the GStreamer pipeline is wedged but still holding its RTSP session, so MediaMTX reports the `dashcam` path healthy and the no-publisher page stays quiet while viewers see a frozen frame. Check `kubectl -n prod-1 logs playout-{{ $labels.service_platform }}` for a stalled decode or a silent EOS, then restart the pod from the console; a pipeline that re-wedges on the same clip is the corrupt-clip trap — send `!skip` over NATS to advance past it. Parking the platform below dark from the console (which scales mediamtx-{{ $labels.service_platform }} to 0) disarms this automatically."
+    }
+    labels = {
+      severity = "critical"
+      service  = "playout"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (service_platform) (increase(playout_pipeline_running_time_ms{service_name=\"playout\", deployment_environment=\"prod-1\"}[5m])) ${local.relay_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [10000] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The control plane behind the two rules above. Both of their runbooks end in
+  // "send `!skip` over NATS", so a dead NATS link makes them unactionable at the
+  // moment they fire: playout keeps looping the corpus while every playback
+  // command (find/goto/timewarp/skip) is dropped silently, with no Sentry error
+  // and no relay-side symptom. playout_nats_connected is 1 while the connection
+  // is up and 0 while it's down, including before the first successful connect —
+  // the boot race where playout comes up ahead of NATS.
+  //
+  // Ungated, unlike the playhead rules: NATS matters whenever playout runs, and
+  // chat-map mode runs playout with mediamtx parked, so local.relay_mode_gate
+  // would disarm the rule in a mode where dropped commands still matter. The
+  // gauge is only emitted while playout is running, so series presence is the
+  // gate — no_data=OK covers a parked or crashed playout, which the no-publisher
+  // rule pages for instead.
+  //
+  // Per service_platform via `by`, with min so a platform reporting 0 can't be
+  // masked by a sibling holding its connection.
+  //
+  // for=10m rides out a NATS pod restart and the boot race, both of which show
+  // a legitimate 0 for a few sampling intervals (the gauge is sampled every 5s).
+  // Commands being dropped degrades control without blacking the stream, so
+  // severity is warning — Discord only, no ntfy escalation.
+  rule {
+    name           = "Playout: NATS control plane disconnected"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK" // playout not running → the no-publisher rule pages, not this
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Playout on {{ $labels.service_platform }} has been off NATS for 10m — playback commands are being dropped"
+      description = "playout_nats_connected has been 0 for 10m on playout-{{ $labels.service_platform }} — the pipeline keeps looping the corpus, but every playback command (`!skip`, find/goto/timewarp) is silently dropped, so the playhead-freeze and no-publisher runbooks can't be carried out. Check the NATS pod (`kubectl -n prod-1 get pods | grep nats`) first, then `kubectl -n prod-1 logs playout-{{ $labels.service_platform }}` for reconnect attempts; playout does not re-resolve NATS on its own if it came up before the server was reachable, so restarting the playout pod clears that case."
+    }
+    labels = {
+      severity = "warning"
+      service  = "playout"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (service_platform) (playout_nats_connected{service_name=\"playout\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
     }
   }
 }
