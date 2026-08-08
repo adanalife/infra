@@ -252,7 +252,7 @@
       "id": 43,
       "type": "stat",
       "title": "SomaFM edge",
-      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing.",
+      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing. The probe only runs while a bot is stranded on the local fallback bed, so \"not probing\" is the healthy steady state.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
       "targets": [
@@ -270,8 +270,10 @@
             { "color": "red", "value": null },
             { "color": "green", "value": 1 }
           ]},
+          "noValue": "not probing",
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } },
+            { "type": "special", "options": { "match": "null", "result": { "text": "not probing", "color": "text" } } }
           ]
         },
         "overrides": []
@@ -331,7 +333,7 @@
       "id": 46,
       "type": "timeseries",
       "title": "Background audio state (playing / fallback / SomaFM reachable)",
-      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed.",
+      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed. The somafm reachable line only exists while the probe runs (i.e. while on fallback), so a gap there means not probing rather than unreachable.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
       "targets": [
