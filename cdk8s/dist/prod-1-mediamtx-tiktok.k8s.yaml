@@ -45,7 +45,7 @@ metadata:
   name: mediamtx-tiktok
   namespace: prod-1
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: mediamtx-tiktok
