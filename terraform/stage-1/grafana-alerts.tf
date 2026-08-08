@@ -1591,9 +1591,10 @@ resource "grafana_rule_group" "stream_health" {
 #
 # Scope note: a publisher that stays CONNECTED but frozen (session up, no
 # frames) keeps state="ready", so the no-publisher rule cannot see it. The
-# playhead-freeze rule at the end of this group covers that half, off
+# playhead-freeze rule in this group covers that half, off
 # playout_pipeline_running_time_ms; the two together cover both ways the
-# dashcam feed goes dead.
+# dashcam feed goes dead. The NATS rule last in the group watches the control
+# plane both of their runbooks depend on to recover.
 resource "grafana_rule_group" "relay_health" {
   name             = "relay-health"
   folder_uid       = grafana_folder.tripbot.uid
@@ -1793,6 +1794,81 @@ resource "grafana_rule_group" "relay_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [10000] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The control plane behind the two rules above. Both of their runbooks end in
+  // "send `!skip` over NATS", so a dead NATS link makes them unactionable at the
+  // moment they fire: playout keeps looping the corpus while every playback
+  // command (find/goto/timewarp/skip) is dropped silently, with no Sentry error
+  // and no relay-side symptom. playout_nats_connected is 1 while the connection
+  // is up and 0 while it's down, including before the first successful connect —
+  // the boot race where playout comes up ahead of NATS.
+  //
+  // Ungated, unlike the playhead rules: NATS matters whenever playout runs, and
+  // chat-map mode runs playout with mediamtx parked, so local.relay_mode_gate
+  // would disarm the rule in a mode where dropped commands still matter. The
+  // gauge is only emitted while playout is running, so series presence is the
+  // gate — no_data=OK covers a parked or crashed playout, which the no-publisher
+  // rule pages for instead.
+  //
+  // Per service_platform via `by`, with min so a platform reporting 0 can't be
+  // masked by a sibling holding its connection.
+  //
+  // for=10m rides out a NATS pod restart and the boot race, both of which show
+  // a legitimate 0 for a few sampling intervals (the gauge is sampled every 5s).
+  // Commands being dropped degrades control without blacking the stream, so
+  // severity is warning — Discord only, no ntfy escalation.
+  rule {
+    name           = "Playout: NATS control plane disconnected"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK" // playout not running → the no-publisher rule pages, not this
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Playout on {{ $labels.service_platform }} has been off NATS for 10m — playback commands are being dropped"
+      description = "playout_nats_connected has been 0 for 10m on playout-{{ $labels.service_platform }} — the pipeline keeps looping the corpus, but every playback command (`!skip`, find/goto/timewarp) is silently dropped, so the playhead-freeze and no-publisher runbooks can't be carried out. Check the NATS pod (`kubectl -n prod-1 get pods | grep nats`) first, then `kubectl -n prod-1 logs playout-{{ $labels.service_platform }}` for reconnect attempts; playout does not re-resolve NATS on its own if it came up before the server was reachable, so restarting the playout pod clears that case."
+    }
+    labels = {
+      severity = "warning"
+      service  = "playout"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (service_platform) (playout_nats_connected{service_name=\"playout\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
