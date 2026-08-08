@@ -96,6 +96,8 @@ spec:
               subPath: mediamtx.yml
       priorityClassName: prod-stream
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
       volumes:
