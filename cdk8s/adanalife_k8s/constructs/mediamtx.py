@@ -5,7 +5,7 @@ into MediaMTX over RTSP; OBS pulls from MediaMTX. The relay decouples the
 OBS-facing RTSP endpoint from the publisher's lifecycle — a playout restart
 doesn't invalidate the endpoint OBS is reading — and adds TCP transport for
 off-cluster viewers. One instance per platform, deliberately: it keeps the
-per-stream blast-radius isolation the fleet already uses (vlc-{platform},
+per-stream blast-radius isolation the fleet already uses (playout-{platform},
 obs-{platform}), so a relay restart only ever touches one platform's stream.
 
 Emits, for one platform, into the env's app namespace:
@@ -26,12 +26,18 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.contract import load_contract
 from adanalife_k8s.naming import meta_labels, selector
 
 # GHCR mirror, not Docker Hub (the ghcr-base-image-mirrors decision) — the
 # mirror pair is registered in the playout repo's mirror-images workflow.
 IMAGE = "ghcr.io/adanalife/mirror/mediamtx:1.19.2"
-RTSP_PORT = 8554
+
+# The relay's name and RTSP port are contract vocabulary: playout dials them to
+# publish and obs dials them to read, both from their own synced copy of
+# contract.json. This construct is the producing side, so it reads the same keys
+# rather than restating them.
+RTSP_PORT = load_contract().port("mediamtx_rtsp")
 RTP_PORT = 8000
 RTCP_PORT = 8001
 METRICS_PORT = 9998
@@ -83,7 +89,7 @@ class Mediamtx(Construct):
         self._instance(env, platform)
 
     def _instance(self, env: EnvConfig, platform: str):
-        name = f"mediamtx-{platform}"
+        name = load_contract().svc(f"mediamtx_{platform}")
         ns = env.namespace or None
         labels = meta_labels(name)
         sel = selector(name)
