@@ -352,6 +352,12 @@ def env_components(env: EnvConfig) -> list[HelmComponent]:
             values={"extraArgs": [f"--default-targets={env.lan_ip}"]},
             argo=False,
         ),
+        # The release name is what the chart names the Service, so it is the
+        # `services.nats` every consumer dials (tripbot, playout and the console
+        # each build nats://<name>.<env>-platform.svc.cluster.local from the
+        # contract). Deliberately a literal rather than a contract read: renaming
+        # a Helm release is an uninstall/install, so this name must move on its
+        # own schedule and not because a JSON key changed under it.
         HelmComponent(
             "nats",
             "nats",
