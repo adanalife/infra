@@ -50,6 +50,15 @@ locals {
   // signal is loud rather than a silent un-arming.
   obs_mode_gate        = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
   obs_twitch_mode_gate = "and on () (console_platform_component_up{component=\"obs\", service_platform=\"twitch\", deployment_environment=\"prod-1\"} > 0)"
+
+  // Relay-side variant of the mode gate, for the playout rules. Keyed on the
+  // mediamtx component rather than obs: mediamtx is up in both dark and live,
+  // and no console mode runs mediamtx without playout, so this arms a playout
+  // rule exactly when playout is running AND has a relay to publish into. The
+  // chat-map mode is the reason it isn't keyed on playout itself — there playout
+  // runs with mediamtx scaled to 0, so it has no publish target and its playhead
+  // isn't expected to advance.
+  relay_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"mediamtx\", deployment_environment=\"prod-1\"} > 0)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -1581,9 +1590,10 @@ resource "grafana_rule_group" "stream_health" {
 # so the relay is the one vantage point that pages for all of them.
 #
 # Scope note: a publisher that stays CONNECTED but frozen (session up, no
-# frames) keeps state="ready" and does NOT fire this — that's the playhead-
-# freeze signal on playout_pipeline_running_time_ms (tracked separately with
-# the playout dashboards+alerts item).
+# frames) keeps state="ready", so the no-publisher rule cannot see it. The
+# playhead-freeze rule at the end of this group covers that half, off
+# playout_pipeline_running_time_ms; the two together cover both ways the
+# dashcam feed goes dead.
 resource "grafana_rule_group" "relay_health" {
   name             = "relay-health"
   folder_uid       = grafana_folder.tripbot.uid
@@ -1711,6 +1721,83 @@ resource "grafana_rule_group" "relay_health" {
           }]
         })
       }
+    }
+  }
+
+  // The frozen-publisher half of the no-publisher page above. When the pipeline
+  // wedges without tearing down the RTSP session, MediaMTX keeps the path
+  // state="ready" and the reader keeps pulling — the last frame just never
+  // changes, so a black/frozen stream reads as healthy from every other
+  // vantage point. playout_pipeline_running_time_ms is the one signal that
+  // proves media is moving: it advances ~1000ms per wallclock second while the
+  // pipeline holds realtime, so a flat window means the playhead has stopped.
+  //
+  // increase() rather than deriv(): the gauge resets to ~0 when a new pipeline
+  // starts, and increase()'s counter-reset handling scores that as forward
+  // progress instead of the sharp negative slope deriv() would see, so a
+  // restart or a redeploy can't page as a freeze. A pod with too little history
+  // to compute an increase drops out of the result for the same reason.
+  //
+  // Threshold with margin instead of == 0: a healthy 5m window yields ~300000ms,
+  // so 10000ms (10s of advance, 3% of realtime) sits two orders of magnitude
+  // below healthy and well below even a badly-degraded-but-progressing pipeline.
+  // The margin absorbs sampling jitter at the window edges without needing the
+  // counter to be exactly flat.
+  //
+  // Per service_platform via `by`, so one platform's wedge can't be masked by
+  // another holding realtime, and a new platform arrives covered. no_data=OK:
+  // a parked or crashed playout stops reporting entirely, which is the
+  // no-publisher rule's page, not this one.
+  rule {
+    name           = "Playout: playhead frozen (stream is a still frame)"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK" // playout not reporting → the no-publisher rule pages, not this
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Playout playhead frozen for 5m — the dashcam feed is a still frame"
+      description = "playout_pipeline_running_time_ms on playout-{{ $labels.service_platform }} advanced less than 10s over a 5m window while the {{ $labels.service_platform }} relay is meant to be up — the GStreamer pipeline is wedged but still holding its RTSP session, so MediaMTX reports the `dashcam` path healthy and the no-publisher page stays quiet while viewers see a frozen frame. Check `kubectl -n prod-1 logs playout-{{ $labels.service_platform }}` for a stalled decode or a silent EOS, then restart the pod from the console; a pipeline that re-wedges on the same clip is the corrupt-clip trap — send `!skip` over NATS to advance past it. Parking the platform below dark from the console (which scales mediamtx-{{ $labels.service_platform }} to 0) disarms this automatically."
+    }
+    labels = {
+      severity = "critical"
+      service  = "playout"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (service_platform) (increase(playout_pipeline_running_time_ms{service_name=\"playout\", deployment_environment=\"prod-1\"}[5m])) ${local.relay_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [10000] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
     }
   }
 }
