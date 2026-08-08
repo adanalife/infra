@@ -1798,6 +1798,63 @@ tasks:
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
 
+  # Repoint an OBS media source at a different RTSP URL — the incident move
+  # when the MediaMTX relay is unhealthy and the Dashcam source has to fall
+  # back to vlc-server (or back again). Same port-forward + ConfigMap-password
+  # plumbing as obs:{prod,stage}:browser:refresh above.
+  #
+  # This is a RUNTIME override: OBS reloads its scene collection on boot, so
+  # the pod reverts on the next restart. The declarative default lives in the
+  # obs repo's cdk8s/contract.py (dashcam_rtsp_url). The helper prints the
+  # current URL before changing it — keep that line, it's the rollback value.
+  #
+  # URL is required; SOURCE selects the OBS input (default Dashcam).
+  obs:prod:input:repoint:
+    desc: 'repoint a prod-1 OBS source at a new URL, e.g. URL=rtsp://vlc-twitch:8554/dashcam (override SOURCE=, default Dashcam; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:input:repoint:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          SOURCE: '{{.SOURCE | default "Dashcam"}}'
+          URL: '{{.URL}}'
+
+  obs:stage:input:repoint:
+    desc: 'repoint a stage-1 OBS source at a new URL, e.g. URL=rtsp://vlc-twitch:8554/dashcam (override SOURCE=, default Dashcam; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:input:repoint:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          SOURCE: '{{.SOURCE | default "Dashcam"}}'
+          URL: '{{.URL}}'
+
+  obs:input:repoint:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM, SOURCE, URL]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
+
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
     vars:
