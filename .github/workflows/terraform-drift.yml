@@ -76,3 +76,27 @@ jobs:
         uses: dflook/terraform-check@v3
         with:
           path: ${{ matrix.terraform-dirs }}
+
+  # A scheduled run has no PR to turn red, so a failure's only record is an
+  # entry in a run list nobody is watching — stage-1 drifted unreported for five
+  # weeks that way. Restricted to `schedule` on purpose: the PR runs of this
+  # workflow are already visible as a check.
+  #
+  # `if: failure()` catches whichever matrix leg drifted; the message points at
+  # the log rather than naming a workspace, since any of them can be the one.
+  # Best-effort like the app repos' release alert — continue-on-error keeps a
+  # rotated webhook from turning a failure to report into a second failure.
+  alert:
+    needs: [check_drift]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Alert Discord on drift
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Terraform drift in [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): [run log]({{ RUN_URL }})'
