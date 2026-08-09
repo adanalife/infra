@@ -383,6 +383,12 @@ resource "grafana_rule_group" "host_storage" {
         to   = 0
       }
       datasource_uid = data.grafana_data_source.loki.uid
+      # Grafana reflects the model's queryType back onto this attribute at
+      # refresh, so leaving it unset here reads as drift on every plan
+      # (`query_type = "instant" -> null`) that an apply cannot settle. It is
+      # the only rule in this file whose model sets queryType; the rest omit
+      # both and match.
+      query_type = "instant"
       model = jsonencode({
         refId         = "A"
         expr          = "sum(count_over_time({cluster=\"adanalife-minipc\"} |= \"input/output error\" [5m]))"
