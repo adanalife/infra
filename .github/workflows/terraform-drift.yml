@@ -25,7 +25,7 @@ jobs:
       # so a prod-1 failure doesn't take stage-1's check down with it.
       fail-fast: false
       matrix:
-        terraform-dirs: [terraform/core, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
     name: Check for drift of terraform configuration
     steps:
       - name: Checkout
