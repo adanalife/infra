@@ -9,6 +9,15 @@ env:
   # flags, so this is portable across hosts.
   KUBECTL_EXTERNAL_DIFF: diff -u -N --color=always
 
+vars:
+  # Every manifest that declares top-level Argo objects for the minipc.
+  # gitops:{diff,apply,prune} all read this list, so adding a manifest here
+  # wires it into the preview, the apply and the orphan report at once — and
+  # missing one means gitops:prune reports its objects as orphaned.
+  # argocd-k3d.k8s.yaml is deliberately absent: it targets the dev cluster,
+  # which the minipc context guard forbids.
+  GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
+
 tasks:
   # ---------------------------------------------------------------------------
   # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/), migrating off
@@ -271,12 +280,24 @@ tasks:
     cmds:
       - kubectl apply -f dist/development-data.k8s.yaml
 
-  gitops:apply:
-    desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)
+  # The read-only preview for gitops:apply — same manifests, `kubectl diff`
+  # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
+  # keeps Task from reading "there's a diff" as a failure.
+  gitops:diff:
+    desc: "Preview what gitops:apply would change: kubectl diff the Argo config against the live cluster (read-only)"
     preconditions:
       - *minipc-context-guard
     cmds:
-      - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
+      - for: { var: GITOPS_MANIFESTS, split: ' ' }
+        cmd: kubectl diff -f {{.ITEM}} || true
+
+  gitops:apply:
+    desc: Apply the Argo CD config (project + appsets + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md). Preview with gitops:diff.
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - for: { var: GITOPS_MANIFESTS, split: ' ' }
+        cmd: kubectl apply -f {{.ITEM}}
 
   # `gitops:apply` is a plain `kubectl apply`, which never deletes. Dropping an
   # AppProject or ApplicationSet from cdk8s/dist therefore leaves the live object
@@ -295,11 +316,6 @@ tasks:
     preconditions:
       - *minipc-context-guard
     vars:
-      # Every manifest that declares top-level Argo objects for the minipc.
-      # Missing one here reports its objects as orphaned, so a new such manifest
-      # must be added. argocd-k3d.k8s.yaml is deliberately absent — it targets the
-      # dev cluster, which the context guard already forbids.
-      GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
       # Argo CD ships this AppProject with the install; it is owned by no manifest
       # and is the fallback project, so pruning it would break every Application
       # that does not name a project.
