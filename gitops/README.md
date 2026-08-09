@@ -77,7 +77,8 @@ every other ESO-backed secret).
 3. **Apply the Argo config** (project + appsets + ingress + repo secret):
 
    ```sh
-   kubectl apply -f cdk8s/dist/argocd.k8s.yaml
+   task gitops:diff    # read-only preview of what the apply would change
+   task gitops:apply
    ```
 
    The three ApplicationSets fan out into the per-component / supporting / data
@@ -192,8 +193,8 @@ intentionally broad **`platform` AppProject** governs them (platform installs CR
 **Argo is the delivery path for everything in the list above** — adoption of the
 live helm releases completed 2026-07-16. Day-2 changes (values edits, chart
 bumps, new platform charts) go: edit `helm_platform.py` / the values files →
-merge → `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml` (if the
-Application specs changed) → sync in Argo. Do **not** `helm upgrade --install`
+merge → `task gitops:apply` (if the Application specs changed; preview with
+`task gitops:diff`) → sync in Argo. Do **not** `helm upgrade --install`
 an adopted release against the live cluster: Argo owns the objects via
 server-side apply, and helm's apply fails with `argocd-controller`
 field-manager conflicts. The remaining `helm upgrade --install` steps in
@@ -208,7 +209,7 @@ future not-yet-Argo-managed release). Argo *adopts* releases that
 `helm upgrade --install` owns, so the risk is Helm/SSA field-manager conflicts.
 Mirror the app cutover:
 
-1. `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml` — the project + Applications
+1. `task gitops:apply` — the project + Applications
    come up **OutOfSync, monitor-only**; nothing changes.
 2. Review each Application's diff vs the live release in the Argo UI.
 3. **Rehearse on stage** — sync `stage-1-nats` (the only stage-scoped Application now
