@@ -36,6 +36,7 @@ locals {
     "tripbot",
     "tripbot-console",
     "obs",
+    "playout",
     "platform-gateway",
     "website",
     "video-pipeline",
