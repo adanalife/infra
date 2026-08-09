@@ -67,3 +67,21 @@ jobs:
             exit 1
           fi
           rm -f tripbot-contract.json
+
+  # Same reasoning as terraform-drift.yml: the daily cron is the run nobody
+  # watches, so a contract that silently rots is invisible until something
+  # breaks. Push and workflow_dispatch runs are already visible as a check.
+  alert:
+    needs: [platforms-contract]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Alert Discord on contract drift
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Contract drift in [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): platforms.json or contract.json is behind its source of truth. [run log]({{ RUN_URL }})'
