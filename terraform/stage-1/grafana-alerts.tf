@@ -1525,6 +1525,137 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // EventSub liveness. Real-time follow / subscribe / raid delivery has no other
+  // signal: the events themselves are far too sparse to alert on (a flat zero
+  // for hours is the normal reading), so tripbot reports the positive instead —
+  // how many subscriptions the live session is holding. On 2026-08-18 EventSub
+  // was dead on prod for 7.5h with the pod Ready, tripbot_channel_live at 1 and
+  // nothing firing; two Sentry issues at one event each were the only trace.
+  //
+  // Not mode-gated. Follows and subs arrive in every console mode, including
+  // chat-only with OBS scaled to 0, so gating on the obs component would blind
+  // this exactly where chat is the whole product.
+  //
+  // for=15m clears both self-healing cases: a socket drop redials in ~10s, and
+  // a rotated broadcaster token is picked up on the next 5m token reload
+  // (tripbot#1402). What survives 15m needs a human.
+  rule {
+    name           = "Tripbot: EventSub holds no subscriptions"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Tripbot is receiving no real-time Twitch events"
+      description = "tripbot_eventsub_subscriptions{result=\"ok\"} has been 0 for 15m — no follower, subscriber, gift, resub or raid event is reaching the bot, so none of those chat shouts will fire. The loop redials every 5m on its own, so 15m of zero means redialing is not helping: the broadcaster grant is revoked or the oauth_tokens row is missing. Re-consent via the platform-gateway flow (surfaced in tripbot-console's auth card), then confirm the gauge returns to 6. Loki `eventsub` lines on tripbot-twitch carry the reason: `broadcaster token rejected` is a refused token, `skipping eventsub` means the row never loaded. Note the chat connection is independent — chat can be fine while this is dead."
+    }
+    labels = {
+      severity = "critical"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(tripbot_eventsub_subscriptions{service_name=\"tripbot\", deployment_environment=\"prod-1\", result=\"ok\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The partial-grant sibling of the rule above, and the failure that is easier
+  // to miss: a broadcaster token short one scope still subscribes to everything
+  // else, so only the event types needing that scope go dead. In July 2026 that
+  // killed follower announcements for eight days while the other five
+  // subscriptions worked, tokenRejected never tripped, and the console's auth
+  // card rendered the token healthy the whole time.
+  //
+  // Gated on result="ok" > 0 so a wholly refused token pages once, as the
+  // critical rule above, rather than twice. Warning severity because the
+  // channel is still mostly working — but the fix is the same re-consent, and
+  // nothing else reports it.
+  rule {
+    name           = "Tripbot: EventSub subscription refused"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Twitch is refusing one of tripbot's EventSub subscriptions"
+      description = "tripbot_eventsub_subscriptions{result=\"denied\"} has been above 0 for 15m while others are held — the broadcaster grant is missing a scope, so the event types needing it are silently dead and the rest keep working. A token refresh cannot fix this: it returns the original grant's scope set, so a short grant stays short through unlimited healthy rotations. Only a re-consent widens it. Which subscription failed is in Loki: `eventsub subscribe failed` on tripbot-twitch names the `event`. channel.follow v2 needs moderator:read:followers, channel.subscribe / .end / .gift / .message need channel:read:subscriptions; channel.raid needs no scope, so its failure means the token itself is bad."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(tripbot_eventsub_subscriptions{service_name=\"tripbot\", deployment_environment=\"prod-1\", result=\"denied\"}) and on () (max(tripbot_eventsub_subscriptions{service_name=\"tripbot\", deployment_environment=\"prod-1\", result=\"ok\"}) > 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Background-audio dead air — the Twitch music bed (Groove Salad Classic /
   // SomaFM) is not playing. tripbot's audio-fallback watchdog swaps the source
   // onto the local Car Hum bed when SomaFM drops, and the local file plays
