@@ -1227,7 +1227,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS silent-disconnect watchdog auto-recovered a stream"
-      description = "tripbot_obs_silent_disconnect_restarts_total incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery: a StopStream+StartStream on twitch, an egress re-mint on tiktok. The counter is per-platform, so service_platform on the series says which. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"ok\"} incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery that worked: a StopStream+StartStream on twitch and youtube, an egress re-mint on tiktok. The counter is per-platform, so service_platform on the series says which. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
     }
     labels = {
       severity = "warning"
@@ -1243,7 +1243,72 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\"}[5m]))"
+        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"ok\"}[5m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The other half of the pair above, and the page-worthy one. A recovery
+  // that keeps failing is a worse outage than one that fires and works, and
+  // it used to be the quieter of the two: the counter only moved past the
+  // error check, so through the 9h41m outage on 2026-08-05 the watchdog
+  // attempted a restart every 60s, failed every time, and this metric read a
+  // flat zero. Sentry was the only signal a stream-path recovery loop was
+  // dead. Critical rather than warning because nothing is coming back on its
+  // own — by definition the automation has already tried and lost.
+  //
+  // for = 10m, not 1m: a single failed attempt is normal (OBS can still be
+  // tearing the output down), so this waits for a pattern rather than paging
+  // on the first miss.
+  rule {
+    name           = "OBS: silent-disconnect recovery is failing"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS silent-disconnect watchdog is restarting and not recovering"
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. The counter is per-platform, so service_platform on the series says which. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
