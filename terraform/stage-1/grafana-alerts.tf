@@ -1150,15 +1150,6 @@ resource "grafana_rule_group" "stream_health" {
   // lost-visibility canary above is what reports that. obs_mode_gate joins on
   // service_platform, so each platform is armed only while the console says its
   // OBS is meant to be up.
-  //
-  // The `or` supplies twitch from tripbot_twitch_channel_live until a tripbot
-  // carrying tripbot_channel_live reaches prod: `or` contributes only label sets
-  // the left side lacks, so the legacy gauge is ignored the moment the generic
-  // one appears for twitch. It exists so this rule is correct in both states and
-  // applying it early can't leave the #1 stream alert silently unarmed; it comes
-  // out with the legacy metric. The legacy gauge carries no service_platform
-  // label at all (it predates stamping the platform onto datapoints), so
-  // label_replace supplies the "twitch" it has to match on.
   rule {
     name           = "OBS: silent disconnect (platform sees us offline)"
     for            = "3m"
@@ -1184,7 +1175,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "(max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) - (max by (service_platform) (tripbot_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) or label_replace(max(tripbot_twitch_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"}), \"service_platform\", \"twitch\", \"\", \"\"))) ${local.obs_mode_gate}"
+        expr          = "(max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) - max by (service_platform) (tripbot_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
