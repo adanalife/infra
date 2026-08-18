@@ -56,9 +56,11 @@ hubble:
   ui:
     enabled: true
     # Internal-IP Ingress at hubble.prod.whereisdana.today — external-dns
-    # publishes the Route53 record at the mini-PC LAN IP (192.168.1.200),
-    # so the host resolves anywhere but is only reachable on the home
-    # network. cert-manager issues via DNS-01, independent of inbound
+    # publishes it as a CNAME onto minipc.whereisdana.today, which is itself a
+    # CNAME onto whichever location is active and resolves to that node's LAN
+    # address. So the host resolves anywhere but is only reachable on the home
+    # network, and a physical move is a pointer flip in terraform/core rather
+    # than a re-publish here. cert-manager issues via DNS-01, independent of inbound
     # reachability. Same shape as the vlc/obs/tripbot app Ingresses.
     #
     # Cilium is only installed on the minipc (Talos has no CNI; dev/k3d

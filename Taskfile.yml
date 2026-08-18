@@ -657,7 +657,7 @@ tasks:
     cmds:
       - task: k8s:dev:cluster:down
 
-  # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
+  # prod-1 is the bare-metal Talos mini-PC (minipc.whereisdana.today), not a k3d
   # cluster — its lifecycle is talosctl wipe-and-rebuild. The k8s:prod:*
   # tasks below (bootstrap-secrets / platform:up / apply) target the live
   # Talos cluster; there is no k8s:prod:cluster:*.
@@ -1929,7 +1929,10 @@ tasks:
   talos:minipc:dashboard:
     desc: open the talosctl TUI dashboard against the minipc node
     cmds:
-      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes 192.168.1.200
+      # --nodes= wants the equals sign; the space-separated form errors. The
+      # hostname is the location-independent alias carried as a machine certSAN,
+      # so this survives a physical-network move that changes the LAN IP.
+      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes=minipc.whereisdana.today
 
   # tripbot operational tasks. Naming follows <tool>:<env>:<verb>[:<subverb>]
   # so it's clear which cluster each one targets. Aliases preserve the

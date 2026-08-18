@@ -208,12 +208,12 @@ def cluster_components(
     # traefik on the mini-PC runs hostNetwork and stamps the LAN IP into
     # Ingress status (replaces values.local.yml's ingressEndpoint.ip).
     #
-    # NOT Argo-manageable (argo=False): ingressEndpoint.ip is the node's
-    # InternalIP, discovered at bootstrap and written to the gitignored
-    # values.local.yml — it's host state, not git-declarable (prod's differs from
-    # the committed lan_ip). Inlining env.lan_ip would make Argo stamp the wrong
-    # IP into every Ingress on adoption, so traefik stays task-installed (the
-    # bootstrap discovers the IP). Same class as cilium/argo-cd.
+    # NOT Argo-manageable (argo=False), and what installs on the minipc is
+    # k8s/traefik/values.prod-1.yml — which stamps ingressEndpoint.hostname with
+    # the location-independent alias, not an address. env.lan_ip below is the
+    # render's stale approximation of that and reaches no cluster. development is
+    # the env that genuinely can't be git-declared: its target is the host's own
+    # public IP, per-machine. Same class as cilium/argo-cd.
     traefik_files = ["traefik/values.yml"]
     traefik_values: dict = {}
     if minipc:
@@ -340,15 +340,14 @@ def env_components(env: EnvConfig) -> list[HelmComponent]:
             "external-dns",
             edns_ns,
             value_files=(f"external-dns/{env.name}/config.yml",),
-            # `extraArgs` (--default-targets=<node IP> + --force-default-targets)
-            # lives in the gitignored values.local.yml, written by bootstrap from
-            # the node's discovered InternalIP. The cdk8s.Helm path approximates it
-            # with the committed lan_ip, but it's NOT git-declarable — NOT
-            # Argo-manageable (argo=False). Like traefik (its IP source) and
-            # cilium/argo-cd, external-dns stays task-installed so the bootstrap
-            # owns the discovered IP + the force flag. Inlining lan_ip here would
-            # make Argo drop --force-default-targets and force the wrong target on
-            # adoption.
+            # prod-1 and stage-1 commit their own `extraArgs`
+            # (--default-targets=<node alias> + --force-default-targets) in
+            # k8s/external-dns/<env>/config.yml, and that is what
+            # `task k8s:<env>:platform:up` installs. The value rendered here from
+            # env.lan_ip approximates it and reaches no cluster. external-dns
+            # stays task-installed (argo=False) alongside traefik and
+            # cilium/argo-cd because development's target is the host's own
+            # public IP, written per-machine to a gitignored values.local.yml.
             values={"extraArgs": [f"--default-targets={env.lan_ip}"]},
             argo=False,
         ),

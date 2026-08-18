@@ -54,9 +54,11 @@ class EnvConfig:
     external_dns_role_arn: str = (
         ""  # cert-manager DNS-01 Route53 role (per AWS account)
     )
-    lan_ip: str = (
-        "192.168.1.200"  # mini-PC node IP external-dns/traefik target (platform Helm)
-    )
+    # Approximates the external-dns/traefik target for the platform-Helm render
+    # only. Both components are task-installed from committed k8s/** values that
+    # carry the node's DNS alias instead, so nothing reads this value into a
+    # cluster — and it still holds the address of a network the mini-PC has left.
+    lan_ip: str = "192.168.1.200"
     nfs_server: str = ""  # dashcam NFS export (nfs mode); from $NFS_SERVER at synth
     nfs_path: str = ""  # dashcam NFS path; from the $nfs_path_env var at synth
     # Which env var supplies this env's dashcam path. Both nfs envs now read the

@@ -18,12 +18,12 @@ Scope (minipc only — development is on the k3d cluster, with its own Argo):
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
   * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
     install) — the bootstrap floor.
-  * **traefik** + **external-dns** — host-coupled: traefik's ingressEndpoint.ip and
-    external-dns's --default-targets are the node's discovered InternalIP, written to
-    gitignored values.local.yml at bootstrap (not git-declarable; prod's differs from
-    the committed lan_ip). external-dns also carries --force-default-targets in that
-    same gitignored arg list. Argo-rendering them from committed values would force
-    the wrong target / drop the flag on adoption, so they stay task-installed.
+  * **traefik** + **external-dns** — host-coupled via development only. prod-1 and
+    stage-1 commit their target (the node's location-independent alias) in
+    k8s/traefik/values.prod-1.yml and k8s/external-dns/<env>/config.yml, alongside
+    --force-default-targets. development is the env whose target is the host's own
+    public IP, written per-machine to a gitignored values.local.yml, so the pair
+    stays task-installed.
 
 The kustomize-only platform bits (local-path-provisioner, intel-gpu/xpu, ESO
 cluster-store, cert-manager ClusterIssuers) are out of scope here too — a later
