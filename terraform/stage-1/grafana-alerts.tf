@@ -59,6 +59,12 @@ locals {
   // runs with mediamtx scaled to 0, so it has no publish target and its playhead
   // isn't expected to advance.
   relay_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"mediamtx\", deployment_environment=\"prod-1\"} > 0)"
+
+  // Every console component a mode gate above keys on. The gate-health deadman
+  // generates one absent() canary per entry, so a gate keyed on a new component
+  // gains its own canary by being added here — the two can't drift into the
+  // state where a gate silently un-arms because nothing watches its component.
+  gated_components = ["obs", "mediamtx"]
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -1954,64 +1960,72 @@ resource "grafana_rule_group" "relay_health" {
 # parked platform doesn't page. If that metric disappears — console down, its
 # scrape/ingest path broken — the gate goes empty and every gated rule silently
 # stops firing: exactly the blind spot we're trying to avoid. absent() turns
-# that into a loud page instead. Keyed on the obs component (every stream rule
-# gates on obs or mediamtx, and the two share the one emitter), so its absence
-# means the gate signal is gone. Critical → ntfy.
+# that into a loud page instead.
+#
+# One rule per gated component, from local.gated_components. absent() can't be
+# grouped, so a single canary over both components only fires when the console
+# stops emitting entirely — the console emitting obs while dropping mediamtx
+# would un-arm both playout playhead-freeze rules with nothing to say so. The
+# two components come from one emitter, which is what makes that case unlikely
+# and also what would make it invisible. Critical → ntfy.
 resource "grafana_rule_group" "gate_health" {
   name             = "gate-health"
   folder_uid       = grafana_folder.tripbot.uid
   interval_seconds = local.alert_eval_interval_seconds
 
-  rule {
-    name           = "Stream gate metric absent (mode gating blind)"
-    for            = "10m"
-    condition      = "C"
-    no_data_state  = "OK"
-    exec_err_state = "Alerting"
+  dynamic "rule" {
+    for_each = toset(local.gated_components)
+    content {
+      name           = "Stream gate metric absent (${rule.value} mode gating blind)"
+      for            = "10m"
+      condition      = "C"
+      no_data_state  = "OK"
+      exec_err_state = "Alerting"
 
-    annotations = {
-      summary     = "console_platform_component_up has been absent for 10m — stream alerts can't tell parked from broken"
-      description = "console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} has been absent for 10m. The stream-health rules gate on this metric to follow platform mode, so while it's gone every gated rule evaluates its gate as empty and silently stops firing — a real outage could go unpaged. Check the tripbot-console pod (`kubectl -n prod-1 get pods | grep tripbot-console`), its /metrics endpoint, and the alloy-metrics scrape/ingest path. no_data is OK because a present series makes absent() return nothing."
-    }
-    labels = {
-      severity = "critical"
-      service  = "monitoring"
-    }
+      annotations = {
+        summary     = "console_platform_component_up{component=\"${rule.value}\"} has been absent for 10m — the rules gated on it can't tell parked from broken"
+        description = "console_platform_component_up{component=\"${rule.value}\", deployment_environment=\"prod-1\"} has been absent for 10m. The stream-health rules gate on this metric to follow platform mode, so while it's gone every rule gated on this component evaluates its gate as empty and silently stops firing — a real outage could go unpaged. obs gates the OBS-side rules; mediamtx gates the playout playhead-freeze rules. Check the tripbot-console pod (`kubectl -n prod-1 get pods | grep tripbot-console`), its /metrics endpoint, and the alloy-metrics scrape/ingest path. no_data is OK because a present series makes absent() return nothing."
+      }
+      labels = {
+        severity = "critical"
+        service  = "monitoring"
+      }
 
-    data {
-      ref_id = "A"
-      relative_time_range {
-        from = 600
-        to   = 0
+      data {
+        ref_id = "A"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        datasource_uid = data.grafana_data_source.prometheus.uid
+        model = jsonencode({
+          refId         = "A"
+          expr          = "absent(console_platform_component_up{component=\"${rule.value}\", deployment_environment=\"prod-1\"})"
+          instant       = true
+          intervalMs    = 60000
+          maxDataPoints = 43200
+        })
       }
-      datasource_uid = data.grafana_data_source.prometheus.uid
-      model = jsonencode({
-        refId         = "A"
-        expr          = "absent(console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"})"
-        instant       = true
-        intervalMs    = 60000
-        maxDataPoints = 43200
-      })
-    }
-    data {
-      ref_id         = "C"
-      datasource_uid = "__expr__"
-      relative_time_range {
-        from = 0
-        to   = 0
+      data {
+        ref_id         = "C"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          refId      = "C"
+          type       = "threshold"
+          expression = "A"
+          conditions = [{
+            type      = "query"
+            evaluator = { type = "gt", params = [0] }
+            operator  = { type = "and" }
+            query     = { params = ["A"] }
+            reducer   = { type = "last", params = [] }
+          }]
+        })
       }
-      model = jsonencode({
-        refId      = "C"
-        type       = "threshold"
-        expression = "A"
-        conditions = [{
-          type      = "query"
-          evaluator = { type = "gt", params = [0] }
-          operator  = { type = "and" }
-          query     = { params = ["A"] }
-          reducer   = { type = "last", params = [] }
-        }]
-      })
     }
   }
 }
