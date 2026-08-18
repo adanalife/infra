@@ -1336,6 +1336,83 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+
+  // The wedged-encoder case: OBS reports the output active, the RTMP socket is
+  // healthy, and the encoder is pushing nothing. On 2026-08-05 a hung NFS mount
+  // blocked the render pipeline for 9h41m while outputActive stayed 1, so every
+  // rule keyed on "is OBS streaming" read green and the silent-disconnect
+  // watchdog's ~45 restarts each reconnected to ingest and then emitted zero
+  // frames — mechanically successful, so they page as result="ok" rather than
+  // as the failure they were.
+  //
+  // The discriminator is the frame counter itself: obs_stream_output_total_frames
+  // climbs at the encoder's framerate whenever anything is actually going out,
+  // and sits perfectly still when it isn't. max_over_time - min_over_time rather
+  // than increase(): the gauge is per-stream-start, so it resets to zero on a
+  // restart, and a spread reads that reset as a large positive rather than as a
+  // counter rollover to extrapolate.
+  //
+  // Gated on obs_streaming_active = 1 so the two states this must not fire on
+  // stay excluded — a stream deliberately stopped, and an OBS the poller can't
+  // reach (it publishes streaming=0 and leaves the frame gauge at its last
+  // value, which would otherwise look exactly like a wedge).
+  //
+  // Critical, and separate from the recovery-is-failing rule: the remedy differs.
+  // Restarting the OBS *output* is the only move the watchdog has and it cannot
+  // help here, so this one names the pod bounce.
+  rule {
+    name           = "OBS: encoder wedged (output active, no frames)"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS says it is streaming but has sent no frames for 15m"
+      description = "obs_stream_output_total_frames has not advanced in 10m while obs_streaming_active is 1 — OBS holds the output open and the encoder is producing nothing, so the stream is dark while every 'is it streaming' signal reads healthy. service_platform on the series says which platform. Restarting the OBS output will not fix this and the silent-disconnect watchdog can do nothing else: the fault is below the output, in the render pipeline or something it blocks on (a hung NFS mount did this for 9h41m on 2026-08-05). Bounce the OBS pod for that platform, then look for what the render thread was waiting on."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_platform) (max_over_time(obs_stream_output_total_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[10m]) - min_over_time(obs_stream_output_total_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[10m])) and on (service_platform) (max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) == 1) ${local.obs_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   rule {
     name           = "Tripbot: disconnected from Twitch chat"
     for            = "5m"
