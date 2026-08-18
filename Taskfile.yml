@@ -657,7 +657,7 @@ tasks:
     cmds:
       - task: k8s:dev:cluster:down
 
-  # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
+  # prod-1 is the bare-metal Talos mini-PC (minipc.whereisdana.today), not a k3d
   # cluster — its lifecycle is talosctl wipe-and-rebuild. The k8s:prod:*
   # tasks below (bootstrap-secrets / platform:up / apply) target the live
   # Talos cluster; there is no k8s:prod:cluster:*.

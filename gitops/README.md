@@ -180,13 +180,13 @@ intentionally broad **`platform` AppProject** governs them (platform installs CR
 
 - **cilium** (the CNI Argo itself rides on) and **argo-cd** (its own install) — the
   bootstrap floor.
-- **traefik** + **external-dns** — *host-coupled*. traefik's `ingressEndpoint.ip`
-  and external-dns's `--default-targets` are the node's **discovered InternalIP**,
-  written to the gitignored `values.local.yml` at bootstrap (prod's differs from the
-  committed `lan_ip`); external-dns also carries `--force-default-targets` in that
-  same gitignored arg list. Argo-rendering them from committed values would force
-  the wrong target / drop the flag on adoption, so the bootstrap (which discovers
-  the IP) owns them.
+- **traefik** + **external-dns** — *host-coupled via `development` only*. prod-1 and
+  stage-1 commit their target — the node's location-independent alias, a CNAME onto
+  whichever location is active — in `k8s/traefik/values.prod-1.yml`
+  (`ingressEndpoint.hostname`) and `k8s/external-dns/<env>/config.yml`
+  (`--default-targets` plus `--force-default-targets`). `development` is the env whose
+  target is the host's own public IP, written per-machine to a gitignored
+  `values.local.yml`, so the pair stays task-installed.
 - The kustomize-only bits (local-path-provisioner, intel-gpu/xpu, ESO
   cluster-store, cert-manager ClusterIssuers).
 
