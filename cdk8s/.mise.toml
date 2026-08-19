@@ -15,3 +15,6 @@ node = "24"
 # helm is needed only for the platform-chart phase (cdk8s.Helm renders via
 # `helm template`); pin it now so it's ready. Bump to 4.x deliberately later.
 helm = "3.16.4"
+# kubeconform validates the synthed dist/ against the k8s API schemas
+# (task cdk8s:validate, mirrored in cdk8s-synth.yml).
+kubeconform = "0.8.0"

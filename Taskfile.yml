@@ -252,6 +252,19 @@ tasks:
       - mise exec -- uv run npx cdk8s synth
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
 
+  # Schema-validate the committed dist/ (what Argo actually applies) against
+  # the cluster's k8s API version — catches API-version drift after a k8s
+  # bump. CRD kinds (ESO, Argo, cert-manager) resolve via the datree
+  # CRDs-catalog; anything not there (none today) is skipped, not failed.
+  # The {{`{{.Group}}`}} backtick wrapping keeps kubeconform's URL template
+  # out of Task's own templating. Mirrored in cdk8s-synth.yml.
+  cdk8s:validate:
+    desc: Validate the committed dist/ manifests against the k8s API schemas (kubeconform)
+    dir: cdk8s
+    cmds:
+      # -kubernetes-version tracks the live cluster (kubectl version); bump it with talos upgrades
+      - mise exec -- kubeconform -strict -summary -kubernetes-version 1.36.0 -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{`{{.Group}}`}}/{{`{{.ResourceKind}}`}}_{{`{{.ResourceAPIVersion}}`}}.json' -ignore-missing-schemas dist/
+
   # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
   # live cluster (read-only; safe pre-cutover check). Output is colorized via the
   # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
