@@ -83,6 +83,10 @@ resource "tailscale_acl" "this" {
           //     apiserver-proxy + per-Service proxy devices it creates with
           //     tag:k8s (the canonical operator pattern owns tag:k8s by
           //     tag:k8s-operator; we keep admin too so the node still works).
+          //     This ownership also covers the Tailscale Services the operator
+          //     mints for HA ingress: they carry the operator's proxy tags
+          //     (proxyConfig.defaultTags = tag:k8s), so no separate tag is
+          //     needed for them.
           "tag:k8s":          ["autogroup:admin", "tag:k8s-operator"],
 
           // Identity of the Tailscale Kubernetes operator and its OAuth client.
@@ -103,6 +107,16 @@ resource "tailscale_acl" "this" {
               "192.168.40.0/24": ["tag:k8s"],
           },
           "exitNode": ["tag:k8s"],
+
+          // Auto-approve the Tailscale Services advertised by the shared HA
+          // ingress fleet. The operator mints one Service per Ingress
+          // annotated `tailscale.com/proxy-group: ingress-proxies`, tagged
+          // tag:k8s; the ProxyGroup replicas that front it are tag:k8s too.
+          // Keyed by the Service's tag rather than its name, so each opted-in
+          // Ingress is approved without a per-Service admin-console click.
+          "services": {
+              "tag:k8s": ["tag:k8s"],
+          },
       },
 
       // Grants govern access. Default allow-all — fine for a single-user
@@ -151,10 +165,11 @@ resource "tailscale_acl" "this" {
 # ACL so tag:k8s-operator exists before the client tries to claim it.
 resource "tailscale_oauth_client" "operator" {
   description = "Tailscale K8s operator adanalife-minipc"
-  # devices:core (register proxy devices) + auth_keys (mint their join keys).
-  # The tags below satisfy the "auth_keys scope needs a tag" requirement.
-  # If a newer operator feature needs the `services` scope, add it here.
-  scopes = ["devices:core", "auth_keys"]
+  # devices:core (register proxy devices) + auth_keys (mint their join keys) +
+  # services (create and own a Tailscale Service per HA-ingress Ingress, which
+  # is how one ProxyGroup fleet fronts many Ingresses). The tags below satisfy
+  # the "auth_keys scope needs a tag" requirement.
+  scopes = ["devices:core", "auth_keys", "services"]
   tags   = ["tag:k8s-operator"]
 
   depends_on = [tailscale_acl.this]
