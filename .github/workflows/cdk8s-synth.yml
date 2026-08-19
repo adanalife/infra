@@ -91,6 +91,19 @@ jobs:
           NFS_PATH: '<export path>'
         run: mise exec -- uv run npx cdk8s synth
 
+      # Schema-validate the freshly synthed dist/ (what Argo applies) against
+      # the cluster's k8s API version — catches API-version drift after a k8s
+      # bump. CRD kinds resolve via the datree CRDs-catalog. Mirrors
+      # `task cdk8s:validate`; keep the two commands in lockstep.
+      - name: Validate manifests (kubeconform)
+        run: >-
+          mise exec -- kubeconform -strict -summary
+          -kubernetes-version 1.36.0
+          -schema-location default
+          -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          -ignore-missing-schemas
+          dist/
+
       # PRs: push the regenerated dist/ back to the branch. Synth is
       # deterministic, so the re-run triggered by this commit finds dist/
       # clean and does not push again.
