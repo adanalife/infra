@@ -126,8 +126,17 @@ destinations:
         // isn't matched (regexes are fully anchored, RE2). Add a family
         // only when a cloud dashboard or alert queries it — the default
         // answer for a new scraped metric is local-VM-only.
-        source_labels = ["__name__"]
-        regex = "platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created"
+        //
+        // Matched against __name__ + mountpoint so the T5 fill alert
+        // (host-storage rule group) can have its two inputs without the
+        // whole node_filesystem_* family: node-exporter emits those per
+        // mount, and only /var/mnt/data is worth cloud residency. Every
+        // other kept family is mountpoint-less, so it joins to a bare
+        // trailing separator — which is what the "/" at the end of the
+        // first alternative matches, and what a new family must keep.
+        source_labels = ["__name__", "mountpoint"]
+        separator = "/"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
