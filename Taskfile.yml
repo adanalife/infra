@@ -1860,6 +1860,69 @@ tasks:
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
 
+  # Swap the stream key on a running OBS — the alternative to re-seeding the
+  # secret and restarting the pod, which drops the stream. Same port-forward +
+  # ConfigMap-password plumbing as obs:{prod,stage}:input:repoint above.
+  #
+  # SHARP EDGE: this writes to a live OBS's stream output. The helper prints the
+  # current settings with the key masked before changing anything — keep that
+  # line, it's the rollback breadcrumb. Run with DRY_RUN=1 first to read only.
+  #
+  # This is a RUNTIME override: OBS reloads its stream service settings on boot,
+  # so the seeded secret wins on the next restart. Rotate the secret too.
+  #
+  # The key is read from $NEW_STREAM_KEY in the environment, never a task arg —
+  # a task arg lands in `ps`. The invocation that keeps it out of shell history
+  # as well is:
+  #
+  #   read -rs NEW_STREAM_KEY && export NEW_STREAM_KEY
+  #   task obs:stage:key:rotate
+  obs:prod:key:rotate:
+    desc: 'MUTATES A LIVE STREAM — swap the stream key on the running prod-1 OBS (export NEW_STREAM_KEY first; DRY_RUN=1 to only read; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:key:rotate:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          DRY_RUN: '{{.DRY_RUN}}'
+
+  obs:stage:key:rotate:
+    desc: 'MUTATES A LIVE STREAM — swap the stream key on the running stage-1 OBS (export NEW_STREAM_KEY first; DRY_RUN=1 to only read; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:key:rotate:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          DRY_RUN: '{{.DRY_RUN}}'
+
+  obs:key:rotate:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+      - sh: '[ -n "{{.DRY_RUN}}" ] || [ -n "$NEW_STREAM_KEY" ]'
+        msg: "NEW_STREAM_KEY is not set — export it into the environment (a task arg would land in `ps`), or pass DRY_RUN=1 to only read"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
+
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)
     vars:
