@@ -63,7 +63,12 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s import eso
-from adanalife_k8s.naming import meta_labels, selector
+from adanalife_k8s.naming import (
+    CONFIG_HASH_ANNOTATION,
+    config_hash,
+    meta_labels,
+    selector,
+)
 
 NAME = "ups-monitor"
 NAMESPACE = "ups"
@@ -277,11 +282,12 @@ class UpsMonitor(Construct):
         labels = meta_labels(NAME, part_of="infra")
         sel = selector(NAME)
 
+        scripts = {"nutread.py": _READER, "fetch-talosctl.py": _FETCH_TALOSCTL}
         k8s.KubeConfigMap(
             self,
             "reader",
             metadata=k8s.ObjectMeta(name=NAME, namespace=NAMESPACE, labels=labels),
-            data={"nutread.py": _READER, "fetch-talosctl.py": _FETCH_TALOSCTL},
+            data=scripts,
         )
 
         # The shutdown credential. Cluster store (not a namespaced SecretStore):
@@ -378,7 +384,12 @@ class UpsMonitor(Construct):
                 strategy=k8s.DeploymentStrategy(type="Recreate"),
                 selector=k8s.LabelSelector(match_labels=sel),
                 template=k8s.PodTemplateSpec(
-                    metadata=k8s.ObjectMeta(labels=sel),
+                    # Python reads the scripts once at startup, so the digest is
+                    # what rolls the reader when the ConfigMap changes.
+                    metadata=k8s.ObjectMeta(
+                        labels=sel,
+                        annotations={CONFIG_HASH_ANNOTATION: config_hash(scripts)},
+                    ),
                     spec=k8s.PodSpec(
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),

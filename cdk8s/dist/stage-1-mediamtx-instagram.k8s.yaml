@@ -60,6 +60,7 @@ spec:
   template:
     metadata:
       annotations:
+        adanalife.dev/config-hash: a41daebe2c
         prometheus.io/port: "9998"
         prometheus.io/scrape: "true"
       labels:
