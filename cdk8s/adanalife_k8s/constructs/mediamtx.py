@@ -27,7 +27,12 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.contract import load_contract
-from adanalife_k8s.naming import meta_labels, selector
+from adanalife_k8s.naming import (
+    CONFIG_HASH_ANNOTATION,
+    config_hash,
+    meta_labels,
+    selector,
+)
 
 # GHCR mirror, not Docker Hub (the ghcr-base-image-mirrors decision) — the
 # mirror pair is registered in the playout repo's mirror-images workflow.
@@ -100,11 +105,12 @@ class Mediamtx(Construct):
         labels = meta_labels(name)
         sel = selector(name)
 
+        config = {"mediamtx.yml": _CONFIG}
         k8s.KubeConfigMap(
             self,
             f"{platform}-config",
             metadata=k8s.ObjectMeta(name=f"{name}-config", namespace=ns, labels=labels),
-            data={"mediamtx.yml": _CONFIG},
+            data=config,
         )
 
         container = k8s.Container(
@@ -169,6 +175,10 @@ class Mediamtx(Construct):
                         annotations={
                             "prometheus.io/scrape": "true",
                             "prometheus.io/port": str(METRICS_PORT),
+                            # The config is a subPath mount, which never updates
+                            # in place; the digest rolls the relay on sync so a
+                            # mediamtx.yml edit reaches the running process.
+                            CONFIG_HASH_ANNOTATION: config_hash(config),
                         },
                     ),
                     spec=k8s.PodSpec(

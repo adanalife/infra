@@ -12,6 +12,7 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import MediamtxChart
 from adanalife_k8s.config import load_env
+from adanalife_k8s.naming import CONFIG_HASH_ANNOTATION, config_hash
 
 
 def _synth(env_name, platform="twitch"):
@@ -41,3 +42,14 @@ def test_dashcam_path_rejects_a_second_publisher(env_name):
     assert len(cms) == 1
     config = cms[0]["data"]["mediamtx.yml"]
     assert "overridePublisher: no" in config.split("dashcam:", 1)[1]
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_pod_template_carries_the_config_digest(env_name):
+    # mediamtx.yml is a subPath mount, so a ConfigMap-only edit reaches a
+    # running pod only if the template changes and the Deployment rolls.
+    objs = _synth(env_name)
+    cm = next(o for o in objs if o["kind"] == "ConfigMap")
+    deploy = next(o for o in objs if o["kind"] == "Deployment")
+    annotations = deploy["spec"]["template"]["metadata"]["annotations"]
+    assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])
