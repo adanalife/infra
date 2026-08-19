@@ -74,7 +74,7 @@ VERSIONS = {
     "cilium": "1.19.4",
     "metrics-server": "3.13.1",  # app v0.8.1 — Talos-only (k3s bundles its own)
     "nats": "2.14.0",  # already pinned in the legacy task
-    "tailscale-operator": "1.98.3",  # already pinned in the legacy task
+    "tailscale-operator": "1.98.3",  # kubectl over the tailnet + tailnet Ingress
     "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
     # CNPG — operator v1.30.0 + the barman-cloud CNPG-I plugin v0.13.0 (WAL
     # archiving / PITR to S3). Verified latest stable at add time (2026-07-10).
