@@ -537,7 +537,7 @@
       "gridPos": {
         "x": 0,
         "y": 24,
-        "w": 8,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -590,9 +590,9 @@
         "uid": "__DS_PROMETHEUS__"
       },
       "gridPos": {
-        "x": 8,
+        "x": 6,
         "y": 24,
-        "w": 8,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -645,9 +645,9 @@
         "uid": "__DS_PROMETHEUS__"
       },
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 24,
-        "w": 8,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -1173,6 +1173,62 @@
         "tooltip": {
           "mode": "multi"
         }
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Last publish gap",
+      "description": "Duration of the most recent publish gap (playout_publish_gap_seconds): how long the MediaMTX path sat without a publisher before this playout's publish attached \u2014 a deploy handoff or an error recovery (e.g. a mediamtx restart). Viewers additionally wait for the next IDR after the gap closes, so the on-screen blackout runs up to one GOP (~2s) longer. No data means no gap since the pod started.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 24,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (service_platform, deployment_environment) (playout_publish_gap_seconds{service_name=\"playout\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "s",
+          "noValue": "none yet",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1.5
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
       }
     }
   ]
