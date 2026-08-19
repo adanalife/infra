@@ -106,3 +106,38 @@ def test_colocated_supporting_has_no_duplicate_store_or_pvc():
     objs = _synth(SupportingChart, _COLOCATED_NFS)
     assert not _by(objs, "SecretStore", "aws-parameterstore")
     assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")
+
+
+# --- ingress guard: default-deny on the isolated data namespace ---
+
+
+def test_isolated_data_ns_gets_ingress_policy_scoped_to_own_app_ns():
+    for name in ("prod-1", "stage-1"):
+        env = load_env(name)
+        objs = _synth(DataChart, env)
+        pol = _by(objs, "NetworkPolicy", "postgres-ingress")[0]
+        assert _ns(pol) == env.data_namespace
+        spec = pol["spec"]
+        # default-deny: selects every pod, Ingress-typed
+        assert spec["podSelector"] == {}
+        assert spec["policyTypes"] == ["Ingress"]
+        # rule 1: same-namespace traffic (the backup CronJob)
+        assert spec["ingress"][0] == {"from": [{"podSelector": {}}]}
+        # rule 2: only the env's OWN app namespace, and only on 5432 — this is
+        # what makes stage-1 -> prod-1-data (and vice versa) a default deny
+        rule = spec["ingress"][1]
+        assert rule["from"] == [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": env.namespace}
+                }
+            }
+        ]
+        assert rule["ports"] == [{"port": 5432, "protocol": "TCP"}]
+
+
+def test_colocated_data_ns_gets_no_ingress_policy():
+    # a default-deny in the shared app namespace would black-hole every other
+    # workload there — co-located envs must not emit the policy
+    objs = _synth(DataChart, _COLOCATED_NFS)
+    assert not _by(objs, "NetworkPolicy", "postgres-ingress")
