@@ -2163,6 +2163,63 @@ tasks:
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
 
+  # Screenshot every source in the live OBS scene and fail on the blank ones —
+  # release acceptance for the overlays. A crashed browser_source stays in the
+  # scene and the pod stays healthy, but it renders as a transparent PNG of a
+  # couple hundred bytes (the 2026-06-21 right-rotator outage). Read-only, so
+  # it's safe against the live prod stream. Same port-forward +
+  # ConfigMap-password plumbing as obs:{prod,stage}:browser:refresh above.
+  #
+  # MIN_BYTES is the blank threshold; SCREENSHOT_DIR keeps the PNGs for
+  # eyeballing (nothing is written without it).
+  obs:prod:screenshot:check:
+    desc: screenshot every prod-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:screenshot:check:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          MIN_BYTES: '{{.MIN_BYTES | default "1000"}}'
+          SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
+
+  obs:stage:screenshot:check:
+    desc: screenshot every stage-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:screenshot:check:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          MIN_BYTES: '{{.MIN_BYTES | default "1000"}}'
+          SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
+
+  obs:screenshot:check:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM, MIN_BYTES]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_SCREENSHOT_MIN_BYTES={{.MIN_BYTES}} \
+        SCREENSHOT_DIR='{{.SCREENSHOT_DIR}}' \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-screenshot-check
+
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)
     vars:
