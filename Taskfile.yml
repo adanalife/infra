@@ -1945,7 +1945,10 @@ tasks:
       # --nodes= wants the equals sign; the space-separated form errors. The
       # hostname is the location-independent alias carried as a machine certSAN,
       # so this survives a physical-network move that changes the LAN IP.
-      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes=minipc.whereisdana.today
+      # --endpoints= pins the API endpoint to the same alias rather than
+      # inheriting whatever the talosconfig context happens to carry, whose
+      # nodes/endpoints lists are regenerated PKI material and can drift.
+      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes=minipc.whereisdana.today --endpoints=minipc.whereisdana.today
 
   # tripbot operational tasks. Naming follows <tool>:<env>:<verb>[:<subverb>]
   # so it's clear which cluster each one targets. Aliases preserve the
