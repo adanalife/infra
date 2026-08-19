@@ -1,6 +1,7 @@
-# Shared HA proxy fleet for tailnet-exposed Ingresses. Applied by
-# `task k8s:prod:platform:up` after the operator is up (the CRD ships with the
-# chart). Cluster-scoped singleton — the operator runs one StatefulSet
+# Shared HA proxy fleet for tailnet-exposed Ingresses. Delivered by the
+# tailscale-operator Argo Application, which carries this directory as a
+# raw-manifest source alongside the chart that ships the CRD (see
+# cdk8s/adanalife_k8s/constructs/argo_platform.py). Cluster-scoped singleton — the operator runs one StatefulSet
 # (ts-ingress-proxies-{0,1}) in its own namespace and serves every Ingress
 # annotated `tailscale.com/proxy-group: ingress-proxies` from it, instead of one
 # proxy pod per Ingress.

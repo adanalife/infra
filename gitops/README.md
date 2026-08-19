@@ -176,6 +176,11 @@ Source: `cdk8s/adanalife_k8s/constructs/argo_platform.py`; the chart table is
 intentionally broad **`platform` AppProject** governs them (platform installs CRDs
 / ClusterRoles / webhooks), distinct from the restrictive `tripbot` app project.
 
+An Application can carry in-repo raw manifests as an extra source when they are
+custom resources of a CRD its chart ships: `tailscale-operator` also delivers
+`k8s/tailscale-operator/proxygroup.yml` (the `ingress-proxies` ProxyGroup), so the
+proxy fleet syncs with the operator that reconciles it.
+
 **Not Argo-managed — they stay task-installed (`task k8s:<env>:platform:up`):**
 
 - **cilium** (the CNI Argo itself rides on) and **argo-cd** (its own install) — the

@@ -131,6 +131,23 @@ class ArgoPlatform(Construct):
             "targetRevision": TARGET_REVISION,
             "ref": "values",
         }
+        sources = [chart_source, values_source]
+
+        if comp.release == "tailscale-operator":
+            # The ingress ProxyGroup is a custom resource of a CRD the operator
+            # chart ships, so it rides the operator's own Application as a third,
+            # raw-manifest source: Argo applies CRDs ahead of custom resources
+            # within one sync, and syncing the operator syncs its proxy fleet with
+            # it. `include` scopes the directory to the manifest, leaving the
+            # chart's values.yml (fed to the chart source above) out of it.
+            sources.append(
+                {
+                    "repoURL": REPO_URL,
+                    "targetRevision": TARGET_REVISION,
+                    "path": "k8s/tailscale-operator",
+                    "directory": {"include": "proxygroup.yml"},
+                }
+            )
 
         app = cdk8s.ApiObject(
             self,
@@ -144,7 +161,7 @@ class ArgoPlatform(Construct):
                 "/spec",
                 {
                     "project": PROJECT,
-                    "sources": [chart_source, values_source],
+                    "sources": sources,
                     "destination": {"server": IN_CLUSTER, "namespace": dest_ns},
                     "syncPolicy": {
                         # MONITOR-ONLY: manual sync. CreateNamespace so Argo owns the
