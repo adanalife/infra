@@ -75,6 +75,12 @@ authInternalUsers:
       - action: metrics
 paths:
   dashcam:
+    # Reject a second publisher instead of kicking the current one
+    # (MediaMTX's default is to kick). During a playout rolling deploy the
+    # incoming pod waits for the path to free (probe-gated, so it never
+    # even connects while the path is held); this is the backstop that
+    # keeps any stray publish attempt from stealing the live stream.
+    overridePublisher: no
 """
 
 
