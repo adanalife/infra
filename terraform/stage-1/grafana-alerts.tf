@@ -425,6 +425,127 @@ resource "grafana_rule_group" "host_storage" {
       })
     }
   }
+
+  // Capacity, the other way the T5 takes prod down. The I/O-fault rule above
+  // catches the disk vanishing; these catch it filling, which has no log
+  // signature at all until writes start failing. Two tiers off one ratio
+  // expression: 25% warning (act this week) and 15% critical (act now).
+  //
+  // Ratio rather than absolute bytes so the thresholds survive a bigger disk.
+  // `min()` collapses to a single series — the mount is one filesystem, and the
+  // aggregation keeps the rule from multiplying if node-exporter ever reports
+  // the volume under a second device label.
+  //
+  // node_filesystem_* is otherwise local-VictoriaMetrics-only; the two series
+  // these read are allowlisted into the cloud destination explicitly
+  // (k8s/monitoring/prod-1/values.yml). 30m `for` rides out the transient dips
+  // a large ingest batch causes while it stages and then prunes.
+
+  rule {
+    name           = "minipc T5 SSD filling (below 25% free)"
+    for            = "30m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc T5 SSD below 25% free (2TB durable volume)"
+      description = "The T5 UserVolume at /var/mnt/data backs every local-path PV on the minipc — prod + stage Postgres, NATS, VictoriaMetrics, and the ~700Gi live dashcam corpus mirror. At 25% free (~500GB of 2TB) there is still room to act, but the trend is the signal: this is the tier meant to be caught during working hours rather than at 3am. What to check, in order: `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today df` for the mount, then `du -xh --max-depth=1 /var/mnt/data` to find which local-path PV grew. The usual causes are a footage-ingest or dashcam-localize job writing an unsized batch, and Postgres WAL/log growth. Levers: stop the runaway writer job, prune the data it already wrote, and re-run the dashcam-localize sizing so the next batch is bounded. Deleting the redundant `_all` corpus mirror is NOT one — it is not redundant free space, it is the live corpus. The hourly S3 pg_dump is the backstop for Postgres data, not for staying up: at 0 bytes free the database stops accepting writes regardless."
+    }
+    labels = {
+      severity = "warning"
+      service  = "storage"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 1800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min(node_filesystem_avail_bytes{mountpoint=\"/var/mnt/data\"} / node_filesystem_size_bytes{mountpoint=\"/var/mnt/data\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [0.25] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name           = "minipc T5 SSD nearly full (below 15% free)"
+    for            = "30m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc T5 SSD below 15% free — a full disk stops prod Postgres and the dashcam stream"
+      description = "The T5 UserVolume at /var/mnt/data is under 15% free (~300GB of 2TB). When it hits zero, prod Postgres stops accepting WAL writes and the live dashcam corpus mirror stops — the stream and the bot both go down together, which is why this escalates to ntfy rather than Discord alone. Local-path claim sizes are hostPath bookkeeping and enforce nothing, so one runaway writer can consume the whole volume. What to check, in order: `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today df` for the mount, then `du -xh --max-depth=1 /var/mnt/data` to find which local-path PV grew. The usual causes are a footage-ingest or dashcam-localize job writing an unsized batch, and Postgres WAL/log growth. Levers: stop the runaway writer job, prune the data it already wrote, and re-run the dashcam-localize sizing so the next batch is bounded. Deleting the redundant `_all` corpus mirror is NOT one — it is not redundant free space, it is the live corpus. The hourly S3 pg_dump is the backstop for Postgres data, not for staying up: at 0 bytes free the database stops accepting writes regardless."
+    }
+    labels = {
+      severity = "critical"
+      service  = "storage"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 1800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min(node_filesystem_avail_bytes{mountpoint=\"/var/mnt/data\"} / node_filesystem_size_bytes{mountpoint=\"/var/mnt/data\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [0.15] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 // Metrics-budget alert — fires when Grafana Cloud's tenant-side count of
