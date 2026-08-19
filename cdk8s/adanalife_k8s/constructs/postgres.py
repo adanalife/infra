@@ -274,6 +274,52 @@ class Postgres(Construct):
             self._backup_external_secret(ns)
             self._backup_cronjob(ns)
 
+        # --- data-namespace ingress guard (isolated envs only). NetworkPolicy
+        #     is allowlist-only, so "stage can't reach prod's DB" is expressed
+        #     as default-deny ingress on every pod in the data namespace,
+        #     allowing only same-namespace traffic (the backup CronJob) and the
+        #     env's OWN app namespace on the postgres port. Cilium enforces it.
+        #     Co-located envs skip it: a default-deny in the shared app
+        #     namespace would black-hole every other workload there. Kubelet
+        #     probes and `kubectl port-forward` arrive from the host, which
+        #     Cilium allows regardless of policy.
+        if env.data_isolated:
+            k8s.KubeNetworkPolicy(
+                self,
+                "ingress-policy",
+                metadata=k8s.ObjectMeta(
+                    name=f"{NAME}-ingress", namespace=ns, labels=labels
+                ),
+                spec=k8s.NetworkPolicySpec(
+                    pod_selector=k8s.LabelSelector(),
+                    policy_types=["Ingress"],
+                    ingress=[
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(pod_selector=k8s.LabelSelector())
+                            ]
+                        ),
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": env.namespace
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(PORT),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            )
+
     # ---- helpers ----
     def _storage_class(self):
         # Retain reclaim policy: the safety lever so `kubectl delete pvc` (or a
