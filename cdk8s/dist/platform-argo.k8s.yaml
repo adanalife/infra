@@ -112,6 +112,11 @@ spec:
     - repoURL: git@github.com:adanalife/infra.git
       targetRevision: main
       ref: values
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      path: k8s/tailscale-operator
+      directory:
+        include: proxygroup.yml
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale

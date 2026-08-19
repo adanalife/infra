@@ -1365,14 +1365,16 @@ tasks:
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
   # mirror to both unless deliberately env-specific.
   #
-  # DAY-0 BRING-UP ONLY. The Argo-adoptable platform releases in here (ESO,
-  # metrics-server, tailscale-operator, cert-manager, cnpg, node-exporter,
-  # k8s-monitoring, NATS) are Argo-owned on the live cluster
-  # (platform-argo.k8s.yaml; adopted 2026-07-16) — re-running their helm
-  # steps against it fails with argocd-controller field-manager conflicts.
-  # Day-2 changes go through git + Argo sync; see gitops/README.md
-  # ("Platform stack"). On an empty cluster this task still works: helm
-  # installs everything, Argo adopts on first sync.
+  # DAY-0 BRING-UP ONLY. The Argo-adoptable platform releases still installed in
+  # here (ESO, cert-manager, cnpg, node-exporter, k8s-monitoring, NATS) are
+  # Argo-owned on the live cluster (platform-argo.k8s.yaml; adopted 2026-07-16) —
+  # re-running their helm steps against it fails with argocd-controller
+  # field-manager conflicts. Day-2 changes go through git + Argo sync; see
+  # gitops/README.md ("Platform stack"). On an empty cluster this task brings up
+  # the floor Argo needs (cilium, storage, ESO + the cluster store, the tailscale
+  # OAuth Secret, Argo CD itself); charts with no helm step here — metrics-server,
+  # tailscale-operator, victoria-metrics — arrive on the first Argo sync, and
+  # everything else Argo adopts.
   k8s:prod:platform:up:
     desc: "day-0 bring-up of an empty cluster (live releases are Argo-owned — see gitops/README.md)"
     deps: [k8s:prod:bootstrap-secrets]
@@ -1398,19 +1400,9 @@ tasks:
       - kubectl -n kube-system rollout status daemonset/cilium --timeout=180s
       - kubectl wait --for=condition=Ready node --all --timeout=180s
       - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
-      # metrics-server — backs `kubectl top` + the HPA metrics API. Talos
-      # doesn't bundle it (k3s does, hence dev k3d has it and this step is
-      # prod-only). --kubelet-insecure-tls in values.yml works around Talos's
-      # self-signed kubelet serving certs. No deps beyond a Ready node.
-      - helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
-      - helm repo update metrics-server
-      - helm upgrade --install metrics-server metrics-server/metrics-server
-          --version 3.13.1
-          -n kube-system
-          -f k8s/metrics-server/values.yml
-      - kubectl wait --for=condition=Available --timeout=120s
-          deployment/metrics-server -n kube-system
-      - 'echo "metrics-server up. kubectl top nodes/pods now works on the minipc."'
+      # metrics-server (backs `kubectl top` + the HPA metrics API; Talos doesn't
+      # bundle it, unlike k3s) has no helm step here — it's Argo-delivered only
+      # (platform-argo.k8s.yaml, synced after gitops:apply), never helm-CLI-owned.
       # local-path-provisioner — cluster storage backing. Must precede any
       # PVC-consuming workload (postgres). See k8s/local-path-provisioner/prod-1.
       - kubectl apply -k k8s/local-path-provisioner/prod-1
@@ -1435,22 +1427,16 @@ tasks:
       - kubectl apply -k k8s/external-secrets/cluster-store
       - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       # Tailscale operator — kubectl over the tailnet (API server proxy) + app-UI
-      # exposure as tailnet services. Needs ESO up (the operator-oauth Secret is
-      # materialized from SM via the cluster store). prod-1 only — the tailnet is
-      # global, managed once (see terraform/prod-1/tailscale.tf).
+      # exposure as tailnet services — is Argo-delivered (platform-argo.k8s.yaml),
+      # together with the ingress-proxies ProxyGroup that rides its Application.
+      # Its OAuth credentials are the bootstrap half and belong here: the chart
+      # expects the operator-oauth Secret to already exist, so ESO must have
+      # materialized it from SM (via the cluster store, up above) before the first
+      # Argo sync brings the operator up. prod-1 only — the tailnet is global,
+      # managed once (see terraform/prod-1/tailscale.tf).
       - kubectl apply -f k8s/tailscale-operator/operator-oauth.yml
       - for i in $(seq 1 30); do kubectl get secret operator-oauth -n tailscale >/dev/null 2>&1 && break; sleep 2; done
-      - helm repo add tailscale https://pkgs.tailscale.com/helmcharts
-      - helm repo update tailscale
-      - helm upgrade --install tailscale-operator tailscale/tailscale-operator
-          --version 1.98.3
-          -n tailscale
-          -f k8s/tailscale-operator/values.yml
-      - kubectl wait --for=condition=Available --timeout=120s deployment --all -n tailscale
-      - 'echo "Tailscale operator up. kubectl over tailnet: tailscale configure kubeconfig tailscale-operator"'
-      # Shared HA proxy fleet for tailnet Ingresses (2 pods), serving every
-      # Ingress annotated tailscale.com/proxy-group: ingress-proxies.
-      - kubectl apply -f k8s/tailscale-operator/proxygroup.yml
+      - 'echo "operator-oauth Secret materialized in the tailscale namespace; the operator comes up on the first Argo sync. kubectl over tailnet: tailscale configure kubeconfig tailscale-operator"'
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
