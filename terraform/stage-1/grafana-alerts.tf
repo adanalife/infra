@@ -1055,6 +1055,77 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // Corrupt-feed detector, sourced from Loki rather than the obs_* metrics: the
+  // failure it catches is upstream of OBS's own counters. When the playout
+  // publish path hands OBS a stream with broken H264 reference structure, OBS
+  // renders (and re-encodes) the garbage at full framerate — render/output/
+  // stream skip counters all stay clean while viewers see heavy artifacts. The
+  // only signal is ffmpeg's decoder complaining on the obs container's stdout,
+  // hundreds of lines per minute. Motivating incident: the playout 0.17.0
+  // rollout on 2026-08-19 published a corrupt stream for ~25 minutes (~12000
+  // matched lines in the first 15m) and nothing paged; the healthy baseline for
+  // these patterns is ~1 line per 3h, so the threshold sits orders of magnitude
+  // from both sides.
+  //
+  // service_platform is derived from the pod name embedded in
+  // service_instance_id ("prod-1.obs-twitch-<hash>.obs") so the Discord message
+  // names the affected platform like the metric-sourced rules do. No mode gate:
+  // a parked platform's obs pod is scaled to 0 and emits no logs at all.
+  rule {
+    name           = "OBS: decode errors (corrupt playout feed)"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS is logging a storm of H264 decode errors — the playout feed is corrupt"
+      description = "The prod OBS container is logging sustained H264 decode errors (missing reference pictures / mmco failures) — the RTSP feed from playout has broken reference structure and viewers see heavy artifacts, while the frame-skip metrics stay clean. If this started at a playout deploy or restart, roll playout back to the previous image (`kubectl -n prod-1 set image deployment/playout-<platform> playout=ghcr.io/adanalife/playout:<prev>`); the artifacts persist through clip changes and skips, so waiting does not clear it. Compare against the other platform's obs logs to confirm it's one feed rather than both."
+    }
+    labels = {
+      severity = "warning"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant" // Grafana reflects the model's queryType back; see the T5 rule
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (service_platform) (count_over_time({namespace=\"prod-1\", container=\"obs\"} |~ \"Missing reference picture|reference picture missing|mmco: unref|co located POCs\" | label_format service_platform=`{{ regexReplaceAll \"prod-1\\\\.obs-([a-z]+)-.*\" .service_instance_id \"$${1}\" }}` [5m]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [100] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Visibility canary, one per platform: every other stream-health rule uses
   // no_data_state=OK, so if tripbot stops emitting obs_streaming_active entirely
   // (pod crash, broken OTLP push) they all go quiet instead of firing — "lost
