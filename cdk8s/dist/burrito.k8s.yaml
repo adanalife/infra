@@ -125,7 +125,7 @@ spec:
         value: "false"
     envFrom:
       - secretRef:
-          name: burrito-aws-stage
+          name: burrito-aws-stage-apply
     volumes:
       - name: gcp-token
         projected:
@@ -148,15 +148,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: burrito-aws-stage
+  name: burrito-aws-stage-apply
   namespace: burrito
 spec:
   data:
     - remoteRef:
-        key: /k8s/burrito/stage-access-key-id
+        key: /k8s/burrito/stage-apply-access-key-id
       secretKey: AWS_ACCESS_KEY_ID
     - remoteRef:
-        key: /k8s/burrito/stage-secret-access-key
+        key: /k8s/burrito/stage-apply-secret-access-key
       secretKey: AWS_SECRET_ACCESS_KEY
   refreshInterval: 1h
   secretStoreRef:
@@ -164,7 +164,7 @@ spec:
     name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
-    name: burrito-aws-stage
+    name: burrito-aws-stage-apply
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -213,7 +213,7 @@ spec:
         value: "false"
     envFrom:
       - secretRef:
-          name: burrito-aws-prod
+          name: burrito-aws-prod-apply
     volumes:
       - name: gcp-token
         projected:
@@ -236,15 +236,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: burrito-aws-prod
+  name: burrito-aws-prod-apply
   namespace: burrito
 spec:
   data:
     - remoteRef:
-        key: /k8s/burrito/prod-access-key-id
+        key: /k8s/burrito/prod-apply-access-key-id
       secretKey: AWS_ACCESS_KEY_ID
     - remoteRef:
-        key: /k8s/burrito/prod-secret-access-key
+        key: /k8s/burrito/prod-apply-secret-access-key
       secretKey: AWS_SECRET_ACCESS_KEY
   refreshInterval: 1h
   secretStoreRef:
@@ -252,7 +252,7 @@ spec:
     name: aws-parameterstore-cluster
   target:
     creationPolicy: Owner
-    name: burrito-aws-prod
+    name: burrito-aws-prod-apply
 ---
 apiVersion: v1
 kind: ConfigMap

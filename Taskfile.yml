@@ -297,13 +297,48 @@ tasks:
   # CRDs, which only exist once the `burrito` Argo Application has synced — a
   # blanket gitops:apply would fail on a cluster that hasn't installed it.
   k8s:prod:burrito:apply:
-    desc: "Apply the Burrito trial config (chart-registry secret + TerraformRepository + core layer + runner creds + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
+    desc: "Apply the Burrito config (TerraformRepository + the four layers + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
     preconditions:
       - *minipc-context-guard
       - sh: kubectl get crd terraformlayers.config.terraform.padok.cloud >/dev/null 2>&1
         msg: "Burrito CRDs missing — sync the `burrito` Application first (it ships them with the chart): argocd app sync burrito --core"
     cmds:
       - kubectl apply -f cdk8s/dist/burrito.k8s.yaml
+
+  # Run `terraform apply` for one layer, once. Burrito has no standing apply
+  # loop — every layer keeps remediationStrategy.autoApply false — so an apply
+  # only ever happens because someone asked for it, here or in the UI.
+  #
+  # The run replays the plan burrito already computed and displayed
+  # (applyWithoutPlanArtifact stays false), so what runs is what you reviewed.
+  #
+  # Only stage-1 and prod-1 can actually apply: core and platform hold a
+  # ReadOnlyAccess credential and a run against them fails at the first write.
+  # That is the intended answer, not a gap — see constructs/burrito.py.
+  k8s:prod:burrito:run:
+    desc: "Trigger one terraform apply for a Burrito layer: task k8s:prod:burrito:run LAYER=prod-1"
+    requires:
+      vars: [LAYER]
+    preconditions:
+      - *minipc-context-guard
+      - sh: kubectl -n burrito get terraformlayer {{.LAYER}} >/dev/null 2>&1
+        msg: "No TerraformLayer named '{{.LAYER}}' — kubectl -n burrito get terraformlayers"
+    cmds:
+      # generateName, so repeated runs don't collide on a name.
+      - |
+        kubectl create -f - <<EOF
+        apiVersion: config.terraform.padok.cloud/v1alpha1
+        kind: TerraformRun
+        metadata:
+          generateName: {{.LAYER}}-manual-apply-
+          namespace: burrito
+        spec:
+          action: apply
+          layer:
+            name: {{.LAYER}}
+            namespace: burrito
+        EOF
+        echo "Watch it with: kubectl -n burrito get terraformruns --sort-by=.metadata.creationTimestamp"
 
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
   # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
