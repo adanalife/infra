@@ -69,6 +69,7 @@ class ArgoPlatform(Construct):
     def __init__(self, scope: Construct, id: str = "argo-platform"):
         super().__init__(scope, id)
         self._project()
+        self._oci_registries()
 
         # Cluster-scoped releases (one install for the whole minipc), skipping the
         # bootstrap floor (cilium / argo-cd, argo=False).
@@ -84,6 +85,39 @@ class ArgoPlatform(Construct):
             for comp in env_components(load_env(env_name)):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+
+    def _oci_registries(self):
+        # Anonymous HTTP(S) chart repos need no Argo registration, but an OCI
+        # registry (scheme-less in REPOS) must be registered with enableOCI so
+        # the repo-server pulls charts from it as Helm OCI refs. Public
+        # registries, so the Secrets carry no credentials — one per OCI
+        # registry the component table references.
+        for registry in sorted({url for url in REPOS.values() if "://" not in url}):
+            # Slug the full registry path, not just the host — two registries
+            # on one host must not collide on the Secret name.
+            slug = registry.replace("/", "-").replace(".", "-")
+            secret = cdk8s.ApiObject(
+                self,
+                f"oci-registry-{slug}",
+                api_version="v1",
+                kind="Secret",
+                metadata={
+                    "name": f"argocd-repo-oci-{slug}",
+                    "namespace": ARGO_NS,
+                    "labels": {"argocd.argoproj.io/secret-type": "repository"},
+                },
+            )
+            secret.add_json_patch(
+                cdk8s.JsonPatch.add(
+                    "/stringData",
+                    {
+                        "name": f"oci-{slug}",
+                        "type": "helm",
+                        "url": registry,
+                        "enableOCI": "true",
+                    },
+                )
+            )
 
     def _project(self):
         proj = cdk8s.ApiObject(

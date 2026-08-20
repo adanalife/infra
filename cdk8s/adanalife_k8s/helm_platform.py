@@ -53,6 +53,9 @@ REPOS = {
     "argo": "https://argoproj.github.io/argo-helm",
     "cloudnative-pg": "https://cloudnative-pg.github.io/charts",
     "victoria-metrics": "https://victoriametrics.github.io/helm-charts/",
+    # OCI registry — no scheme, the form Argo's repoURL wants. emit() detects
+    # the missing scheme and passes helm the full oci:// chart ref instead.
+    "burrito": "ghcr.io/padok-team/charts",
 }
 
 # --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
@@ -83,6 +86,10 @@ VERSIONS = {
     # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
     # live minipc release.
     "victoria-metrics-single": "0.42.0",
+    # Burrito v0.13.0 — terraform GitOps controller (plan/drift-detect trial).
+    # Latest stable at add time (2026-08-19); pre-1.0, so minors can break —
+    # read the release notes before bumping.
+    "burrito": "0.13.0",
 }
 
 
@@ -106,11 +113,19 @@ class HelmComponent:
         flags = ["--namespace", self.namespace]
         for vf in self.value_files:
             flags += ["-f", f"{K8S}/{vf}"]
+        repo = REPOS[self.repo_key]
+        if "://" not in repo:
+            # OCI registry (scheme-less in REPOS, matching Argo's repoURL
+            # format). helm can't take an OCI registry via --repo — it wants
+            # the full oci:// chart ref as the chart argument.
+            chart, repo = f"oci://{repo}/{self.chart}", None
+        else:
+            chart = self.chart
         return Helm(
             scope,
             self.release,
-            chart=self.chart,
-            repo=REPOS[self.repo_key],
+            chart=chart,
+            repo=repo,
             version=VERSIONS[self.version_key],
             release_name=self.release,
             namespace=self.namespace,
@@ -202,6 +217,26 @@ def cluster_components(
                 "argocd",
                 value_files=tuple(argo_values),
                 argo=False,
+            )
+        )
+
+    # Burrito — terraform GitOps controller ("Argo CD for terraform"), a
+    # plan/drift-detect TRIAL: no layer enables remediationStrategy.autoApply
+    # and the runner credential is read-only, so applies stay Dana-driven per
+    # the write-side preference. Mock (in-memory) datastore — plan artifacts
+    # don't survive a datastore restart; a real S3 bucket is the promotion
+    # step if the trial sticks. Cleanly Argo-manageable (no host-coupled
+    # values). The CRs it reconciles (TerraformRepository/TerraformLayer) live
+    # in dist/burrito.k8s.yaml — see constructs/burrito.py.
+    if minipc:
+        components.append(
+            HelmComponent(
+                "burrito",
+                "burrito",
+                "burrito",
+                "burrito",
+                "burrito-system",
+                value_files=("burrito/values.yml",),
             )
         )
 

@@ -19,6 +19,7 @@ from cdk8s import App
 
 from adanalife_k8s.charts import (
     ArgoCDChart,
+    BurritoChart,
     DashcamLocalizeChart,
     NfsPVChart,
     DataChart,
@@ -108,6 +109,10 @@ if not only:
     # Application per release (offline: just Application objects, no rendered
     # charts). MONITOR-ONLY until adopted; see gitops/README.md.
     PlatformArgoChart(app, "platform-argo")
+    # Burrito trial config (TerraformRepository + core layer + runner creds +
+    # UI ingress) — plan/drift-detect only, applied after the Burrito chart
+    # syncs. See constructs/burrito.py.
+    BurritoChart(app, "burrito")
     # UPS monitor (observe-only NUT client) — cluster-singleton in the `ups`
     # namespace, env-agnostic. Delivered by a minipc-only Argo Application (the
     # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
