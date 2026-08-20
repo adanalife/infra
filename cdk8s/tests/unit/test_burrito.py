@@ -175,3 +175,14 @@ def test_credential_matches_whether_the_layer_can_apply():
             layer.name,
             keys,
         )
+
+
+def test_tailnet_ui_rides_the_shared_proxy_fleet():
+    ing = next(
+        i
+        for i in _kind(_synth(), "Ingress")
+        if i["spec"].get("ingressClassName") == "tailscale"
+    )
+    assert (
+        ing["metadata"]["annotations"]["tailscale.com/proxy-group"] == "ingress-proxies"
+    )

@@ -966,10 +966,16 @@ class ArgoCD(Construct):
     def _ui_ingress(self):
         # TLS terminates at the tailnet edge; forwards plain HTTP to
         # argocd-server:80 (chart runs server.insecure). UI at argocd-prod.<tailnet>.
+        # Served by the shared HA proxy fleet (k8s/tailscale-operator/proxygroup.yml)
+        # instead of a dedicated per-Ingress proxy pod.
         k8s.KubeIngress(
             self,
             "ui-ingress",
-            metadata=k8s.ObjectMeta(name="argocd-server-tailscale", namespace=ARGO_NS),
+            metadata=k8s.ObjectMeta(
+                name="argocd-server-tailscale",
+                namespace=ARGO_NS,
+                annotations={"tailscale.com/proxy-group": "ingress-proxies"},
+            ),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
                 default_backend=k8s.IngressBackend(
