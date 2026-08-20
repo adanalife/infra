@@ -293,6 +293,38 @@ spec:
     creationPolicy: Owner
     name: burrito-oidc-client-secret
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tripbot-console-burrito
+  namespace: burrito
+rules:
+  - apiGroups:
+      - config.terraform.padok.cloud
+    resources:
+      - terraformlayers
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tripbot-console-burrito
+  namespace: burrito
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tripbot-console-burrito
+subjects:
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: prod-1
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: stage-1
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

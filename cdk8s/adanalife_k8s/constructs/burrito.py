@@ -71,6 +71,10 @@ BURRITO_API = "config.terraform.padok.cloud/v1alpha1"
 TENANT_NS = "burrito"
 # The chart's own namespace (controller/server/datastore + the UI Service).
 SYSTEM_NS = "burrito-system"
+# The consoles that read the layers' drift verdict (tripbot-console's terraform
+# panel): one console per env, both on this cluster, both watching the same
+# cluster-wide Burrito. Namespace == env name, as everywhere else.
+CONSOLE_ENVS = ("prod-1", "stage-1")
 # Created by the chart (the `tenants[].serviceAccounts` entry in values.yml).
 # Named on every runner because the projected token below is what GCP
 # federates — its subject is this ServiceAccount.
@@ -182,6 +186,7 @@ class Burrito(Construct):
             if layer.gcp_project:
                 self._gcp_credential_config(layer)
         self._oidc_client_secret()
+        self._console_rbac()
         self._ui_ingress()
         self._lan_ingress()
 
@@ -380,6 +385,44 @@ class Burrito(Construct):
                     ),
                 ],
             ),
+        )
+
+    def _console_rbac(self):
+        """A Role + RoleBinding in the tenant namespace letting each env's
+        `tripbot-console` ServiceAccount list TerraformLayers — the console's
+        terraform drift panel, which reports each layer's last plan and links
+        out to here for the plan itself. Read-only and layers-only: the console
+        never triggers a run, and the trial never applies, so there is nothing
+        for it to mutate. Mirrors the console's Argo grant (argocd.py
+        _console_argo_rbac), which the console can no more self-grant than this
+        one — both namespaces are infra's.
+        """
+        name = "tripbot-console-burrito"
+        k8s.KubeRole(
+            self,
+            "console-role",
+            metadata=k8s.ObjectMeta(name=name, namespace=TENANT_NS),
+            rules=[
+                k8s.PolicyRule(
+                    api_groups=["config.terraform.padok.cloud"],
+                    resources=["terraformlayers"],
+                    verbs=["get", "list", "watch"],
+                )
+            ],
+        )
+        k8s.KubeRoleBinding(
+            self,
+            "console-rolebinding",
+            metadata=k8s.ObjectMeta(name=name, namespace=TENANT_NS),
+            role_ref=k8s.RoleRef(
+                api_group="rbac.authorization.k8s.io", kind="Role", name=name
+            ),
+            subjects=[
+                k8s.Subject(
+                    kind="ServiceAccount", name="tripbot-console", namespace=env
+                )
+                for env in CONSOLE_ENVS
+            ],
         )
 
     def _lan_ingress(self):
