@@ -117,6 +117,22 @@ resource "aws_ssm_parameter" "guessr_admin_emails" {
   }
 }
 
+# Who may sign in to the cluster's internal admin UIs through Cloudflare
+# Access — burrito today (burrito-oidc.tf). Separate from the guessr list on
+# purpose: that one gates a game-scheduling surface, this one gates terraform.
+# Same empty-placeholder shape as guessr's, and the policy carries the
+# precondition that explains the two-apply bootstrap.
+resource "aws_ssm_parameter" "internal_admin_emails" {
+  name        = "/prod-1/internal-admin-emails"
+  description = "Email addresses allowed through Cloudflare Access to the cluster's internal admin UIs. JSON array of addresses."
+  type        = "SecureString"
+  value       = "[]"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # ============================================================================
 # Unmanaged parameters (deliberately NOT terraform resources)
 # ============================================================================
@@ -169,6 +185,10 @@ data "aws_ssm_parameter" "discord_alerts_webhook" {
 
 data "aws_ssm_parameter" "guessr_admin_emails" {
   name = aws_ssm_parameter.guessr_admin_emails.name
+}
+
+data "aws_ssm_parameter" "internal_admin_emails" {
+  name = aws_ssm_parameter.internal_admin_emails.name
 }
 
 # ============================================================================
