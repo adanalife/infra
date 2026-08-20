@@ -1,7 +1,7 @@
 # SSM Parameter Store — prod-1 parameters + CI grants.
 # KEEP-IN-SYNC: terraform/stage-1/secrets.tf (same shape; env-specific
 # entries differ — see each file's map. Prod-only parameters that belong to
-# topic files stay there: argocd.tf, tailscale.tf, postgres-backup.tf.)
+# topic files stay there: argocd.tf, tailscale.tf.)
 #
 # Parameter Store, not Secrets Manager: standard-tier parameters are free where
 # SM bills $0.40/secret/month.
