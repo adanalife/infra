@@ -98,6 +98,22 @@ updates:
         update-types:
           - minor
           - patch
+    cooldown:
+      default-days: 7
+    rebase-strategy: disabled
+  - package-ecosystem: terraform
+    directory: terraform/prod-1-data
+    schedule:
+      interval: weekly
+      day: monday
+      time: "13:00"
+    groups:
+      prod-1-data-providers:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   # The cdk8s CLI and its jsii toolchain. Dependabot has no mise backend, so
   # this is only reachable because the CLI is pinned in package-lock.json
   # rather than cdk8s/.mise.toml. cdk8s-synth re-synths on the bump PR, so a

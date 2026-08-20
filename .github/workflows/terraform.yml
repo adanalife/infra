@@ -34,6 +34,7 @@ jobs:
           - terraform/platform
           - terraform/stage-1
           - terraform/prod-1
+          - terraform/prod-1-data
     env:
       # required in order to comment on MRs
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,7 +94,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/prod-1-data, terraform/stage-1]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -107,7 +108,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/stage-1]
+        terraform-dirs: [terraform/core, terraform/platform, terraform/prod-1, terraform/prod-1-data, terraform/stage-1]
     steps:
       - name: Checkout
         uses: actions/checkout@v7

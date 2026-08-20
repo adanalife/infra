@@ -515,6 +515,45 @@ tasks:
     cmds:
       - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
+  # prod-1-data holds the prod resources that can't be recreated from this
+  # repo (the Talos PKI KMS key, the postgres backup bucket). Own state file,
+  # same account and profile as tf:prod:* — see terraform/prod-1-data/README.md.
+  tf:prod-data:apply:
+    desc: terraform apply against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform apply {{.CLI_ARGS}}
+
+  tf:prod-data:plan:
+    desc: terraform plan against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
+
+  tf:prod-data:init:
+    desc: terraform init against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
+
+  tf:prod-data:init:reconfigure:
+    desc: terraform init -reconfigure against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:prod-data:init:migrate:
+    desc: terraform init -migrate-state against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
+
+  tf:prod-data:destroy:
+    desc: terraform destroy against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
   # Core uses --no-session because session tokens can't make IAM changes.
   tf:core:apply:
     desc: terraform apply against core (no session token; IAM changes need full creds)
@@ -1985,7 +2024,7 @@ tasks:
   # Talos PKI (adanalife-minipc). The generated machine configs + talosconfig
   # hold the cluster CA key, bootstrap/trustd tokens, and etcd encryption
   # secrets. They're SOPS-encrypted with the prod-1 KMS key
-  # (alias/sops-talos-pki, terraform/prod-1/sops.tf) and committed as
+  # (alias/sops-talos-pki, terraform/prod-1-data/sops.tf) and committed as
   # talos/adanalife-minipc/*.sops.yaml; the plaintext stays gitignored.
   # Encrypted as opaque binary blobs because the configs are
   # multi-document YAML (sops's native YAML store doesn't handle multi-doc).
@@ -2029,7 +2068,7 @@ tasks:
       - |
         aws-vault exec adanalife-prod -- bash -c '
           set -euo pipefail
-          kms=$(terraform -chdir=../../terraform/prod-1 output -raw sops_talos_kms_key_arn)
+          kms=$(terraform -chdir=../../terraform/prod-1-data output -raw sops_talos_kms_key_arn)
           for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml" "tailscale.patch.yaml:tailscale.patch.sops.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
             [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
