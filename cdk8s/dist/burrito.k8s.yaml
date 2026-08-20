@@ -1,0 +1,70 @@
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformRepository
+metadata:
+  name: infra
+  namespace: burrito
+spec:
+  repository:
+    url: https://github.com/adanalife/infra.git
+  terraform:
+    enabled: true
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: core
+  namespace: burrito
+spec:
+  path: terraform/core
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+    envFrom:
+      - secretRef:
+          name: burrito-aws-core
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-core
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/core-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/core-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-core
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: burrito-server-tailscale
+  namespace: burrito-system
+spec:
+  defaultBackend:
+    service:
+      name: burrito-server
+      port:
+        name: http
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - burrito-prod

@@ -1,0 +1,32 @@
+# Burrito (padok-team/burrito) — terraform GitOps controller, plan/drift-detect
+# trial. Chart version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered
+# by the `burrito` Argo Application (platform-argo.k8s.yaml). The
+# TerraformRepository/TerraformLayer CRs it reconciles live in
+# cdk8s/dist/burrito.k8s.yaml (task k8s:prod:burrito:apply).
+config:
+  burrito:
+    controller:
+      timers:
+        # Every drift check spawns a runner pod that terraform-plans on the
+        # minipc — keep it hourly so the trial doesn't compete with the live
+        # stream for CPU (chart default is 10m).
+        driftDetection: 1h
+      # One runner at a time, same reasoning.
+      maxConcurrentRunnerPods: 1
+    datastore:
+      storage:
+        # In-memory plan/log storage: no bucket needed, but artifacts are lost
+        # on datastore restart. Trial-grade; promotion to a real S3 bucket is
+        # the first step if burrito earns its keep.
+        mock: true
+
+tenants:
+  # The tenant namespace holds the CRs + runner pods; the chart creates the
+  # namespace and the runner ServiceAccount (referenced nowhere yet — runner
+  # AWS creds arrive via overrideRunnerSpec envFrom instead, see
+  # constructs/burrito.py).
+  - namespace:
+      create: true
+      name: burrito
+    serviceAccounts:
+      - name: burrito-runner

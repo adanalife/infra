@@ -293,6 +293,18 @@ tasks:
     cmds:
       - kubectl apply -f dist/development-data.k8s.yaml
 
+  # Burrito's config unit is NOT in GITOPS_MANIFESTS: its CRs need the Burrito
+  # CRDs, which only exist once the `burrito` Argo Application has synced — a
+  # blanket gitops:apply would fail on a cluster that hasn't installed it.
+  k8s:prod:burrito:apply:
+    desc: "Apply the Burrito trial config (chart-registry secret + TerraformRepository + core layer + runner creds + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
+    preconditions:
+      - *minipc-context-guard
+      - sh: kubectl get crd terraformlayers.config.terraform.padok.cloud >/dev/null 2>&1
+        msg: "Burrito CRDs missing — sync the `burrito` Application first (it ships them with the chart): argocd app sync burrito --core"
+    cmds:
+      - kubectl apply -f cdk8s/dist/burrito.k8s.yaml
+
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
   # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
   # keeps Task from reading "there's a diff" as a failure.

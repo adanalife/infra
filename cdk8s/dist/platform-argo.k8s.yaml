@@ -7,6 +7,7 @@ spec:
   description: shared cluster platform (Helm) reconciled by Argo CD
   sourceRepos:
     - git@github.com:adanalife/infra.git
+    - ghcr.io/padok-team/charts
     - https://argoproj.github.io/argo-helm
     - https://charts.external-secrets.io
     - https://charts.jetstack.io
@@ -29,6 +30,19 @@ spec:
   namespaceResourceWhitelist:
     - group: "*"
       kind: "*"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    argocd.argoproj.io/secret-type: repository
+  name: argocd-repo-oci-ghcr-io-padok-team-charts
+  namespace: argocd
+stringData:
+  name: oci-ghcr-io-padok-team-charts
+  type: helm
+  url: ghcr.io/padok-team/charts
+  enableOCI: "true"
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -120,6 +134,38 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: burrito
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: ghcr.io/padok-team/charts
+      chart: burrito
+      targetRevision: 0.13.0
+      helm:
+        releaseName: burrito
+        valueFiles:
+          - $values/k8s/burrito/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: burrito-system
   syncPolicy:
     syncOptions:
       - CreateNamespace=true
