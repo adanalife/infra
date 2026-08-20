@@ -10,6 +10,12 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: tailscale
+  labels:
+    # The operator's ProxyGroup proxy pods run privileged containers
+    # (sysctler + tailscale), which the cluster's baseline PodSecurity
+    # default rejects. Infrastructure pods in their own namespace.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
