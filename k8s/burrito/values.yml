@@ -66,6 +66,30 @@ server:
       - secretRef:
           name: burrito-oidc-client-secret
 
+# The controllers pod serves Burrito's own Prometheus metrics on :8080, and
+# these three annotations are what makes alloy-metrics scrape it (the fleet
+# convention — see k8s/monitoring/prod-1/values.yml, which remaps the chart's
+# k8s.grafana.com/* keys to prometheus.io/*). Without them the endpoint exists
+# and nothing reads it.
+#
+# The family worth having is burrito_terraform_layer_status{layer_name,status}:
+# per layer, `warning` when the last plan was not empty, `error` when it failed,
+# `running` mid-plan. That is the drift verdict from the component that owns it,
+# which is why the console exports only the one thing Burrito omits — a last-run
+# timestamp (see tripbot-console src/console/metrics.py).
+#
+# Everything scraped reaches the cluster's VictoriaMetrics; only the allowlisted
+# family reaches Grafana Cloud, per that same monitoring values file. Restating
+# the chart's default-container annotation is deliberate — podAnnotations
+# replaces the map rather than merging, so omitting it would drop it.
+controllers:
+  deployment:
+    podAnnotations:
+      kubectl.kubernetes.io/default-container: burrito
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics"
+
 tenants:
   # The tenant namespace holds the CRs + runner pods; the chart creates the
   # namespace and the runner ServiceAccount (referenced nowhere yet — runner

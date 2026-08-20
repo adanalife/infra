@@ -29,6 +29,11 @@ def _platform_synth():
 # The chart's own config, which carries the half of the auth setup that is
 # values rather than Kubernetes objects.
 VALUES = Path(__file__).parents[3] / "k8s" / "burrito" / "values.yml"
+# The alloy-metrics values that decide which scraped families reach Grafana
+# Cloud — the other half of making Burrito's own metrics alertable.
+MONITORING_VALUES = (
+    Path(__file__).parents[3] / "k8s" / "monitoring" / "prod-1" / "values.yml"
+)
 
 
 def _values():
@@ -209,3 +214,21 @@ def test_console_reads_layers_and_nothing_else():
     assert {(s["name"], s["namespace"]) for s in binding["subjects"]} == {
         ("tripbot-console", env) for env in CONSOLE_ENVS
     }
+
+
+def test_controller_metrics_are_scraped_and_reach_the_cloud():
+    # Burrito's own /metrics is the source of truth for the drift verdict (the
+    # console exports only the last-run timestamp Burrito omits), and it takes
+    # two files to land: the scrape annotations here, and an allowlist entry on
+    # the cloud remote_write, since that destination keeps only named families.
+    # Doing one without the other is the failure this pins — annotations alone
+    # leave the alert blind, an allowlist entry alone matches nothing.
+    annotations = _values()["controllers"]["deployment"]["podAnnotations"]
+    assert annotations["prometheus.io/scrape"] == "true"
+    assert annotations["prometheus.io/port"] == "8080"
+    # podAnnotations replaces rather than merges, so the chart's own default has
+    # to be restated in ours or it disappears.
+    assert annotations["kubectl.kubernetes.io/default-container"] == "burrito"
+
+    monitoring = MONITORING_VALUES.read_text()
+    assert "burrito_terraform_layer_status" in monitoring

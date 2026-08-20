@@ -69,6 +69,11 @@ destinations:
     #                         the shared-encoder contention view; the iGPU is
     #                         the scarcest resource on the minipc, so this one
     #                         earns cloud residency despite being scraped.
+    #   burrito_terraform_layer_status  — terraform drift per layer, for the
+    #                         drift alert. One series per layer (the gauge
+    #                         deletes the other status labels), so four today.
+    #                         Burrito's other families (runs, reconcile, its
+    #                         controller-runtime self-metrics) stay local-VM-only.
     # Everything else scraped is local-VM-only: node_* (node-exporter-full),
     # container_*/machine_* (cadvisor), the rest of kube_* (kubernetes-views),
     # cilium_*, traefik_*, coredns_*, certmanager_*, external(_)dns_*,
@@ -136,7 +141,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|burrito_terraform_layer_status)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
