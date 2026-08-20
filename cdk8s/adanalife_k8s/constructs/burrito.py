@@ -16,6 +16,11 @@ objects that tell it what to plan:
     `burrito` IAM user (terraform/core/burrito.tf), so the credential in the
     cluster structurally cannot apply — applies stay Dana-driven.
   * tailscale Ingress — the UI at burrito-prod.<tailnet>.ts.net.
+  * traefik Ingress — the same UI at burrito.prod.whereisdana.today, published
+    by external-dns to the cluster's LAN endpoint, cert via the route53
+    ClusterIssuer. Mirrors Argo's dual tailnet+LAN exposure (Burrito, like
+    Argo, is a prod-level install governing the whole cluster's view, so it
+    lives under the prod subdomain).
 
 The whole trial is plan-only: remediationStrategy.autoApply stays false (also
 Burrito's default) on every layer, pinned by tests/unit/test_burrito.py.
@@ -42,6 +47,9 @@ INFRA_HTTPS_URL = "https://github.com/adanalife/infra.git"
 # KEEP-IN-SYNC with the repo-root .terraform-version.
 TERRAFORM_VERSION = "1.15.2"
 TAILNET_HOST = "burrito-prod"  # -> burrito-prod.<tailnet>.ts.net
+# LAN-reachable UI host, external-dns-published — same shape as
+# argocd.prod.whereisdana.today (see argocd.py _lan_ingress).
+LAN_HOST = "burrito.prod.whereisdana.today"
 RUNNER_SECRET = "burrito-aws-core"
 # Seeded by hand in prod's SM (the account the cluster store reads) from the
 # core-account `burrito` IAM user's key — see vault/infra/burrito.md.
@@ -56,6 +64,7 @@ class Burrito(Construct):
         self._layer()
         self._runner_external_secret()
         self._ui_ingress()
+        self._lan_ingress()
 
     def _repository(self):
         repo = cdk8s.ApiObject(
@@ -137,6 +146,51 @@ class Burrito(Construct):
                             key=SECRET_KEY_SM_KEY
                         ),
                     ),
+                ],
+            ),
+        )
+
+    def _lan_ingress(self):
+        # LAN-reachable UI at burrito.prod.whereisdana.today — the same shape
+        # as Argo's traefik Ingress (argocd.py _lan_ingress): external-dns
+        # publishes the record to the cluster's LAN endpoint; cert-manager
+        # issues the cert via the cluster-scoped route53 issuer (burrito-system
+        # has no namespaced Issuer). Reachable on-LAN directly, off-LAN via the
+        # tailscale subnet route.
+        k8s.KubeIngress(
+            self,
+            "lan-ingress",
+            metadata=k8s.ObjectMeta(
+                name="burrito-server-traefik",
+                namespace=SYSTEM_NS,
+                annotations={
+                    "external-dns.alpha.kubernetes.io/hostname": LAN_HOST,
+                    "cert-manager.io/cluster-issuer": "letsencrypt-route53",
+                },
+            ),
+            spec=k8s.IngressSpec(
+                ingress_class_name="traefik",
+                tls=[
+                    k8s.IngressTls(hosts=[LAN_HOST], secret_name="burrito-server-tls")
+                ],
+                rules=[
+                    k8s.IngressRule(
+                        host=LAN_HOST,
+                        http=k8s.HttpIngressRuleValue(
+                            paths=[
+                                k8s.HttpIngressPath(
+                                    path="/",
+                                    path_type="Prefix",
+                                    backend=k8s.IngressBackend(
+                                        service=k8s.IngressServiceBackend(
+                                            name="burrito-server",
+                                            port=k8s.ServiceBackendPort(name="http"),
+                                        )
+                                    ),
+                                )
+                            ]
+                        ),
+                    )
                 ],
             ),
         )
