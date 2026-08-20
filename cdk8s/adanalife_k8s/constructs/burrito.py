@@ -6,21 +6,32 @@ objects that tell it what to plan:
 
   * TerraformRepository `infra` — the infra repo over anonymous HTTPS (public,
     so no deploy key — same as the obs/playout Argo sources).
-  * TerraformLayer `core` — terraform/core on main. Deliberately the ONLY
-    layer: core is the one workspace whose providers are AWS-only. stage-1 and
-    prod-1 also carry cloudflare/grafana (token seeding, a promotion step) and
-    google via keyless WIF, which only authenticates from GitHub Actions — an
-    in-cluster runner can't plan those without minting a GCP SA key.
-  * runner-creds ExternalSecret — AWS access key for `terraform plan` (state
-    read + refresh), materialized from SM. The key belongs to the read-only
-    `burrito` IAM user (terraform/core/burrito.tf), so the credential in the
-    cluster structurally cannot apply — applies stay Dana-driven.
+  * One TerraformLayer per remote-state workspace (LAYERS below): core,
+    platform, stage-1, prod-1. terraform/bootstrap is deliberately absent — its
+    state is a file committed in the repo, and it pins `required_version
+    ~> 0.13`, so there is nothing for a 1.x runner to plan.
+  * One runner-creds ExternalSecret per layer, materialized from SM. Every one
+    of them is an AWS key belonging to a ReadOnlyAccess IAM user, so no
+    credential in the cluster can apply — applies stay Dana-driven.
+  * For stage-1/prod-1, a GCP credential-config ConfigMap + a projected
+    ServiceAccount token: the google provider authenticates keyless by
+    federating the cluster's own OIDC issuer (env-base/google.tf), so no GCP
+    service account key exists.
   * tailscale Ingress — the UI at burrito-prod.<tailnet>.ts.net.
   * traefik Ingress — the same UI at burrito.prod.whereisdana.today, published
     by external-dns to the cluster's LAN endpoint, cert via the route53
     ClusterIssuer. Mirrors Argo's dual tailnet+LAN exposure (Burrito, like
     Argo, is a prod-level install governing the whole cluster's view, so it
     lives under the prod subdomain).
+
+Each layer gets its own IAM user rather than sharing one, so a layer's blast
+radius is its own workspace. The `platform` split is the load-bearing case: its
+github provider reads the automation App's private key from SM, which every
+other layer's user is explicitly denied (terraform/core/burrito.tf).
+
+Credentials the providers need beyond AWS — cloudflare, grafana, tailscale —
+are not seeded anywhere: those providers read their tokens from the env
+account's Parameter Store, which ReadOnlyAccess already covers.
 
 The whole trial is plan-only: remediationStrategy.autoApply stays false (also
 Burrito's default) on every layer, pinned by tests/unit/test_burrito.py.
@@ -31,6 +42,9 @@ worth it.
 """
 
 from __future__ import annotations
+
+import json
+from dataclasses import dataclass
 
 import cdk8s
 import imports.io.external_secrets as esx
@@ -43,6 +57,10 @@ BURRITO_API = "config.terraform.padok.cloud/v1alpha1"
 TENANT_NS = "burrito"
 # The chart's own namespace (controller/server/datastore + the UI Service).
 SYSTEM_NS = "burrito-system"
+# Created by the chart (the `tenants[].serviceAccounts` entry in values.yml).
+# Named on every runner because the projected token below is what GCP
+# federates — its subject is this ServiceAccount.
+RUNNER_SA = "burrito-runner"
 INFRA_HTTPS_URL = "https://github.com/adanalife/infra.git"
 # KEEP-IN-SYNC with the repo-root .terraform-version.
 TERRAFORM_VERSION = "1.15.2"
@@ -50,19 +68,83 @@ TAILNET_HOST = "burrito-prod"  # -> burrito-prod.<tailnet>.ts.net
 # LAN-reachable UI host, external-dns-published — same shape as
 # argocd.prod.whereisdana.today (see argocd.py _lan_ingress).
 LAN_HOST = "burrito.prod.whereisdana.today"
-RUNNER_SECRET = "burrito-aws-core"
-# Seeded by hand in prod's SM (the account the cluster store reads) from the
-# core-account `burrito` IAM user's key — see vault/infra/burrito.md.
-ACCESS_KEY_SM_KEY = "/k8s/burrito/core-access-key-id"
-SECRET_KEY_SM_KEY = "/k8s/burrito/core-secret-access-key"
+# The S3 state backend declares no region; runners supply it like CI does.
+AWS_REGION = "us-east-1"
+
+# Audience the runner's projected token is minted for, and the only one the
+# WIF providers accept. KEEP-IN-SYNC with local.burrito_token_audience in
+# terraform/modules/env-base/google.tf.
+GCP_TOKEN_AUDIENCE = "adanalife-burrito"
+GCP_TOKEN_DIR = "/var/run/secrets/gcp"
+GCP_CONFIG_DIR = "/etc/gcp"
+GCP_CONFIG_FILE = "credential-config.json"
+
+
+@dataclass(frozen=True)
+class Layer:
+    """A terraform workspace Burrito plans, and the credentials it needs.
+
+    `sm_prefix` names the SM parameter pair holding the layer's AWS key —
+    /k8s/burrito/<prefix>-access-key-id and -secret-access-key, seeded by hand
+    into prod's Parameter Store (the account the cluster store reads) from the
+    workspace's own `burrito_*` terraform outputs.
+
+    `gcp_project`/`gcp_project_number` are set only for the workspaces carrying
+    a google provider; they select the per-project WIF provider the runner
+    trades its ServiceAccount token at.
+    """
+
+    name: str
+    path: str
+    sm_prefix: str
+    gcp_project: str | None = None
+    gcp_project_number: str | None = None
+
+    @property
+    def secret_name(self) -> str:
+        return f"burrito-aws-{self.sm_prefix}"
+
+    @property
+    def wif_audience(self) -> str:
+        return (
+            f"//iam.googleapis.com/projects/{self.gcp_project_number}"
+            "/locations/global/workloadIdentityPools/minipc/providers/minipc"
+        )
+
+    @property
+    def plan_service_account(self) -> str:
+        return f"burrito-plan@{self.gcp_project}.iam.gserviceaccount.com"
+
+
+LAYERS = (
+    Layer(name="core", path="terraform/core", sm_prefix="core"),
+    Layer(name="platform", path="terraform/platform", sm_prefix="platform"),
+    Layer(
+        name="stage-1",
+        path="terraform/stage-1",
+        sm_prefix="stage",
+        gcp_project="tripbot-stage",
+        gcp_project_number="574760983858",
+    ),
+    Layer(
+        name="prod-1",
+        path="terraform/prod-1",
+        sm_prefix="prod",
+        gcp_project="tripbot-prod",
+        gcp_project_number="876608406330",
+    ),
+)
 
 
 class Burrito(Construct):
     def __init__(self, scope: Construct, id: str = "burrito"):
         super().__init__(scope, id)
         self._repository()
-        self._layer()
-        self._runner_external_secret()
+        for layer in LAYERS:
+            self._layer(layer)
+            self._runner_external_secret(layer)
+            if layer.gcp_project:
+                self._gcp_credential_config(layer)
         self._ui_ingress()
         self._lan_ingress()
 
@@ -85,19 +167,19 @@ class Burrito(Construct):
             )
         )
 
-    def _layer(self):
-        layer = cdk8s.ApiObject(
+    def _layer(self, layer: Layer):
+        obj = cdk8s.ApiObject(
             self,
-            "layer-core",
+            f"layer-{layer.name}",
             api_version=BURRITO_API,
             kind="TerraformLayer",
-            metadata={"name": "core", "namespace": TENANT_NS},
+            metadata={"name": layer.name, "namespace": TENANT_NS},
         )
-        layer.add_json_patch(
+        obj.add_json_patch(
             cdk8s.JsonPatch.add(
                 "/spec",
                 {
-                    "path": "terraform/core",
+                    "path": layer.path,
                     "branch": "main",
                     "terraform": {"version": TERRAFORM_VERSION},
                     "repository": {"name": "infra", "namespace": TENANT_NS},
@@ -105,24 +187,102 @@ class Burrito(Construct):
                     # safety property is explicit — plan and report drift,
                     # never apply.
                     "remediationStrategy": {"autoApply": False},
-                    "overrideRunnerSpec": {
-                        # The S3 state backend declares no region; the runner
-                        # supplies it like CI does.
-                        "env": [{"name": "AWS_REGION", "value": "us-east-1"}],
-                        "envFrom": [{"secretRef": {"name": RUNNER_SECRET}}],
-                    },
+                    "overrideRunnerSpec": self._runner_spec(layer),
                 },
             )
         )
 
-    def _runner_external_secret(self):
-        # The runner's AWS credential (read-only `burrito` IAM user), shaped as
+    def _runner_spec(self, layer: Layer) -> dict:
+        spec = {
+            "serviceAccountName": RUNNER_SA,
+            "env": [{"name": "AWS_REGION", "value": AWS_REGION}],
+            "envFrom": [{"secretRef": {"name": layer.secret_name}}],
+        }
+        if not layer.gcp_project:
+            return spec
+
+        # Keyless GCP: the kubelet mints a short-lived token for this pod's
+        # ServiceAccount, the google client library trades it at STS for a
+        # token impersonating the read-only burrito-plan SA. gcp_impersonate is
+        # off for the same reason CI turns it off — the credential already IS
+        # the delegated identity, so there is no second hop to make.
+        spec["env"] += [
+            {
+                "name": "GOOGLE_APPLICATION_CREDENTIALS",
+                "value": f"{GCP_CONFIG_DIR}/{GCP_CONFIG_FILE}",
+            },
+            {"name": "TF_VAR_gcp_impersonate", "value": "false"},
+        ]
+        spec["volumes"] = [
+            {
+                "name": "gcp-token",
+                "projected": {
+                    "sources": [
+                        {
+                            "serviceAccountToken": {
+                                "audience": GCP_TOKEN_AUDIENCE,
+                                "expirationSeconds": 3600,
+                                "path": "token",
+                            }
+                        }
+                    ]
+                },
+            },
+            {
+                "name": "gcp-credential-config",
+                "configMap": {"name": self._config_map_name(layer)},
+            },
+        ]
+        spec["volumeMounts"] = [
+            {"name": "gcp-token", "mountPath": GCP_TOKEN_DIR, "readOnly": True},
+            {
+                "name": "gcp-credential-config",
+                "mountPath": GCP_CONFIG_DIR,
+                "readOnly": True,
+            },
+        ]
+        return spec
+
+    @staticmethod
+    def _config_map_name(layer: Layer) -> str:
+        return f"burrito-gcp-{layer.name}"
+
+    def _gcp_credential_config(self, layer: Layer):
+        # Google's external_account credential file: where to find the subject
+        # token, which pool to exchange it at, and whose identity to assume.
+        # Public config, no secret material — the token it points at is minted
+        # per-pod by the kubelet.
+        config = {
+            "type": "external_account",
+            "audience": layer.wif_audience,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "token_url": "https://sts.googleapis.com/v1/token",
+            "service_account_impersonation_url": (
+                "https://iamcredentials.googleapis.com/v1/projects/-"
+                f"/serviceAccounts/{layer.plan_service_account}:generateAccessToken"
+            ),
+            "credential_source": {
+                "file": f"{GCP_TOKEN_DIR}/token",
+                "format": {"type": "text"},
+            },
+        }
+        k8s.KubeConfigMap(
+            self,
+            f"gcp-config-{layer.name}",
+            metadata=k8s.ObjectMeta(
+                name=self._config_map_name(layer), namespace=TENANT_NS
+            ),
+            data={GCP_CONFIG_FILE: json.dumps(config, indent=2)},
+        )
+
+    def _runner_external_secret(self, layer: Layer):
+        # The runner's AWS credential (a ReadOnlyAccess IAM user), shaped as
         # the AWS_* env vars terraform reads. Same cluster-store pattern as the
         # Argo repo keys.
         esx.ExternalSecret(
             self,
-            "runner-secret",
-            metadata={"name": RUNNER_SECRET, "namespace": TENANT_NS},
+            f"runner-secret-{layer.name}",
+            metadata={"name": layer.secret_name, "namespace": TENANT_NS},
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
@@ -130,20 +290,20 @@ class Burrito(Construct):
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(
-                    name=RUNNER_SECRET,
+                    name=layer.secret_name,
                     creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
                 ),
                 data=[
                     esx.ExternalSecretSpecData(
                         secret_key="AWS_ACCESS_KEY_ID",
                         remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=ACCESS_KEY_SM_KEY
+                            key=f"/k8s/burrito/{layer.sm_prefix}-access-key-id"
                         ),
                     ),
                     esx.ExternalSecretSpecData(
                         secret_key="AWS_SECRET_ACCESS_KEY",
                         remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=SECRET_KEY_SM_KEY
+                            key=f"/k8s/burrito/{layer.sm_prefix}-secret-access-key"
                         ),
                     ),
                 ],
