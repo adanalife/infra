@@ -75,3 +75,22 @@ output "eso_reader_secret" {
   value     = module.env_base.eso_reader_encrypted_secret
   sensitive = true
 }
+
+output "burrito_access_key" {
+  value     = module.env_base.burrito_access_key
+  sensitive = true
+}
+
+# the PGP-encrypted secret
+output "burrito_secret" {
+  value     = module.env_base.burrito_secret
+  sensitive = true
+}
+
+output "burrito_wif_audience" {
+  value = module.env_base.burrito_wif_audience
+}
+
+output "burrito_plan_service_account" {
+  value = module.env_base.burrito_plan_service_account
+}

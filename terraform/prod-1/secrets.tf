@@ -128,6 +128,16 @@ resource "aws_ssm_parameter" "guessr_admin_emails" {
 #   - /k8s/obs/facebook-stream-key (Facebook Live Producer persistent key, prod Page)
 #   - /k8s/grafana-cloud-metrics-write
 #   - /k8s/external-dns/aws-credentials (hand-seeded from PGP outputs)
+#
+# Burrito's per-layer runner credentials also live here — one pair per
+# terraform workspace it plans, all in PROD's Parameter Store because that is
+# the account the cluster's ClusterSecretStore reads. Each is hand-seeded from
+# its own workspace's `burrito_*` PGP outputs, so no single workspace can
+# declare them:
+#   - /k8s/burrito/core-access-key-id     + -secret-access-key  (core's `burrito` user)
+#   - /k8s/burrito/platform-access-key-id + -secret-access-key  (core's `burrito-platform` user)
+#   - /k8s/burrito/stage-access-key-id    + -secret-access-key  (stage-1's `burrito` user)
+#   - /k8s/burrito/prod-access-key-id     + -secret-access-key  (prod-1's `burrito` user)
 
 # ============================================================================
 # Plan-time data sources
