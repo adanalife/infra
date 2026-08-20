@@ -23,6 +23,16 @@ kubeProxyReplacement: true
 k8sServiceHost: localhost
 k8sServicePort: 7445
 
+# Service translation happens at the tc/veth layer, not in the pod's
+# connect() syscall. The node's InternalIP is its tailnet 100.x address, so
+# socket-level LB rewrites in-pod service dials to a 100.64.0.0/10
+# destination — which any pod running its own tailscaled (the operator's
+# ProxyGroup proxies) routes into its own TUN instead of the veth,
+# timing out. Tailscale's k8s docs require this setting on Cilium
+# kube-proxy-replacement clusters.
+socketLB:
+  hostNamespaceOnly: true
+
 securityContext:
   capabilities:
     ciliumAgent:
