@@ -11,6 +11,7 @@ import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import BurritoChart, PlatformArgoChart
+from adanalife_k8s.constructs.burrito import LAYERS
 
 
 def _synth():
@@ -143,3 +144,34 @@ def test_oidc_client_secret_reaches_the_server_as_its_env_var():
     assert {"secretRef": {"name": secret["spec"]["target"]["name"]}} in _values()[
         "server"
     ]["deployment"]["envFrom"]
+
+
+def test_only_stage_and_prod_can_apply():
+    # core holds IAM and Organizations; platform holds the automation App's
+    # key. Their apply path stays a workstation gesture. And because
+    # overrideRunnerSpec is per-layer rather than per-action, marking one
+    # appliable would also hand its hourly drift plan an admin credential —
+    # so this is a wider decision than "can I click apply".
+    assert {layer.name for layer in LAYERS if layer.appliable} == {
+        "stage-1",
+        "prod-1",
+    }
+
+
+def test_credential_matches_whether_the_layer_can_apply():
+    # The read-only user and the admin user are different SM parameters. A
+    # layer wired to the wrong one either cannot plan or can silently write.
+    objs = _synth()
+    by_target = {
+        es["spec"]["target"]["name"]: es for es in _kind(objs, "ExternalSecret")
+    }
+    for layer in LAYERS:
+        secret = by_target[layer.secret_name]
+        keys = [d["remoteRef"]["key"] for d in secret["spec"]["data"]]
+        expected = "-apply-" if layer.appliable else "-"
+        assert all(
+            k.startswith(f"/k8s/burrito/{layer.sm_prefix}{expected}") for k in keys
+        ), (
+            layer.name,
+            keys,
+        )

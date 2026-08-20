@@ -94,3 +94,14 @@ output "burrito_wif_audience" {
 output "burrito_plan_service_account" {
   value = module.env_base.burrito_plan_service_account
 }
+
+output "burrito_apply_access_key" {
+  value     = module.env_base.burrito_apply_access_key
+  sensitive = true
+}
+
+# the PGP-encrypted secret
+output "burrito_apply_secret" {
+  value     = module.env_base.burrito_apply_secret
+  sensitive = true
+}

@@ -150,8 +150,28 @@ data "aws_iam_policy_document" "bucket_policy" {
       actions   = ["s3:ListBucket"]
 
       principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito",
+          "arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito-apply",
+        ]
+      }
+    }
+  }
+
+  # The apply identity additionally writes the state object back. Only it — the
+  # plan user above is read-only by construction and never needs this.
+  dynamic "statement" {
+    for_each = local.accounts
+
+    content {
+      sid       = "put-state-burrito-${local.accounts[statement.key].name}"
+      resources = ["arn:aws:s3:::${var.state_bucket}/${local.accounts[statement.key].name}.tfstate"]
+      actions   = ["s3:PutObject"]
+
+      principals {
         type        = "AWS"
-        identifiers = ["arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito"]
+        identifiers = ["arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito-apply"]
       }
     }
   }

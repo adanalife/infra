@@ -10,9 +10,19 @@ objects that tell it what to plan:
     platform, stage-1, prod-1. terraform/bootstrap is deliberately absent — its
     state is a file committed in the repo, and it pins `required_version
     ~> 0.13`, so there is nothing for a 1.x runner to plan.
-  * One runner-creds ExternalSecret per layer, materialized from SM. Every one
-    of them is an AWS key belonging to a ReadOnlyAccess IAM user, so no
-    credential in the cluster can apply — applies stay Dana-driven.
+  * One runner-creds ExternalSecret per layer, materialized from SM. core and
+    platform get a ReadOnlyAccess key and so cannot be applied from here at
+    all; stage-1 and prod-1 get the admin `burrito-apply` key, which is what
+    lets a TerraformRun with action=apply against them succeed.
+
+    That boundary is coarser than it looks. overrideRunnerSpec is per-LAYER,
+    not per-action, so an appliable layer runs its hourly drift PLAN as an
+    administrator too — no arrangement plans read-only and applies with write
+    access on one layer. Making it finer means splitting the terraform state so
+    the irreplaceable resources sit in a layer that keeps a read-only
+    credential, which is the tracked follow-up. Until then core and platform
+    are the workspaces whose apply path stays a workstation gesture, and
+    stage-1/prod-1 are the ones where even a plan holds admin.
   * For stage-1/prod-1, a GCP credential-config ConfigMap + a projected
     ServiceAccount token: the google provider authenticates keyless by
     federating the cluster's own OIDC issuer (env-base/google.tf), so no GCP
@@ -102,6 +112,12 @@ class Layer:
     `gcp_project`/`gcp_project_number` are set only for the workspaces carrying
     a google provider; they select the per-project WIF provider the runner
     trades its ServiceAccount token at.
+
+    `appliable` swaps the read-only credential for the admin one, which is what
+    lets a TerraformRun with action=apply succeed. It is not an apply-time-only
+    switch: overrideRunnerSpec is per-layer, not per-action, so an appliable
+    layer runs its hourly drift PLAN as an administrator too. That is the whole
+    reason core and platform are left alone — see the module docstring.
     """
 
     name: str
@@ -109,10 +125,18 @@ class Layer:
     sm_prefix: str
     gcp_project: str | None = None
     gcp_project_number: str | None = None
+    appliable: bool = False
 
     @property
     def secret_name(self) -> str:
-        return f"burrito-aws-{self.sm_prefix}"
+        suffix = "-apply" if self.appliable else ""
+        return f"burrito-aws-{self.sm_prefix}{suffix}"
+
+    @property
+    def sm_key_prefix(self) -> str:
+        """Which SM parameter pair backs this layer's credential — the apply
+        user's key when the layer can apply, the read-only user's otherwise."""
+        return f"{self.sm_prefix}-apply" if self.appliable else self.sm_prefix
 
     @property
     def wif_audience(self) -> str:
@@ -135,6 +159,7 @@ LAYERS = (
         sm_prefix="stage",
         gcp_project="tripbot-stage",
         gcp_project_number="574760983858",
+        appliable=True,
     ),
     Layer(
         name="prod-1",
@@ -142,6 +167,7 @@ LAYERS = (
         sm_prefix="prod",
         gcp_project="tripbot-prod",
         gcp_project_number="876608406330",
+        appliable=True,
     ),
 )
 
@@ -308,13 +334,13 @@ class Burrito(Construct):
                     esx.ExternalSecretSpecData(
                         secret_key="AWS_ACCESS_KEY_ID",
                         remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=f"/k8s/burrito/{layer.sm_prefix}-access-key-id"
+                            key=f"/k8s/burrito/{layer.sm_key_prefix}-access-key-id"
                         ),
                     ),
                     esx.ExternalSecretSpecData(
                         secret_key="AWS_SECRET_ACCESS_KEY",
                         remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=f"/k8s/burrito/{layer.sm_prefix}-secret-access-key"
+                            key=f"/k8s/burrito/{layer.sm_key_prefix}-secret-access-key"
                         ),
                     ),
                 ],
