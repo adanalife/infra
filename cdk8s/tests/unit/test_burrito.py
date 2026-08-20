@@ -5,7 +5,9 @@ Application pulls from must be registered with Argo. See constructs/burrito.py.
 """
 
 import json
+from pathlib import Path
 
+import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import BurritoChart, PlatformArgoChart
@@ -21,6 +23,16 @@ def _platform_synth():
     app = K8sTesting.app()
     chart = PlatformArgoChart(app, "platform-argo")
     return K8sTesting.synth(chart)
+
+
+# The chart's own config, which carries the half of the auth setup that is
+# values rather than Kubernetes objects.
+VALUES = Path(__file__).parents[3] / "k8s" / "burrito" / "values.yml"
+
+
+def _values():
+    with VALUES.open() as f:
+        return yaml.safe_load(f)
 
 
 def _kind(objs, kind):
@@ -105,3 +117,29 @@ def test_gcp_layers_authenticate_keylessly():
         (source,) = projected["projected"]["sources"]
         assert source["serviceAccountToken"]["audience"] == "adanalife-burrito"
         assert spec["serviceAccountName"] == "burrito-runner"
+
+
+def test_server_is_never_unauthenticated():
+    # The chart spells this out: with both basic auth and OIDC disabled the
+    # server is publicly accessible. It is a UI that can reach terraform.
+    server = _values()["config"]["burrito"]["server"]
+    assert server["oidc"]["enabled"] or server["basicAuth"]["enabled"]
+
+
+def test_oidc_client_secret_reaches_the_server_as_its_env_var():
+    # Three names have to agree or the server silently loses its OIDC secret:
+    # the ExternalSecret's target, the envFrom entry in the chart values, and
+    # the key, which the chart consumes as an env var and so must BE the env
+    # var name.
+    objs = _synth()
+    (secret,) = [
+        es
+        for es in _kind(objs, "ExternalSecret")
+        if es["spec"]["target"]["name"] == "burrito-oidc-client-secret"
+    ]
+    assert [d["secretKey"] for d in secret["spec"]["data"]] == [
+        "BURRITO_SERVER_OIDC_CLIENTSECRET"
+    ]
+    assert {"secretRef": {"name": secret["spec"]["target"]["name"]}} in _values()[
+        "server"
+    ]["deployment"]["envFrom"]

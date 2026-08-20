@@ -20,6 +20,52 @@ config:
         # the first step if burrito earns its keep.
         mock: true
 
+    # SSO through Cloudflare Access, which is already the login for guessr's
+    # admin surface. Access has no identity provider behind it, so a sign-in is
+    # a one-time PIN mailed to an address on the allowlist in
+    # /prod-1/internal-admin-emails (terraform/prod-1/burrito-oidc.tf).
+    #
+    # This is the login for a UI that can trigger terraform, so basic auth is
+    # off rather than left as a fallback: the chart generates that password
+    # itself, nothing owns or can rotate it, and upstream marks it
+    # not-for-production. With both disabled the server would be wide open, so
+    # oidc.enabled and basicAuth.enabled must never both be false.
+    #
+    # clientId and issuerUrl are not secrets — a client id travels in the
+    # browser's address bar during the flow. Only the client secret is, and it
+    # arrives as BURRITO_SERVER_OIDC_CLIENTSECRET via the ExternalSecret in
+    # constructs/burrito.py. The issuer is per-application rather than the bare
+    # team domain: Access serves each SaaS app its own discovery document,
+    # which is why the client id appears in both fields.
+    server:
+      basicAuth:
+        enabled: false
+      oidc:
+        enabled: true
+        issuerUrl: "https://adanalife.cloudflareaccess.com/cdn-cgi/access/sso/oidc/7fe510da9b31163fe5cec2a32ffdbadc468a74d1e91eba398698d3170a64e388"
+        clientId: "7fe510da9b31163fe5cec2a32ffdbadc468a74d1e91eba398698d3170a64e388"
+        # The LAN host, the only redirect URI registered on the Access
+        # application. Burrito takes exactly one.
+        redirectUrl: "https://burrito.prod.whereisdana.today/auth/callback"
+        # scopes defaults to openid/profile/email, which is what the
+        # application grants — left unset rather than restated.
+      session:
+        # Both UI paths terminate TLS (traefik + cert-manager on the LAN host,
+        # the tailnet edge on the other), so the session cookie is
+        # HTTPS-only. The chart's default assumes plain HTTP.
+        secure: true
+
+# The client secret, the one OIDC setting the chart takes as an env var rather
+# than a value. The Secret is an ExternalSecret in constructs/burrito.py, and
+# it has to exist BEFORE this lands — a Deployment whose envFrom names a
+# missing Secret parks in CreateContainerConfigError and does not retry when it
+# appears.
+server:
+  deployment:
+    envFrom:
+      - secretRef:
+          name: burrito-oidc-client-secret
+
 tenants:
   # The tenant namespace holds the CRs + runner pods; the chart creates the
   # namespace and the runner ServiceAccount (referenced nowhere yet — runner

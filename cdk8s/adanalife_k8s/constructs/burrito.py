@@ -17,6 +17,10 @@ objects that tell it what to plan:
     ServiceAccount token: the google provider authenticates keyless by
     federating the cluster's own OIDC issuer (env-base/google.tf), so no GCP
     service account key exists.
+  * an OIDC client-secret ExternalSecret for the server itself — the UI
+    authenticates through Cloudflare Access (terraform/prod-1/burrito-oidc.tf),
+    and this is the one auth setting the chart takes as an env var rather than
+    a value.
   * tailscale Ingress — the UI at burrito-prod.<tailnet>.ts.net.
   * traefik Ingress — the same UI at burrito.prod.whereisdana.today, published
     by external-dns to the cluster's LAN endpoint, cert via the route53
@@ -74,6 +78,12 @@ AWS_REGION = "us-east-1"
 # Audience the runner's projected token is minted for, and the only one the
 # WIF providers accept. KEEP-IN-SYNC with local.burrito_token_audience in
 # terraform/modules/env-base/google.tf.
+# The server's OIDC client secret, the one auth setting the chart takes as an
+# env var rather than a value (k8s/burrito/values.yml carries the rest). Name
+# matches the chart's own documented example.
+OIDC_SECRET = "burrito-oidc-client-secret"
+OIDC_SECRET_SM_KEY = "/k8s/burrito/oidc-client-secret"
+
 GCP_TOKEN_AUDIENCE = "adanalife-burrito"
 GCP_TOKEN_DIR = "/var/run/secrets/gcp"
 GCP_CONFIG_DIR = "/etc/gcp"
@@ -145,6 +155,7 @@ class Burrito(Construct):
             self._runner_external_secret(layer)
             if layer.gcp_project:
                 self._gcp_credential_config(layer)
+        self._oidc_client_secret()
         self._ui_ingress()
         self._lan_ingress()
 
@@ -304,6 +315,41 @@ class Burrito(Construct):
                         secret_key="AWS_SECRET_ACCESS_KEY",
                         remote_ref=esx.ExternalSecretSpecDataRemoteRef(
                             key=f"/k8s/burrito/{layer.sm_prefix}-secret-access-key"
+                        ),
+                    ),
+                ],
+            ),
+        )
+
+    def _oidc_client_secret(self):
+        # Lives in the chart's namespace, not the tenant one: this is the
+        # server's login, not a runner credential. Terraform owns the value
+        # (terraform/prod-1/burrito-oidc.tf creates the Access application and
+        # writes its secret straight to SM), so there is nothing to seed by
+        # hand and rotation is an apply.
+        #
+        # The key IS the env var name — the chart mounts this Secret with
+        # envFrom, so BURRITO_SERVER_OIDC_CLIENTSECRET is what reaches the
+        # process.
+        esx.ExternalSecret(
+            self,
+            "oidc-client-secret",
+            metadata={"name": OIDC_SECRET, "namespace": SYSTEM_NS},
+            spec=esx.ExternalSecretSpec(
+                refresh_interval="1h",
+                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
+                    name="aws-parameterstore-cluster",
+                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
+                ),
+                target=esx.ExternalSecretSpecTarget(
+                    name=OIDC_SECRET,
+                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
+                ),
+                data=[
+                    esx.ExternalSecretSpecData(
+                        secret_key="BURRITO_SERVER_OIDC_CLIENTSECRET",
+                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
+                            key=OIDC_SECRET_SM_KEY
                         ),
                     ),
                 ],

@@ -275,6 +275,24 @@ data:
       }
     }
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-oidc-client-secret
+  namespace: burrito-system
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/oidc-client-secret
+      secretKey: BURRITO_SERVER_OIDC_CLIENTSECRET
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-oidc-client-secret
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
