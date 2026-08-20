@@ -11,6 +11,10 @@ kind: Ingress
 metadata:
   name: hubble-ui-tailscale
   namespace: kube-system
+  annotations:
+    # Served by the shared HA proxy fleet (k8s/tailscale-operator/proxygroup.yml)
+    # instead of a dedicated per-Ingress proxy pod.
+    tailscale.com/proxy-group: ingress-proxies
 spec:
   ingressClassName: tailscale
   defaultBackend:
