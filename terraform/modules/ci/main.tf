@@ -119,6 +119,37 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
       ]
     }
   }
+
+  # The keyless path, alongside the CIUser principal above rather than
+  # replacing it, so the access-key path keeps working until the workflows
+  # move. Present only in accounts that opted in (see oidc.tf).
+  dynamic "statement" {
+    for_each = length(var.github_oidc_subjects) > 0 ? [1] : []
+
+    content {
+      actions = ["sts:AssumeRoleWithWebIdentity"]
+
+      principals {
+        type        = "Federated"
+        identifiers = [aws_iam_openid_connect_provider.github_actions[0].arn]
+      }
+
+      # Both conditions are load-bearing. Without the aud check any GitHub
+      # token would be accepted; without the sub check any *repository* on
+      # GitHub could assume the role, which is the classic misconfiguration.
+      condition {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:aud"
+        values   = ["sts.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringLike"
+        variable = "token.actions.githubusercontent.com:sub"
+        values   = var.github_oidc_subjects
+      }
+    }
+  }
 }
 
 # Read-only on purpose: CI only ever plans (terraform.yml + the drift cron) —
