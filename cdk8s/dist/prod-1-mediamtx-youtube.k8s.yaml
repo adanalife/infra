@@ -101,6 +101,8 @@ spec:
               name: config
               readOnly: true
               subPath: mediamtx.yml
+      nodeSelector:
+        kubernetes.io/arch: amd64
       priorityClassName: prod-stream
       securityContext:
         runAsNonRoot: true

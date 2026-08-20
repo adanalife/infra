@@ -192,6 +192,10 @@ class Mediamtx(Construct):
                         priority_class_name=(
                             "prod-stream" if env.name == "prod-1" else None
                         ),
+                        # The relay sits mid stream path between playout and
+                        # OBS, both amd64-pinned to the minipc; matching the arch
+                        # keeps all three on one node.
+                        node_selector={"kubernetes.io/arch": "amd64"},
                         # The `restricted` PodSecurity profile requires
                         # runAsNonRoot as a spec field, whatever USER the image
                         # declares. MediaMTX is a static Go binary: every port
