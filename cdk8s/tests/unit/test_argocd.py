@@ -82,6 +82,16 @@ def test_minipc_default_has_both_uis_and_both_envs():
         o["spec"].get("ingressClassName") for o in objs if o["kind"] == "Ingress"
     }
     assert classes == {"tailscale", "traefik"}  # tailnet UI + LAN UI
+    # the tailnet UI rides the shared proxy fleet, not its own proxy pod
+    tailnet_ui = next(
+        o
+        for o in objs
+        if o["kind"] == "Ingress" and o["spec"].get("ingressClassName") == "tailscale"
+    )
+    assert (
+        tailnet_ui["metadata"]["annotations"]["tailscale.com/proxy-group"]
+        == "ingress-proxies"
+    )
     # tripbot-apps self-discovers deploy units from the tripbot repo's index
     # (git files generator); the per-env globs scope which envs it delivers.
     globs = _appset(objs, "tripbot-apps")["spec"]["generators"][0]["git"]["files"]

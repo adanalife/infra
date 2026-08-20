@@ -434,7 +434,9 @@ class Burrito(Construct):
             self,
             "ui-ingress",
             metadata=k8s.ObjectMeta(
-                name="burrito-server-tailscale", namespace=SYSTEM_NS
+                name="burrito-server-tailscale",
+                namespace=SYSTEM_NS,
+                annotations={"tailscale.com/proxy-group": "ingress-proxies"},
             ),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
