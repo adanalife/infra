@@ -1,8 +1,10 @@
 """Burrito is a plan/drift-detect trial: no layer may auto-apply (applies stay
-Dana-driven), the runner credential comes from the read-only ExternalSecret,
-and the OCI chart registry the platform Application pulls from must be
-registered with Argo. See constructs/burrito.py.
+Dana-driven), every layer's credential comes from its own read-only
+ExternalSecret, GCP auth stays keyless, and the OCI chart registry the platform
+Application pulls from must be registered with Argo. See constructs/burrito.py.
 """
+
+import json
 
 from cdk8s import Testing as K8sTesting
 
@@ -62,3 +64,44 @@ def test_oci_chart_registry_is_registered():
         and o["stringData"].get("enableOCI") == "true"
     }
     assert repo_url in registered
+
+
+def test_each_layer_has_its_own_credential():
+    # Sharing one credential across layers would hand every runner the
+    # platform layer's grant on the automation App's private key.
+    objs = _synth()
+    refs = [
+        ref["secretRef"]["name"]
+        for layer in _kind(objs, "TerraformLayer")
+        for ref in layer["spec"]["overrideRunnerSpec"]["envFrom"]
+    ]
+    assert len(refs) == len(set(refs))
+
+
+def test_gcp_layers_authenticate_keylessly():
+    # stage-1/prod-1 carry a google provider. Its credentials must be a
+    # projected ServiceAccount token federated at STS — never a service
+    # account key, which is what gcp-terraform-auth-model rules out.
+    objs = _synth()
+    configs = {
+        cm["metadata"]["name"]: json.loads(cm["data"]["credential-config.json"])
+        for cm in _kind(objs, "ConfigMap")
+    }
+    assert configs, "expected a GCP credential config for the google-provider layers"
+    for config in configs.values():
+        assert config["type"] == "external_account"
+        assert config["credential_source"]["file"].startswith("/var/run/secrets/gcp")
+        assert "burrito-plan@" in config["service_account_impersonation_url"]
+
+    for layer in _kind(objs, "TerraformLayer"):
+        spec = layer["spec"]["overrideRunnerSpec"]
+        mounted = [
+            v["configMap"]["name"] for v in spec.get("volumes", []) if "configMap" in v
+        ]
+        if not mounted:
+            continue
+        assert mounted[0] in configs
+        (projected,) = [v for v in spec["volumes"] if "projected" in v]
+        (source,) = projected["projected"]["sources"]
+        assert source["serviceAccountToken"]["audience"] == "adanalife-burrito"
+        assert spec["serviceAccountName"] == "burrito-runner"

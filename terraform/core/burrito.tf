@@ -63,3 +63,48 @@ output "burrito_secret" {
   value     = aws_iam_access_key.burrito.encrypted_secret
   sensitive = true
 }
+
+# ---------------------------------------------------------------------------
+# The platform layer's runner — a SECOND, separately-scoped identity
+# ---------------------------------------------------------------------------
+#
+# The platform workspace's github provider auths as the adanalife-automation
+# App, whose private key is /platform/github-automation-app-private-key — the
+# one parameter the `burrito` user above is explicitly denied. Planning that
+# workspace means some in-cluster credential can read that key, so it gets its
+# own user rather than widening the one every other layer uses: only the
+# platform TerraformLayer's runner pod mounts this credential
+# (overrideRunnerSpec.envFrom, cdk8s/adanalife_k8s/constructs/burrito.py), and
+# a compromise of any other layer still can't reach the App key.
+#
+# Still ReadOnlyAccess — this identity can read the key, not apply with it.
+resource "aws_iam_user" "burrito_platform" {
+  name = "burrito-platform"
+  path = "/bots/"
+  tags = {
+    Name = "burrito-platform"
+  }
+  force_destroy = false
+}
+
+resource "aws_iam_access_key" "burrito_platform" {
+  user = aws_iam_user.burrito_platform.name
+  # encrypt it using the @adanalife keybase key
+  pgp_key = "keybase:adanalife"
+}
+
+resource "aws_iam_user_policy_attachment" "burrito_platform_read_only" {
+  user       = aws_iam_user.burrito_platform.name
+  policy_arn = data.aws_iam_policy.read_only.arn
+}
+
+output "burrito_platform_access_key" {
+  value     = aws_iam_access_key.burrito_platform.id
+  sensitive = true
+}
+
+# the PGP-encrypted secret
+output "burrito_platform_secret" {
+  value     = aws_iam_access_key.burrito_platform.encrypted_secret
+  sensitive = true
+}

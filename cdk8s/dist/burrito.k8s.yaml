@@ -25,6 +25,7 @@ spec:
   remediationStrategy:
     autoApply: false
   overrideRunnerSpec:
+    serviceAccountName: burrito-runner
     env:
       - name: AWS_REGION
         value: us-east-1
@@ -52,6 +53,227 @@ spec:
   target:
     creationPolicy: Owner
     name: burrito-aws-core
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: platform
+  namespace: burrito
+spec:
+  path: terraform/platform
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+    envFrom:
+      - secretRef:
+          name: burrito-aws-platform
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-platform
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/platform-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/platform-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-platform
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: stage-1
+  namespace: burrito
+spec:
+  path: terraform/stage-1
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/gcp/credential-config.json
+      - name: TF_VAR_gcp_impersonate
+        value: "false"
+    envFrom:
+      - secretRef:
+          name: burrito-aws-stage
+    volumes:
+      - name: gcp-token
+        projected:
+          sources:
+            - serviceAccountToken:
+                audience: adanalife-burrito
+                expirationSeconds: 3600
+                path: token
+      - name: gcp-credential-config
+        configMap:
+          name: burrito-gcp-stage-1
+    volumeMounts:
+      - name: gcp-token
+        mountPath: /var/run/secrets/gcp
+        readOnly: true
+      - name: gcp-credential-config
+        mountPath: /etc/gcp
+        readOnly: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-stage
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/stage-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/stage-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-stage
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burrito-gcp-stage-1
+  namespace: burrito
+data:
+  credential-config.json: |-
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/574760983858/locations/global/workloadIdentityPools/minipc/providers/minipc",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/burrito-plan@tripbot-stage.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "file": "/var/run/secrets/gcp/token",
+        "format": {
+          "type": "text"
+        }
+      }
+    }
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: prod-1
+  namespace: burrito
+spec:
+  path: terraform/prod-1
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/gcp/credential-config.json
+      - name: TF_VAR_gcp_impersonate
+        value: "false"
+    envFrom:
+      - secretRef:
+          name: burrito-aws-prod
+    volumes:
+      - name: gcp-token
+        projected:
+          sources:
+            - serviceAccountToken:
+                audience: adanalife-burrito
+                expirationSeconds: 3600
+                path: token
+      - name: gcp-credential-config
+        configMap:
+          name: burrito-gcp-prod-1
+    volumeMounts:
+      - name: gcp-token
+        mountPath: /var/run/secrets/gcp
+        readOnly: true
+      - name: gcp-credential-config
+        mountPath: /etc/gcp
+        readOnly: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-prod
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/prod-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/prod-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-prod
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burrito-gcp-prod-1
+  namespace: burrito
+data:
+  credential-config.json: |-
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/876608406330/locations/global/workloadIdentityPools/minipc/providers/minipc",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/burrito-plan@tripbot-prod.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "file": "/var/run/secrets/gcp/token",
+        "format": {
+          "type": "text"
+        }
+      }
+    }
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
