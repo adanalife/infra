@@ -11,7 +11,7 @@ import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import BurritoChart, PlatformArgoChart
-from adanalife_k8s.constructs.burrito import LAYERS
+from adanalife_k8s.constructs.burrito import CONSOLE_ENVS, LAYERS, TENANT_NS
 
 
 def _synth():
@@ -34,6 +34,10 @@ VALUES = Path(__file__).parents[3] / "k8s" / "burrito" / "values.yml"
 def _values():
     with VALUES.open() as f:
         return yaml.safe_load(f)
+
+
+# The console's read-only grant on the layers (Role + RoleBinding share the name).
+ROLE = "tripbot-console-burrito"
 
 
 def _kind(objs, kind):
@@ -186,3 +190,22 @@ def test_tailnet_ui_rides_the_shared_proxy_fleet():
     assert (
         ing["metadata"]["annotations"]["tailscale.com/proxy-group"] == "ingress-proxies"
     )
+
+
+def test_console_reads_layers_and_nothing_else():
+    # The console's terraform panel reads layers; the trial's safety property is
+    # that nothing but Dana applies, so this grant must stay read-only and must
+    # not reach the runs, the repository, or the runner credentials.
+    objs = _synth()
+    role = next(r for r in _kind(objs, "Role") if r["metadata"]["name"] == ROLE)
+    assert role["metadata"]["namespace"] == TENANT_NS
+    for rule in role["rules"]:
+        assert rule["resources"] == ["terraformlayers"]
+        assert set(rule["verbs"]) <= {"get", "list", "watch"}
+    binding = next(
+        rb for rb in _kind(objs, "RoleBinding") if rb["metadata"]["name"] == ROLE
+    )
+    assert binding["roleRef"]["name"] == ROLE
+    assert {(s["name"], s["namespace"]) for s in binding["subjects"]} == {
+        ("tripbot-console", env) for env in CONSOLE_ENVS
+    }
