@@ -388,6 +388,33 @@ tasks:
         [ "$(cond IsRunning)" = "True" ] && refuse "a run is already in flight — wait for it" || true
         [ "$(cond HasLastPlanFailed)" = "True" ] && refuse "the last plan failed; there is no good plan to replay" || true
         [ "$(cond IsLastRelevantCommitPlanned)" = "False" ] && refuse "a commit touching this layer has not been planned yet — let the plan finish first" || true
+        # That condition only covers commits burrito already KNOWS about: the
+        # repository controller syncs every 5 minutes, so for up to five minutes
+        # after a merge burrito has planned everything it has seen and still
+        # reports IsLastRelevantCommitPlanned true. Applying in that window
+        # replays a plan that predates the merge. It happened — an alert-rule PR
+        # merged at 16:12:56, an apply fired at 16:13:52, and the run correctly
+        # applied the previous revision.
+        #
+        # So compare burrito's view of main against the remote's, from here,
+        # and refuse only when the commits it has not caught up to actually
+        # touch THIS layer's path. Unrelated pending commits are none of this
+        # layer's business.
+        git fetch --quiet origin main 2>/dev/null || true
+        remote_head=$(git rev-parse origin/main 2>/dev/null || echo "")
+        if [ -n "$remote_head" ] && [ "$remote_head" != "$revision" ]; then
+          path=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o jsonpath='{.spec.path}')
+          # An unknown revision (force-push, or a local checkout that never had
+          # it) makes the range invalid — treat that as "cannot prove it is
+          # safe" rather than as safe.
+          if ! git merge-base --is-ancestor "$revision" "$remote_head" 2>/dev/null; then
+            refuse "burrito is on revision $revision, which is not an ancestor of origin/main — cannot tell what it has missed"
+          fi
+          touched=$(git diff --name-only "$revision".."$remote_head" -- "$path" | head -5)
+          [ -n "$touched" ] && refuse "burrito has not synced $(git rev-parse --short "$remote_head") yet, and it changes this layer:
+        $touched
+        The plan it would replay predates those changes. The repository syncs every 5m — wait for the new plan." || true
+        fi
         # `Error getting last Result` is burrito's own text for "the plan's
         # artifacts are not in the datastore" — pruned, or written to a storage
         # backend that has since been replaced. There is nothing to replay.
