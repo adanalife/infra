@@ -307,10 +307,23 @@ tasks:
 
   # Run `terraform apply` for one layer, once. Burrito has no standing apply
   # loop — every layer keeps remediationStrategy.autoApply false — so an apply
-  # only ever happens because someone asked for it, here or in the UI.
+  # only ever happens because someone asked for it, and this task is the only
+  # way to ask. Burrito's UI cannot: at v0.13.0 its one mutating call is
+  # POST /api/layers/:ns/:layer/sync, which sets the SyncNow annotation and
+  # gets you a *plan* (internal/server/api/sync.go); plan/apply buttons are
+  # still "more to come" upstream.
   #
   # The run replays the plan burrito already computed and displayed
-  # (applyWithoutPlanArtifact stays false), so what runs is what you reviewed.
+  # (applyWithoutPlanArtifact stays false), so what runs is what you reviewed —
+  # which is why spec.artifact has to name that plan run. An apply run without
+  # it has no bundle to replay and dies in reconcile with `could not check
+  # bundle, there's an issue with the storage backend`. Both fields are copied
+  # off the layer's own annotations, exactly as burrito's ApplyNeeded handler
+  # does it (internal/controllers/terraformlayer/run.go getRun).
+  #
+  # The burrito/managed-by label is load-bearing too, not decoration: the layer
+  # finds its runs by that selector, so an unlabelled apply is invisible to the
+  # layer's state machine and its history.
   #
   # Only stage-1 and prod-1 can actually apply: core and platform hold a
   # ReadOnlyAccess credential and a run against them fails at the first write.
@@ -326,17 +339,39 @@ tasks:
     cmds:
       # generateName, so repeated runs don't collide on a name.
       - |
+        set -eu
+        layer=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o json)
+        plan_run=$(printf %s "$layer" | jq -r '.metadata.annotations["runner.terraform.padok.cloud/plan-run"] // ""')
+        revision=$(printf %s "$layer" | jq -r '.metadata.annotations["webhook.terraform.padok.cloud/branch-commit"] // ""')
+        uid=$(printf %s "$layer" | jq -r .metadata.uid)
+        if [ -z "$plan_run" ] || [ -z "$revision" ]; then
+          echo "Layer {{.LAYER}} has no plan to replay yet (plan-run='$plan_run' branch-commit='$revision')." >&2
+          echo "Let it plan first — kubectl -n burrito get terraformlayer {{.LAYER}}" >&2
+          exit 1
+        fi
+        echo "Replaying ${plan_run}: $(printf %s "$layer" | jq -r '.status.lastResult')"
         kubectl create -f - <<EOF
         apiVersion: config.terraform.padok.cloud/v1alpha1
         kind: TerraformRun
         metadata:
           generateName: {{.LAYER}}-manual-apply-
           namespace: burrito
+          labels:
+            burrito/managed-by: {{.LAYER}}
+          ownerReferences:
+            - apiVersion: config.terraform.padok.cloud/v1alpha1
+              kind: TerraformLayer
+              name: {{.LAYER}}
+              uid: ${uid}
         spec:
           action: apply
           layer:
             name: {{.LAYER}}
             namespace: burrito
+            revision: ${revision}
+          artifact:
+            run: ${plan_run%/*}
+            attempt: "${plan_run##*/}"
         EOF
         echo "Watch it with: kubectl -n burrito get terraformruns --sort-by=.metadata.creationTimestamp"
 
