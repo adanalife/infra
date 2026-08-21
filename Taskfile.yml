@@ -423,8 +423,9 @@ tasks:
         esac
 
         echo "Replaying ${plan_run} on {{.LAYER}}: ${result}"
-        # generateName, so repeated runs don't collide on a name.
-        kubectl create -f - <<EOF
+        # generateName, so repeated runs don't collide on a name — which is why
+        # the created name has to be read back rather than assumed.
+        run=$(kubectl create -f - -o jsonpath='{.metadata.name}' <<EOF
         apiVersion: config.terraform.padok.cloud/v1alpha1
         kind: TerraformRun
         metadata:
@@ -447,7 +448,60 @@ tasks:
             run: ${plan_run%/*}
             attempt: "${plan_run##*/}"
         EOF
-        echo "Watch it with: kubectl -n burrito get terraformruns --sort-by=.metadata.creationTimestamp"
+        )
+        echo "Created $run — waiting for its runner pod"
+
+        # Follow the run to its end, rather than printing a kubectl command and
+        # leaving. Two reasons: the terraform output belongs in the scrollback of
+        # whoever asked for the apply, and the run object is pruned from the API
+        # by the layer's history cleanup within a few rounds — so "go look at it
+        # later" is not actually an option. The copy in the datastore bucket
+        # outlives the object but needs AWS credentials to read.
+        #
+        # maxConcurrentRunnerPods is 1, so a pod can legitimately be minutes
+        # away while another layer's plan finishes. Hence the patient wait, and
+        # the note saying why nothing is happening.
+        pod=""
+        for i in $(seq 1 120); do
+          pod=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.runnerPod}' 2>/dev/null || true)
+          [ -n "$pod" ] && break
+          [ "$i" = "6" ] && echo "still queued (one runner pod at a time) — waiting"
+          sleep 5
+        done
+        [ -n "$pod" ] || { echo "no runner pod after 10m; check: kubectl -n burrito describe terraformrun $run" >&2; exit 1; }
+
+        # `logs -f` errors while the container is still pulling or waiting, so
+        # hold until it has actually started. Succeeded is fine to tail — it
+        # just replays what was written.
+        for i in $(seq 1 120); do
+          phase=$(kubectl -n burrito get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          case "$phase" in Running|Succeeded|Failed) break ;; esac
+          sleep 5
+        done
+        echo "--- $pod ---"
+        kubectl -n burrito logs -f "$pod" 2>&1 || true
+
+        # The pod exiting is not the verdict — the run controller writes that a
+        # beat later, and a failed attempt may go to Retrying rather than
+        # straight to Failed. Exit non-zero on a bad outcome so a caller (or an
+        # agent) can tell an apply that worked from one that did not, instead of
+        # having to parse terraform's output.
+        #
+        # A run that goes to Retrying reports as a failure here, and the log
+        # above is the first attempt's — a later attempt gets a new pod this
+        # does not follow. That is the right bias for a gesture someone is
+        # watching: a retrying apply is one to go and look at.
+        state=""
+        for i in $(seq 1 24); do
+          state=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.state}' 2>/dev/null || true)
+          case "$state" in Succeeded|Failed) break ;; esac
+          sleep 5
+        done
+        echo "--- $run: ${state:-unknown} ---"
+        [ "$state" = "Succeeded" ] || {
+          echo "apply did not succeed (state: ${state:-unknown}) — the run log above is also at layers/burrito/{{.LAYER}}/$run/ in the datastore bucket" >&2
+          exit 1
+        }
 
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
   # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
