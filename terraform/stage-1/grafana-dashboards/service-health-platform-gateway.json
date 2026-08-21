@@ -53,7 +53,7 @@
         "name": "platform",
         "label": "Platform",
         "type": "custom",
-        "query": "twitch,youtube,facebook",
+        "query": "twitch,youtube,facebook,instagram,tiktok",
         "current": {
           "text": "twitch",
           "value": "twitch"
