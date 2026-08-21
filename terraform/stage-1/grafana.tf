@@ -94,6 +94,7 @@ locals {
     "service-health-tripbot",
     "service-health-onscreens-server",
     "service-health-platform-gateway", # gateway façade request metrics + the Twitch Helix rate-limit/error panels that replace tripbot's in-process ones at cutover (platform-gateway#14)
+    "service-health-tripbot-console",  # the admin live console: SSE clients, its own HTTP surface, and its view of per-platform component health
     "igpu-performance",                # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
     "twitch-chat-activity",
     "logs-and-errors",
