@@ -2193,6 +2193,85 @@ resource "grafana_rule_group" "relay_health" {
     }
   }
 
+  // The publish hop's quality half. The two rules above catch a publisher that
+  // is gone or frozen; this one catches a publisher that is connected and
+  // progressing while the relay is not receiving everything it sends. MediaMTX
+  // discards any frame a lost RTP packet landed in, so readers decode against
+  // broken references and viewers see artifacts until the next keyframe, and
+  // every other vantage point reads healthy: the playhead advances, the path
+  // stays ready, playout's own frame-gap counter sits at ~1 per 6h, and OBS's
+  // render/output/stream skip counters stay clean. The decode-error rule in
+  // stream-health is the only other signal and it is calibrated for a corrupt
+  // feed (>100 matched lines per 5m); a chronic 0.2% loss produces ~1.
+  //
+  // Zero is the baseline this asserts. The hop is pod-to-pod on one node over
+  // RTSP-interleaved TCP, which cannot drop packets — the read side has
+  // measured exactly 0 lost across 13.5M packets since obs#106, and the
+  // publish side joined it in playout#139. A nonzero rate means something put
+  // the transport back on UDP: a playout image predating that fix, or a sink
+  // rebuilt without protocols=tcp.
+  //
+  // 100 per 15m rather than >0 so a session teardown mid-window can't page.
+  // The regime a viewer reported on 2026-08-20 ran ~1400 per 15m (0.22% of
+  // packets, artifacts every ~18s), and the UDP era's worst 6h held 92000, so
+  // the threshold sits an order of magnitude under what is visible on stream
+  // and two above what a clean session produces.
+  dynamic "rule" {
+    for_each = toset(local.stream_platforms)
+    content {
+      name           = "MediaMTX: ${rule.value} publisher is losing RTP packets"
+      for            = "15m"
+      condition      = "C"
+      no_data_state  = "OK" // no publish session → the no-publisher rule pages, not this
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "The ${rule.value} relay is losing RTP packets from playout — viewers see artifacts"
+        description = "mediamtx-${rule.value} has been counting lost RTP packets on its publish session for 15m: playout-${rule.value}'s stream is arriving with gaps, MediaMTX discards every frame a gap lands in, and the ${rule.value} feed shows decoding artifacts until each next keyframe. Nothing else reports it — the playhead advances, the path stays ready, and OBS's frame-skip counters stay clean. Confirm the loss is on the publish leg with `kubectl -n prod-1 logs deploy/mediamtx-${rule.value} | grep 'RTP packet is missing'`, then check the transport: `kubectl -n prod-1 get deploy playout-${rule.value} -o jsonpath='{.spec.template.spec.containers[0].image}'` must be an image carrying the TCP publish (playout#139). Loss on an image that has it means the RTSP session negotiated UDP anyway — read the relay's session log line, which names the transport."
+      }
+      labels = {
+        severity = "warning"
+        service  = "playout"
+      }
+
+      data {
+        ref_id = "A"
+        relative_time_range {
+          from = 900
+          to   = 0
+        }
+        datasource_uid = data.grafana_data_source.prometheus.uid
+        model = jsonencode({
+          refId         = "A"
+          expr          = "sum(increase(rtsp_sessions_inbound_rtp_packets_lost{state=\"publish\", path=\"dashcam\", pod=~\"mediamtx-${rule.value}.*\"}[15m])) and on () (console_platform_component_up{component=\"mediamtx\", service_platform=\"${rule.value}\", deployment_environment=\"prod-1\"} > 0)"
+          instant       = true
+          intervalMs    = 60000
+          maxDataPoints = 43200
+        })
+      }
+      data {
+        ref_id         = "C"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          refId      = "C"
+          type       = "threshold"
+          expression = "A"
+          conditions = [{
+            type      = "query"
+            evaluator = { type = "gt", params = [100] }
+            operator  = { type = "and" }
+            query     = { params = ["A"] }
+            reducer   = { type = "last", params = [] }
+          }]
+        })
+      }
+    }
+  }
+
   // The frozen-publisher half of the no-publisher page above. When the pipeline
   // wedges without tearing down the RTSP session, MediaMTX keeps the path
   // state="ready" and the reader keeps pulling — the last frame just never
