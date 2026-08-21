@@ -11,7 +11,12 @@ import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import BurritoChart, PlatformArgoChart
-from adanalife_k8s.constructs.burrito import CONSOLE_ENVS, LAYERS, TENANT_NS
+from adanalife_k8s.constructs.burrito import (
+    CONSOLE_ENVS,
+    DATASTORE_SECRET,
+    LAYERS,
+    TENANT_NS,
+)
 
 
 def _synth():
@@ -153,6 +158,33 @@ def test_oidc_client_secret_reaches_the_server_as_its_env_var():
     assert {"secretRef": {"name": secret["spec"]["target"]["name"]}} in _values()[
         "server"
     ]["deployment"]["envFrom"]
+
+
+def test_apply_has_a_real_datastore_behind_it():
+    # An apply replays the reviewed plan's artifact bundle
+    # (applyWithoutPlanArtifact stays false), so a mocked in-memory datastore
+    # makes the apply path inert — it reconciles forever and never schedules a
+    # runner. Three things have to agree: mock off, a bucket named, and the
+    # credential the datastore reads it with.
+    storage = _values()["config"]["burrito"]["datastore"]["storage"]
+    assert storage["mock"] is False
+    assert storage["s3"]["bucket"]
+
+    objs = _synth()
+    (secret,) = [
+        es
+        for es in _kind(objs, "ExternalSecret")
+        if es["spec"]["target"]["name"] == DATASTORE_SECRET
+    ]
+    # The keys are consumed as env vars, so they must BE the env var names.
+    assert {d["secretKey"] for d in secret["spec"]["data"]} == {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION",
+    }
+    assert {"secretRef": {"name": DATASTORE_SECRET}} in _values()["datastore"][
+        "deployment"
+    ]["envFrom"]
 
 
 def test_only_stage_and_prod_can_apply():
