@@ -776,12 +776,194 @@
       }
     },
     {
+      "id": 40,
+      "type": "stat",
+      "title": "EventSub subscriptions held",
+      "description": "Twitch EventSub subscriptions the current WebSocket session holds. 0 means no real-time follow / subscribe / gift / resub / raid notices are arriving at all — the bot still runs and chat still works, so nothing else on this page turns red. Twitch drops a subscription-less session after ~10s, so a healthy session re-subscribes on every reconnect and this returns to its full count within seconds. Aggregated with min across platform instances: red if any instance is deaf.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 69, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "min by (deployment_environment) (tripbot_eventsub_subscriptions{result=\"ok\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "EventSub subscriptions denied",
+      "description": "Subscriptions Twitch refused on the last subscribe round, almost always a scope the broadcaster token doesn't carry. Above 0 while 'held' is also above 0 is a partial grant: only the event types needing the missing scope are dead, which is why this needs its own tile rather than being inferred from the held count. Recovery is a broadcaster re-consent through the platform-gateway flow, then a restart.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 69, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (tripbot_eventsub_subscriptions{result=\"denied\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "Channel live (per platform)",
+      "description": "1 when the platform itself reports this instance's channel as live, 0 when it reports offline. Paired with obs_streaming_active in the silent-disconnect alert: OBS=1 while this reads 0 means we are streaming into the void. Broken out per platform rather than aggregated, because one platform going dark while the others stream is the case worth seeing.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 69, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "tripbot_channel_live{service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}", "legendFormat": "{{service_platform}} [{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OFFLINE", "color": "red" }, "1": { "text": "live", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Gateway reachable",
+      "description": "1 when tripbot's last platform-gateway call got an HTTP response, 0 when it failed at the transport layer (connection refused, timeout, DNS). Consumer-side reachability — pair with the gateway's own platform_gateway_up on dashboard 05 to tell 'gateway is down' from 'the path between us is down'. Carries no service_platform label, so this tile is deliberately not platform-filtered; the $platform selector does not apply.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 69, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "min by (deployment_environment) (tripbot_gateway_up{deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "UNREACHABLE", "color": "red" }, "1": { "text": "reachable", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "EventSub notices vs chat shouts (per hour)",
+      "description": "The two halves of the announcement path, which should track each other: every subscribe / follow notice that persists a row should also land a thank-you in chat. Shouts running below notices means outbound chat accepted the call and posted nothing — the one leg of this path with no other signal, since a shout's only other trace is ordinary bot chat text. Compares sub+follow only: gift and resub shouts open no subscribed interval, so they have no events-table row to compare against (see the by-kind panel for those).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 73, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_events_total{event=~\"subscribe|follow\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "notices received [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "sum by (deployment_environment) (increase(tripbot_announcements_total{kind=~\"sub|follow\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "shouts posted [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto", "spanNulls": true }
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*shouts posted.*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*notices received.*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Chat shouts by kind (per hour)",
+      "description": "Thank-you shouts posted to chat, split by what triggered them. Sub, gift and resub are rare enough on a quiet day that flat zero is normal — read this against the notices panel beside it rather than in isolation. Gift counts one per gift event, not per sub gifted, because that is how many shouts go out; sub counts gift recipients too, matching channel.subscribe.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 73, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (kind, deployment_environment) (increase(tripbot_announcements_total{service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "{{kind}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 46,
+      "type": "stat",
+      "title": "Silent-disconnect recoveries (24h)",
+      "description": "Times the watchdog forced a recovery because OBS reported outputActive=true while the platform reported the channel offline — a StopStream+StartStream on Twitch and YouTube, an egress re-mint on TikTok. Zero is the expected reading and renders as 0 rather than 'no data'; a nonzero count means the stream dropped and healed itself, which is worth knowing even though nothing paged.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 81, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_obs_silent_disconnect_restarts_total{deployment_environment=~\"$deployment_environment\"}[24h]))", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 700,
       "type": "table",
       "title": "Recent traces (tripbot)",
       "description": "Most recent traces for this service. The deployment_environment column disambiguates rows when the env selector is set to All.",
       "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
-      "gridPos": { "x": 0, "y": 69, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 85, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"tripbot\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)", "limit": 20 }
       ]
