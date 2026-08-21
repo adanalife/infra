@@ -422,6 +422,11 @@ tasks:
           Error*) refuse "the last plan's result cannot be read ($result) — its artifacts are gone; re-plan first" ;;
         esac
 
+        # The apply verdict is read from the layer afterwards, so remember what
+        # it said before — a re-apply of the same revision changes the date and
+        # nothing else.
+        before_apply=$(ann runner.terraform.padok.cloud/apply-date)
+
         echo "Replaying ${plan_run} on {{.LAYER}}: ${result}"
         # generateName, so repeated runs don't collide on a name — which is why
         # the created name has to be read back rather than assumed.
@@ -481,27 +486,40 @@ tasks:
         echo "--- $pod ---"
         kubectl -n burrito logs -f "$pod" 2>&1 || true
 
-        # The pod exiting is not the verdict — the run controller writes that a
-        # beat later, and a failed attempt may go to Retrying rather than
-        # straight to Failed. Exit non-zero on a bad outcome so a caller (or an
-        # agent) can tell an apply that worked from one that did not, instead of
-        # having to parse terraform's output.
+        # The pod exiting is not the verdict — the runner writes that a beat
+        # later. Read it off the LAYER, not the run: the layer's apply-date and
+        # apply-commit annotations are what the runner stamps on success, and
+        # unlike the run object they are not pruned. Reading the run's
+        # status.state here looked obvious and failed the first time it ran for
+        # real — the object was already gone, `kubectl get` said NotFound, and a
+        # successful apply reported "unknown".
         #
-        # A run that goes to Retrying reports as a failure here, and the log
-        # above is the first attempt's — a later attempt gets a new pod this
-        # does not follow. That is the right bias for a gesture someone is
-        # watching: a retrying apply is one to go and look at.
-        state=""
+        # A run that fails reports as failure, and the log above is that
+        # attempt's — a retry gets a new pod this does not follow. That is the
+        # right bias for a gesture someone is watching: an apply that did not
+        # land is one to go and look at.
+        verdict=""
         for i in $(seq 1 24); do
-          state=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.state}' 2>/dev/null || true)
-          case "$state" in Succeeded|Failed) break ;; esac
+          now_apply=$(kubectl -n burrito get terraformlayer {{.LAYER}} \
+            -o jsonpath='{.metadata.annotations.runner\.terraform\.padok\.cloud/apply-date}' 2>/dev/null || true)
+          now_commit=$(kubectl -n burrito get terraformlayer {{.LAYER}} \
+            -o jsonpath='{.metadata.annotations.runner\.terraform\.padok\.cloud/apply-commit}' 2>/dev/null || true)
+          if [ -n "$now_apply" ] && [ "$now_apply" != "$before_apply" ] && [ "$now_commit" = "$revision" ]; then
+            verdict="applied $now_commit at $now_apply"
+            break
+          fi
+          # Still reachable while it exists, and the only thing that reports a
+          # terminal failure — the layer says nothing when an apply fails.
+          run_state=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.state}' 2>/dev/null || true)
+          [ "$run_state" = "Failed" ] && break
           sleep 5
         done
-        echo "--- $run: ${state:-unknown} ---"
-        [ "$state" = "Succeeded" ] || {
-          echo "apply did not succeed (state: ${state:-unknown}) — the run log above is also at layers/burrito/{{.LAYER}}/$run/ in the datastore bucket" >&2
+        if [ -n "$verdict" ]; then
+          echo "--- {{.LAYER}}: $verdict ---"
+        else
+          echo "apply did not land: the layer still reports apply-date '${before_apply:-none}'. Run log above, and at layers/burrito/{{.LAYER}}/$run/ in the datastore bucket" >&2
           exit 1
-        }
+        fi
 
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
   # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
