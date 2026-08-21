@@ -2828,3 +2828,156 @@ resource "grafana_rule_group" "batch_health" {
     }
   }
 }
+
+# Burrito health — the terraform drift-detection loop watching itself. Burrito
+# plans all four remote-state workspaces hourly and is the only thing that
+# reports drift between applies, so a Burrito that has quietly stopped working
+# reads exactly like "no drift anywhere" — the failure this group exists for.
+#
+# Which series to alert on was picked by looking at what actually moved during
+# a real 40-minute outage on 2026-08-21, not by metric name. During it, every
+# run failed on a missing git bundle, and:
+#
+#   * burrito_terraform_layer_status never once reported status="error". Layers
+#     keep reporting the status of their last *completed* plan, so three of them
+#     sat on stale success/warning for the whole window. An error-only rule
+#     would have stayed silent.
+#   * burrito_runs_failed_total never appeared. It is a CounterVec, so it emits
+#     no series until a run reaches the terminal failed state — and these runs
+#     retried instead, never exhausting terraformMaxRetries. Alerting on it
+#     would have waited for retries to run out, if they ever did.
+#   * burrito_runs_by_status{status="Retrying"} was the one series that tracked
+#     the outage, because a run wedged mid-flight sits in exactly that state.
+#
+# So the first rule watches Retrying and the second keeps error as a
+# complementary signal for the ordinary case: terraform itself failing on a
+# layer that does complete its run. Both are warnings — no viewer sees this, and
+# a paused drift loop is a "fix it today" problem rather than a wake-up.
+#
+# The plan-staleness blind spot these two share (a layer Burrito stopped
+# scheduling at all, so nothing retries and nothing errors) needs the console's
+# console_terraform_plan_age_seconds, which is not in Grafana Cloud yet: the
+# deployed tripbot-console 0.46.0 predates that metric. Adding a third rule is a
+# console release away, tracked in vault/infra/TODO.md.
+#
+# burrito_runs_by_status reaches the cloud only because the keep-regex in
+# k8s/monitoring/prod-1/values.yml names it, same as
+# burrito_terraform_layer_status. That allowlist is load-bearing: with
+# no_data_state OK, a dropped family reads as "nothing wrong".
+resource "grafana_rule_group" "burrito_health" {
+  name             = "burrito-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name = "Burrito runs stuck retrying (drift detection has stalled)"
+    # 20m is three of Burrito's 10s reconcile rounds' worth of patience past the
+    # point a transient retry clears. One plan pod died on an `etcdserver:
+    # request timed out` and retried clean well inside a minute, so a shorter
+    # window would page on minipc control-plane hiccups.
+    for            = "20m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "Burrito has had a run retrying for 20m — terraform drift detection is stalled and reporting stale results"
+      description = "burrito_runs_by_status{status=\"Retrying\"} has been above zero for 20m. A run that keeps retrying means Burrito cannot complete a plan, and every layer keeps serving the result of its last *successful* one — so the UI, the console's terraform panel and the drift alert below all read green off stale data. Read the reason from the controller: `kubectl -n burrito-system logs deploy/burrito-controllers | grep -i error`. Known causes: the git bundle for the current revision is missing from the datastore (`bundle for revision <sha> not found`, fixed by clearing the repository's branches — see vault/infra/burrito.md), a layer's AWS credential expired, or the datastore cannot reach its bucket. no_data is OK because the gauge emits no series at all when nothing is retrying, which is the healthy state."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(burrito_runs_by_status{status=\"Retrying\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name = "Burrito layer plan or apply failed"
+    # by (layer_name) so the notification names the workspace; a failure on core
+    # and one on prod-1 are different problems.
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "Burrito layer {{ $labels.layer_name }} last plan or apply failed — that workspace's drift is unknown"
+      description = "burrito_terraform_layer_status{layer_name=\"{{ $labels.layer_name }}\", status=\"error\"} has been set for 15m: the layer completed a run and terraform reported failure, so this workspace's real drift is unknown until it plans clean again. Read the run log from the UI at https://burrito.prod.whereisdana.today, or from the datastore bucket (layers/burrito/{{ $labels.layer_name }}/<run>/<attempt>/run.log). A failure on core or platform is a plan failure by construction — those layers hold a read-only credential and cannot apply. no_data is OK: the gauge drops the error label entirely once a layer recovers."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (layer_name) (burrito_terraform_layer_status{status=\"error\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
