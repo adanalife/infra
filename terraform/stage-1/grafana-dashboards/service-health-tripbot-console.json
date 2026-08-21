@@ -197,7 +197,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "HTTP latency (p50 / p95 / p99)",
-      "description": "Server-side request latency. Charted in MILLISECONDS despite the metric being named console_http_request_duration_seconds — its buckets run 0 … 10000 in millisecond steps, and a p95 of ~5 confirms ms rather than s (5s would be absurd for an HTMX partial). The name is wrong at the source, not here; until it is renamed, do not relabel this axis to seconds.",
+      "description": "Server-side request latency, in seconds. Reads a flat 2.5 / 4.75 / 4.95 until tripbot-console#337 ships: the histogram was left on the OTel SDK default bucket boundaries, which are spaced for milliseconds, so every seconds-valued observation fell into the single (0, 5] bucket and each quantile was `q * 5` from interpolating inside it rather than a measurement. True mean over that period was 78ms (sum/count). Once the explicit seconds boundaries deploy, a window spanning the deploy shows a one-time step as the old le series stop and the new ones start.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 7, "w": 12, "h": 8 },
       "targets": [
@@ -207,7 +207,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }
         },
         "overrides": []
@@ -382,7 +382,7 @@
       "gridPos": { "x": 0, "y": 44, "w": 24, "h": 5 },
       "options": {
         "mode": "markdown",
-        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **No 'Recent traces' table.** 03/04/05 each carry one; whether the console exports spans to Tempo has not been confirmed, and an unverified trace table renders as an empty panel that reads like a broken service. Add it once there are spans to show.\n\n**Known source-side gaps**, both fixable in the console repo rather than here:\n\n1. `target_info` carries no `service_version`, so the Running version tile reads \"not reported\". Fix is `service.version` in `OTEL_RESOURCE_ATTRIBUTES` at deploy.\n2. `console_http_request_duration_seconds` is named in seconds but bucketed in **milliseconds** (0 … 10000). The latency panel is labelled ms to match the data. Renaming the metric means updating that panel's unit in the same change."
+        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **No 'Recent traces' table.** 03/04/05 each carry one; whether the console exports spans to Tempo has not been confirmed, and an unverified trace table renders as an empty panel that reads like a broken service. Add it once there are spans to show.\n\n**Known source-side gaps**, both fixable in the console repo rather than here:\n\n1. `target_info` carries no `service_version`, so the Running version tile reads \"not reported\". Fix is `service.version` in `OTEL_RESOURCE_ATTRIBUTES` at deploy.\n2. The request-duration histogram carried no usable signal — the SDK's default bucket boundaries are spaced for milliseconds, so seconds-valued observations all landed in one bucket and every quantile was an interpolation artifact (`q * 5`), not a measurement. Fixed at the source in tripbot-console#337. The panel is labelled seconds because the data is seconds, and reads flat until that ships."
       }
     }
   ]
