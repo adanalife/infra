@@ -53,7 +53,7 @@
         "name": "platform",
         "label": "Platform",
         "type": "custom",
-        "query": "twitch,youtube,facebook",
+        "query": "twitch,youtube,facebook,instagram,tiktok",
         "current": {
           "text": "twitch",
           "value": "twitch"
@@ -70,7 +70,7 @@
       "title": "About this dashboard",
       "gridPos": {
         "x": 0,
-        "y": 37,
+        "y": 46,
         "w": 24,
         "h": 4
       },
@@ -574,7 +574,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 50,
         "w": 24,
         "h": 10
       },
@@ -711,6 +711,265 @@
           }
         },
         "overrides": []
+      }
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Fleet & config (all platforms — not $platform-scoped)",
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Platform enabled",
+      "description": "1 when that gateway reports its platform as enabled, 0 when it is switched off. One tile row per running gateway container. This metric carries no platform label — the platform is the container name — so this panel is deliberately not $platform-scoped: it is the fleet view, and a platform switched off is exactly what you want to see next to the ones that are on.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (container) (platform_gateway_platform_enabled{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"})",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DISABLED",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "enabled",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Chat connected",
+      "description": "1 when the gateway holds a live chat connection for its platform, 0 when it does not. Pair with tripbot's own 'Twitch Chat Connected' tile on dashboard 03: this one 0 while that one 1 localises the fault to the gateway rather than the path between them. Not $platform-scoped, for the same reason as the tile beside it — the metric carries no platform label.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 38,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (container) (platform_gateway_chat_connected{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"})",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DISCONNECTED",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "connected",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Stream metadata drift by field",
+      "description": "1 when the platform's live stream metadata no longer matches what the gateway intends for it, per field (title, category, tags, description). Drift means somebody or something changed the stream's title or category out from under us — the gateway notices but does not force it back, so this is the only signal. Flat 0 across every field is the healthy reading.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 38,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (platform, field) (platform_gateway_metadata_drift{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"})",
+          "legendFormat": "{{platform}} · {{field}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Sentry events dropped (per hour, by reason)",
+      "description": "Error events the gateway threw away instead of sending to Sentry, split by why: cooldown (same fingerprint too soon) or hourly_cap (budget exhausted). Nonzero is not a gateway fault — it is the self-limiter working — but a sustained hourly_cap means real errors are being discarded, so Sentry is no longer a complete picture of this service and the cap needs raising.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (increase(platform_gateway_sentry_events_dropped_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"}[1h]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
       }
     }
   ]
