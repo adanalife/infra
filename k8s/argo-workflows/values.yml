@@ -74,11 +74,11 @@ workflow:
     create: true
 
 server:
-  # The UI is reachable only over the tailnet (the Ingress below), so the
-  # server itself does not authenticate: `server` mode acts as the server's own
-  # ServiceAccount and skips the login. The tailnet IS the auth boundary — a
-  # LAN Ingress would need SSO first, since this UI can submit workflows and a
-  # workflow is an arbitrary pod.
+  # The server itself does not authenticate: `server` mode acts as the server's
+  # own ServiceAccount and skips the login. It is reachable over the tailnet
+  # and the home LAN (the two Ingresses below), both treated as trusted
+  # networks — anyone on either can submit workflows, and a workflow is an
+  # arbitrary pod. Gate with `client` authModes before exposing it any wider.
   authModes:
     - server
   resources:
@@ -94,6 +94,34 @@ extraObjects:
   # and Burrito's tailnet Ingresses; carried here rather than in a cdk8s
   # construct so the whole install is one values file. TLS terminates at the
   # tailnet edge and forwards plain HTTP to argo-workflows-server:2746.
+  # LAN UI at argo-workflows.prod.whereisdana.today — the traefik sibling every
+  # platform UI carries (argocd/burrito/hubble follow the same shape). The
+  # record rides external-dns -> minipc.whereisdana.today, so it follows the
+  # box between networks; cert-manager issues the TLS cert via Route53 DNS-01.
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: argo-workflows-server-traefik
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-route53
+        external-dns.alpha.kubernetes.io/hostname: argo-workflows.prod.whereisdana.today
+    spec:
+      ingressClassName: traefik
+      rules:
+        - host: argo-workflows.prod.whereisdana.today
+          http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: argo-workflows-server
+                    port:
+                      number: 2746
+      tls:
+        - hosts:
+            - argo-workflows.prod.whereisdana.today
+          secretName: argo-workflows-server-tls
   - apiVersion: networking.k8s.io/v1
     kind: Ingress
     metadata:
