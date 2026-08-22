@@ -86,6 +86,9 @@ VERSIONS = {
     # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
     # live minipc release.
     "victoria-metrics-single": "0.42.0",
+    # Argo Workflows app v4.1.2 — the batch engine for spare-compute work.
+    # Latest stable at add time (2026-08-22).
+    "argo-workflows": "2.0.2",
     # Burrito v0.13.0 — terraform GitOps controller (plan/drift-detect trial).
     # Latest stable at add time (2026-08-19); pre-1.0, so minors can break —
     # read the release notes before bumping.
@@ -237,6 +240,24 @@ def cluster_components(
                 "burrito",
                 "burrito-system",
                 value_files=("burrito/values.yml",),
+            )
+        )
+
+    # Argo Workflows — the batch/DAG engine for the spare-compute passes that are
+    # hand-applied one-shot Jobs today (video-pipeline's embed/coords/auto-trim).
+    # Runs one workflow at a time at the most-preemptible priority, so a queue of
+    # them yields to the stream. Cleanly Argo-manageable (no host-coupled values).
+    # The CRs it runs are Workflows, submitted by hand or by the video-pipeline
+    # repo — nothing in this repo declares one.
+    if minipc:
+        components.append(
+            HelmComponent(
+                "argo-workflows",
+                "argo",
+                "argo-workflows",
+                "argo-workflows",
+                "argo-workflows",
+                value_files=("argo-workflows/values.yml",),
             )
         )
 
