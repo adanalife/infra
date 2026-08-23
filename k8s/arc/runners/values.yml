@@ -29,9 +29,12 @@ controllerServiceAccount:
 # gha_registered_runners, gha_desired_runners and the
 # gha_job_{startup,execution}_duration_seconds histograms. Its metrics port
 # comes from the controller's `metrics:` stanza (../controller/values.yml);
-# these annotations are what points alloy-metrics at it. Annotations only: the
-# controller merges the template's metadata into the pod it builds, and a `spec`
-# here would have to carry a full container list to pass CRD validation.
+# these annotations are what points alloy-metrics at it. The stub `listener`
+# container is load-bearing: the controller copies this template verbatim into
+# the AutoscalingListener object, whose CRD requires a non-empty container
+# list — a metadata-only template fails validation, no listener is created,
+# and every queued job in the org sits undispatched. The controller merges its
+# real listener container over the stub.
 # The series land in the in-cluster VictoriaMetrics; Grafana Cloud takes an
 # allowlist, so add a gha_* entry there only when a dashboard or alert asks.
 listenerTemplate:
@@ -40,6 +43,9 @@ listenerTemplate:
       prometheus.io/scrape: "true"
       prometheus.io/port: "8080"
       prometheus.io/path: "/metrics"
+  spec:
+    containers:
+      - name: listener
 
 # minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
