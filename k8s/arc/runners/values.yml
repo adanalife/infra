@@ -109,10 +109,17 @@ template:
         # ubuntu-latest (4 vCPU) while capping what a hot build can take from
         # the streams; the dind sidecar declares nothing and gets the
         # LimitRange defaults (2 CPU / 4Gi).
+        #
+        # The memory REQUEST must be honest, not minimal: a real job (pytest,
+        # golangci-lint, uv sync) uses multiple GiB, and a runner requesting
+        # 1Gi while using 4 is the kubelet's first eviction victim when a full
+        # burst puts the node under memory pressure — which kills a job
+        # mid-run. At 2.5Gi the scheduler queues the runner a full node can't
+        # feed (the job waits) instead of overpacking and evicting.
         resources:
           requests:
             cpu: 500m
-            memory: 1Gi
+            memory: 2.5Gi
           limits:
             cpu: "4"
             memory: 6Gi
