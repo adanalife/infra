@@ -25,6 +25,22 @@ controllerServiceAccount:
   namespace: arc-systems
   name: arc-controller-gha-rs-controller
 
+# The listener pod holds the pool's own metrics — gha_busy_runners,
+# gha_registered_runners, gha_desired_runners and the
+# gha_job_{startup,execution}_duration_seconds histograms. Its metrics port
+# comes from the controller's `metrics:` stanza (../controller/values.yml);
+# these annotations are what points alloy-metrics at it. Annotations only: the
+# controller merges the template's metadata into the pod it builds, and a `spec`
+# here would have to carry a full container list to pass CRD validation.
+# The series land in the in-cluster VictoriaMetrics; Grafana Cloud takes an
+# allowlist, so add a gha_* entry there only when a dashboard or alert asks.
+listenerTemplate:
+  metadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics"
+
 # minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
 # showing arc-amd64 online is a true health signal. maxRunners: 5 lets a full
