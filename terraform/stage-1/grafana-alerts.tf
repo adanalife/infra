@@ -2827,6 +2827,87 @@ resource "grafana_rule_group" "batch_health" {
       })
     }
   }
+
+  // Prod Postgres dumps hourly to S3 from an in-cluster CronJob, and that is
+  // the only durable copy — stage has none by design and the PVC has been lost
+  // outright twice (a talosctl upgrade wiping EPHEMERAL, and an HNSW bulk index
+  // build OOMing the pod). So the window between "backups quietly stopped" and
+  // "we need one" is the whole risk, and nothing was watching it.
+  //
+  // On 2026-08-23 the CronJob controller stopped creating jobs for nine hours
+  // while the CronJob object itself stayed present and unsuspended. No job
+  // failed, because no job ran. A rule on job failures sees nothing; so does a
+  // glance at `kubectl get cronjob`, which keeps reporting the LAST SCHEDULE
+  // from before the wedge. Success *age* is the only number that moves, which
+  // is the same reasoning as the guessr rule above.
+  //
+  // Deliberately reads the CronJob's success time and not the S3 object: the
+  // bucket lives in an account this Grafana holds no credential for. A dump the
+  // job reports as successful but that never lands is therefore still unwatched
+  // — this rule answers "did the hourly job run", not "is the object there".
+  // See vault/infra/backups.md.
+  rule {
+    name      = "Postgres: prod hourly backup has not succeeded in 2h"
+    for       = "15m"
+    condition = "C"
+    // Alerting, not OK, for the same reason as guessr: the series vanishing is
+    // itself the blindness this rule exists to catch — the CronJob deleted, KSM
+    // down, or a wrong selector here that would otherwise never fire.
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "prod Postgres has not completed an hourly backup in over 2 hours"
+      description = "The postgres-backup CronJob in prod-1-data dumps the prod database to s3://adanalife-prod-1-postgres-backups/hourly/ every hour, and it has not recorded a success in over two hours. Prod Postgres has no other durable copy. Check whether jobs are being created at all with `kubectl -n prod-1-data get jobs --sort-by=.metadata.creationTimestamp` — a gap in the sequence with no Failed job means the CronJob controller stopped scheduling rather than the dump failing, which is a control-plane problem and not a backup one. Confirm what actually landed with `task -d ~/adanalife/infra tripbot:prod:db:backups`. Run one by hand with `kubectl -n prod-1-data create job --from=cronjob/postgres-backup postgres-backup-manual`. Restore path and the S3 layout are in vault/infra/backups.md."
+    }
+    labels = {
+      severity = "critical"
+      service  = "postgres"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // Same `or kube_cronjob_created` floor as the guessr rule: a CronJob
+        // that has never succeeded emits no last_successful_time series, which
+        // would otherwise read as no-data and be indistinguishable from a
+        // broken metrics pipeline.
+        expr          = "time() - max(kube_cronjob_status_last_successful_time{namespace=\"prod-1-data\", cronjob=\"postgres-backup\"} or kube_cronjob_created{namespace=\"prod-1-data\", cronjob=\"postgres-backup\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // 7200s is two hours: one missed hourly run plus a full hour of slack,
+        // so a single slow or retried dump is not a page. The 15m `for` adds
+        // another cushion against a scrape gap landing on the boundary.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [7200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 # Burrito health — the terraform drift-detection loop watching itself. Burrito
