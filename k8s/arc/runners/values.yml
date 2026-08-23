@@ -27,14 +27,16 @@ controllerServiceAccount:
 
 # minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
-# showing arc-amd64 online is a true health signal. maxRunners bounds the
-# burst: a PR push fans out ~6 jobs, three runners clears that in two rounds
-# while the LimitRange + per-container limits below keep the worst case well
-# under the node's 20 CPUs. There is no GitHub-hosted fallback job routing —
+# showing arc-amd64 online is a true health signal. maxRunners: 5 lets a full
+# PR fan-out (up to ~6 jobs on tripbot-console) run mostly parallel — the pool
+# can't scale horizontally like GitHub-hosted, so burst width is the lever.
+# The worst case stays bounded by the per-container limits below + the
+# arc-runners LimitRange, and ci-low priority means the streams win every
+# scramble regardless. There is no GitHub-hosted fallback job routing —
 # if the minipc is down, checks queue until it returns (none are required
 # checks; the free plan can't protect private repos, so merges never block).
 minRunners: 1
-maxRunners: 3
+maxRunners: 5
 
 # dind: each ephemeral runner gets a Docker daemon sidecar, so the existing
 # `docker build` / buildx steps (dev-image, release, image-smoke) work
@@ -50,10 +52,59 @@ template:
     # so a runner pod is evicted before any stage workload. A mid-build
     # eviction just fails the check — rerun it.
     priorityClassName: ci-low
+    # hostPath dirs are created root-owned; hand them to the runner user
+    # (uid 1001, group docker/123 — see the image Dockerfile) before the
+    # runner starts. Non-recursive: children are created by 1001 afterward.
+    initContainers:
+      - name: chown-caches
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+          - sudo
+          - chown
+          - "1001:123"
+          - /cache/dot-cache
+          - /cache/mise
+          - /cache/gomod
+          - /cache/toolcache
+        volumeMounts:
+          - name: cache-dot-cache
+            mountPath: /cache/dot-cache
+          - name: cache-mise
+            mountPath: /cache/mise
+          - name: cache-gomod
+            mountPath: /cache/gomod
+          - name: cache-toolcache
+            mountPath: /cache/toolcache
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
+        env:
+          # Point the setup actions (setup-python, setup-uv, setup-go, …) at
+          # the shared tool cache so a toolchain downloads once per version,
+          # not once per job. GitHub-hosted runners use this same path.
+          - name: RUNNER_TOOL_CACHE
+            value: /opt/hostedtoolcache
+        # Warm caches shared across runner pods via hostPath — a single-node
+        # cluster, so every pod sees the same disk. Ephemeral runners
+        # otherwise re-download every toolchain and package on every job,
+        # which dominates job wall-clock. Cache-only data: a Talos EPHEMERAL
+        # wipe costs one cold run, nothing to back up. Concurrent-writer
+        # safety is each tool's own (uv hardlinks, go-build is
+        # content-addressed, pre-commit locks); worst case is a failed run
+        # that reruns clean.
+        volumeMounts:
+          # uv, pre-commit envs, pip, go-build, mise's download cache
+          - name: cache-dot-cache
+            mountPath: /home/runner/.cache
+          # mise-installed toolchains (python, node, task, …)
+          - name: cache-mise
+            mountPath: /home/runner/.local/share/mise
+          # Go module cache (GOMODCACHE default)
+          - name: cache-gomod
+            mountPath: /home/runner/go/pkg/mod
+          - name: cache-toolcache
+            mountPath: /opt/hostedtoolcache
         # 4-CPU limit makes a self-hosted job as fast as a GitHub-hosted
         # ubuntu-latest (4 vCPU) while capping what a hot build can take from
         # the streams; the dind sidecar declares nothing and gets the
@@ -65,3 +116,20 @@ template:
           limits:
             cpu: "4"
             memory: 6Gi
+    volumes:
+      - name: cache-dot-cache
+        hostPath:
+          path: /var/arc-cache/dot-cache
+          type: DirectoryOrCreate
+      - name: cache-mise
+        hostPath:
+          path: /var/arc-cache/mise
+          type: DirectoryOrCreate
+      - name: cache-gomod
+        hostPath:
+          path: /var/arc-cache/gomod
+          type: DirectoryOrCreate
+      - name: cache-toolcache
+        hostPath:
+          path: /var/arc-cache/toolcache
+          type: DirectoryOrCreate
