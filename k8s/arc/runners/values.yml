@@ -40,6 +40,14 @@ listenerTemplate:
       prometheus.io/scrape: "true"
       prometheus.io/port: "8080"
       prometheus.io/path: "/metrics"
+  # A listenerTemplate must carry a stub container named `listener` — the
+  # controller merges the real listener config over it by name, and REJECTS
+  # the AutoscalingListener outright without it (`spec.template.spec.containers:
+  # Required value`), which silently leaves the pool with no listener: runners
+  # sit online-idle while every job queues.
+  spec:
+    containers:
+      - name: listener
 
 # minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
