@@ -65,6 +65,20 @@ locals {
   // gains its own canary by being added here — the two can't drift into the
   // state where a gate silently un-arms because nothing watches its component.
   gated_components = ["obs", "mediamtx"]
+
+  // Stack URL, for the `link` annotations that deep-link a rule at the panel
+  // that answers it. Same lookup the provider block uses rather than a
+  // hardcoded host, so a stack move doesn't leave dead links in Discord.
+  grafana_url = lookup(local.grafana_creds, "GRAFANA_CLOUD_URL", "")
+
+  // The panel that plots the silent-disconnect recovery counter both watchdog
+  // rules below fire on.
+  watchdog_panel_link = "[recoveries](${local.grafana_url}/d/tripbot-service-health/?viewPanel=46)"
+
+  // Unresolved prod tripbot issues. A watchdog whose recovery keeps failing
+  // leaves its trace here and nowhere else — through the 9h41m outage on
+  // 2026-08-05 Sentry was the only signal at all.
+  tripbot_sentry_link = "[sentry](https://a-dana-life.sentry.io/issues/?environment=prod-1&query=is%3Aunresolved+project%3Atripbot)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -84,6 +98,13 @@ locals {
 // summary annotation plus the platform it broke on, nothing else. Keep the
 // summary annotations short for the same reason — the template can only be as
 // brief as the sentence it's handed.
+//
+// A rule may also set a `link` annotation to append somewhere worth opening
+// first — a dashboard panel, a Sentry search. Written as Discord-masked
+// markdown (`[label](url)`) so it costs one word on the line rather than a
+// wrapped URL; the rule owns the label because only the rule knows what is
+// worth looking at. Optional by design: most alerts read fine without one, and
+// a link on every rule would undo the terseness this template exists for.
 resource "grafana_contact_point" "discord_alerts" {
   name = "discord-alerts"
 
@@ -94,7 +115,7 @@ resource "grafana_contact_point" "discord_alerts" {
 
     title   = "{{ .GroupLabels.alertname }}"
     message = <<-EOT
-      {{ range .Alerts.Firing }}🔴 {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
+      {{ range .Alerts.Firing }}🔴 {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}{{ with .Annotations.link }} · {{ . }}{{ end }}
       {{ end }}{{ range .Alerts.Resolved }}✅ {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
       {{ end }}
     EOT
@@ -1416,7 +1437,8 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS silent-disconnect watchdog auto-recovered a stream"
-      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"ok\"} incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery that worked: a StopStream+StartStream on twitch and youtube, an egress re-mint on tiktok. The counter is per-platform, so service_platform on the series says which. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
+      link        = local.watchdog_panel_link
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"ok\"} incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery that worked: a StopStream+StartStream on twitch and youtube, an egress re-mint on tiktok. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
     }
     labels = {
       severity = "warning"
@@ -1432,7 +1454,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"ok\"}[5m]))"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"ok\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1481,7 +1503,8 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS silent-disconnect watchdog is restarting and not recovering"
-      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. The counter is per-platform, so service_platform on the series says which. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
+      link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
     }
     labels = {
       severity = "critical"
@@ -1497,7 +1520,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
