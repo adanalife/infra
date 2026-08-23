@@ -1,0 +1,10 @@
+# gha-runner-scale-set-controller — the ARC reconciler. A small always-on
+# controller, not a build workload; the runner pods it manages are bounded
+# separately (see ../runners/values.yml + the arc-runners LimitRange).
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

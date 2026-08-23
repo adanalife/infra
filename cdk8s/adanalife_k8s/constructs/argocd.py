@@ -238,6 +238,7 @@ class ArgoCD(Construct):
         lan_tls: bool = True,
         notifications_secret: bool = True,
         ups_monitor: bool = True,
+        arc: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -293,15 +294,18 @@ class ArgoCD(Construct):
             name=INFRA_PROJECT,
             description="shared cluster infrastructure (postgres data + supporting), from the infra repo",
             source_repos=[REPO_URL],
-            # + the UPS monitor's `ups` namespace on the minipc (the singleton
-            # Application below rides the infra project — same repo, same project).
+            # + the minipc singletons' namespaces (the UPS monitor + ARC
+            # Applications below ride the infra project — same repo, same
+            # project).
             namespaces=_project_namespaces(self.envs)
-            + (["ups"] if ups_monitor else []),
-            # + Namespace when the UPS monitor rides this project: the unit's own
-            # Namespace object is itself gated by this clusterResourceWhitelist,
-            # so a CreateNamespace=true sync fails without the entry.
+            + (["ups"] if ups_monitor else [])
+            + (["arc-systems", "arc-runners"] if arc else []),
+            # + Namespace when a singleton rides this project: its Namespace
+            # objects (owned by the unit, or via CreateNamespace=true) are
+            # gated by this clusterResourceWhitelist, so a sync fails without
+            # the entry.
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
-            + ([NAMESPACE_KIND] if ups_monitor else []),
+            + ([NAMESPACE_KIND] if (ups_monitor or arc) else []),
         )
         if self.console_envs:
             self._app_project(
@@ -483,6 +487,24 @@ class ArgoCD(Construct):
                 dest_ns_tmpl="ups",
                 prune_disabled=False,
                 create_namespace=True,
+            )
+        # The ARC supporting unit (namespaces + runner LimitRange + GitHub App
+        # ExternalSecret) — a cluster-SINGLETON like the UPS monitor, minipc-only
+        # (the k3d dev Argo passes arc=False; there's no runner host there).
+        # MANUAL sync (no automated block), matching the two ARC Helm
+        # Applications it underpins — runner capacity changes are hand-synced.
+        # No CreateNamespace: the unit owns its Namespace objects, because
+        # arc-runners needs PodSecurity labels a bare create can't set.
+        if arc:
+            self._application_set(
+                id="appset-arc",
+                name="arc",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="arc",
+                include_tmpl="arc.k8s.yaml",
+                dest_ns_tmpl="arc-runners",
+                prune_disabled=False,
             )
         # The cross-repo console unit: one Application per env, sourcing the
         # PRIVATE tripbot-console repo's committed dist (per-env revision —
