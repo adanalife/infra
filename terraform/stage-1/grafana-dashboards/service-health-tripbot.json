@@ -935,11 +935,11 @@
       "id": 46,
       "type": "stat",
       "title": "Silent-disconnect recoveries (24h)",
-      "description": "Times the watchdog forced a recovery because OBS reported outputActive=true while the platform reported the channel offline — a StopStream+StartStream on Twitch and YouTube, an egress re-mint on TikTok. Zero is the expected reading and renders as 0 rather than 'no data'; a nonzero count means the stream dropped and healed itself, which is worth knowing even though nothing paged.",
+      "description": "Times the watchdog forced a recovery because OBS reported outputActive=true while the platform reported the channel offline — a StopStream+StartStream on Twitch and YouTube, an egress re-mint on TikTok. Split per platform because the recovery action differs by platform, and per result because a recovery that keeps failing is the worse outage: `ok` (orange) means the stream dropped and healed itself, `failed` (red) means the watchdog is trying and losing. A platform that has never fired has no series at all, so the quiet reading is the single 0 the noValue placeholder draws.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 81, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum by (deployment_environment) (increase(tripbot_obs_silent_disconnect_restarts_total{deployment_environment=~\"$deployment_environment\"}[24h]))", "legendFormat": "[{{deployment_environment}}]" }
+        { "refId": "A", "expr": "sum by (deployment_environment, service_platform, result) (increase(tripbot_obs_silent_disconnect_restarts_total{deployment_environment=~\"$deployment_environment\", service_platform=~\"$platform\"}[24h]))", "legendFormat": "[{{deployment_environment}}] {{service_platform}} {{result}}" }
       ],
       "options": {
         "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
@@ -954,7 +954,13 @@
             { "color": "orange", "value": 1 }
           ]}
         },
-        "overrides": []
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*failed$" },
+            "properties": [{ "id": "thresholds", "value": { "mode": "absolute", "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]}}]}
+        ]
       }
     },
     {
