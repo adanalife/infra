@@ -20,6 +20,9 @@ deploy unit (dist/arc.k8s.yaml), the same shape as the UPS monitor:
     scale set authenticates with. Platform components read the cluster-scoped
     `aws-parameterstore-cluster` store (per k8s-platform-stack), so no per-ns
     eso-aws-credentials bootstrap is needed.
+  * A read-only Role + RoleBinding letting each env's tripbot-console read the
+    scale sets, for its runner panel — the same shape as the console's Argo and
+    Burrito grants, and here for the same reason (the namespace is infra's).
 
 minipc-only: the runners serve the private repos' CI and there's exactly one
 runner host; the k3d dev cluster doesn't deliver this unit (arc=False).
@@ -28,12 +31,18 @@ runner host; the k3d dev cluster doesn't deliver this unit (arc=False).
 from __future__ import annotations
 
 import cdk8s
+import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.eso import external_secret
 
 SYSTEMS_NS = "arc-systems"
 RUNNERS_NS = "arc-runners"
+
+# The consoles that read the runner pools (tripbot-console's runner panel): one
+# console per env, both on this cluster, both watching the same runner scale
+# sets. Namespace == env name, as everywhere else.
+CONSOLE_ENVS = ("prod-1", "stage-1")
 
 # The materialized Secret the gha-runner-scale-set chart authenticates with
 # (githubConfigSecret). Holds the GitHub App triple — keys must be exactly
@@ -115,4 +124,45 @@ class Arc(Construct):
             namespace=RUNNERS_NS,
             store=CLUSTER_STORE,
             extract=GITHUB_APP_SM_KEY,
+        )
+
+        self._console_rbac()
+
+    def _console_rbac(self):
+        """A Role + RoleBinding in the runners namespace letting each env's
+        `tripbot-console` ServiceAccount read the AutoscalingRunnerSets — the
+        console's runner panel, which reports how much self-hosted CI capacity
+        is up and how much of it is working. Read-only and scale-sets-only: the
+        pool sizes itself off GitHub's job queue, so there is nothing for the
+        console to mutate. Mirrors the console's Argo and Burrito grants
+        (argocd.py _console_argo_rbac, burrito.py _console_rbac), which the
+        console can no more self-grant than this one — its AppProject permits
+        only its own app and data namespaces, and this one is infra's.
+        """
+        name = "tripbot-console-arc"
+        k8s.KubeRole(
+            self,
+            "console-role",
+            metadata=k8s.ObjectMeta(name=name, namespace=RUNNERS_NS),
+            rules=[
+                k8s.PolicyRule(
+                    api_groups=["actions.github.com"],
+                    resources=["autoscalingrunnersets"],
+                    verbs=["get", "list", "watch"],
+                )
+            ],
+        )
+        k8s.KubeRoleBinding(
+            self,
+            "console-rolebinding",
+            metadata=k8s.ObjectMeta(name=name, namespace=RUNNERS_NS),
+            role_ref=k8s.RoleRef(
+                api_group="rbac.authorization.k8s.io", kind="Role", name=name
+            ),
+            subjects=[
+                k8s.Subject(
+                    kind="ServiceAccount", name="tripbot-console", namespace=env
+                )
+                for env in CONSOLE_ENVS
+            ],
         )
