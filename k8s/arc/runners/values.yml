@@ -1,0 +1,67 @@
+# gha-runner-scale-set — one amd64 runner pool on the minipc, registered at the
+# ORG level so a single scale set serves every private repo (tripbot-console,
+# platform-gateway, video-pipeline, flare). Their CI + release workflows target
+# it with `runs-on: arc-amd64`; GitHub-hosted minutes on private repos are
+# metered, minutes here are free. Org registration requires the ARC GitHub App
+# to hold Organization → Self-hosted runners: read/write — without it the
+# listener fails registration and jobs sit queued.
+#
+# The public repos stay on GitHub-hosted runners: their minutes are free, and
+# the org's default runner group excludes public repos (fork-PR code must never
+# reach this pool).
+githubConfigUrl: https://github.com/adanalife
+# Pre-existing Secret materialized by the arc-github-app ExternalSecret
+# (constructs/arc.py). Holds the GitHub App triple ARC registers with.
+githubConfigSecret: arc-github-app
+
+runnerScaleSetName: arc-amd64
+
+# Pin the controller's ServiceAccount explicitly. The chart otherwise
+# auto-discovers it via a cluster lookup, which returns empty under offline
+# templating (Argo's `helm template`, and PlatformChart's cdk8s.Helm render)
+# and fails the manifest with "No gha-rs-controller deployment found". Names
+# the arc-controller release's SA in arc-systems.
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-controller-gha-rs-controller
+
+# minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
+# spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
+# showing arc-amd64 online is a true health signal. maxRunners bounds the
+# burst: a PR push fans out ~6 jobs, three runners clears that in two rounds
+# while the LimitRange + per-container limits below keep the worst case well
+# under the node's 20 CPUs. There is no GitHub-hosted fallback job routing —
+# if the minipc is down, checks queue until it returns (none are required
+# checks; the free plan can't protect private repos, so merges never block).
+minRunners: 1
+maxRunners: 3
+
+# dind: each ephemeral runner gets a Docker daemon sidecar, so the existing
+# `docker build` / buildx steps (dev-image, release, image-smoke) work
+# unchanged. The chart injects the dind sidecar; we only override the runner
+# container below. Requires the arc-runners namespace's privileged
+# PodSecurity exemption (constructs/arc.py).
+containerMode:
+  type: dind
+
+template:
+  spec:
+    # CI loses every scramble: prod preemption picks the lowest tier first,
+    # so a runner pod is evicted before any stage workload. A mid-build
+    # eviction just fails the check — rerun it.
+    priorityClassName: ci-low
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        # 4-CPU limit makes a self-hosted job as fast as a GitHub-hosted
+        # ubuntu-latest (4 vCPU) while capping what a hot build can take from
+        # the streams; the dind sidecar declares nothing and gets the
+        # LimitRange defaults (2 CPU / 4Gi).
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "4"
+            memory: 6Gi

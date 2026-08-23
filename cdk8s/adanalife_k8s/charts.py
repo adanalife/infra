@@ -218,6 +218,20 @@ class UpsMonitorChart(Chart):
         UpsMonitor(self)
 
 
+class ArcChart(Chart):
+    """The ARC (self-hosted GHA runner) supporting unit — namespaces + runner
+    LimitRange + GitHub App ExternalSecret, a cluster-singleton in the same
+    shape as the UPS monitor (dist/arc.k8s.yaml, minipc-only Argo delivery).
+    The ARC Helm charts themselves are platform components (helm_platform.py).
+    See constructs/arc.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        from adanalife_k8s.constructs.arc import Arc
+
+        Arc(self)
+
+
 class ArgoCDChart(Chart):
     """Argo CD GitOps config (AppProject + ApplicationSets + UI Ingress + repo
     ExternalSecret) — the objects that drive the controller. Applied after the
