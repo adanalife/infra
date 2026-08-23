@@ -63,14 +63,11 @@ template:
           - chown
           - "1001:123"
           - /cache/dot-cache
-          - /cache/mise
           - /cache/gomod
           - /cache/toolcache
         volumeMounts:
           - name: cache-dot-cache
             mountPath: /cache/dot-cache
-          - name: cache-mise
-            mountPath: /cache/mise
           - name: cache-gomod
             mountPath: /cache/gomod
           - name: cache-toolcache
@@ -89,17 +86,19 @@ template:
         # cluster, so every pod sees the same disk. Ephemeral runners
         # otherwise re-download every toolchain and package on every job,
         # which dominates job wall-clock. Cache-only data: a Talos EPHEMERAL
-        # wipe costs one cold run, nothing to back up. Concurrent-writer
-        # safety is each tool's own (uv hardlinks, go-build is
-        # content-addressed, pre-commit locks); worst case is a failed run
-        # that reruns clean.
+        # wipe costs one cold run, nothing to back up. Only shared where the
+        # tool is multi-writer safe: uv hardlinks, go-build is
+        # content-addressed, pre-commit locks, and the setup actions guard
+        # the tool cache with completion markers. mise's INSTALLS dir is
+        # deliberately NOT shared — one pod exec-ing a shared python while
+        # another pod's `mise install` re-extracts it throws ETXTBSY and
+        # fails whatever test is running (a venv symlinks its interpreter
+        # into that dir). Each pod extracts its own toolchain from mise's
+        # download cache in ~/.cache instead — seconds, and race-free.
         volumeMounts:
           # uv, pre-commit envs, pip, go-build, mise's download cache
           - name: cache-dot-cache
             mountPath: /home/runner/.cache
-          # mise-installed toolchains (python, node, task, …)
-          - name: cache-mise
-            mountPath: /home/runner/.local/share/mise
           # Go module cache (GOMODCACHE default)
           - name: cache-gomod
             mountPath: /home/runner/go/pkg/mod
@@ -109,10 +108,17 @@ template:
         # ubuntu-latest (4 vCPU) while capping what a hot build can take from
         # the streams; the dind sidecar declares nothing and gets the
         # LimitRange defaults (2 CPU / 4Gi).
+        #
+        # The memory REQUEST must be honest, not minimal: a real job (pytest,
+        # golangci-lint, uv sync) uses multiple GiB, and a runner requesting
+        # 1Gi while using 4 is the kubelet's first eviction victim when a full
+        # burst puts the node under memory pressure — which kills a job
+        # mid-run. At 2.5Gi the scheduler queues the runner a full node can't
+        # feed (the job waits) instead of overpacking and evicting.
         resources:
           requests:
             cpu: 500m
-            memory: 1Gi
+            memory: 2.5Gi
           limits:
             cpu: "4"
             memory: 6Gi
@@ -120,10 +126,6 @@ template:
       - name: cache-dot-cache
         hostPath:
           path: /var/arc-cache/dot-cache
-          type: DirectoryOrCreate
-      - name: cache-mise
-        hostPath:
-          path: /var/arc-cache/mise
           type: DirectoryOrCreate
       - name: cache-gomod
         hostPath:
