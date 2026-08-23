@@ -51,29 +51,44 @@ listenerTemplate:
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
 # showing arc-amd64 online is a true health signal.
 #
-# maxRunners is capped by the node's memory, not by how wide a PR fan-out is.
-# A runner pod is the runner container below plus the chart-injected dind
-# native sidecar, whose resources come from the arc-runners LimitRange in
-# cdk8s/adanalife_k8s/constructs/arc.py — a `dind` entry in the containers
-# list here is silently dropped, so that file is the only place to change them.
-# At 2.5Gi + 2Gi requested and 6Gi + 3Gi capped, a pod asks for 4.5Gi and
-# ceilings at 9Gi. The minipc allocates ~30.5Gi and the stream stack holds
-# ~16Gi of it in requests, so two runners sit near 82% of the node.
+# maxRunners is held at 1 because CI activity correlates with the node dying
+# and nobody knows why yet. Six node deaths on 2026-08-23 each landed minutes
+# after a CI burst, so the pool runs one job at a time until the mechanism is
+# identified — a throughput cost accepted deliberately, against a node whose
+# failure takes both prod streams and every co-tenant with it.
+#
+# It is NOT a memory cap, and the arithmetic that used to live here argued
+# otherwise. Measured against the in-cluster VictoriaMetrics across those crash
+# windows: MemAvailable never fell below ~15.8Gi of ~30.5Gi, load15 peaked at 4
+# of 20 CPUs, the USB-attached T5 wrote 0.05 MiB/s, and every arc-runners pod
+# together peaked at 487Mi. Scheduler commitment ran high while consumption
+# stayed low, so the requests were inflated relative to reality rather than the
+# node being exhausted. Reason from the metrics, not from the request totals —
+# and query the in-cluster VictoriaMetrics, since Grafana Cloud takes an
+# allowlist and holds none of these series.
+#
+# A runner pod is the runner container below plus the chart-injected dind native
+# sidecar, whose resources come from the arc-runners LimitRange in
+# cdk8s/adanalife_k8s/constructs/arc.py — a `dind` entry in the containers list
+# here is silently dropped, so that file is the only place to change them. dind
+# measures 229Mi at peak across 112 runner pods including a real `docker build`,
+# against the 2Gi it requests.
 #
 # ci-low priority decides who the kubelet evicts once memory is already tight;
-# it does not stop a burst from exhausting the node in the first place, and an
-# exhausted node takes the control plane down with it, not just the jobs. The
-# guard that does work is the requests staying honest, so the scheduler queues
-# a runner it cannot place instead of overpacking the node.
+# it does not stop a burst from exhausting the node in the first place. Honest
+# requests remain worth keeping so the scheduler queues a runner it cannot place
+# rather than overpacking the node — that is hygiene, not the fix for the
+# crashes.
 #
-# Widening the pool means re-doing that arithmetic against the LimitRange
-# numbers, not raising this alone.
+# Widening the pool waits on knowing what kills the node. The kernel log is the
+# outstanding evidence: Talos does not persist dmesg across reboot, so six
+# deaths produced none.
 #
 # There is no GitHub-hosted fallback job routing — if the minipc is down,
 # checks queue until it returns (none are required checks; the free plan can't
 # protect private repos, so merges never block).
 minRunners: 1
-maxRunners: 2
+maxRunners: 1
 
 # dind: each ephemeral runner gets a Docker daemon sidecar, so the existing
 # `docker build` / buildx steps (dev-image, release, image-smoke) work
