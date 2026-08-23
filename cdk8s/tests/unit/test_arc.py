@@ -12,6 +12,10 @@ from adanalife_k8s.charts import ArcChart, ArgoCDChart
 from adanalife_k8s.helm_platform import cluster_components
 from adanalife_k8s.config import load_env
 
+# The console's read-only grant on the scale sets (Role + RoleBinding share the
+# name).
+CONSOLE_ROLE = "tripbot-console-arc"
+
 _DEV = dict(
     envs=("development",),
     autosync_envs=("development",),
@@ -83,6 +87,33 @@ def test_arc_github_app_secret_reads_the_cluster_store():
     assert es["spec"]["secretStoreRef"]["kind"] == "ClusterSecretStore"
     assert es["spec"]["secretStoreRef"]["name"] == "aws-parameterstore-cluster"
     assert es["spec"]["dataFrom"][0]["extract"]["key"] == "/k8s/arc/github-app"
+
+
+def test_console_reads_the_scale_sets_and_nothing_else():
+    # The console's runner panel reads the scale sets to report CI capacity. It
+    # must stay read-only and must not reach the runner pods or the GitHub App
+    # credential sharing this namespace — the panel has no button, and this is
+    # the grant that guarantees it can't grow one.
+    objs = _synth(ArcChart)
+    role = next(
+        r for r in _by_kind(objs, "Role") if r["metadata"]["name"] == CONSOLE_ROLE
+    )
+    assert role["metadata"]["namespace"] == "arc-runners"
+    for rule in role["rules"]:
+        assert rule["apiGroups"] == ["actions.github.com"]
+        assert rule["resources"] == ["autoscalingrunnersets"]
+        assert set(rule["verbs"]) <= {"get", "list", "watch"}
+    binding = next(
+        rb
+        for rb in _by_kind(objs, "RoleBinding")
+        if rb["metadata"]["name"] == CONSOLE_ROLE
+    )
+    assert binding["roleRef"]["name"] == CONSOLE_ROLE
+    # Subjects are the consoles' ServiceAccounts in their own env namespaces —
+    # the cross-namespace hop the console's own AppProject can't grant itself.
+    assert {(s["name"], s["namespace"]) for s in binding["subjects"]} == {
+        ("tripbot-console", env) for env in ("prod-1", "stage-1")
+    }
 
 
 # --- the platform components (the two OCI Helm releases) ---
