@@ -49,16 +49,25 @@ listenerTemplate:
 
 # minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
-# showing arc-amd64 online is a true health signal. maxRunners: 5 lets a full
-# PR fan-out (up to ~6 jobs on tripbot-console) run mostly parallel — the pool
-# can't scale horizontally like GitHub-hosted, so burst width is the lever.
-# The worst case stays bounded by the per-container limits below + the
-# arc-runners LimitRange, and ci-low priority means the streams win every
-# scramble regardless. There is no GitHub-hosted fallback job routing —
-# if the minipc is down, checks queue until it returns (none are required
-# checks; the free plan can't protect private repos, so merges never block).
+# showing arc-amd64 online is a true health signal.
+#
+# maxRunners is capped by the node's memory, not by how wide a PR fan-out is.
+# Each runner is TWO containers: the runner (6Gi limit, below) plus the dind
+# sidecar, which declares nothing and takes the arc-runners LimitRange default
+# of 4Gi — so a runner pod's ceiling is 10Gi, not 6Gi. The minipc allocates
+# ~30.5Gi total and the stream stack holds ~16Gi of it in requests, which
+# leaves room for two runner pods with real slack. ci-low priority decides who
+# the kubelet evicts once memory is already tight; it does not stop a burst
+# from exhausting the node in the first place, and an exhausted node takes the
+# control plane down with it, not just the jobs.
+#
+# Widening this means giving the dind sidecar an explicit, smaller limit first
+# — otherwise every extra runner adds 10Gi of ceiling to a 30.5Gi machine.
+# There is no GitHub-hosted fallback job routing — if the minipc is down,
+# checks queue until it returns (none are required checks; the free plan can't
+# protect private repos, so merges never block).
 minRunners: 1
-maxRunners: 5
+maxRunners: 2
 
 # dind: each ephemeral runner gets a Docker daemon sidecar, so the existing
 # `docker build` / buildx steps (dev-image, release, image-smoke) work
