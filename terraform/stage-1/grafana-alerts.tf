@@ -560,7 +560,17 @@ resource "grafana_rule_group" "host_storage" {
 //
 // Both rules read node_boot_time_seconds, which is allowlisted into the cloud
 // destination for exactly this (k8s/monitoring/prod-1/values.yml) — node_* is
-// otherwise local-VictoriaMetrics-only. One series: one node.
+// otherwise local-VictoriaMetrics-only.
+//
+// Both pin job="integrations/node_exporter" and aggregate `by (instance)`.
+// node-exporter is scraped twice — once by hostMetrics' integration, once by
+// annotation-autodiscovery via the Service — so the metric carries two series
+// per physical node reporting the same value. Pinning one job keeps a single
+// physical reboot from reading as two, and `by (instance)` puts the node's name
+// on the alert instead of collapsing it away, which is what makes the rules
+// still make sense when the second node arrives (a matched amd64 MS-01 is the
+// plan). The instance label is the node name on this job, so the Discord line
+// names the box that bounced.
 //
 // no_data_state = OK on both, so the rules sit quiet rather than firing if the
 // series is ever absent — during the window between a terraform apply and the
@@ -605,7 +615,7 @@ resource "grafana_rule_group" "host_lifecycle" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "min(time() - node_boot_time_seconds)"
+        expr          = "min by (instance) (time() - node_boot_time_seconds{job=\"integrations/node_exporter\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -671,7 +681,7 @@ resource "grafana_rule_group" "host_lifecycle" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(changes(node_boot_time_seconds[6h]))"
+        expr          = "max by (instance) (changes(node_boot_time_seconds{job=\"integrations/node_exporter\"}[6h]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200

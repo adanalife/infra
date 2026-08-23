@@ -83,12 +83,20 @@ destinations:
     #                         stay local-VM-only.
     #   node_boot_time_seconds  — the node's boot timestamp, for the
     #                         host-lifecycle alerts (a reboot, and a repeated
-    #                         reboot). One series: the cluster is one node. It
-    #                         is the only signal that distinguishes "the node
-    #                         went away and came back" from the dozens of
-    #                         downstream symptoms a reboot produces, and every
+    #                         reboot). It is the only signal that distinguishes
+    #                         "the node went away and came back" from the dozens
+    #                         of downstream symptoms a reboot produces, and every
     #                         one of those symptoms is cheaper to read once you
     #                         know the box bounced.
+    #                         Two series per physical node, not one: node-exporter
+    #                         is scraped both by hostMetrics' integration
+    #                         (job=integrations/node_exporter, instance=the node
+    #                         name) and by annotation-autodiscovery via the
+    #                         Service (job=prometheus-node-exporter), and both
+    #                         report the same value. The alerts pin the former so
+    #                         one reboot doesn't read as two; the duplicate is
+    #                         left shipping because two series against a
+    #                         15000-series cap is not worth a relabel rule.
     # The rest of what's scraped is local-VM-only: the other node_*
     # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
     # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
