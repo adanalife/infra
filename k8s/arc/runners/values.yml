@@ -52,17 +52,23 @@ listenerTemplate:
 # showing arc-amd64 online is a true health signal.
 #
 # maxRunners is capped by the node's memory, not by how wide a PR fan-out is.
-# Each runner is TWO containers: the runner (6Gi limit, below) plus the dind
-# sidecar, which declares nothing and takes the arc-runners LimitRange default
-# of 4Gi — so a runner pod's ceiling is 10Gi, not 6Gi. The minipc allocates
-# ~30.5Gi total and the stream stack holds ~16Gi of it in requests, which
-# leaves room for two runner pods with real slack. ci-low priority decides who
-# the kubelet evicts once memory is already tight; it does not stop a burst
-# from exhausting the node in the first place, and an exhausted node takes the
-# control plane down with it, not just the jobs.
+# A runner pod is the runner container below plus the chart-injected dind
+# native sidecar, whose resources come from the arc-runners LimitRange in
+# cdk8s/adanalife_k8s/constructs/arc.py — a `dind` entry in the containers
+# list here is silently dropped, so that file is the only place to change them.
+# At 2.5Gi + 2Gi requested and 6Gi + 3Gi capped, a pod asks for 4.5Gi and
+# ceilings at 9Gi. The minipc allocates ~30.5Gi and the stream stack holds
+# ~16Gi of it in requests, so two runners sit near 82% of the node.
 #
-# Widening this means giving the dind sidecar an explicit, smaller limit first
-# — otherwise every extra runner adds 10Gi of ceiling to a 30.5Gi machine.
+# ci-low priority decides who the kubelet evicts once memory is already tight;
+# it does not stop a burst from exhausting the node in the first place, and an
+# exhausted node takes the control plane down with it, not just the jobs. The
+# guard that does work is the requests staying honest, so the scheduler queues
+# a runner it cannot place instead of overpacking the node.
+#
+# Widening the pool means re-doing that arithmetic against the LimitRange
+# numbers, not raising this alone.
+#
 # There is no GitHub-hosted fallback job routing — if the minipc is down,
 # checks queue until it returns (none are required checks; the free plan can't
 # protect private repos, so merges never block).

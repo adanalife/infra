@@ -76,6 +76,13 @@ def test_arc_runner_limitrange_bounds_containers():
     assert item["type"] == "Container"
     assert item["default"]["cpu"] and item["default"]["memory"]
     assert item["defaultRequest"]["cpu"] and item["defaultRequest"]["memory"]
+    # dind is a native sidecar the chart injects with no resources, so these two
+    # numbers ARE its budget and the request is what the scheduler packs
+    # against. A token request here lets the scheduler place runners the node
+    # can't feed, which is how the node died twice on 2026-08-23 — pin both so a
+    # regression to a smaller default is a test failure and not an outage.
+    assert item["defaultRequest"]["memory"] == "2Gi"
+    assert item["default"]["memory"] == "3Gi"
 
 
 def test_arc_github_app_secret_reads_the_cluster_store():

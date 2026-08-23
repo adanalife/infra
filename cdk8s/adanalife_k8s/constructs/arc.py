@@ -92,6 +92,28 @@ class Arc(Construct):
         # (and caps per-container CPU/memory); maxRunners in the chart values
         # bounds concurrency, and priorityClassName: ci-low makes the runner
         # pods the first eviction victims under node pressure.
+        #
+        # These numbers are dind's resources, and this file is the only place
+        # that can set them. dind is injected as a *native sidecar* — an
+        # initContainer carrying restartPolicy: Always — so the chart builds it
+        # and a `dind` entry in the values file's template.spec.containers is
+        # silently dropped rather than merged. Because it is a native sidecar,
+        # the kubelet adds its request to the pod's, which makes defaultRequest
+        # the number the scheduler packs against.
+        #
+        # memory defaultRequest is therefore 2Gi and not a token 512Mi: dind
+        # runs `docker build`, whose build steps are its cgroup children, so it
+        # is the heaviest container in the pod and the runner beside it already
+        # requests 2.5Gi honestly for the same reason. At 512Mi the scheduler
+        # believed a runner pod needed 3Gi when it could take 10Gi, and packed
+        # runners the node could not feed until the node died — twice on
+        # 2026-08-23, the second time with the pool already capped at two.
+        # An honest request makes the scheduler queue a runner instead.
+        #
+        # The 3Gi ceiling is a bound, not a measurement — no per-container
+        # memory series reaches Grafana Cloud, so what a real image build peaks
+        # at here is unmeasured. Widen it if a `docker build` starts OOMing,
+        # and revisit maxRunners against these numbers rather than in isolation.
         limits = cdk8s.ApiObject(
             self,
             "runner-limits",
@@ -106,8 +128,8 @@ class Arc(Construct):
                     "limits": [
                         {
                             "type": "Container",
-                            "defaultRequest": {"cpu": "250m", "memory": "512Mi"},
-                            "default": {"cpu": "2", "memory": "4Gi"},
+                            "defaultRequest": {"cpu": "250m", "memory": "2Gi"},
+                            "default": {"cpu": "2", "memory": "3Gi"},
                         }
                     ]
                 },
