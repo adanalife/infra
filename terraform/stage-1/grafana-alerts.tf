@@ -79,6 +79,11 @@ locals {
   // leaves its trace here and nowhere else — through the 9h41m outage on
   // 2026-08-05 Sentry was the only signal at all.
   tripbot_sentry_link = "[sentry](https://a-dana-life.sentry.io/issues/?environment=prod-1&query=is%3Aunresolved+project%3Atripbot)"
+
+  // Restart counts for the platform namespaces the control-plane-health rules
+  // count over. The alert reports how many containers bounced; this is where
+  // you see which ones, which is the first thing you want to know.
+  control_plane_restarts_link = "[restarts](${local.grafana_url}/explore?left=%7B%22queries%22:%5B%7B%22expr%22:%22max%20by%20(namespace,%20pod,%20container)%20(increase(kube_pod_container_status_restarts_total%7Bnamespace%3D~%5C%22kube-system%7Ccnpg-system%7Cmonitoring%7Cburrito-system%7Cargocd%7Cexternal-secrets%7Ctailscale%5C%22%7D%5B1h%5D))%22%7D%5D%7D)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -3239,6 +3244,183 @@ resource "grafana_rule_group" "burrito_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Control-plane restart-churn alerts — the breadth signal that separates "one
+// operator is crashlooping" from "the API server is dropping out from under
+// every leader-elected controller at once".
+//
+// The shape this catches, measured 2026-08-24: seven containers in four
+// unrelated namespaces — cnpg's manager, the barman-cloud plugin,
+// cilium-operator, alloy-operator, burrito-controllers, and BOTH
+// kube-scheduler and kube-controller-manager — terminated within five seconds
+// of each other (17:36:11Z–17:36:16Z), with identical restart counts. Three
+// independent operators dying together is a lost leader-election lease; the
+// two static control-plane pods going with them says the apiserver itself was
+// unreachable, not that three controllers each have a bug.
+//
+// Why breadth and not a per-container rate: any single container's restart
+// count is unremarkable in isolation and a per-pod threshold would need one
+// exemption per chatty operator. Counting how many *distinct* platform
+// containers restarted in the same window keys directly on the thing that
+// makes this a control-plane fault rather than an application one.
+//
+// The `max by (namespace, pod, container)` is load-bearing, not defensive:
+// several Alloy instances scrape kube-state-metrics, so each container yields
+// one series per scraper `instance`. A `sum` would multiply the count by the
+// number of collectors; `max` collapses the duplicates back to one per
+// container. (Confirmed: alloy-operator appears under two `instance` values,
+// one carrying the increase and one reading zero.)
+//
+// Namespaces are the platform layer only. App namespaces (prod-1, stage-1) are
+// deliberately excluded — a restarting app pod is the app's problem and
+// already has its own coverage, and including them would let a single
+// crashlooping workload trip a control-plane alert.
+resource "grafana_rule_group" "control_plane_health" {
+  name             = "control-plane-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Tier one: churn that persists. Warning → Discord.
+  //
+  // Measured over the 3 days to 2026-08-24 at 15-minute resolution, counting
+  // distinct platform containers with more than one restart in the trailing
+  // hour. The series is 0 most of the time and bursty otherwise:
+  //   isolated burst      7-10, four consecutive samples then back to 0
+  //   sustained stretch   7-16 held for ~8.5h (08-24 ~03:00-11:30Z)
+  //   08-23 storm         44 for an hour, decaying through 25 to 19
+  // Threshold 4 clears the quiet baseline (0, occasionally 2) while every real
+  // burst scores 7 or more.
+  //
+  // `for` is the load-bearing number here, not the threshold. Because the
+  // query looks back an hour, ONE churn event keeps the count above 4 for a
+  // full hour as the window slides past it — so a short `for` pages on every
+  // isolated blip, and there were 15-20 of those in three days. `for = 2h`
+  // requires the churn to still be happening after the first event has aged
+  // out of the window, which is the difference between "a controller bounced"
+  // and "the control plane is flapping". The 8.5h stretch and the storm both
+  // clear it; a lone blip does not.
+  //
+  // A node reboot restarts much of this set at once and would trip the
+  // threshold, but not for two hours, so it stays with its own rule in
+  // host-lifecycle rather than double-paging here.
+  rule {
+    name           = "k8s: platform controllers restarting in lockstep"
+    for            = "2h"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "More than 4 platform containers have restarted in the last hour — apiserver is likely dropping out"
+      description = "Several unrelated platform controllers restarted inside the same hour. When cnpg, cilium-operator, alloy-operator and burrito-controllers bounce together they are not each broken — they are leader-elected, and they all self-terminate when they lose their lease, so simultaneous exits mean the API server became unreachable. Check whether `kube-apiserver`, `kube-scheduler` or `kube-controller-manager` are in the set (`kubectl --context admin@adanalife-minipc get pods -n kube-system`): if the static control-plane pods restarted too, the fault is below the controllers. Then look at etcd — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today service etcd status` and its fsync latency, since a single-node control plane wedges on slow disk. Distinguish from a node reboot by the sibling \"minipc rebooted\" alert: if that is also firing, this is expected fallout and resolves itself. If it is not, the box stayed up and the control plane flapped on its own, which is the case worth chasing."
+      link        = local.control_plane_restarts_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [4] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Tier two: storm. Critical, so it escalates to ntfy alongside Discord.
+  //
+  // Threshold 20 against the 08-23 peak, which held 44 for an hour and decayed
+  // through 25 to 19. The elevated-but-survivable state the warning covers
+  // tops out around 16, so 20 separates "the control plane is unhappy" from
+  // "the control plane is gone" without needing a second signal.
+  //
+  // `for = 0m` on purpose: at this magnitude the first evaluation is already
+  // enough, and the two hours tier one waits would be two hours of a control
+  // plane that cannot react to a failing Postgres.
+  rule {
+    name           = "k8s: control plane in a restart storm"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Over 20 platform containers restarted in the last hour — control plane is not holding"
+      description = "This is the 2026-08-23 shape: 44 distinct platform containers restarting inside one hour. At this rate nothing that depends on a controller is reliable — cnpg will not react to a failing Postgres, Argo will not sync, and the ARC runners will thrash. `pg_dump` prod and stage first, because a control plane this unstable usually means the node underneath it is unstable too and repeated unclean Postgres stops are how a database gets lost. Then check whether the node is rebooting (the \"minipc rebooting repeatedly\" alert) — if it is, chase that instead, because this is downstream of it. If the node is up, the control plane is failing on its own: read etcd health and disk latency before anything else."
+      link        = local.control_plane_restarts_link
+    }
+    labels = {
+      severity = "critical"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [20] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
