@@ -569,6 +569,168 @@ resource "grafana_rule_group" "host_storage" {
   }
 }
 
+// Host lifecycle — the minipc going away and coming back.
+//
+// The cluster is one node, so a reboot takes prod down wholesale: every stream,
+// the console, both Postgres instances. Until these rules existed nothing said
+// so. The node's own restart is invisible to every other alert in this file,
+// because they all watch workloads, and a workload that dies with its node and
+// is recreated 90s later reads as a brief blip in a dozen unrelated places
+// rather than as one event with one cause. Reading `kubectl get pod` restart
+// counts by hand was the only way to see it.
+//
+// Both rules read node_boot_time_seconds, which is allowlisted into the cloud
+// destination for exactly this (k8s/monitoring/prod-1/values.yml) — node_* is
+// otherwise local-VictoriaMetrics-only.
+//
+// Both pin job="integrations/node_exporter" and aggregate `by (instance)`.
+// node-exporter is scraped twice — once by hostMetrics' integration, once by
+// annotation-autodiscovery via the Service — so the metric carries two series
+// per physical node reporting the same value. Pinning one job keeps a single
+// physical reboot from reading as two, and `by (instance)` puts the node's name
+// on the alert instead of collapsing it away, which is what makes the rules
+// still make sense when the second node arrives (a matched amd64 MS-01 is the
+// plan). The instance label is the node name on this job, so the Discord line
+// names the box that bounced.
+//
+// no_data_state = OK on both, so the rules sit quiet rather than firing if the
+// series is ever absent — during the window between a terraform apply and the
+// k8s-monitoring sync that starts shipping the metric, and on a node so
+// thoroughly down that nothing scrapes it (which the deadman covers instead).
+resource "grafana_rule_group" "host_lifecycle" {
+  name             = "host-lifecycle"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Tier one: it bounced. Warning, not critical — a single reboot is usually
+  // either deliberate (`talosctl reboot`, the documented recovery for a T5 I/O
+  // fault) or already self-healed by the time it's read. It fires for ~15
+  // minutes after each boot and then resolves on its own.
+  //
+  // Deliberate reboots firing this is intended, not noise: the alert answers
+  // "did the box restart", and an operator who just typed the reboot has the
+  // context to ignore one Discord line. The alternative — suppressing planned
+  // reboots — needs a signal for intent that doesn't exist.
+  rule {
+    name           = "minipc rebooted"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc booted within the last 15m — prod restarted with it"
+      description = "The mini-PC's kernel boot timestamp is under 15 minutes old, so the single-node cluster restarted and took every prod workload with it: both streams, the console, prod + stage Postgres. If this was a deliberate `talosctl reboot`, nothing to do — it clears itself in 15m. If it was not, the box crashed: check `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today dmesg` and the kernel log captured onto the Synology, then look for the sibling \"rebooting repeatedly\" alert to see whether this is one event or a loop. Expect OBS pods to be left behind in Failed/UnexpectedAdmissionError — the i915 device plugin re-registers after kubelet re-admits them; the ReplicaSet makes a fresh pod and the stream returns without help."
+    }
+    labels = {
+      severity = "warning"
+      service  = "host"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (instance) (time() - node_boot_time_seconds{job=\"integrations/node_exporter\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [900] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Tier two: it's looping. Critical, so it escalates to ntfy — this is the
+  // shape that needs a human now, and the shape the tier-one warning hides,
+  // because each individual bounce looks survivable and self-healing.
+  //
+  // `changes()` over the boot timestamp is the reboot count: the gauge holds
+  // one value between boots and steps to a new one at each, so a change is a
+  // boot. More than one in 6h is not maintenance.
+  //
+  // Sized against the 2026-08-23 storm, which put 14 reboots into one day in
+  // bursts — four around 03:00, five across 13:00-14:35, five more 16:00-17:23
+  // — after 35 days of continuous uptime. Any 6h window in that day scores
+  // 4-5, well clear of the threshold, while the ordinary case (a deliberate
+  // reboot, or a one-off crash) scores exactly 1 and stays quiet.
+  rule {
+    name           = "minipc rebooting repeatedly"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc has rebooted more than once in 6h — crash loop, prod is flapping"
+      description = "More than one kernel boot in the last 6 hours on the single node that runs everything. This is not maintenance: the box is crash-looping and prod goes down on every cycle, so the streams flap and both Postgres instances take an unclean stop each time. First: `pg_dump` prod before anything else, because repeated unclean stops are how a database gets lost. Then read the cause — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today dmesg` only survives if the panic was written out, so prefer the kernel log shipped to the Synology, which persists across the reboot. Node memory pressure was measured and ruled out during the 2026-08-23 storm (15-17 GiB free throughout); a hard power/thermal fault and the USB-attached T5 dropping the bus are the live theories. The UPS monitor in the `ups` namespace records whether input power dipped."
+    }
+    labels = {
+      severity = "critical"
+      service  = "host"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 21600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (instance) (changes(node_boot_time_seconds{job=\"integrations/node_exporter\"}[6h]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // Metrics-budget alert — fires when Grafana Cloud's tenant-side count of
 // active series climbs toward the free-tier hard cap (15000). Routes to the
 // shared discord-alerts contact point.

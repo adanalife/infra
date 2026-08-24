@@ -81,14 +81,34 @@ destinations:
     #                         Burrito's other families (the rest of runs,
     #                         reconcile, its controller-runtime self-metrics)
     #                         stay local-VM-only.
-    # Everything else scraped is local-VM-only: node_* (node-exporter-full),
-    # container_*/machine_* (cadvisor), the rest of kube_* (kubernetes-views),
-    # cilium_*, traefik_*, coredns_*, certmanager_*, external(_)dns_*,
-    # externalsecret_*, windows_*. Those dashboards need a VictoriaMetrics
-    # datasource in Grafana Cloud, which does not exist yet (it needs the PDC
-    # agent) — until it does, query VM by port-forward. Only two
-    # scraped series feed any alert — paths and platform_gateway_up — and both
-    # are kept, so no alert goes blind.
+    #   node_boot_time_seconds  — the node's boot timestamp, for the
+    #                         host-lifecycle alerts (a reboot, and a repeated
+    #                         reboot). It is the only signal that distinguishes
+    #                         "the node went away and came back" from the dozens
+    #                         of downstream symptoms a reboot produces, and every
+    #                         one of those symptoms is cheaper to read once you
+    #                         know the box bounced.
+    #                         Two series per physical node, not one: node-exporter
+    #                         is scraped both by hostMetrics' integration
+    #                         (job=integrations/node_exporter, instance=the node
+    #                         name) and by annotation-autodiscovery via the
+    #                         Service (job=prometheus-node-exporter), and both
+    #                         report the same value. The alerts pin the former so
+    #                         one reboot doesn't read as two; the duplicate is
+    #                         left shipping because two series against a
+    #                         15000-series cap is not worth a relabel rule.
+    # The rest of what's scraped is local-VM-only: the other node_*
+    # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
+    # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
+    # external(_)dns_*, externalsecret_*, windows_*. Those dashboards need a
+    # VictoriaMetrics datasource in Grafana Cloud, which does not exist yet (it
+    # needs the PDC agent) — until it does, query VM by port-forward.
+    #
+    # Every scraped series an alert reads is on this list, so no alert goes
+    # blind. That property is the reason to check this file when adding a rule
+    # against a scraped metric: a rule written against a series that isn't kept
+    # evaluates as no-data forever, and no-data on a `no_data_state = "OK"` rule
+    # is indistinguishable from healthy.
     metricProcessingRules: |-
       write_relabel_config {
         // The one stage-1 exception, and it needs the marker below because RE2
@@ -148,7 +168,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|burrito_terraform_layer_status|burrito_runs_by_status)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
