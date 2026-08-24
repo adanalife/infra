@@ -99,6 +99,7 @@ locals {
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
+    "k8s/flare/ghcr-pull-token"            = "GitHub token (read:packages) for pulling the private flare image from GHCR. Keys: username, token."
   }
 }
 
