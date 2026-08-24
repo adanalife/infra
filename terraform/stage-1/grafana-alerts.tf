@@ -84,6 +84,11 @@ locals {
   // count over. The alert reports how many containers bounced; this is where
   // you see which ones, which is the first thing you want to know.
   control_plane_restarts_link = "[restarts](${local.grafana_url}/explore?left=%7B%22queries%22:%5B%7B%22expr%22:%22max%20by%20(namespace,%20pod,%20container)%20(increase(kube_pod_container_status_restarts_total%7Bnamespace%3D~%5C%22kube-system%7Ccnpg-system%7Cmonitoring%7Cburrito-system%7Cargocd%7Cexternal-secrets%7Ctailscale%5C%22%7D%5B1h%5D))%22%7D%5D%7D)"
+
+  // The CI runners row on platform-services, which plots the queue depth and
+  // the runner pool against node reboots. The alert says CI is stuck; this is
+  // where you see whether the box bounced underneath it.
+  ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -3421,6 +3426,91 @@ resource "grafana_rule_group" "control_plane_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [20] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// ARC self-hosted runner health. The fleet's CI runs on the runner scale set
+// in arc-systems/arc-runners on this same mini-PC, so a broken listener stops
+// every repo's checks at once — and does it silently, because GitHub shows the
+// jobs as queued rather than failed and nothing in the cluster is unhealthy.
+//
+// The 2026-08-23 shape: a listener CRD defect left jobs queued for ~9h with
+// zero signal. Registered runners read healthy, no check went red, and no rule
+// covered the gap between "a job was handed to us" and "a runner picked it up".
+resource "grafana_rule_group" "ci_health" {
+  name             = "ci-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Work assigned to the scale set with nothing executing it. `gha_assigned_jobs`
+  // is what the listener has accepted from GitHub and `gha_running_jobs` is what
+  // a runner has actually started, so assigned-without-running is the queue that
+  // never drains — the one state a queued job in GitHub's UI cannot be told from
+  // a slow one.
+  //
+  // The `and` yields no series whenever CI is idle or healthy, which with
+  // no_data_state = OK is what keeps the rule quiet: it has an opinion only
+  // while work is outstanding. Aggregated `by (job)` so a second scale set
+  // (an arm64 one, say) alerts on its own queue instead of being masked by a
+  // busy sibling.
+  //
+  // 15m against the measured baseline: over the three days to 2026-08-24 the
+  // condition was true 76 times at 1-minute resolution and lasted 15 minutes
+  // exactly once — a window where `gha_registered_runners` fell to zero with a
+  // job still assigned, which is the fault this rule is for. Ordinary runner
+  // startup holds it true for 4-7 minutes, well clear.
+  rule {
+    name           = "CI queued with nothing running"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "CI jobs assigned to the runner scale set with none running for 15m — every repo's checks are stuck"
+      description = "The ARC listener has jobs from GitHub but no runner has started one for 15 minutes. On GitHub these look queued, not failed, so nothing goes red and the wait is invisible until someone notices a PR that never checked out. Read the listener first — `kubectl --context admin@adanalife-minipc -n arc-systems logs deploy/arc-amd64-listener` (a CRD or API-version defect shows up here as a reconcile error, and this is the shape that cost ~9h on 2026-08-23), then the controller in the same namespace. `kubectl --context admin@adanalife-minipc -n arc-runners get pods` shows whether runner pods are being created at all: none means the listener is not asking for them, Pending means the node cannot schedule them. Do not read `gha_registered_runners` as reassurance — it read healthy throughout the 2026-08-23 stall."
+      link        = local.ci_runners_panel_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "ci"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "(sum by (job) (gha_assigned_jobs) > 0) and (sum by (job) (gha_running_jobs) == 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
