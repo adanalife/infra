@@ -1937,6 +1937,29 @@ tasks:
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
 
+  # Read-only crash forensics for the minipc: intersect the node's reboot census
+  # (node_boot_time_seconds, in-cluster VictoriaMetrics only — node_* is not
+  # allowlisted to Grafana Cloud) with the self-hosted runner jobs that were on
+  # the box at each death. The port-forward lives for the duration of the run;
+  # the script's own flags go after `--`. See scripts/arc-crash-correlate.py.
+  arc:crash-correlate:
+    desc: "correlate minipc reboots with the ARC CI jobs running at the time (read-only); flags after --, e.g. task arc:crash-correlate -- --since 2026-08-22"
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      # Task's shell interpreter reports a job id (`g1`) for `$!` rather than a
+      # PID, so a kill/trap written here cannot reach the backgrounded forward.
+      # Run the whole thing in a real bash, where `$!` is a PID and the EXIT trap
+      # tears the forward down on success, failure and Ctrl-C alike.
+      - |
+        bash -eu -c '
+          kubectl -n monitoring port-forward svc/victoria-metrics 8428 >/dev/null 2>&1 &
+          trap "kill $! 2>/dev/null || true" EXIT
+          # Bounded wait: if it never comes up, the script says so actionably.
+          for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:8428/health && break; sleep 1; done
+          scripts/arc-crash-correlate.py {{.CLI_ARGS}}
+        '
+
   # Local kubectl port-forward wrapper for OBS VNC — the
   # cluster-agnostic way in, working on any env without a host-access
   # LoadBalancer. The backgrounded kubectl PID is parked under
