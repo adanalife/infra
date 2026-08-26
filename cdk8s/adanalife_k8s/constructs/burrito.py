@@ -98,6 +98,13 @@ AWS_REGION = "us-east-1"
 OIDC_SECRET = "burrito-oidc-client-secret"
 OIDC_SECRET_SM_KEY = "/k8s/burrito/oidc-client-secret"
 
+# The datastore's own S3 credential — see _datastore_s3_secret. One SM
+# parameter holding a JSON object, terraform-owned
+# (terraform/prod-1/burrito-datastore.tf), so each key is a property read.
+DATASTORE_SECRET = "burrito-datastore-s3"
+DATASTORE_SECRET_SM_KEY = "/k8s/burrito/datastore-s3-credentials"
+DATASTORE_SECRET_KEYS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION")
+
 GCP_TOKEN_AUDIENCE = "adanalife-burrito"
 GCP_TOKEN_DIR = "/var/run/secrets/gcp"
 GCP_CONFIG_DIR = "/etc/gcp"
@@ -186,6 +193,7 @@ class Burrito(Construct):
             if layer.gcp_project:
                 self._gcp_credential_config(layer)
         self._oidc_client_secret()
+        self._datastore_s3_secret()
         self._console_rbac()
         self._ui_ingress()
         self._lan_ingress()
@@ -383,6 +391,43 @@ class Burrito(Construct):
                             key=OIDC_SECRET_SM_KEY
                         ),
                     ),
+                ],
+            ),
+        )
+
+    def _datastore_s3_secret(self):
+        # The datastore's bucket credential, in the chart's namespace next to
+        # the server's OIDC secret — infrastructure for the install, not a
+        # per-layer grant. Without it the datastore falls back to the mock
+        # in-memory store and apply cannot work at all: an apply replays the
+        # reviewed plan's artifact bundle, and the mock backend has none to
+        # serve.
+        #
+        # The keys ARE the env var names — the chart mounts this Secret with
+        # envFrom (datastore.deployment.envFrom in k8s/burrito/values.yml), and
+        # the AWS SDK reads them from the environment.
+        esx.ExternalSecret(
+            self,
+            "datastore-s3-secret",
+            metadata={"name": DATASTORE_SECRET, "namespace": SYSTEM_NS},
+            spec=esx.ExternalSecretSpec(
+                refresh_interval="1h",
+                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
+                    name="aws-parameterstore-cluster",
+                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
+                ),
+                target=esx.ExternalSecretSpecTarget(
+                    name=DATASTORE_SECRET,
+                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
+                ),
+                data=[
+                    esx.ExternalSecretSpecData(
+                        secret_key=key,
+                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
+                            key=DATASTORE_SECRET_SM_KEY, property=key
+                        ),
+                    )
+                    for key in DATASTORE_SECRET_KEYS
                 ],
             ),
         )

@@ -293,6 +293,33 @@ spec:
     creationPolicy: Owner
     name: burrito-oidc-client-secret
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-datastore-s3
+  namespace: burrito-system
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/datastore-s3-credentials
+        property: AWS_ACCESS_KEY_ID
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/datastore-s3-credentials
+        property: AWS_SECRET_ACCESS_KEY
+      secretKey: AWS_SECRET_ACCESS_KEY
+    - remoteRef:
+        key: /k8s/burrito/datastore-s3-credentials
+        property: AWS_REGION
+      secretKey: AWS_REGION
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-datastore-s3
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

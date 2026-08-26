@@ -12,6 +12,9 @@ most-preemptible tier:
   prod-support  (900)  prod-important but not the broadcast — the console. Below
                        prod-stream, so it preempts stage/batch to schedule but
                        never evicts a broadcasting pod.
+  ci-low        (-10)  CI runner pods (the ARC scale set). Below default, so
+                       prod preemption evicts a CI build before any stage
+                       workload; a killed build is just a re-run.
 
 Cluster-scoped (one per cluster), so emitted once, in the prod-1 SupportingChart
 — the apiserver ignores the namespace cdk8s stamps on a cluster-scoped kind.
@@ -27,6 +30,7 @@ from adanalife_k8s.config import EnvConfig
 
 PROD_STREAM = "prod-stream"
 PROD_SUPPORT = "prod-support"
+CI_LOW = "ci-low"
 
 
 def emit_priority_classes(scope: Construct, env: EnvConfig) -> None:
@@ -57,5 +61,17 @@ def emit_priority_classes(scope: Construct, env: EnvConfig) -> None:
             "Prod support workloads (the console) — outrank default-priority "
             "co-tenants and preempt them under node pressure, but stay below the "
             "live-stream tier (prod-stream)."
+        ),
+    )
+    k8s.KubePriorityClass(
+        scope,
+        "priority-ci-low",
+        metadata=k8s.ObjectMeta(name=CI_LOW),
+        value=-10,
+        global_default=False,
+        description=(
+            "CI runner pods (ARC) — most-preemptible tier, alongside "
+            "dashcam-cv-low. Evicted before any default-priority workload; "
+            "a killed build is just a re-run."
         ),
     )

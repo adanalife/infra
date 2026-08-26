@@ -39,6 +39,10 @@ spec:
       namespace: stage-1-data
     - server: https://kubernetes.default.svc
       namespace: ups
+    - server: https://kubernetes.default.svc
+      namespace: arc-systems
+    - server: https://kubernetes.default.svc
+      namespace: arc-runners
   clusterResourceWhitelist:
     - group: ""
       kind: PersistentVolume
@@ -141,6 +145,23 @@ spec:
   destinations:
     - server: https://kubernetes.default.svc
       namespace: prod-1
+    - server: https://kubernetes.default.svc
+      namespace: stage-1
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: flare
+  namespace: argocd
+spec:
+  description: flare social-video renderer (render template + hosted editor), from the private flare repo
+  sourceRepos:
+    - git@github.com:adanalife/flare.git
+  destinations:
     - server: https://kubernetes.default.svc
       namespace: stage-1
   clusterResourceWhitelist: []
@@ -566,6 +587,59 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
+  name: arc
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - {}
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: arc
+    spec:
+      project: infra
+      source:
+        repoURL: git@github.com:adanalife/infra.git
+        targetRevision: main
+        path: cdk8s/dist
+        directory:
+          include: arc.k8s.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: arc-runners
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
   name: tripbot-console
   namespace: argocd
 spec:
@@ -658,6 +732,73 @@ spec:
       project: video-pipeline
       source:
         repoURL: git@github.com:adanalife/video-pipeline.git
+        targetRevision: "{{.revision}}"
+        path: cdk8s/dist
+        directory:
+          include: "{{.env}}.k8s.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+          - RespectIgnoreDifferences=true
+      ignoreDifferences:
+        - group: external-secrets.io
+          kind: ExternalSecret
+          jqPathExpressions:
+            - .spec.target.deletionPolicy
+            - .spec.data[]?.remoteRef.conversionStrategy
+            - .spec.data[]?.remoteRef.decodingStrategy
+            - .spec.data[]?.remoteRef.metadataPolicy
+            - .spec.data[]?.remoteRef.nullBytePolicy
+            - .spec.dataFrom[]?.extract.conversionStrategy
+            - .spec.dataFrom[]?.extract.decodingStrategy
+            - .spec.dataFrom[]?.extract.metadataPolicy
+            - .spec.dataFrom[]?.extract.nullBytePolicy
+        - group: apps
+          kind: StatefulSet
+          jqPathExpressions:
+            - .spec.volumeClaimTemplates[]?.apiVersion
+            - .spec.volumeClaimTemplates[]?.kind
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
+  templatePatch: |
+    {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: flare
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          - env: stage-1
+            revision: main
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/syncPolicy
+  template:
+    metadata:
+      name: "{{.env}}-flare"
+    spec:
+      project: flare
+      source:
+        repoURL: git@github.com:adanalife/flare.git
         targetRevision: "{{.revision}}"
         path: cdk8s/dist
         directory:
@@ -1061,6 +1202,33 @@ spec:
         sshPrivateKey: "{{ .sshPrivateKey }}"
         type: git
         url: git@github.com:adanalife/platform-gateway.git
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-repo-flare
+  namespace: argocd
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/argocd/repo-ssh-key-flare
+      secretKey: sshPrivateKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: argocd-repo-flare
+    template:
+      data:
+        sshPrivateKey: "{{ .sshPrivateKey }}"
+        type: git
+        url: git@github.com:adanalife/flare.git
       engineVersion: v2
       metadata:
         labels:

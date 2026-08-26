@@ -65,6 +65,30 @@ locals {
   // gains its own canary by being added here — the two can't drift into the
   // state where a gate silently un-arms because nothing watches its component.
   gated_components = ["obs", "mediamtx"]
+
+  // Stack URL, for the `link` annotations that deep-link a rule at the panel
+  // that answers it. Same lookup the provider block uses rather than a
+  // hardcoded host, so a stack move doesn't leave dead links in Discord.
+  grafana_url = lookup(local.grafana_creds, "GRAFANA_CLOUD_URL", "")
+
+  // The panel that plots the silent-disconnect recovery counter both watchdog
+  // rules below fire on.
+  watchdog_panel_link = "[recoveries](${local.grafana_url}/d/tripbot-service-health/?viewPanel=46)"
+
+  // Unresolved prod tripbot issues. A watchdog whose recovery keeps failing
+  // leaves its trace here and nowhere else — through the 9h41m outage on
+  // 2026-08-05 Sentry was the only signal at all.
+  tripbot_sentry_link = "[sentry](https://a-dana-life.sentry.io/issues/?environment=prod-1&query=is%3Aunresolved+project%3Atripbot)"
+
+  // Restart counts for the platform namespaces the control-plane-health rules
+  // count over. The alert reports how many containers bounced; this is where
+  // you see which ones, which is the first thing you want to know.
+  control_plane_restarts_link = "[restarts](${local.grafana_url}/explore?left=%7B%22queries%22:%5B%7B%22expr%22:%22max%20by%20(namespace,%20pod,%20container)%20(increase(kube_pod_container_status_restarts_total%7Bnamespace%3D~%5C%22kube-system%7Ccnpg-system%7Cmonitoring%7Cburrito-system%7Cargocd%7Cexternal-secrets%7Ctailscale%5C%22%7D%5B1h%5D))%22%7D%5D%7D)"
+
+  // The CI runners row on platform-services, which plots the queue depth and
+  // the runner pool against node reboots. The alert says CI is stuck; this is
+  // where you see whether the box bounced underneath it.
+  ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -84,6 +108,13 @@ locals {
 // summary annotation plus the platform it broke on, nothing else. Keep the
 // summary annotations short for the same reason — the template can only be as
 // brief as the sentence it's handed.
+//
+// A rule may also set a `link` annotation to append somewhere worth opening
+// first — a dashboard panel, a Sentry search. Written as Discord-masked
+// markdown (`[label](url)`) so it costs one word on the line rather than a
+// wrapped URL; the rule owns the label because only the rule knows what is
+// worth looking at. Optional by design: most alerts read fine without one, and
+// a link on every rule would undo the terseness this template exists for.
 resource "grafana_contact_point" "discord_alerts" {
   name = "discord-alerts"
 
@@ -94,7 +125,7 @@ resource "grafana_contact_point" "discord_alerts" {
 
     title   = "{{ .GroupLabels.alertname }}"
     message = <<-EOT
-      {{ range .Alerts.Firing }}🔴 {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
+      {{ range .Alerts.Firing }}🔴 {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}{{ with .Annotations.link }} · {{ . }}{{ end }}
       {{ end }}{{ range .Alerts.Resolved }}✅ {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
       {{ end }}
     EOT
@@ -539,6 +570,168 @@ resource "grafana_rule_group" "host_storage" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [0.15] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Host lifecycle — the minipc going away and coming back.
+//
+// The cluster is one node, so a reboot takes prod down wholesale: every stream,
+// the console, both Postgres instances. Until these rules existed nothing said
+// so. The node's own restart is invisible to every other alert in this file,
+// because they all watch workloads, and a workload that dies with its node and
+// is recreated 90s later reads as a brief blip in a dozen unrelated places
+// rather than as one event with one cause. Reading `kubectl get pod` restart
+// counts by hand was the only way to see it.
+//
+// Both rules read node_boot_time_seconds, which is allowlisted into the cloud
+// destination for exactly this (k8s/monitoring/prod-1/values.yml) — node_* is
+// otherwise local-VictoriaMetrics-only.
+//
+// Both pin job="integrations/node_exporter" and aggregate `by (instance)`.
+// node-exporter is scraped twice — once by hostMetrics' integration, once by
+// annotation-autodiscovery via the Service — so the metric carries two series
+// per physical node reporting the same value. Pinning one job keeps a single
+// physical reboot from reading as two, and `by (instance)` puts the node's name
+// on the alert instead of collapsing it away, which is what makes the rules
+// still make sense when the second node arrives (a matched amd64 MS-01 is the
+// plan). The instance label is the node name on this job, so the Discord line
+// names the box that bounced.
+//
+// no_data_state = OK on both, so the rules sit quiet rather than firing if the
+// series is ever absent — during the window between a terraform apply and the
+// k8s-monitoring sync that starts shipping the metric, and on a node so
+// thoroughly down that nothing scrapes it (which the deadman covers instead).
+resource "grafana_rule_group" "host_lifecycle" {
+  name             = "host-lifecycle"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Tier one: it bounced. Warning, not critical — a single reboot is usually
+  // either deliberate (`talosctl reboot`, the documented recovery for a T5 I/O
+  // fault) or already self-healed by the time it's read. It fires for ~15
+  // minutes after each boot and then resolves on its own.
+  //
+  // Deliberate reboots firing this is intended, not noise: the alert answers
+  // "did the box restart", and an operator who just typed the reboot has the
+  // context to ignore one Discord line. The alternative — suppressing planned
+  // reboots — needs a signal for intent that doesn't exist.
+  rule {
+    name           = "minipc rebooted"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc booted within the last 15m — prod restarted with it"
+      description = "The mini-PC's kernel boot timestamp is under 15 minutes old, so the single-node cluster restarted and took every prod workload with it: both streams, the console, prod + stage Postgres. If this was a deliberate `talosctl reboot`, nothing to do — it clears itself in 15m. If it was not, the box crashed: check `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today dmesg` and the kernel log captured onto the Synology, then look for the sibling \"rebooting repeatedly\" alert to see whether this is one event or a loop. Expect OBS pods to be left behind in Failed/UnexpectedAdmissionError — the i915 device plugin re-registers after kubelet re-admits them; the ReplicaSet makes a fresh pod and the stream returns without help."
+    }
+    labels = {
+      severity = "warning"
+      service  = "host"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (instance) (time() - node_boot_time_seconds{job=\"integrations/node_exporter\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [900] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Tier two: it's looping. Critical, so it escalates to ntfy — this is the
+  // shape that needs a human now, and the shape the tier-one warning hides,
+  // because each individual bounce looks survivable and self-healing.
+  //
+  // `changes()` over the boot timestamp is the reboot count: the gauge holds
+  // one value between boots and steps to a new one at each, so a change is a
+  // boot. More than one in 6h is not maintenance.
+  //
+  // Sized against the 2026-08-23 storm, which put 14 reboots into one day in
+  // bursts — four around 03:00, five across 13:00-14:35, five more 16:00-17:23
+  // — after 35 days of continuous uptime. Any 6h window in that day scores
+  // 4-5, well clear of the threshold, while the ordinary case (a deliberate
+  // reboot, or a one-off crash) scores exactly 1 and stays quiet.
+  rule {
+    name           = "minipc rebooting repeatedly"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "minipc has rebooted more than once in 6h — crash loop, prod is flapping"
+      description = "More than one kernel boot in the last 6 hours on the single node that runs everything. This is not maintenance: the box is crash-looping and prod goes down on every cycle, so the streams flap and both Postgres instances take an unclean stop each time. First: `pg_dump` prod before anything else, because repeated unclean stops are how a database gets lost. Then read the cause — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today dmesg` only survives if the panic was written out, so prefer the kernel log shipped to the Synology, which persists across the reboot. Node memory pressure was measured and ruled out during the 2026-08-23 storm (15-17 GiB free throughout); a hard power/thermal fault and the USB-attached T5 dropping the bus are the live theories. The UPS monitor in the `ups` namespace records whether input power dipped."
+    }
+    labels = {
+      severity = "critical"
+      service  = "host"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 21600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (instance) (changes(node_boot_time_seconds{job=\"integrations/node_exporter\"}[6h]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
@@ -1416,7 +1609,8 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS silent-disconnect watchdog auto-recovered a stream"
-      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"ok\"} incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery that worked: a StopStream+StartStream on twitch and youtube, an egress re-mint on tiktok. The counter is per-platform, so service_platform on the series says which. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
+      link        = local.watchdog_panel_link
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"ok\"} incremented in the last 5m — the watchdog detected OBS thinking it was streaming while the platform reported offline, and forced a recovery that worked: a StopStream+StartStream on twitch and youtube, an egress re-mint on tiktok. The stream is back up; check tripbot logs for the recovery sequence and Loki for any pattern across recurrences. A tiktok re-mint means a brand-new LIVE — viewers on the old room had to rejoin."
     }
     labels = {
       severity = "warning"
@@ -1432,7 +1626,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"ok\"}[5m]))"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"ok\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1481,7 +1675,8 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "OBS silent-disconnect watchdog is restarting and not recovering"
-      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. The counter is per-platform, so service_platform on the series says which. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
+      link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
     }
     labels = {
       severity = "critical"
@@ -1497,7 +1692,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -2193,6 +2388,85 @@ resource "grafana_rule_group" "relay_health" {
     }
   }
 
+  // The publish hop's quality half. The two rules above catch a publisher that
+  // is gone or frozen; this one catches a publisher that is connected and
+  // progressing while the relay is not receiving everything it sends. MediaMTX
+  // discards any frame a lost RTP packet landed in, so readers decode against
+  // broken references and viewers see artifacts until the next keyframe, and
+  // every other vantage point reads healthy: the playhead advances, the path
+  // stays ready, playout's own frame-gap counter sits at ~1 per 6h, and OBS's
+  // render/output/stream skip counters stay clean. The decode-error rule in
+  // stream-health is the only other signal and it is calibrated for a corrupt
+  // feed (>100 matched lines per 5m); a chronic 0.2% loss produces ~1.
+  //
+  // Zero is the baseline this asserts. The hop is pod-to-pod on one node over
+  // RTSP-interleaved TCP, which cannot drop packets — the read side has
+  // measured exactly 0 lost across 13.5M packets since obs#106, and the
+  // publish side joined it in playout#139. A nonzero rate means something put
+  // the transport back on UDP: a playout image predating that fix, or a sink
+  // rebuilt without protocols=tcp.
+  //
+  // 100 per 15m rather than >0 so a session teardown mid-window can't page.
+  // The regime a viewer reported on 2026-08-20 ran ~1400 per 15m (0.22% of
+  // packets, artifacts every ~18s), and the UDP era's worst 6h held 92000, so
+  // the threshold sits an order of magnitude under what is visible on stream
+  // and two above what a clean session produces.
+  dynamic "rule" {
+    for_each = toset(local.stream_platforms)
+    content {
+      name           = "MediaMTX: ${rule.value} publisher is losing RTP packets"
+      for            = "15m"
+      condition      = "C"
+      no_data_state  = "OK" // no publish session → the no-publisher rule pages, not this
+      exec_err_state = "Error"
+
+      annotations = {
+        summary     = "The ${rule.value} relay is losing RTP packets from playout — viewers see artifacts"
+        description = "mediamtx-${rule.value} has been counting lost RTP packets on its publish session for 15m: playout-${rule.value}'s stream is arriving with gaps, MediaMTX discards every frame a gap lands in, and the ${rule.value} feed shows decoding artifacts until each next keyframe. Nothing else reports it — the playhead advances, the path stays ready, and OBS's frame-skip counters stay clean. Confirm the loss is on the publish leg with `kubectl -n prod-1 logs deploy/mediamtx-${rule.value} | grep 'RTP packet is missing'`, then check the transport: `kubectl -n prod-1 get deploy playout-${rule.value} -o jsonpath='{.spec.template.spec.containers[0].image}'` must be an image carrying the TCP publish (playout#139). Loss on an image that has it means the RTSP session negotiated UDP anyway — read the relay's session log line, which names the transport."
+      }
+      labels = {
+        severity = "warning"
+        service  = "playout"
+      }
+
+      data {
+        ref_id = "A"
+        relative_time_range {
+          from = 900
+          to   = 0
+        }
+        datasource_uid = data.grafana_data_source.prometheus.uid
+        model = jsonencode({
+          refId         = "A"
+          expr          = "sum(increase(rtsp_sessions_inbound_rtp_packets_lost{state=\"publish\", path=\"dashcam\", pod=~\"mediamtx-${rule.value}.*\"}[15m])) and on () (console_platform_component_up{component=\"mediamtx\", service_platform=\"${rule.value}\", deployment_environment=\"prod-1\"} > 0)"
+          instant       = true
+          intervalMs    = 60000
+          maxDataPoints = 43200
+        })
+      }
+      data {
+        ref_id         = "C"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          refId      = "C"
+          type       = "threshold"
+          expression = "A"
+          conditions = [{
+            type      = "query"
+            evaluator = { type = "gt", params = [100] }
+            operator  = { type = "and" }
+            query     = { params = ["A"] }
+            reducer   = { type = "last", params = [] }
+          }]
+        })
+      }
+    }
+  }
+
   // The frozen-publisher half of the no-publisher page above. When the pipeline
   // wedges without tearing down the RTSP session, MediaMTX keeps the path
   // state="ready" and the reader keeps pulling — the last frame just never
@@ -2741,6 +3015,502 @@ resource "grafana_rule_group" "batch_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [691200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Prod Postgres dumps hourly to S3 from an in-cluster CronJob, and that is
+  // the only durable copy — stage has none by design and the PVC has been lost
+  // outright twice (a talosctl upgrade wiping EPHEMERAL, and an HNSW bulk index
+  // build OOMing the pod). So the window between "backups quietly stopped" and
+  // "we need one" is the whole risk, and nothing was watching it.
+  //
+  // On 2026-08-23 the CronJob controller stopped creating jobs for nine hours
+  // while the CronJob object itself stayed present and unsuspended. No job
+  // failed, because no job ran. A rule on job failures sees nothing; so does a
+  // glance at `kubectl get cronjob`, which keeps reporting the LAST SCHEDULE
+  // from before the wedge. Success *age* is the only number that moves, which
+  // is the same reasoning as the guessr rule above.
+  //
+  // Deliberately reads the CronJob's success time and not the S3 object: the
+  // bucket lives in an account this Grafana holds no credential for. A dump the
+  // job reports as successful but that never lands is therefore still unwatched
+  // — this rule answers "did the hourly job run", not "is the object there".
+  // See vault/infra/backups.md.
+  rule {
+    name      = "Postgres: prod hourly backup has not succeeded in 2h"
+    for       = "15m"
+    condition = "C"
+    // Alerting, not OK, for the same reason as guessr: the series vanishing is
+    // itself the blindness this rule exists to catch — the CronJob deleted, KSM
+    // down, or a wrong selector here that would otherwise never fire.
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "prod Postgres has not completed an hourly backup in over 2 hours"
+      description = "The postgres-backup CronJob in prod-1-data dumps the prod database to s3://adanalife-prod-1-postgres-backups/hourly/ every hour, and it has not recorded a success in over two hours. Prod Postgres has no other durable copy. Check whether jobs are being created at all with `kubectl -n prod-1-data get jobs --sort-by=.metadata.creationTimestamp` — a gap in the sequence with no Failed job means the CronJob controller stopped scheduling rather than the dump failing, which is a control-plane problem and not a backup one. Confirm what actually landed with `task -d ~/adanalife/infra tripbot:prod:db:backups`. Run one by hand with `kubectl -n prod-1-data create job --from=cronjob/postgres-backup postgres-backup-manual`. Restore path and the S3 layout are in vault/infra/backups.md."
+    }
+    labels = {
+      severity = "critical"
+      service  = "postgres"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // Same `or kube_cronjob_created` floor as the guessr rule: a CronJob
+        // that has never succeeded emits no last_successful_time series, which
+        // would otherwise read as no-data and be indistinguishable from a
+        // broken metrics pipeline.
+        expr          = "time() - max(kube_cronjob_status_last_successful_time{namespace=\"prod-1-data\", cronjob=\"postgres-backup\"} or kube_cronjob_created{namespace=\"prod-1-data\", cronjob=\"postgres-backup\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // 7200s is two hours: one missed hourly run plus a full hour of slack,
+        // so a single slow or retried dump is not a page. The 15m `for` adds
+        // another cushion against a scrape gap landing on the boundary.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [7200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+# Burrito health — the terraform drift-detection loop watching itself. Burrito
+# plans all four remote-state workspaces hourly and is the only thing that
+# reports drift between applies, so a Burrito that has quietly stopped working
+# reads exactly like "no drift anywhere" — the failure this group exists for.
+#
+# Which series to alert on was picked by looking at what actually moved during
+# a real 40-minute outage on 2026-08-21, not by metric name. During it, every
+# run failed on a missing git bundle, and:
+#
+#   * burrito_terraform_layer_status never once reported status="error". Layers
+#     keep reporting the status of their last *completed* plan, so three of them
+#     sat on stale success/warning for the whole window. An error-only rule
+#     would have stayed silent.
+#   * burrito_runs_failed_total never appeared. It is a CounterVec, so it emits
+#     no series until a run reaches the terminal failed state — and these runs
+#     retried instead, never exhausting terraformMaxRetries. Alerting on it
+#     would have waited for retries to run out, if they ever did.
+#   * burrito_runs_by_status{status="Retrying"} was the one series that tracked
+#     the outage, because a run wedged mid-flight sits in exactly that state.
+#
+# So the first rule watches Retrying and the second keeps error as a
+# complementary signal for the ordinary case: terraform itself failing on a
+# layer that does complete its run. Both are warnings — no viewer sees this, and
+# a paused drift loop is a "fix it today" problem rather than a wake-up.
+#
+# The plan-staleness blind spot these two share (a layer Burrito stopped
+# scheduling at all, so nothing retries and nothing errors) needs the console's
+# console_terraform_plan_age_seconds, which is not in Grafana Cloud yet: the
+# deployed tripbot-console 0.46.0 predates that metric. Adding a third rule is a
+# console release away, tracked in vault/infra/TODO.md.
+#
+# burrito_runs_by_status reaches the cloud only because the keep-regex in
+# k8s/monitoring/prod-1/values.yml names it, same as
+# burrito_terraform_layer_status. That allowlist is load-bearing: with
+# no_data_state OK, a dropped family reads as "nothing wrong".
+resource "grafana_rule_group" "burrito_health" {
+  name             = "burrito-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name = "Burrito runs stuck retrying (drift detection has stalled)"
+    # 20m is three of Burrito's 10s reconcile rounds' worth of patience past the
+    # point a transient retry clears. One plan pod died on an `etcdserver:
+    # request timed out` and retried clean well inside a minute, so a shorter
+    # window would page on minipc control-plane hiccups.
+    for            = "20m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "Burrito has had a run retrying for 20m — terraform drift detection is stalled and reporting stale results"
+      description = "burrito_runs_by_status{status=\"Retrying\"} has been above zero for 20m. A run that keeps retrying means Burrito cannot complete a plan, and every layer keeps serving the result of its last *successful* one — so the UI, the console's terraform panel and the drift alert below all read green off stale data. Read the reason from the controller: `kubectl -n burrito-system logs deploy/burrito-controllers | grep -i error`. Known causes: the git bundle for the current revision is missing from the datastore (`bundle for revision <sha> not found`, fixed by clearing the repository's branches — see vault/infra/burrito.md), a layer's AWS credential expired, or the datastore cannot reach its bucket. no_data is OK because the gauge emits no series at all when nothing is retrying, which is the healthy state."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(burrito_runs_by_status{status=\"Retrying\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name = "Burrito layer plan or apply failed"
+    # by (layer_name) so the notification names the workspace; a failure on core
+    # and one on prod-1 are different problems.
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "Burrito layer {{ $labels.layer_name }} last plan or apply failed — that workspace's drift is unknown"
+      description = "burrito_terraform_layer_status{layer_name=\"{{ $labels.layer_name }}\", status=\"error\"} has been set for 15m: the layer completed a run and terraform reported failure, so this workspace's real drift is unknown until it plans clean again. Read the run log from the UI at https://burrito.prod.whereisdana.today, or from the datastore bucket (layers/burrito/{{ $labels.layer_name }}/<run>/<attempt>/run.log). A failure on core or platform is a plan failure by construction — those layers hold a read-only credential and cannot apply. no_data is OK: the gauge drops the error label entirely once a layer recovers."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (layer_name) (burrito_terraform_layer_status{status=\"error\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Control-plane restart-churn alerts — the breadth signal that separates "one
+// operator is crashlooping" from "the API server is dropping out from under
+// every leader-elected controller at once".
+//
+// The shape this catches, measured 2026-08-24: seven containers in four
+// unrelated namespaces — cnpg's manager, the barman-cloud plugin,
+// cilium-operator, alloy-operator, burrito-controllers, and BOTH
+// kube-scheduler and kube-controller-manager — terminated within five seconds
+// of each other (17:36:11Z–17:36:16Z), with identical restart counts. Three
+// independent operators dying together is a lost leader-election lease; the
+// two static control-plane pods going with them says the apiserver itself was
+// unreachable, not that three controllers each have a bug.
+//
+// Why breadth and not a per-container rate: any single container's restart
+// count is unremarkable in isolation and a per-pod threshold would need one
+// exemption per chatty operator. Counting how many *distinct* platform
+// containers restarted in the same window keys directly on the thing that
+// makes this a control-plane fault rather than an application one.
+//
+// The `max by (namespace, pod, container)` is load-bearing, not defensive:
+// several Alloy instances scrape kube-state-metrics, so each container yields
+// one series per scraper `instance`. A `sum` would multiply the count by the
+// number of collectors; `max` collapses the duplicates back to one per
+// container. (Confirmed: alloy-operator appears under two `instance` values,
+// one carrying the increase and one reading zero.)
+//
+// Namespaces are the platform layer only. App namespaces (prod-1, stage-1) are
+// deliberately excluded — a restarting app pod is the app's problem and
+// already has its own coverage, and including them would let a single
+// crashlooping workload trip a control-plane alert.
+resource "grafana_rule_group" "control_plane_health" {
+  name             = "control-plane-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Tier one: churn that persists. Warning → Discord.
+  //
+  // Measured over the 3 days to 2026-08-24 at 15-minute resolution, counting
+  // distinct platform containers with more than one restart in the trailing
+  // hour. The series is 0 most of the time and bursty otherwise:
+  //   isolated burst      7-10, four consecutive samples then back to 0
+  //   sustained stretch   7-16 held for ~8.5h (08-24 ~03:00-11:30Z)
+  //   08-23 storm         44 for an hour, decaying through 25 to 19
+  // Threshold 4 clears the quiet baseline (0, occasionally 2) while every real
+  // burst scores 7 or more.
+  //
+  // `for` is the load-bearing number here, not the threshold. Because the
+  // query looks back an hour, ONE churn event keeps the count above 4 for a
+  // full hour as the window slides past it — so a short `for` pages on every
+  // isolated blip, and there were 15-20 of those in three days. `for = 2h`
+  // requires the churn to still be happening after the first event has aged
+  // out of the window, which is the difference between "a controller bounced"
+  // and "the control plane is flapping". The 8.5h stretch and the storm both
+  // clear it; a lone blip does not.
+  //
+  // A node reboot restarts much of this set at once and would trip the
+  // threshold, but not for two hours, so it stays with its own rule in
+  // host-lifecycle rather than double-paging here.
+  rule {
+    name           = "k8s: platform controllers restarting in lockstep"
+    for            = "2h"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "More than 4 platform containers have restarted in the last hour — apiserver is likely dropping out"
+      description = "Several unrelated platform controllers restarted inside the same hour. When cnpg, cilium-operator, alloy-operator and burrito-controllers bounce together they are not each broken — they are leader-elected, and they all self-terminate when they lose their lease, so simultaneous exits mean the API server became unreachable. Check whether `kube-apiserver`, `kube-scheduler` or `kube-controller-manager` are in the set (`kubectl --context admin@adanalife-minipc get pods -n kube-system`): if the static control-plane pods restarted too, the fault is below the controllers. Then look at etcd — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today service etcd status` and its fsync latency, since a single-node control plane wedges on slow disk. Distinguish from a node reboot by the sibling \"minipc rebooted\" alert: if that is also firing, this is expected fallout and resolves itself. If it is not, the box stayed up and the control plane flapped on its own, which is the case worth chasing."
+      link        = local.control_plane_restarts_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [4] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Tier two: storm. Critical, so it escalates to ntfy alongside Discord.
+  //
+  // Threshold 20 against the 08-23 peak, which held 44 for an hour and decayed
+  // through 25 to 19. The elevated-but-survivable state the warning covers
+  // tops out around 16, so 20 separates "the control plane is unhappy" from
+  // "the control plane is gone" without needing a second signal.
+  //
+  // `for = 0m` on purpose: at this magnitude the first evaluation is already
+  // enough, and the two hours tier one waits would be two hours of a control
+  // plane that cannot react to a failing Postgres.
+  rule {
+    name           = "k8s: control plane in a restart storm"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Over 20 platform containers restarted in the last hour — control plane is not holding"
+      description = "This is the 2026-08-23 shape: 44 distinct platform containers restarting inside one hour. At this rate nothing that depends on a controller is reliable — cnpg will not react to a failing Postgres, Argo will not sync, and the ARC runners will thrash. `pg_dump` prod and stage first, because a control plane this unstable usually means the node underneath it is unstable too and repeated unclean Postgres stops are how a database gets lost. Then check whether the node is rebooting (the \"minipc rebooting repeatedly\" alert) — if it is, chase that instead, because this is downstream of it. If the node is up, the control plane is failing on its own: read etcd health and disk latency before anything else."
+      link        = local.control_plane_restarts_link
+    }
+    labels = {
+      severity = "critical"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [20] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// ARC self-hosted runner health. The fleet's CI runs on the runner scale set
+// in arc-systems/arc-runners on this same mini-PC, so a broken listener stops
+// every repo's checks at once — and does it silently, because GitHub shows the
+// jobs as queued rather than failed and nothing in the cluster is unhealthy.
+//
+// The 2026-08-23 shape: a listener CRD defect left jobs queued for ~9h with
+// zero signal. Registered runners read healthy, no check went red, and no rule
+// covered the gap between "a job was handed to us" and "a runner picked it up".
+resource "grafana_rule_group" "ci_health" {
+  name             = "ci-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Work assigned to the scale set with nothing executing it. `gha_assigned_jobs`
+  // is what the listener has accepted from GitHub and `gha_running_jobs` is what
+  // a runner has actually started, so assigned-without-running is the queue that
+  // never drains — the one state a queued job in GitHub's UI cannot be told from
+  // a slow one.
+  //
+  // The `and` yields no series whenever CI is idle or healthy, which with
+  // no_data_state = OK is what keeps the rule quiet: it has an opinion only
+  // while work is outstanding. Aggregated `by (job)` so a second scale set
+  // (an arm64 one, say) alerts on its own queue instead of being masked by a
+  // busy sibling.
+  //
+  // 15m against the measured baseline: over the three days to 2026-08-24 the
+  // condition was true 76 times at 1-minute resolution and lasted 15 minutes
+  // exactly once — a window where `gha_registered_runners` fell to zero with a
+  // job still assigned, which is the fault this rule is for. Ordinary runner
+  // startup holds it true for 4-7 minutes, well clear.
+  rule {
+    name           = "CI queued with nothing running"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "CI jobs assigned to the runner scale set with none running for 15m — every repo's checks are stuck"
+      description = "The ARC listener has jobs from GitHub but no runner has started one for 15 minutes. On GitHub these look queued, not failed, so nothing goes red and the wait is invisible until someone notices a PR that never checked out. Read the listener first — `kubectl --context admin@adanalife-minipc -n arc-systems logs deploy/arc-amd64-listener` (a CRD or API-version defect shows up here as a reconcile error, and this is the shape that cost ~9h on 2026-08-23), then the controller in the same namespace. `kubectl --context admin@adanalife-minipc -n arc-runners get pods` shows whether runner pods are being created at all: none means the listener is not asking for them, Pending means the node cannot schedule them. Do not read `gha_registered_runners` as reassurance — it read healthy throughout the 2026-08-23 stall."
+      link        = local.ci_runners_panel_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "ci"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "(sum by (job) (gha_assigned_jobs) > 0) and (sum by (job) (gha_running_jobs) == 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }

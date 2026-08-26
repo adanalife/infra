@@ -305,18 +305,58 @@ tasks:
     cmds:
       - kubectl apply -f cdk8s/dist/burrito.k8s.yaml
 
-  # Run `terraform apply` for one layer, once. Burrito has no standing apply
-  # loop — every layer keeps remediationStrategy.autoApply false — so an apply
-  # only ever happens because someone asked for it, here or in the UI.
+  # Run `terraform apply` for one layer, once. Named per ENV, not per cluster:
+  # every burrito layer lives on the one prod cluster, so the old
+  # k8s:prod:burrito:run LAYER=stage-1 spelling put "prod" and "stage" in the
+  # same gesture and read like a footgun.
+  #
+  # Only stage-1 and prod-1 appear here. core and platform hold a
+  # ReadOnlyAccess credential and a run against them fails at the first write —
+  # the intended answer, not a gap, so there is deliberately no task for them
+  # (see constructs/burrito.py).
+  burrito:stage:apply:
+    desc: "Apply the stage-1 burrito layer's reviewed plan (one terraform apply, in-cluster)"
+    cmds:
+      - task: burrito:_apply
+        vars: { LAYER: stage-1 }
+
+  burrito:prod:apply:
+    desc: "Apply the prod-1 burrito layer's reviewed plan (one terraform apply, in-cluster)"
+    cmds:
+      - task: burrito:_apply
+        vars: { LAYER: prod-1 }
+
+  # Burrito has no standing apply loop — every layer keeps
+  # remediationStrategy.autoApply false — so an apply only ever happens because
+  # someone asked for it, and this is the only way to ask. Burrito's UI cannot:
+  # at v0.13.0 its one mutating call is POST /api/layers/:ns/:layer/sync, which
+  # sets the SyncNow annotation and gets you a *plan*
+  # (internal/server/api/sync.go); plan/apply buttons are still "more to come"
+  # upstream.
   #
   # The run replays the plan burrito already computed and displayed
-  # (applyWithoutPlanArtifact stays false), so what runs is what you reviewed.
+  # (applyWithoutPlanArtifact stays false), so what runs is what you reviewed —
+  # which is why spec.artifact has to name that plan run. An apply run without
+  # it has no bundle to replay and dies in reconcile with `could not check
+  # bundle, there's an issue with the storage backend`. Both fields are copied
+  # off the layer's own annotations, exactly as burrito's ApplyNeeded handler
+  # does it (internal/controllers/terraformlayer/run.go getRun).
   #
-  # Only stage-1 and prod-1 can actually apply: core and platform hold a
-  # ReadOnlyAccess credential and a run against them fails at the first write.
-  # That is the intended answer, not a gap — see constructs/burrito.py.
-  k8s:prod:burrito:run:
-    desc: "Trigger one terraform apply for a Burrito layer: task k8s:prod:burrito:run LAYER=prod-1"
+  # The burrito/managed-by label is load-bearing too, not decoration: the layer
+  # finds its runs by that selector, so an unlabelled apply is invisible to the
+  # layer's state machine and its history. It also makes the run eligible for
+  # the layer's history pruning, so a finished apply disappears from `kubectl
+  # get terraformruns` after a few rounds — the run.log in the datastore bucket
+  # is the durable record, not the object.
+  #
+  # Whether the plan is safe to replay is read from the layer's own conditions
+  # rather than recomputed here. In particular: do NOT gate on plan-commit ==
+  # branch-commit. Any commit to main bumps branch-commit, while a layer only
+  # re-plans when a commit touches its own path, so plan-commit legitimately
+  # lags most of the time — comparing them refuses almost every valid apply.
+  # IsLastRelevantCommitPlanned is the condition that actually answers it.
+  burrito:_apply:
+    internal: true
     requires:
       vars: [LAYER]
     preconditions:
@@ -324,21 +364,162 @@ tasks:
       - sh: kubectl -n burrito get terraformlayer {{.LAYER}} >/dev/null 2>&1
         msg: "No TerraformLayer named '{{.LAYER}}' — kubectl -n burrito get terraformlayers"
     cmds:
-      # generateName, so repeated runs don't collide on a name.
       - |
-        kubectl create -f - <<EOF
+        set -eu
+        layer=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o json)
+        # printf, not echo: the layer carries a last-applied-configuration
+        # annotation full of \n escapes, and POSIX echo expands them, handing jq
+        # a string with raw control characters in it.
+        cond() {
+          printf %s "$layer" | jq -r --arg t "$1" \
+            '(.status.conditions[]? | select(.type == $t) | .status) // "Unknown"'
+        }
+        ann() {
+          printf %s "$layer" | jq -r --arg k "$1" '.metadata.annotations[$k] // ""'
+        }
+        plan_run=$(ann runner.terraform.padok.cloud/plan-run)
+        revision=$(ann webhook.terraform.padok.cloud/branch-commit)
+        uid=$(printf %s "$layer" | jq -r .metadata.uid)
+        result=$(printf %s "$layer" | jq -r '.status.lastResult // "unknown"')
+
+        refuse() { echo "refusing to apply {{.LAYER}}: $1" >&2; exit 1; }
+        [ -n "$plan_run" ] || refuse "no plan to replay yet (no plan-run annotation)"
+        [ -n "$revision" ] || refuse "no branch commit known yet"
+        [ "$(cond IsRunning)" = "True" ] && refuse "a run is already in flight — wait for it" || true
+        [ "$(cond HasLastPlanFailed)" = "True" ] && refuse "the last plan failed; there is no good plan to replay" || true
+        [ "$(cond IsLastRelevantCommitPlanned)" = "False" ] && refuse "a commit touching this layer has not been planned yet — let the plan finish first" || true
+        # That condition only covers commits burrito already KNOWS about: the
+        # repository controller syncs every 5 minutes, so for up to five minutes
+        # after a merge burrito has planned everything it has seen and still
+        # reports IsLastRelevantCommitPlanned true. Applying in that window
+        # replays a plan that predates the merge. It happened — an alert-rule PR
+        # merged at 16:12:56, an apply fired at 16:13:52, and the run correctly
+        # applied the previous revision.
+        #
+        # So compare burrito's view of main against the remote's, from here,
+        # and refuse only when the commits it has not caught up to actually
+        # touch THIS layer's path. Unrelated pending commits are none of this
+        # layer's business.
+        git fetch --quiet origin main 2>/dev/null || true
+        remote_head=$(git rev-parse origin/main 2>/dev/null || echo "")
+        if [ -n "$remote_head" ] && [ "$remote_head" != "$revision" ]; then
+          path=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o jsonpath='{.spec.path}')
+          # An unknown revision (force-push, or a local checkout that never had
+          # it) makes the range invalid — treat that as "cannot prove it is
+          # safe" rather than as safe.
+          if ! git merge-base --is-ancestor "$revision" "$remote_head" 2>/dev/null; then
+            refuse "burrito is on revision $revision, which is not an ancestor of origin/main — cannot tell what it has missed"
+          fi
+          touched=$(git diff --name-only "$revision".."$remote_head" -- "$path" | head -5)
+          [ -n "$touched" ] && refuse "burrito has not synced $(git rev-parse --short "$remote_head") yet, and it changes this layer:
+        $touched
+        The plan it would replay predates those changes. The repository syncs every 5m — wait for the new plan." || true
+        fi
+        # `Error getting last Result` is burrito's own text for "the plan's
+        # artifacts are not in the datastore" — pruned, or written to a storage
+        # backend that has since been replaced. There is nothing to replay.
+        case "$result" in
+          Error*) refuse "the last plan's result cannot be read ($result) — its artifacts are gone; re-plan first" ;;
+        esac
+
+        # The apply verdict is read from the layer afterwards, so remember what
+        # it said before — a re-apply of the same revision changes the date and
+        # nothing else.
+        before_apply=$(ann runner.terraform.padok.cloud/apply-date)
+
+        echo "Replaying ${plan_run} on {{.LAYER}}: ${result}"
+        # generateName, so repeated runs don't collide on a name — which is why
+        # the created name has to be read back rather than assumed.
+        run=$(kubectl create -f - -o jsonpath='{.metadata.name}' <<EOF
         apiVersion: config.terraform.padok.cloud/v1alpha1
         kind: TerraformRun
         metadata:
           generateName: {{.LAYER}}-manual-apply-
           namespace: burrito
+          labels:
+            burrito/managed-by: {{.LAYER}}
+          ownerReferences:
+            - apiVersion: config.terraform.padok.cloud/v1alpha1
+              kind: TerraformLayer
+              name: {{.LAYER}}
+              uid: ${uid}
         spec:
           action: apply
           layer:
             name: {{.LAYER}}
             namespace: burrito
+            revision: ${revision}
+          artifact:
+            run: ${plan_run%/*}
+            attempt: "${plan_run##*/}"
         EOF
-        echo "Watch it with: kubectl -n burrito get terraformruns --sort-by=.metadata.creationTimestamp"
+        )
+        echo "Created $run — waiting for its runner pod"
+
+        # Follow the run to its end, rather than printing a kubectl command and
+        # leaving. Two reasons: the terraform output belongs in the scrollback of
+        # whoever asked for the apply, and the run object is pruned from the API
+        # by the layer's history cleanup within a few rounds — so "go look at it
+        # later" is not actually an option. The copy in the datastore bucket
+        # outlives the object but needs AWS credentials to read.
+        #
+        # maxConcurrentRunnerPods is 1, so a pod can legitimately be minutes
+        # away while another layer's plan finishes. Hence the patient wait, and
+        # the note saying why nothing is happening.
+        pod=""
+        for i in $(seq 1 120); do
+          pod=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.runnerPod}' 2>/dev/null || true)
+          [ -n "$pod" ] && break
+          [ "$i" = "6" ] && echo "still queued (one runner pod at a time) — waiting"
+          sleep 5
+        done
+        [ -n "$pod" ] || { echo "no runner pod after 10m; check: kubectl -n burrito describe terraformrun $run" >&2; exit 1; }
+
+        # `logs -f` errors while the container is still pulling or waiting, so
+        # hold until it has actually started. Succeeded is fine to tail — it
+        # just replays what was written.
+        for i in $(seq 1 120); do
+          phase=$(kubectl -n burrito get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          case "$phase" in Running|Succeeded|Failed) break ;; esac
+          sleep 5
+        done
+        echo "--- $pod ---"
+        kubectl -n burrito logs -f "$pod" 2>&1 || true
+
+        # The pod exiting is not the verdict — the runner writes that a beat
+        # later. Read it off the LAYER, not the run: the layer's apply-date and
+        # apply-commit annotations are what the runner stamps on success, and
+        # unlike the run object they are not pruned. Reading the run's
+        # status.state here looked obvious and failed the first time it ran for
+        # real — the object was already gone, `kubectl get` said NotFound, and a
+        # successful apply reported "unknown".
+        #
+        # A run that fails reports as failure, and the log above is that
+        # attempt's — a retry gets a new pod this does not follow. That is the
+        # right bias for a gesture someone is watching: an apply that did not
+        # land is one to go and look at.
+        verdict=""
+        for i in $(seq 1 24); do
+          now_apply=$(kubectl -n burrito get terraformlayer {{.LAYER}} \
+            -o jsonpath='{.metadata.annotations.runner\.terraform\.padok\.cloud/apply-date}' 2>/dev/null || true)
+          now_commit=$(kubectl -n burrito get terraformlayer {{.LAYER}} \
+            -o jsonpath='{.metadata.annotations.runner\.terraform\.padok\.cloud/apply-commit}' 2>/dev/null || true)
+          if [ -n "$now_apply" ] && [ "$now_apply" != "$before_apply" ] && [ "$now_commit" = "$revision" ]; then
+            verdict="applied $now_commit at $now_apply"
+            break
+          fi
+          # Still reachable while it exists, and the only thing that reports a
+          # terminal failure — the layer says nothing when an apply fails.
+          run_state=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.state}' 2>/dev/null || true)
+          [ "$run_state" = "Failed" ] && break
+          sleep 5
+        done
+        if [ -n "$verdict" ]; then
+          echo "--- {{.LAYER}}: $verdict ---"
+        else
+          echo "apply did not land: the layer still reports apply-date '${before_apply:-none}'. Run log above, and at layers/burrito/{{.LAYER}}/$run/ in the datastore bucket" >&2
+          exit 1
+        fi
 
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
   # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
@@ -1794,6 +1975,29 @@ tasks:
     desc: tail logs across all app pods
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
+
+  # Read-only crash forensics for the minipc: intersect the node's reboot census
+  # (node_boot_time_seconds, in-cluster VictoriaMetrics only — node_* is not
+  # allowlisted to Grafana Cloud) with the self-hosted runner jobs that were on
+  # the box at each death. The port-forward lives for the duration of the run;
+  # the script's own flags go after `--`. See scripts/arc-crash-correlate.py.
+  arc:crash-correlate:
+    desc: "correlate minipc reboots with the ARC CI jobs running at the time (read-only); flags after --, e.g. task arc:crash-correlate -- --since 2026-08-22"
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      # Task's shell interpreter reports a job id (`g1`) for `$!` rather than a
+      # PID, so a kill/trap written here cannot reach the backgrounded forward.
+      # Run the whole thing in a real bash, where `$!` is a PID and the EXIT trap
+      # tears the forward down on success, failure and Ctrl-C alike.
+      - |
+        bash -eu -c '
+          kubectl -n monitoring port-forward svc/victoria-metrics 8428 >/dev/null 2>&1 &
+          trap "kill $! 2>/dev/null || true" EXIT
+          # Bounded wait: if it never comes up, the script says so actionably.
+          for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:8428/health && break; sleep 1; done
+          scripts/arc-crash-correlate.py {{.CLI_ARGS}}
+        '
 
   # Local kubectl port-forward wrapper for OBS VNC — the
   # cluster-agnostic way in, working on any env without a host-access

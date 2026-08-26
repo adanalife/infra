@@ -11,7 +11,12 @@ import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import BurritoChart, PlatformArgoChart
-from adanalife_k8s.constructs.burrito import CONSOLE_ENVS, LAYERS, TENANT_NS
+from adanalife_k8s.constructs.burrito import (
+    CONSOLE_ENVS,
+    DATASTORE_SECRET,
+    LAYERS,
+    TENANT_NS,
+)
 
 
 def _synth():
@@ -29,6 +34,11 @@ def _platform_synth():
 # The chart's own config, which carries the half of the auth setup that is
 # values rather than Kubernetes objects.
 VALUES = Path(__file__).parents[3] / "k8s" / "burrito" / "values.yml"
+# The alloy-metrics values that decide which scraped families reach Grafana
+# Cloud — the other half of making Burrito's own metrics alertable.
+MONITORING_VALUES = (
+    Path(__file__).parents[3] / "k8s" / "monitoring" / "prod-1" / "values.yml"
+)
 
 
 def _values():
@@ -150,6 +160,33 @@ def test_oidc_client_secret_reaches_the_server_as_its_env_var():
     ]["deployment"]["envFrom"]
 
 
+def test_apply_has_a_real_datastore_behind_it():
+    # An apply replays the reviewed plan's artifact bundle
+    # (applyWithoutPlanArtifact stays false), so a mocked in-memory datastore
+    # makes the apply path inert — it reconciles forever and never schedules a
+    # runner. Three things have to agree: mock off, a bucket named, and the
+    # credential the datastore reads it with.
+    storage = _values()["config"]["burrito"]["datastore"]["storage"]
+    assert storage["mock"] is False
+    assert storage["s3"]["bucket"]
+
+    objs = _synth()
+    (secret,) = [
+        es
+        for es in _kind(objs, "ExternalSecret")
+        if es["spec"]["target"]["name"] == DATASTORE_SECRET
+    ]
+    # The keys are consumed as env vars, so they must BE the env var names.
+    assert {d["secretKey"] for d in secret["spec"]["data"]} == {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION",
+    }
+    assert {"secretRef": {"name": DATASTORE_SECRET}} in _values()["datastore"][
+        "deployment"
+    ]["envFrom"]
+
+
 def test_only_stage_and_prod_can_apply():
     # core holds IAM and Organizations; platform holds the automation App's
     # key. Their apply path stays a workstation gesture. And because
@@ -209,3 +246,21 @@ def test_console_reads_layers_and_nothing_else():
     assert {(s["name"], s["namespace"]) for s in binding["subjects"]} == {
         ("tripbot-console", env) for env in CONSOLE_ENVS
     }
+
+
+def test_controller_metrics_are_scraped_and_reach_the_cloud():
+    # Burrito's own /metrics is the source of truth for the drift verdict (the
+    # console exports only the last-run timestamp Burrito omits), and it takes
+    # two files to land: the scrape annotations here, and an allowlist entry on
+    # the cloud remote_write, since that destination keeps only named families.
+    # Doing one without the other is the failure this pins — annotations alone
+    # leave the alert blind, an allowlist entry alone matches nothing.
+    annotations = _values()["controllers"]["deployment"]["podAnnotations"]
+    assert annotations["prometheus.io/scrape"] == "true"
+    assert annotations["prometheus.io/port"] == "8080"
+    # podAnnotations replaces rather than merges, so the chart's own default has
+    # to be restated in ours or it disappears.
+    assert annotations["kubectl.kubernetes.io/default-container"] == "burrito"
+
+    monitoring = MONITORING_VALUES.read_text()
+    assert "burrito_terraform_layer_status" in monitoring

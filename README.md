@@ -65,3 +65,22 @@ servicelb (klipper-lb) fulfills the VNC LoadBalancer services declared
 by the app manifests. Both are k3s-only — stage-1/prod-1 co-tenant a bare-metal
 Talos cluster on a mini-PC with no LoadBalancer controller; traefik there runs
 on hostNetwork, binding the node's LAN IP :80/:443.
+
+## diagnosing minipc reboots
+
+The single-node Talos cluster leaves no record of its own restarts — nothing
+survives to mark the node NotReady, and `node_*` metrics are allowlisted to the
+in-cluster VictoriaMetrics rather than Grafana Cloud. `scripts/arc-crash-correlate.py`
+builds the census from `node_boot_time_seconds` and intersects it with the
+self-hosted (ARC) runner jobs that were on the box at each death, ending in a
+per-(repo, workflow, job) table of runs vs. runs-with-a-death:
+
+```bash
+task arc:crash-correlate -- --since 2026-08-22
+```
+
+The task port-forwards VictoriaMetrics for the duration; flags after `--` reach
+the script (`--label`, `--vm-url`, `--window`, `--refresh` to bust the job
+cache). Both traps it walks around — a scrape gap is not a reboot, and the plain
+`/jobs` endpoint hides every attempt but the latest — are written up in the
+script's docstring.

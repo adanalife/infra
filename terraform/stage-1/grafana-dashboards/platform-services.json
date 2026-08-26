@@ -1,5 +1,5 @@
 {
-  "title": "13 — Platform Services",
+  "title": "14 — Platform Services",
   "uid": "platform-services",
   "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium"],
   "schemaVersion": 39,
@@ -477,6 +477,171 @@
         { "refId": "A", "expr": "max by (map_name) (cilium_bpf_map_pressure{cluster=~\"$cluster\"})", "legendFormat": "{{map_name}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] }
+    }
+    ,
+    {
+      "id": 500,
+      "type": "row",
+      "title": "burrito (terraform drift)",
+      "gridPos": { "x": 0, "y": 49, "w": 24, "h": 1 }
+    },
+    {
+      "id": 501,
+      "type": "stat",
+      "title": "Layers in sync",
+      "description": "Terraform layers burrito last reconciled cleanly. Four layers exist (core, platform, prod-1, stage-1), so anything below 4 means at least one layer has a plan burrito could not call clean. Counts the one-hot status series rather than reading a single gauge, so a layer that disappears from the scrape drops out of this count instead of silently reading as healthy.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(burrito_terraform_layer_status{cluster=~\"$cluster\", status=\"success\"} == 1)" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "orange", "value": 1 },
+            { "color": "green", "value": 4 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 502,
+      "type": "stat",
+      "title": "Layers needing attention",
+      "description": "Layers whose current status is anything other than success — drift burrito has detected but not resolved. Matched as status!=\"success\" rather than by listing warning/error, so a status value burrito adds later still lands here instead of being silently dropped. Nonzero is not an outage; it means the committed terraform and the live infrastructure disagree, and the plan is waiting on someone.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(burrito_terraform_layer_status{cluster=~\"$cluster\", status!=\"success\"} == 1)" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 503,
+      "type": "table",
+      "title": "Terraform layer status",
+      "description": "One row per layer burrito tracks, showing the status it currently reports. The metric is one-hot across the status label, so the ==1 filter is what reduces it to the single current status per layer.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "burrito_terraform_layer_status{cluster=~\"$cluster\"} == 1", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "container": true, "pod": true, "prometheus": true, "namespace": true, "k8s_cluster_name": true, "Value": true },
+            "indexByName": {},
+            "renameByName": { "layer_name": "Layer", "status": "Status", "repository_name": "Repository", "cluster": "Cluster" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "success": { "color": "green", "index": 0 }, "warning": { "color": "orange", "index": 1 }, "error": { "color": "red", "index": 2 }, "failed": { "color": "red", "index": 3 } } }
+              ]},
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 504,
+      "type": "timeseries",
+      "title": "Layer status over time (one-hot by status)",
+      "description": "Each layer's status as a stepped 0/1 line, so a layer moving from success to warning shows as one line handing off to another at the moment burrito noticed. Reads the same series the table above collapses to a snapshot — use this to tell a layer that has been drifted for days from one that just changed.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 54, "w": 12, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (layer_name, status) (burrito_terraform_layer_status{cluster=~\"$cluster\"})", "legendFormat": "{{layer_name}} · {{status}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 600,
+      "type": "row",
+      "title": "CI runners (ARC)",
+      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 1 }
+    },
+    {
+      "id": 601,
+      "type": "timeseries",
+      "title": "Runner jobs vs node reboots",
+      "description": "The self-hosted runner scale set's queue and pool, with a red bar on the right axis at every node boot — so a CI job that died mid-run reads as a job that was in flight when the mini-PC bounced, rather than as a mystery. Assigned sitting above running is the stuck-queue shape the \"CI queued with nothing running\" alert fires on; registered runners can read healthy right through it, which is why both lines are here.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (job) (gha_assigned_jobs{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · assigned jobs" },
+        { "refId": "B", "expr": "sum by (job) (gha_running_jobs{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · running jobs" },
+        { "refId": "C", "expr": "sum by (job) (gha_registered_runners{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · registered runners" },
+        { "refId": "D", "expr": "sum by (job) (gha_busy_runners{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · busy runners" },
+        { "refId": "E", "expr": "max(changes(node_boot_time_seconds{job=\"integrations/node_exporter\", cluster=~\"$cluster\"}[5m])) > 0", "legendFormat": "node reboot" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "node reboot" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "max", "value": 1 },
+              { "id": "custom.drawStyle", "value": "bars" },
+              { "id": "custom.lineWidth", "value": 0 },
+              { "id": "custom.fillOpacity", "value": 60 },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "boot" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
     }
   ]
 }
