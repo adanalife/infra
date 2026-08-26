@@ -123,6 +123,13 @@ VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
+# The private flare repo — the social-video renderer's in-cluster unit (a render
+# WorkflowTemplate, its PVCs, the hosted editor) — stage-1 only; there is no
+# prod flare. Trunk-based like the rest: stage tracks main.
+FLARE_PROJECT = "flare"
+FLARE_REPO_URL = "git@github.com:adanalife/flare.git"
+FLARE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-flare"
+FLARE_REVISIONS = {"stage-1": "main"}
 # The obs repo — the OBS streaming encoder. PUBLIC, so Argo fetches it over
 # anonymous HTTPS — no deploy key / repo Secret (unlike the private
 # console/video-pipeline/gateway SSH sources, so no _repo_external_secret below).
@@ -265,6 +272,8 @@ class ArgoCD(Construct):
         self.platform_gateway_envs = tuple(
             e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
         )
+        # Envs whose flare unit this Argo delivers — stage-1 on the minipc only.
+        self.flare_envs = tuple(e for e in envs if e in FLARE_REVISIONS)
         # Envs whose OBS is delivered from the standalone (public) obs repo —
         # every env, including the k3d dev instance (the obs repo is public, so
         # dev fetches it anonymously).
@@ -343,6 +352,16 @@ class ArgoCD(Construct):
                 # App namespace only — the gateway needs no data-namespace access
                 # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
                 namespaces=list(self.platform_gateway_envs),
+                cluster_resources=[],
+            )
+        if self.flare_envs:
+            self._app_project(
+                id="project-flare",
+                name=FLARE_PROJECT,
+                description="flare social-video renderer (render template + hosted editor), from the private flare repo",
+                source_repos=[FLARE_REPO_URL],
+                # App namespace only; its dist creates nothing cluster-scoped.
+                namespaces=list(self.flare_envs),
                 cluster_resources=[],
             )
         if self.obs_envs:
@@ -557,6 +576,27 @@ class ArgoCD(Construct):
                 repo_url=VIDEO_PIPELINE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
+        # The cross-repo flare unit: one Application per env, sourcing the PRIVATE
+        # flare repo's committed dist (<env>.k8s.yaml). Autosync like the others,
+        # so a merge to flare's main is the deploy of its editor and render template.
+        if self.flare_envs:
+            self._application_set(
+                id="appset-flare",
+                name="flare",
+                project=FLARE_PROJECT,
+                elements=[
+                    {"env": e, "revision": FLARE_REVISIONS[e]} for e in self.flare_envs
+                ],
+                app_name_tmpl="{{.env}}-flare",
+                include_tmpl="{{.env}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                selfheal=self._selfheal,
+                # Runtime-owned replicas so parking the editor sticks with selfHeal on.
+                ignore_replicas=True,
+                repo_url=FLARE_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
         # The cross-repo platform-gateway unit: one Application per unit that the
         # PRIVATE platform-gateway repo synthed, self-discovered from its
         # committed discovery index (dist/apps/<env>-<app>.json) — every
@@ -687,6 +727,13 @@ class ArgoCD(Construct):
                 name="argocd-repo-platform-gateway",
                 url=PLATFORM_GATEWAY_REPO_URL,
                 sm_key=PLATFORM_GATEWAY_REPO_SM_KEY,
+            )
+        if self.flare_envs:
+            self._repo_external_secret(
+                id="repo-secret-flare",
+                name="argocd-repo-flare",
+                url=FLARE_REPO_URL,
+                sm_key=FLARE_REPO_SM_KEY,
             )
         # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
         # skips the webhook secret too.
