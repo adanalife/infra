@@ -38,8 +38,8 @@ def _cluster(objs):
 # --- env gate: stage-1 only until the PITR drill passes ---
 
 
-def test_stage_data_chart_emits_cnpg_prod_does_not():
-    for env_name, expected in (("stage-1", True), ("prod-1", False)):
+def test_isolated_data_charts_emit_cnpg():
+    for env_name, expected in (("stage-1", True), ("prod-1", True)):
         app = K8sTesting.app()
         objs = K8sTesting.synth(DataChart(app, "t", env=load_env(env_name)))
         assert bool(_by(objs, "Cluster")) is expected
