@@ -422,8 +422,8 @@ resource "grafana_rule_group" "host_storage" {
       datasource_uid = data.grafana_data_source.loki.uid
       # Grafana reflects the model's queryType back onto this attribute at
       # refresh, so leaving it unset here reads as drift on every plan
-      # (`query_type = "instant" -> null`) that an apply cannot settle. It is
-      # the only rule in this file whose model sets queryType; the rest omit
+      # (`query_type = "instant" -> null`) that an apply cannot settle. Only
+      # the Loki rules in this file set queryType; the Prometheus rules omit
       # both and match.
       query_type = "instant"
       model = jsonencode({
@@ -3587,6 +3587,86 @@ resource "grafana_rule_group" "ci_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Generic error-rate backstop for the prod components that have no watchdog
+// or liveness metric of their own to page on. The rules above key on a
+// specific failure each; this one keys on the shape every loud failure
+// shares — a component logging at error level far above its idle rate — so
+// a new retry loop pages before it has its own rule. The 2026-08-24 YouTube
+// egress loop is the model: ~294 tripbot errors in 24h, ~400 Sentry events,
+// and no rule fired for 17 hours because no metric it watched moved.
+//
+// 20 per 3h per service against the measured baseline (2026-08-10 → 08-23,
+// Loki): a quiet prod day peaks at 9 tripbot errors in any 3h bucket and 18
+// for onscreens-server; the two incident days read 30-42 (the 08-23 reboot
+// storm) and ~50 (the 08-24 loop). A 3h window rather than 1h because the
+// loop's rate was ~17/h — steady, not bursty — and a 1h threshold low
+// enough to see it sits inside the idle noise. Warning, not critical: the
+// specific rules own paging, and this fires for whatever they missed.
+//
+// Loki bills bytes scanned by the stream selector, so this keeps the
+// selector to the prod environment and does the level filtering after it.
+resource "grafana_rule_group" "error_rate" {
+  name             = "error-rate"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Prod: sustained error-level logging"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "A prod service has logged 20+ errors in the last 3h — several times its idle rate"
+      link        = local.tripbot_sentry_link
+      description = "{{ $labels.service_name }} logged more than 20 error-level lines in 3h on prod-1; a quiet day peaks under 10 per 3h for tripbot and under 20 for onscreens-server, so this is a component failing loudly on a loop rather than background noise. Nothing more specific has paged, or you would be reading that alert instead — start from the errors themselves: Loki `{deployment_environment=\"prod-1\", service_name=\"{{ $labels.service_name }}\"} | detected_level=\"error\"` for the repeating line, then Sentry for the grouped issue. A retry loop that is not converging (the watchdog re-forcing the same recovery, an egress start the platform keeps refusing) is the usual shape; fix the thing it is retrying against rather than the retry."
+    }
+    labels = {
+      severity = "warning"
+      service  = "{{ $labels.service_name }}"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 10800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant"
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (service_name) (count_over_time({deployment_environment=\"prod-1\"} | detected_level=\"error\" [3h]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [20] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
