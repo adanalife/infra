@@ -1179,7 +1179,7 @@
       "id": 25,
       "type": "stat",
       "title": "Last publish gap",
-      "description": "Duration of the most recent publish gap (playout_publish_gap_seconds): how long the MediaMTX path sat without a publisher before this playout's publish attached \u2014 a deploy handoff or an error recovery (e.g. a mediamtx restart). Viewers additionally wait for the next IDR after the gap closes, so the on-screen blackout runs up to one GOP (~2s) longer. No data means no gap since the pod started.",
+      "description": "Duration of the most recent publish gap (playout_publish_gap_seconds): from playout first seeing the MediaMTX path free (deploy handoff) or detaching (error recovery, e.g. a mediamtx restart) until its publish put the first keyframe on the wire. Most of a handoff is the wait for that keyframe, bounded by the corpus's 2s GOP, so ~1.5\u20132.5s is a normal deploy. Excludes up to one 500ms acquire poll before the sighting and the readers' reconnect, so the on-screen blackout runs slightly longer. No data means no gap since the pod started.",
       "datasource": {
         "type": "prometheus",
         "uid": "__DS_PROMETHEUS__"
@@ -1219,7 +1219,7 @@
               },
               {
                 "color": "yellow",
-                "value": 1.5
+                "value": 3
               },
               {
                 "color": "red",
