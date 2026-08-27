@@ -316,6 +316,26 @@ class Postgres(Construct):
                                 )
                             ],
                         ),
+                        # The CloudNativePG operator polls each instance's
+                        # status API; without this the Cluster never reports
+                        # Ready ("Instance Status Extraction Error").
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": "cnpg-system"
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(8000),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
                     ],
                 ),
             )
