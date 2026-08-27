@@ -16,6 +16,7 @@ from cdk8s import Chart
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.constructs.cnpg import CnpgCluster
 from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_local_pvc,
     emit_dashcam_localize_job,
@@ -127,6 +128,12 @@ class DataChart(Chart):
         # --- postgres (StatefulSet; prod adds StorageClass + backup CronJob).
         #     Lands in env.data_ns — the deletion boundary this unit protects. ---
         Postgres(self, env=env)
+
+        # --- CNPG `pg` cluster (PITR via barman-cloud → S3), side-by-side with
+        #     the legacy StatefulSet while the migration is in flight. Apps pick
+        #     which one via DATABASE_HOST (tripbot repo's postgres_host). ---
+        if env.cnpg:
+            CnpgCluster(self, env=env)
 
         # --- dashcam PVC (nfs envs only; no-op on hostPath local/dev). The PV it
         #     binds to is provisioned out-of-band via NfsPVChart. Mounted by
