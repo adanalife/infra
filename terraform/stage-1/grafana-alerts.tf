@@ -422,8 +422,8 @@ resource "grafana_rule_group" "host_storage" {
       datasource_uid = data.grafana_data_source.loki.uid
       # Grafana reflects the model's queryType back onto this attribute at
       # refresh, so leaving it unset here reads as drift on every plan
-      # (`query_type = "instant" -> null`) that an apply cannot settle. It is
-      # the only rule in this file whose model sets queryType; the rest omit
+      # (`query_type = "instant" -> null`) that an apply cannot settle. Only
+      # the Loki rules in this file set queryType; the Prometheus rules omit
       # both and match.
       query_type = "instant"
       model = jsonencode({
@@ -1663,12 +1663,17 @@ resource "grafana_rule_group" "stream_health" {
   // dead. Critical rather than warning because nothing is coming back on its
   // own — by definition the automation has already tried and lost.
   //
-  // for = 10m, not 1m: a single failed attempt is normal (OBS can still be
-  // tearing the output down), so this waits for a pattern rather than paging
-  // on the first miss.
+  // The lookback is 30m and the threshold is a second failure, not a 5m
+  // window held for 10m: the watchdog's failing-restart back-off retries
+  // roughly every 12 minutes, so a 5m increase() reads >0 for five minutes
+  // and 0 for seven, and a `for` longer than the pulse can never be
+  // satisfied. That is exactly how the 2026-08-24 YouTube egress loop went
+  // unpaged — this rule flapped Normal → Pending → Normal every cycle for
+  // 17 hours. A single failed attempt is still normal (OBS can be tearing
+  // the output down), so the second one within 30m is the pattern.
   rule {
     name           = "OBS: silent-disconnect recovery is failing"
-    for            = "10m"
+    for            = "0m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
@@ -1676,7 +1681,7 @@ resource "grafana_rule_group" "stream_health" {
     annotations = {
       summary     = "OBS silent-disconnect watchdog is restarting and not recovering"
       link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
-      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} incremented twice in 30m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
     }
     labels = {
       severity = "critical"
@@ -1686,13 +1691,13 @@ resource "grafana_rule_group" "stream_health" {
     data {
       ref_id = "A"
       relative_time_range {
-        from = 300
+        from = 1800
         to   = 0
       }
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[30m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1711,7 +1716,7 @@ resource "grafana_rule_group" "stream_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [0] }
+          evaluator = { type = "gt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
@@ -1720,6 +1725,77 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+
+  // The escalation tier for both watchdog rules above. Restarting the OBS
+  // output is the only move the watchdog has, and a mechanically-successful
+  // StartStream resets its miss counter, so a fault below the output — a
+  // wedged render pipeline, a platform refusing the egress — puts it in a
+  // loop where every cycle "works" and the stream never comes back. On
+  // 2026-08-05 that was ~45 result="ok" recoveries in 9h41m against an OBS
+  // blocked on a hung NFS mount; on 2026-08-24 it was ~85 recoveries in 17h
+  // against a YouTube stream the platform had marked inactive. Neither
+  // per-attempt rule reads that shape: one says "recovered", the other
+  // needs the attempts to fail.
+  //
+  // Counted over an hour regardless of result: a real silent disconnect is
+  // one restart, occasionally two. Three in an hour means recovery is being
+  // needed again as fast as it fires, which is the definition of not
+  // working. The remedy is categorically different from the watchdog's, so
+  // the description names it — bounce the OBS pod from the console's
+  // restart control, then find what the output is blocked on.
+  rule {
+    name           = "OBS: silent-disconnect watchdog stuck in a recovery loop"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS silent-disconnect watchdog has restarted the output 3+ times in an hour and the stream is not staying up"
+      link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
+      description = "tripbot_obs_silent_disconnect_restarts_total (any result) rose by 3 or more in the last hour on {{ $labels.service_platform }} — the watchdog keeps forcing a recovery and the platform keeps reporting the channel offline afterwards, so restarting the OBS output is not fixing this and it will keep cycling until something else does. The fault is below the output: OBS itself wedged (obs_stream_output_total_frames flat while obs_streaming_active=1 — the encoder-wedged rule fires alongside), or the platform rejecting the stream (a 403 'Stream is inactive' from YouTube on every egress start; check Sentry). Bounce the OBS pod for that platform from the console's restart control — ~30s of hard downtime — and if the platform side is what's broken, re-arm the broadcast by hand (YouTube Studio go-live) before the next watchdog cycle."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[1h]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [2] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 
   // The wedged-encoder case: OBS reports the output active, the RTMP socket is
   // healthy, and the encoder is pushing nothing. On 2026-08-05 a hung NFS mount
@@ -3511,6 +3587,86 @@ resource "grafana_rule_group" "ci_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Generic error-rate backstop for the prod components that have no watchdog
+// or liveness metric of their own to page on. The rules above key on a
+// specific failure each; this one keys on the shape every loud failure
+// shares — a component logging at error level far above its idle rate — so
+// a new retry loop pages before it has its own rule. The 2026-08-24 YouTube
+// egress loop is the model: ~294 tripbot errors in 24h, ~400 Sentry events,
+// and no rule fired for 17 hours because no metric it watched moved.
+//
+// 20 per 3h per service against the measured baseline (2026-08-10 → 08-23,
+// Loki): a quiet prod day peaks at 9 tripbot errors in any 3h bucket and 18
+// for onscreens-server; the two incident days read 30-42 (the 08-23 reboot
+// storm) and ~50 (the 08-24 loop). A 3h window rather than 1h because the
+// loop's rate was ~17/h — steady, not bursty — and a 1h threshold low
+// enough to see it sits inside the idle noise. Warning, not critical: the
+// specific rules own paging, and this fires for whatever they missed.
+//
+// Loki bills bytes scanned by the stream selector, so this keeps the
+// selector to the prod environment and does the level filtering after it.
+resource "grafana_rule_group" "error_rate" {
+  name             = "error-rate"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Prod: sustained error-level logging"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "A prod service has logged 20+ errors in the last 3h — several times its idle rate"
+      link        = local.tripbot_sentry_link
+      description = "{{ $labels.service_name }} logged more than 20 error-level lines in 3h on prod-1; a quiet day peaks under 10 per 3h for tripbot and under 20 for onscreens-server, so this is a component failing loudly on a loop rather than background noise. Nothing more specific has paged, or you would be reading that alert instead — start from the errors themselves: Loki `{deployment_environment=\"prod-1\", service_name=\"{{ $labels.service_name }}\"} | detected_level=\"error\"` for the repeating line, then Sentry for the grouped issue. A retry loop that is not converging (the watchdog re-forcing the same recovery, an egress start the platform keeps refusing) is the usual shape; fix the thing it is retrying against rather than the retry."
+    }
+    labels = {
+      severity = "warning"
+      service  = "{{ $labels.service_name }}"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 10800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant"
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (service_name) (count_over_time({deployment_environment=\"prod-1\"} | detected_level=\"error\" [3h]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [20] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
