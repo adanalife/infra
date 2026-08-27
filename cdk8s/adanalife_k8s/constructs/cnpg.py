@@ -54,11 +54,12 @@ OBJECT_STORE_NAME = "pg-store"
 # `plugin-barman-cloud` platform Helm component in cnpg-system).
 _BARMAN_PLUGIN = "barman-cloud.cloudnative-pg.io"
 
-# Pinned exact build of the CNPG `standard` image flavor — PG16 to match the
-# live pgvector/pg16 server, `standard` because it bundles pgvector (verify
+# Pinned exact build of the CNPG `standard` image flavor — PG18 (the cutover
+# import is a logical dump/restore, so it crosses the major from the live
+# pgvector/pg16 server for free), `standard` because it bundles pgvector (verify
 # bundled pgvector >= the live extversion before each env's cutover; live is
 # 0.8.2 on PG 16.14).
-_IMAGE = "ghcr.io/cloudnative-pg/postgresql:16.14-202607130907-standard-bookworm"
+_IMAGE = "ghcr.io/cloudnative-pg/postgresql:18.6-202608240816-standard-bookworm"
 
 # The application database and its owning role. The password lives in SSM
 # (rendered by ESO into pg-app-creds); the names are plain config — CNPG's

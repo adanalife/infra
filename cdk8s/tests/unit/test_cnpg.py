@@ -56,8 +56,8 @@ def test_cluster_is_single_instance_pinned_standard_image():
     spec = _cluster(_synth("stage-1"))["spec"]
     assert spec["instances"] == 1
     image = spec["imageName"]
-    # standard flavor (bundles pgvector), PG16, exact-pinned build
-    assert image.startswith("ghcr.io/cloudnative-pg/postgresql:16.")
+    # standard flavor (bundles pgvector), PG18, exact-pinned build
+    assert image.startswith("ghcr.io/cloudnative-pg/postgresql:18.")
     assert "-standard-" in image
 
 
