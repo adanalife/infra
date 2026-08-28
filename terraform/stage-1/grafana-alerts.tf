@@ -2182,9 +2182,9 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // SomaFM down a while — informational. The fallback keeps audible Car Hum on
+  // SomaFM down a while — informational. The fallback keeps audible music on
   // air, so this isn't dead air (the dead-air rule above covers that); it's a
-  // heads-up that the stream has been on the local bed instead of the intended
+  // heads-up that the stream has been on a local bed instead of the intended
   // music for 20m, i.e. SomaFM's edge has been unreachable for a sustained
   // stretch. Warning → Discord, not a page. for=20m so a brief SomaFM blip the
   // fallback rides through doesn't notify.
@@ -2196,8 +2196,8 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Twitch background audio has been on the Car Hum fallback for 20m"
-      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m — SomaFM's edge has been unreachable, so the stream is on the local Car Hum bed instead of the SomaFM music. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
+      summary     = "Twitch background audio has been on the fallback bed for 20m"
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
     }
     labels = {
       severity = "warning"
