@@ -364,12 +364,84 @@
       }
     },
     {
+      "id": 401,
+      "type": "row",
+      "title": "Dependencies (NATS and the Kubernetes API)",
+      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 1 }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "NATS messages / sec by subject",
+      "description": "Per-channel throughput, consumed and published. The NATS control plane tile above only says the socket is up — a subject that stopped delivering while the connection stayed healthy shows here and nowhere else. Subjects are the concrete ones NATS delivered, so the wildcard auth.status.* subscription splits per platform.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 35, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (nats_subject, direction, deployment_environment) (rate(console_nats_messages_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{nats_subject}} {{direction}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "k8s API calls / sec by status",
+      "description": "Every call the console makes to the API server, counted at its shared client. A rising 403 line is a revoked Role on the restart/status RBAC path — which otherwise shows up only as an empty status table with nothing saying why. `error` means the call never got a status back at all (timeout, closed connection), a different fault from an API server that answered.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 35, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (k8s_status, deployment_environment) (rate(console_k8s_api_calls_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{k8s_status}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "k8s API calls / sec by resource path",
+      "description": "Which resources the console is asking about. Paths are templated, so a named Deployment or Application never becomes its own series.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 43, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (k8s_path, deployment_environment) (rate(console_k8s_api_calls_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{k8s_path}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
       "id": 9,
       "type": "logs",
       "title": "Recent errors & warnings",
       "description": "Error and warning lines from the console, newest first. Severity comes from the detected_level label (lowercase values), not severity_text.",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
-      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 51, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "expr": "{service_name=\"tripbot-console\", deployment_environment=~\"$deployment_environment\"} | detected_level =~ \"error|warn\"" }
       ],
@@ -379,10 +451,10 @@
       "id": 99,
       "type": "text",
       "title": "About this dashboard",
-      "gridPos": { "x": 0, "y": 44, "w": 24, "h": 5 },
+      "gridPos": { "x": 0, "y": 61, "w": 24, "h": 5 },
       "options": {
         "mode": "markdown",
-        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **No 'Recent traces' table.** 03/04/05 each carry one; whether the console exports spans to Tempo has not been confirmed, and an unverified trace table renders as an empty panel that reads like a broken service. Add it once there are spans to show.\n\n**Known source-side gaps**, both fixable in the console repo rather than here:\n\n1. `target_info` carries no `service_version`, so the Running version tile reads \"not reported\". Fix is `service.version` in `OTEL_RESOURCE_ATTRIBUTES` at deploy.\n2. The request-duration histogram carried no usable signal — the SDK's default bucket boundaries are spaced for milliseconds, so seconds-valued observations all landed in one bucket and every quantile was an interpolation artifact (`q * 5`), not a measurement. Fixed at the source in tripbot-console#337. The panel is labelled seconds because the data is seconds, and reads flat until that ships."
+        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **No 'Recent traces' table.** 03/04/05 each carry one; whether the console exports spans to Tempo has not been confirmed, and an unverified trace table renders as an empty panel that reads like a broken service. Add it once there are spans to show.\n\n**Known source-side gaps**, both fixable in the console repo rather than here:\n\n1. `target_info` carries no `service_version`, so the Running version tile reads \"not reported\" until tripbot-console#360 ships — it sets `service.version` on the meter provider from the image's `APP_VERSION`, which is where the running version actually lives.\n2. The request-duration histogram carried no usable signal — the SDK's default bucket boundaries are spaced for milliseconds, so seconds-valued observations all landed in one bucket and every quantile was an interpolation artifact (`q * 5`), not a measurement. Fixed at the source in tripbot-console#337. The panel is labelled seconds because the data is seconds, and reads flat until that ships.\n\nThe **Dependencies** row reads `console_nats_messages_total` and `console_k8s_api_calls_total`, added in tripbot-console#360 — both panels are empty on an environment still running an earlier release."
       }
     }
   ]
