@@ -117,6 +117,7 @@ template:
           - /cache/dot-cache
           - /cache/gomod
           - /cache/toolcache
+          - /cache/work
         volumeMounts:
           - name: cache-dot-cache
             mountPath: /cache/dot-cache
@@ -124,6 +125,8 @@ template:
             mountPath: /cache/gomod
           - name: cache-toolcache
             mountPath: /cache/toolcache
+          - name: work
+            mountPath: /cache/work
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
@@ -195,4 +198,20 @@ template:
       - name: cache-toolcache
         hostPath:
           path: /var/mnt/data/arc-cache/toolcache
+          type: DirectoryOrCreate
+      # The job workspace — checkout, build context, test artifacts. The chart
+      # defaults it to an emptyDir, which lands on /var and puts the heaviest
+      # per-job write path on the disk etcd fsyncs to; declaring `work` here is
+      # the one override the chart honours (gha-runner-scale-set.runner-mode-
+      # work-volume takes a user-supplied volume of this name over its default).
+      #
+      # The tradeoff: an emptyDir is recreated per pod, so each ephemeral runner
+      # starts from a clean workspace. A hostPath persists across jobs. That is
+      # safe at maxRunners: 1 (no concurrent writers) and actions/checkout runs
+      # `git clean -ffdx` by default, so the checkout itself is still clean —
+      # but _temp and _actions now carry over between jobs. Revert this volume
+      # alone if a job starts failing on state it did not create.
+      - name: work
+        hostPath:
+          path: /var/mnt/data/arc-work
           type: DirectoryOrCreate
