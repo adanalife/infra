@@ -57,9 +57,8 @@ listenerTemplate:
 # identified — a throughput cost accepted deliberately, against a node whose
 # failure takes both prod streams and every co-tenant with it.
 #
-# It is NOT a memory cap, and the arithmetic that used to live here argued
-# otherwise. Measured against the in-cluster VictoriaMetrics across those crash
-# windows: MemAvailable never fell below ~15.8Gi of ~30.5Gi, load15 peaked at 4
+# It is NOT a memory cap — the node was never short of memory. Measured against
+# the in-cluster VictoriaMetrics across those crash windows: MemAvailable never fell below ~15.8Gi of ~30.5Gi, load15 peaked at 4
 # of 20 CPUs, the USB-attached T5 wrote 0.05 MiB/s, and every arc-runners pod
 # together peaked at 487Mi. Scheduler commitment ran high while consumption
 # stayed low, so the requests were inflated relative to reality rather than the
