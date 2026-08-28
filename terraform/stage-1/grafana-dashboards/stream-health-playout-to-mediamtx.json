@@ -584,7 +584,7 @@
       "id": 21,
       "type": "stat",
       "title": "Frame gaps / min",
-      "description": "Output frames whose PTS jumped past 1.5 frame intervals \u2014 visible stalls or dropped frames. concat keeps running time continuous across splices, so a gap is a real hitch, not a clip boundary. 0 is healthy.",
+      "description": "Output frames whose DTS jumped past 1.5 frame intervals \u2014 visible stalls or dropped frames. DTS, not PTS: in passthrough the buffers arrive in decode order, where PTS is non-monotonic under B-frame reorder and false-fires on roughly half of all frames. concat keeps running time continuous across splices, so a gap is a real hitch, not a clip boundary. 0 is healthy.",
       "datasource": {
         "type": "prometheus",
         "uid": "__DS_PROMETHEUS__"
@@ -738,7 +738,7 @@
       "id": 24,
       "type": "timeseries",
       "title": "Frame gaps & clip errors / min",
-      "description": "Playout quality faults: PTS gaps (viewer-visible stutter) and clip errors (recovered clip teardowns). Both should baseline at 0.",
+      "description": "Playout quality faults: DTS gaps (viewer-visible stutter) and clip errors (recovered clip teardowns). Both should baseline at 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "__DS_PROMETHEUS__"
