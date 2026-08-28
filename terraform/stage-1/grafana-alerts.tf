@@ -3122,7 +3122,6 @@ resource "grafana_rule_group" "batch_health" {
   // bucket lives in an account this Grafana holds no credential for. A dump the
   // job reports as successful but that never lands is therefore still unwatched
   // — this rule answers "did the hourly job run", not "is the object there".
-  // See vault/infra/backups.md.
   rule {
     name      = "Postgres: prod hourly backup has not succeeded in 2h"
     for       = "15m"
@@ -3216,7 +3215,7 @@ resource "grafana_rule_group" "batch_health" {
 # scheduling at all, so nothing retries and nothing errors) needs the console's
 # console_terraform_plan_age_seconds, which is not in Grafana Cloud yet: the
 # deployed tripbot-console 0.46.0 predates that metric. Adding a third rule is a
-# console release away, tracked in vault/infra/TODO.md.
+# console release away.
 #
 # burrito_runs_by_status reaches the cloud only because the keep-regex in
 # k8s/monitoring/prod-1/values.yml names it, same as
