@@ -42,6 +42,21 @@ stamp() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 
 mkdir -p "$DIR"
 
+# The config comes in by flag, not by the TALOSCONFIG environment variable:
+# talosctl resolves that variable relative to a home directory, and DSM's Task
+# Scheduler runs with no $HOME, so an env-var config fails to open at all.
+#
+# Check it once up front, because every failure in this script looks the same
+# from the outside. An unusable config makes each attach fail instantly, and the
+# retry loop turns that into an endless stream of ATTACHED/DETACHED pairs with
+# no kernel log between them — indistinguishable from a node that keeps dying,
+# which is the very thing being watched for. Better to leave one line and stop.
+if ! err="$("$BIN" --talosconfig "$CFG" config info 2>&1 >/dev/null)"; then
+  echo "=== kmsg-capture ABORTED $(stamp) talosconfig unusable: $err ===" \
+    >>"$DIR/kmsg-$(date -u '+%Y-%m-%d').log"
+  exit 1
+fi
+
 while :; do
   log="$DIR/kmsg-$(date -u '+%Y-%m-%d').log"
 
@@ -53,7 +68,7 @@ while :; do
 
   # Not fatal: the node being unreachable is the normal case this loop exists
   # to survive, so `set -e` must not end the capture when it happens.
-  TALOSCONFIG="$CFG" "$BIN" --nodes "$NODE" dmesg --follow >>"$log" 2>&1 || true
+  "$BIN" --talosconfig "$CFG" --nodes "$NODE" dmesg --follow >>"$log" 2>&1 || true
 
   echo "=== kmsg-capture DETACHED $(stamp) (node unreachable or stream closed) ===" >>"$log"
 

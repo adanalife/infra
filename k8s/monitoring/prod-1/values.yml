@@ -97,6 +97,16 @@ destinations:
     #                         one reboot doesn't read as two; the duplicate is
     #                         left shipping because two series against a
     #                         15000-series cap is not worth a relabel rule.
+    #   gha_{assigned,running}_jobs, gha_{registered,busy}_runners  — the
+    #                         ARC listener's queue depth and runner pool, for
+    #                         the CI-queued-with-nothing-running alert and the
+    #                         CI runners row on platform-services. Four series:
+    #                         one listener, one scale set, one series each.
+    #                         The rest of the family stays local-VM-only —
+    #                         gha_{started,completed}_jobs_total carry
+    #                         repository and job_name (~170 series), and the
+    #                         two duration histograms add a `le` dimension on
+    #                         top of that (~7800).
     # The rest of what's scraped is local-VM-only: the other node_*
     # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
     # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
@@ -168,7 +178,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 

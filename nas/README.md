@@ -55,6 +55,12 @@ reconfiguration, and nothing to back up first.
    `sh /volume1/ADanaLife/kmsg/kmsg-capture.sh`. The task has to survive DSM
    upgrades being re-applied, so re-check it after one.
 
+   Task Scheduler runs with no `$HOME`, and `talosctl` resolves the
+   `TALOSCONFIG` environment variable relative to a home directory — so the
+   script passes `--talosconfig` instead. Anything else added here needs the
+   same treatment; a missing `$HOME` surfaces as
+   `failed to open config file "": $HOME is not defined`.
+
 ### Reading the output
 
 Logs land in `/volume1/ADanaLife/kmsg/logs/kmsg-<UTC date>.log`, pruned after 14
@@ -70,6 +76,10 @@ it that survives the reboot:
 ```sh
 grep -E 'ATTACHED|DETACHED' /volume1/ADanaLife/kmsg/logs/kmsg-*.log
 ```
+
+A single `ABORTED` line and nothing after it means the talosconfig could not be
+opened — the capture stops there rather than retrying, because an unusable
+config produces instant detaches that read exactly like a node dying in a loop.
 
 What to look for in the lines *before* a `DETACHED`: `usb` disconnects (the
 T5 has dropped off the bus before, and the boot cmdline still carries the

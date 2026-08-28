@@ -1,8 +1,8 @@
 # Burrito's in-cluster terraform-plan runner — deliberately READ-ONLY, so the
 # credential that lives in the cluster can plan the core workspace but
 # structurally cannot apply. Consumed via SM -> ESO (see
-# cdk8s/adanalife_k8s/constructs/burrito.py); seeding runbook in
-# vault/infra/burrito.md.
+# cdk8s/adanalife_k8s/constructs/burrito.py). Terraform mints the key but only
+# emits the secret keybase-encrypted, so putting it into SM is a manual step.
 resource "aws_iam_user" "burrito" {
   name = "burrito"
   path = "/bots/"

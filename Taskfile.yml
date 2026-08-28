@@ -1937,6 +1937,29 @@ tasks:
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
 
+  # Read-only crash forensics for the minipc: intersect the node's reboot census
+  # (node_boot_time_seconds, in-cluster VictoriaMetrics only — node_* is not
+  # allowlisted to Grafana Cloud) with the self-hosted runner jobs that were on
+  # the box at each death. The port-forward lives for the duration of the run;
+  # the script's own flags go after `--`. See scripts/arc-crash-correlate.py.
+  arc:crash-correlate:
+    desc: "correlate minipc reboots with the ARC CI jobs running at the time (read-only); flags after --, e.g. task arc:crash-correlate -- --since 2026-08-22"
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      # Task's shell interpreter reports a job id (`g1`) for `$!` rather than a
+      # PID, so a kill/trap written here cannot reach the backgrounded forward.
+      # Run the whole thing in a real bash, where `$!` is a PID and the EXIT trap
+      # tears the forward down on success, failure and Ctrl-C alike.
+      - |
+        bash -eu -c '
+          kubectl -n monitoring port-forward svc/victoria-metrics 8428 >/dev/null 2>&1 &
+          trap "kill $! 2>/dev/null || true" EXIT
+          # Bounded wait: if it never comes up, the script says so actionably.
+          for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:8428/health && break; sleep 1; done
+          scripts/arc-crash-correlate.py {{.CLI_ARGS}}
+        '
+
   # Local kubectl port-forward wrapper for OBS VNC — the
   # cluster-agnostic way in, working on any env without a host-access
   # LoadBalancer. The backgrounded kubectl PID is parked under
@@ -2139,6 +2162,63 @@ tasks:
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
+
+  # Screenshot every source in the live OBS scene and fail on the blank ones —
+  # release acceptance for the overlays. A crashed browser_source stays in the
+  # scene and the pod stays healthy, but it renders as a transparent PNG of a
+  # couple hundred bytes (the 2026-06-21 right-rotator outage). Read-only, so
+  # it's safe against the live prod stream. Same port-forward +
+  # ConfigMap-password plumbing as obs:{prod,stage}:browser:refresh above.
+  #
+  # MIN_BYTES is the blank threshold; SCREENSHOT_DIR keeps the PNGs for
+  # eyeballing (nothing is written without it).
+  obs:prod:screenshot:check:
+    desc: screenshot every prod-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:screenshot:check:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          MIN_BYTES: '{{.MIN_BYTES | default "1000"}}'
+          SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
+
+  obs:stage:screenshot:check:
+    desc: screenshot every stage-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:screenshot:check:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          MIN_BYTES: '{{.MIN_BYTES | default "1000"}}'
+          SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
+
+  obs:screenshot:check:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM, MIN_BYTES]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_SCREENSHOT_MIN_BYTES={{.MIN_BYTES}} \
+        SCREENSHOT_DIR='{{.SCREENSHOT_DIR}}' \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-screenshot-check
 
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)

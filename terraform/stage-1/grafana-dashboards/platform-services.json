@@ -596,6 +596,52 @@
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
       }
+    },
+    {
+      "id": 600,
+      "type": "row",
+      "title": "CI runners (ARC)",
+      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 1 }
+    },
+    {
+      "id": 601,
+      "type": "timeseries",
+      "title": "Runner jobs vs node reboots",
+      "description": "The self-hosted runner scale set's queue and pool, with a red bar on the right axis at every node boot — so a CI job that died mid-run reads as a job that was in flight when the mini-PC bounced, rather than as a mystery. Assigned sitting above running is the stuck-queue shape the \"CI queued with nothing running\" alert fires on; registered runners can read healthy right through it, which is why both lines are here.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (job) (gha_assigned_jobs{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · assigned jobs" },
+        { "refId": "B", "expr": "sum by (job) (gha_running_jobs{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · running jobs" },
+        { "refId": "C", "expr": "sum by (job) (gha_registered_runners{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · registered runners" },
+        { "refId": "D", "expr": "sum by (job) (gha_busy_runners{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · busy runners" },
+        { "refId": "E", "expr": "max(changes(node_boot_time_seconds{job=\"integrations/node_exporter\", cluster=~\"$cluster\"}[5m])) > 0", "legendFormat": "node reboot" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "node reboot" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "max", "value": 1 },
+              { "id": "custom.drawStyle", "value": "bars" },
+              { "id": "custom.lineWidth", "value": 0 },
+              { "id": "custom.fillOpacity", "value": 60 },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "boot" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
     }
   ]
 }

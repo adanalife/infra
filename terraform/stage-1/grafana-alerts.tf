@@ -43,13 +43,12 @@ locals {
   // hour, so the alerts can't join against KSM. The metric is prod-only, so the
   // service_platform join also keeps stage series out (stage never pages).
   //
-  // Rules whose result carries a service_platform label join on it; the
-  // twitch-only bare-max rules (no service_platform on the result) pin the
-  // platform in the gate and join on (). The gate-metric deadman (gate-health
-  // group) pages if console_platform_component_up disappears, so a lost gate
-  // signal is loud rather than a silent un-arming.
-  obs_mode_gate        = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
-  obs_twitch_mode_gate = "and on () (console_platform_component_up{component=\"obs\", service_platform=\"twitch\", deployment_environment=\"prod-1\"} > 0)"
+  // Every rule using it carries a service_platform label on its result and joins
+  // on it, so one platform's gate never arms or disarms another's. The
+  // gate-metric deadman (gate-health group) pages if
+  // console_platform_component_up disappears, so a lost gate signal is loud
+  // rather than a silent un-arming.
+  obs_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
 
   // Relay-side variant of the mode gate, for the playout rules. Keyed on the
   // mediamtx component rather than obs: mediamtx is up in both dark and live,
@@ -79,6 +78,16 @@ locals {
   // leaves its trace here and nowhere else — through the 9h41m outage on
   // 2026-08-05 Sentry was the only signal at all.
   tripbot_sentry_link = "[sentry](https://a-dana-life.sentry.io/issues/?environment=prod-1&query=is%3Aunresolved+project%3Atripbot)"
+
+  // Restart counts for the platform namespaces the control-plane-health rules
+  // count over. The alert reports how many containers bounced; this is where
+  // you see which ones, which is the first thing you want to know.
+  control_plane_restarts_link = "[restarts](${local.grafana_url}/explore?left=%7B%22queries%22:%5B%7B%22expr%22:%22max%20by%20(namespace,%20pod,%20container)%20(increase(kube_pod_container_status_restarts_total%7Bnamespace%3D~%5C%22kube-system%7Ccnpg-system%7Cmonitoring%7Cburrito-system%7Cargocd%7Cexternal-secrets%7Ctailscale%5C%22%7D%5B1h%5D))%22%7D%5D%7D)"
+
+  // The CI runners row on platform-services, which plots the queue depth and
+  // the runner pool against node reboots. The alert says CI is stuck; this is
+  // where you see whether the box bounced underneath it.
+  ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -412,8 +421,8 @@ resource "grafana_rule_group" "host_storage" {
       datasource_uid = data.grafana_data_source.loki.uid
       # Grafana reflects the model's queryType back onto this attribute at
       # refresh, so leaving it unset here reads as drift on every plan
-      # (`query_type = "instant" -> null`) that an apply cannot settle. It is
-      # the only rule in this file whose model sets queryType; the rest omit
+      # (`query_type = "instant" -> null`) that an apply cannot settle. Only
+      # the Loki rules in this file set queryType; the Prometheus rules omit
       # both and match.
       query_type = "instant"
       model = jsonencode({
@@ -1653,12 +1662,17 @@ resource "grafana_rule_group" "stream_health" {
   // dead. Critical rather than warning because nothing is coming back on its
   // own — by definition the automation has already tried and lost.
   //
-  // for = 10m, not 1m: a single failed attempt is normal (OBS can still be
-  // tearing the output down), so this waits for a pattern rather than paging
-  // on the first miss.
+  // The lookback is 30m and the threshold is a second failure, not a 5m
+  // window held for 10m: the watchdog's failing-restart back-off retries
+  // roughly every 12 minutes, so a 5m increase() reads >0 for five minutes
+  // and 0 for seven, and a `for` longer than the pulse can never be
+  // satisfied. That is exactly how the 2026-08-24 YouTube egress loop went
+  // unpaged — this rule flapped Normal → Pending → Normal every cycle for
+  // 17 hours. A single failed attempt is still normal (OBS can be tearing
+  // the output down), so the second one within 30m is the pattern.
   rule {
     name           = "OBS: silent-disconnect recovery is failing"
-    for            = "10m"
+    for            = "0m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
@@ -1666,7 +1680,7 @@ resource "grafana_rule_group" "stream_health" {
     annotations = {
       summary     = "OBS silent-disconnect watchdog is restarting and not recovering"
       link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
-      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} has been incrementing for 10m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
+      description = "tripbot_obs_silent_disconnect_restarts_total{result=\"failed\"} incremented twice in 30m — the watchdog is detecting the silent disconnect and its recovery is not landing, so the stream is dark right now and nothing automated is going to fix it. Restarting the OBS output is the only move this watchdog has, so a sustained failure means the fault is below it: check whether OBS itself is wedged (obs_streaming_active=1 with the output emitting no frames is the giveaway — a mechanically-successful StartStream resets the miss counter and the loop starts over), and whether anything the render pipeline depends on is hung. Bouncing the OBS pod is the escalation."
     }
     labels = {
       severity = "critical"
@@ -1676,13 +1690,13 @@ resource "grafana_rule_group" "stream_health" {
     data {
       ref_id = "A"
       relative_time_range {
-        from = 300
+        from = 1800
         to   = 0
       }
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[5m]))"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", result=\"failed\"}[30m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1701,7 +1715,7 @@ resource "grafana_rule_group" "stream_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [0] }
+          evaluator = { type = "gt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
@@ -1710,6 +1724,77 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+
+  // The escalation tier for both watchdog rules above. Restarting the OBS
+  // output is the only move the watchdog has, and a mechanically-successful
+  // StartStream resets its miss counter, so a fault below the output — a
+  // wedged render pipeline, a platform refusing the egress — puts it in a
+  // loop where every cycle "works" and the stream never comes back. On
+  // 2026-08-05 that was ~45 result="ok" recoveries in 9h41m against an OBS
+  // blocked on a hung NFS mount; on 2026-08-24 it was ~85 recoveries in 17h
+  // against a YouTube stream the platform had marked inactive. Neither
+  // per-attempt rule reads that shape: one says "recovered", the other
+  // needs the attempts to fail.
+  //
+  // Counted over an hour regardless of result: a real silent disconnect is
+  // one restart, occasionally two. Three in an hour means recovery is being
+  // needed again as fast as it fires, which is the definition of not
+  // working. The remedy is categorically different from the watchdog's, so
+  // the description names it — bounce the OBS pod from the console's
+  // restart control, then find what the output is blocked on.
+  rule {
+    name           = "OBS: silent-disconnect watchdog stuck in a recovery loop"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS silent-disconnect watchdog has restarted the output 3+ times in an hour and the stream is not staying up"
+      link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
+      description = "tripbot_obs_silent_disconnect_restarts_total (any result) rose by 3 or more in the last hour on {{ $labels.service_platform }} — the watchdog keeps forcing a recovery and the platform keeps reporting the channel offline afterwards, so restarting the OBS output is not fixing this and it will keep cycling until something else does. The fault is below the output: OBS itself wedged (obs_stream_output_total_frames flat while obs_streaming_active=1 — the encoder-wedged rule fires alongside), or the platform rejecting the stream (a 403 'Stream is inactive' from YouTube on every egress start; check Sentry). Bounce the OBS pod for that platform from the console's restart control — ~30s of hard downtime — and if the platform side is what's broken, re-arm the broadcast by hand (YouTube Studio go-live) before the next watchdog cycle."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (service_platform) (increase(tripbot_obs_silent_disconnect_restarts_total{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[1h]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [2] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 
   // The wedged-encoder case: OBS reports the output active, the RTMP socket is
   // healthy, and the encoder is pushing nothing. On 2026-08-05 a hung NFS mount
@@ -2033,26 +2118,30 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // Background-audio dead air — the Twitch music bed (Groove Salad Classic /
-  // SomaFM) is not playing. tripbot's audio-fallback watchdog swaps the source
-  // onto the local Car Hum bed when SomaFM drops, and the local file plays
-  // immediately, so obs_background_audio_playing returns to 1 within ~1m of any
-  // SomaFM blip. Sustained 0 for 5m therefore means the source is genuinely
-  // silent AND the fallback didn't restore it (fallback file missing, OBS
-  // WebSocket wedged, watchdog dead) — real dead air on a 24/7 stream, so
-  // critical. Twitch-only: the metric is emitted by tripbot, which only runs
-  // the watchdog Twitch-side. no_data=OK so it stays quiet until tripbot#993
-  // ships the metric. Silence in Grafana during planned audio-off stretches.
+  // Background-audio dead air — a platform's music bed is not playing. tripbot's
+  // audio-fallback watchdog swaps the source onto a local bed when SomaFM drops,
+  // and the local file plays immediately, so obs_background_audio_playing
+  // returns to 1 within ~1m of any SomaFM blip. Sustained 0 for 5m therefore
+  // means the source is genuinely silent AND the fallback didn't restore it
+  // (fallback file missing, OBS WebSocket wedged, watchdog dead) — real dead air
+  // on a 24/7 stream, so critical.
+  //
+  // Grouped by service_platform, and that is the whole rule. Every platform runs
+  // its own watchdog writing this series, so an ungrouped max() is one number
+  // across all of them and only reaches 0 when every platform is silent at the
+  // same moment. Prod TikTok ran silent for eight minutes on 2026-07-29 with the
+  // metric collecting the whole time and this rule not firing; Dana noticed by
+  // ear. Silence in Grafana during planned audio-off stretches.
   rule {
-    name           = "OBS: Twitch background audio dead air (not playing)"
+    name           = "OBS: background audio dead air (not playing)"
     for            = "5m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Twitch background audio has not been playing for 5m"
-      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m — the Twitch music bed (Groove Salad Classic) is silent and the audio-fallback watchdog has NOT restored audio via the local Car Hum bed. Viewers hear dead air. Check the obs-twitch pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart the obs-twitch deploy. See vault tripbot/obs/gotchas.md."
+      summary     = "{{ $labels.service_platform }} background audio has not been playing for 5m"
+      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m on {{ $labels.service_platform }} — that platform's music bed is silent and the audio-fallback watchdog has NOT restored audio via a local bed. Viewers hear dead air. Check the obs-{{ $labels.service_platform }} pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart that obs deploy. See vault tripbot/obs/gotchas.md."
     }
     labels = {
       severity = "critical"
@@ -2068,7 +2157,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_twitch_mode_gate}"
+        expr          = "max by (service_platform) (obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -2096,22 +2185,26 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // SomaFM down a while — informational. The fallback keeps audible Car Hum on
+  // SomaFM down a while — informational. The fallback keeps audible music on
   // air, so this isn't dead air (the dead-air rule above covers that); it's a
-  // heads-up that the stream has been on the local bed instead of the intended
+  // heads-up that a stream has been on a local bed instead of the intended
   // music for 20m, i.e. SomaFM's edge has been unreachable for a sustained
   // stretch. Warning → Discord, not a page. for=20m so a brief SomaFM blip the
   // fallback rides through doesn't notify.
+  //
+  // Grouped by service_platform for the same reason as the dead-air rule: only
+  // a platform that selected the SomaFM bed can be on its fallback, so an
+  // ungrouped max() reports "something is on the fallback" without saying what.
   rule {
-    name           = "OBS: Twitch on SomaFM fallback bed for 20m"
+    name           = "OBS: on SomaFM fallback bed for 20m"
     for            = "20m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Twitch background audio has been on the Car Hum fallback for 20m"
-      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m — SomaFM's edge has been unreachable, so the stream is on the local Car Hum bed instead of the SomaFM music. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
+      summary     = "{{ $labels.service_platform }} background audio has been on the fallback bed for 20m"
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
     }
     labels = {
       severity = "warning"
@@ -2127,7 +2220,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_twitch_mode_gate}"
+        expr          = "max by (service_platform) (obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -2169,16 +2262,15 @@ resource "grafana_rule_group" "stream_health" {
   // where reading OBS fails — so they always agree with what the console's
   // now-playing line and !song report.
   //
-  // Every platform, not Twitch-only: the album is TikTok's default bed and any
-  // platform can be switched onto it from the console. Hence obs_mode_gate
-  // rather than obs_twitch_mode_gate — a parked platform's tripbot keeps running
+  // Every platform: the album is TikTok's default bed and any platform can be
+  // switched onto it from the console. A parked platform's tripbot keeps running
   // and reports a bed it cannot actually play, so gating per-platform on
   // console_platform_component_up is what keeps those instances quiet.
   //
   // for=2m, shorter than the 5m SomaFM rule: silence starts the moment a track
   // ends, so the wait exists only to ride out a switch caught mid-write, not to
-  // confirm a sustained condition. critical for the same reason dead air on the
-  // Twitch bed is — a music-led slow-TV stream with no music is off the air.
+  // confirm a sustained condition. critical for the same reason dead air is — a
+  // music-led slow-TV stream with no music is off the air.
   rule {
     name           = "OBS: album bed dead air (empty play order)"
     for            = "2m"
@@ -3030,7 +3122,6 @@ resource "grafana_rule_group" "batch_health" {
   // bucket lives in an account this Grafana holds no credential for. A dump the
   // job reports as successful but that never lands is therefore still unwatched
   // — this rule answers "did the hourly job run", not "is the object there".
-  // See vault/infra/backups.md.
   rule {
     name      = "Postgres: prod hourly backup has not succeeded in 2h"
     for       = "15m"
@@ -3124,7 +3215,7 @@ resource "grafana_rule_group" "batch_health" {
 # scheduling at all, so nothing retries and nothing errors) needs the console's
 # console_terraform_plan_age_seconds, which is not in Grafana Cloud yet: the
 # deployed tripbot-console 0.46.0 predates that metric. Adding a third rule is a
-# console release away, tracked in vault/infra/TODO.md.
+# console release away.
 #
 # burrito_runs_by_status reaches the cloud only because the keep-regex in
 # k8s/monitoring/prod-1/values.yml names it, same as
@@ -3239,6 +3330,348 @@ resource "grafana_rule_group" "burrito_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Control-plane restart-churn alerts — the breadth signal that separates "one
+// operator is crashlooping" from "the API server is dropping out from under
+// every leader-elected controller at once".
+//
+// The shape this catches, measured 2026-08-24: seven containers in four
+// unrelated namespaces — cnpg's manager, the barman-cloud plugin,
+// cilium-operator, alloy-operator, burrito-controllers, and BOTH
+// kube-scheduler and kube-controller-manager — terminated within five seconds
+// of each other (17:36:11Z–17:36:16Z), with identical restart counts. Three
+// independent operators dying together is a lost leader-election lease; the
+// two static control-plane pods going with them says the apiserver itself was
+// unreachable, not that three controllers each have a bug.
+//
+// Why breadth and not a per-container rate: any single container's restart
+// count is unremarkable in isolation and a per-pod threshold would need one
+// exemption per chatty operator. Counting how many *distinct* platform
+// containers restarted in the same window keys directly on the thing that
+// makes this a control-plane fault rather than an application one.
+//
+// The `max by (namespace, pod, container)` is load-bearing, not defensive:
+// several Alloy instances scrape kube-state-metrics, so each container yields
+// one series per scraper `instance`. A `sum` would multiply the count by the
+// number of collectors; `max` collapses the duplicates back to one per
+// container. (Confirmed: alloy-operator appears under two `instance` values,
+// one carrying the increase and one reading zero.)
+//
+// Namespaces are the platform layer only. App namespaces (prod-1, stage-1) are
+// deliberately excluded — a restarting app pod is the app's problem and
+// already has its own coverage, and including them would let a single
+// crashlooping workload trip a control-plane alert.
+resource "grafana_rule_group" "control_plane_health" {
+  name             = "control-plane-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Tier one: churn that persists. Warning → Discord.
+  //
+  // Measured over the 3 days to 2026-08-24 at 15-minute resolution, counting
+  // distinct platform containers with more than one restart in the trailing
+  // hour. The series is 0 most of the time and bursty otherwise:
+  //   isolated burst      7-10, four consecutive samples then back to 0
+  //   sustained stretch   7-16 held for ~8.5h (08-24 ~03:00-11:30Z)
+  //   08-23 storm         44 for an hour, decaying through 25 to 19
+  // Threshold 4 clears the quiet baseline (0, occasionally 2) while every real
+  // burst scores 7 or more.
+  //
+  // `for` is the load-bearing number here, not the threshold. Because the
+  // query looks back an hour, ONE churn event keeps the count above 4 for a
+  // full hour as the window slides past it — so a short `for` pages on every
+  // isolated blip, and there were 15-20 of those in three days. `for = 2h`
+  // requires the churn to still be happening after the first event has aged
+  // out of the window, which is the difference between "a controller bounced"
+  // and "the control plane is flapping". The 8.5h stretch and the storm both
+  // clear it; a lone blip does not.
+  //
+  // A node reboot restarts much of this set at once and would trip the
+  // threshold, but not for two hours, so it stays with its own rule in
+  // host-lifecycle rather than double-paging here.
+  rule {
+    name           = "k8s: platform controllers restarting in lockstep"
+    for            = "2h"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "More than 4 platform containers have restarted in the last hour — apiserver is likely dropping out"
+      description = "Several unrelated platform controllers restarted inside the same hour. When cnpg, cilium-operator, alloy-operator and burrito-controllers bounce together they are not each broken — they are leader-elected, and they all self-terminate when they lose their lease, so simultaneous exits mean the API server became unreachable. Check whether `kube-apiserver`, `kube-scheduler` or `kube-controller-manager` are in the set (`kubectl --context admin@adanalife-minipc get pods -n kube-system`): if the static control-plane pods restarted too, the fault is below the controllers. Then look at etcd — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today service etcd status` and its fsync latency, since a single-node control plane wedges on slow disk. Distinguish from a node reboot by the sibling \"minipc rebooted\" alert: if that is also firing, this is expected fallout and resolves itself. If it is not, the box stayed up and the control plane flapped on its own, which is the case worth chasing."
+      link        = local.control_plane_restarts_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [4] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Tier two: storm. Critical, so it escalates to ntfy alongside Discord.
+  //
+  // Threshold 20 against the 08-23 peak, which held 44 for an hour and decayed
+  // through 25 to 19. The elevated-but-survivable state the warning covers
+  // tops out around 16, so 20 separates "the control plane is unhappy" from
+  // "the control plane is gone" without needing a second signal.
+  //
+  // `for = 0m` on purpose: at this magnitude the first evaluation is already
+  // enough, and the two hours tier one waits would be two hours of a control
+  // plane that cannot react to a failing Postgres.
+  rule {
+    name           = "k8s: control plane in a restart storm"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Over 20 platform containers restarted in the last hour — control plane is not holding"
+      description = "This is the 2026-08-23 shape: 44 distinct platform containers restarting inside one hour. At this rate nothing that depends on a controller is reliable — cnpg will not react to a failing Postgres, Argo will not sync, and the ARC runners will thrash. `pg_dump` prod and stage first, because a control plane this unstable usually means the node underneath it is unstable too and repeated unclean Postgres stops are how a database gets lost. Then check whether the node is rebooting (the \"minipc rebooting repeatedly\" alert) — if it is, chase that instead, because this is downstream of it. If the node is up, the control plane is failing on its own: read etcd health and disk latency before anything else."
+      link        = local.control_plane_restarts_link
+    }
+    labels = {
+      severity = "critical"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [20] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// ARC self-hosted runner health. The fleet's CI runs on the runner scale set
+// in arc-systems/arc-runners on this same mini-PC, so a broken listener stops
+// every repo's checks at once — and does it silently, because GitHub shows the
+// jobs as queued rather than failed and nothing in the cluster is unhealthy.
+//
+// The 2026-08-23 shape: a listener CRD defect left jobs queued for ~9h with
+// zero signal. Registered runners read healthy, no check went red, and no rule
+// covered the gap between "a job was handed to us" and "a runner picked it up".
+resource "grafana_rule_group" "ci_health" {
+  name             = "ci-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // Work assigned to the scale set with nothing executing it. `gha_assigned_jobs`
+  // is what the listener has accepted from GitHub and `gha_running_jobs` is what
+  // a runner has actually started, so assigned-without-running is the queue that
+  // never drains — the one state a queued job in GitHub's UI cannot be told from
+  // a slow one.
+  //
+  // The `and` yields no series whenever CI is idle or healthy, which with
+  // no_data_state = OK is what keeps the rule quiet: it has an opinion only
+  // while work is outstanding. Aggregated `by (job)` so a second scale set
+  // (an arm64 one, say) alerts on its own queue instead of being masked by a
+  // busy sibling.
+  //
+  // 15m against the measured baseline: over the three days to 2026-08-24 the
+  // condition was true 76 times at 1-minute resolution and lasted 15 minutes
+  // exactly once — a window where `gha_registered_runners` fell to zero with a
+  // job still assigned, which is the fault this rule is for. Ordinary runner
+  // startup holds it true for 4-7 minutes, well clear.
+  rule {
+    name           = "CI queued with nothing running"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "CI jobs assigned to the runner scale set with none running for 15m — every repo's checks are stuck"
+      description = "The ARC listener has jobs from GitHub but no runner has started one for 15 minutes. On GitHub these look queued, not failed, so nothing goes red and the wait is invisible until someone notices a PR that never checked out. Read the listener first — `kubectl --context admin@adanalife-minipc -n arc-systems logs deploy/arc-amd64-listener` (a CRD or API-version defect shows up here as a reconcile error, and this is the shape that cost ~9h on 2026-08-23), then the controller in the same namespace. `kubectl --context admin@adanalife-minipc -n arc-runners get pods` shows whether runner pods are being created at all: none means the listener is not asking for them, Pending means the node cannot schedule them. Do not read `gha_registered_runners` as reassurance — it read healthy throughout the 2026-08-23 stall."
+      link        = local.ci_runners_panel_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "ci"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "(sum by (job) (gha_assigned_jobs) > 0) and (sum by (job) (gha_running_jobs) == 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// Generic error-rate backstop for the prod components that have no watchdog
+// or liveness metric of their own to page on. The rules above key on a
+// specific failure each; this one keys on the shape every loud failure
+// shares — a component logging at error level far above its idle rate — so
+// a new retry loop pages before it has its own rule. The 2026-08-24 YouTube
+// egress loop is the model: ~294 tripbot errors in 24h, ~400 Sentry events,
+// and no rule fired for 17 hours because no metric it watched moved.
+//
+// 20 per 3h per service against the measured baseline (2026-08-10 → 08-23,
+// Loki): a quiet prod day peaks at 9 tripbot errors in any 3h bucket and 18
+// for onscreens-server; the two incident days read 30-42 (the 08-23 reboot
+// storm) and ~50 (the 08-24 loop). A 3h window rather than 1h because the
+// loop's rate was ~17/h — steady, not bursty — and a 1h threshold low
+// enough to see it sits inside the idle noise. Warning, not critical: the
+// specific rules own paging, and this fires for whatever they missed.
+//
+// Loki bills bytes scanned by the stream selector, so this keeps the
+// selector to the prod environment and does the level filtering after it.
+resource "grafana_rule_group" "error_rate" {
+  name             = "error-rate"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Prod: sustained error-level logging"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "A prod service has logged 20+ errors in the last 3h — several times its idle rate"
+      link        = local.tripbot_sentry_link
+      description = "{{ $labels.service_name }} logged more than 20 error-level lines in 3h on prod-1; a quiet day peaks under 10 per 3h for tripbot and under 20 for onscreens-server, so this is a component failing loudly on a loop rather than background noise. Nothing more specific has paged, or you would be reading that alert instead — start from the errors themselves: Loki `{deployment_environment=\"prod-1\", service_name=\"{{ $labels.service_name }}\"} | detected_level=\"error\"` for the repeating line, then Sentry for the grouped issue. A retry loop that is not converging (the watchdog re-forcing the same recovery, an egress start the platform keeps refusing) is the usual shape; fix the thing it is retrying against rather than the retry."
+    }
+    labels = {
+      severity = "warning"
+      service  = "{{ $labels.service_name }}"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 10800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant"
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (service_name) (count_over_time({deployment_environment=\"prod-1\"} | detected_level=\"error\" [3h]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [20] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }

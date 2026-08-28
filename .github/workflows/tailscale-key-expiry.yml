@@ -1,0 +1,57 @@
+name: tailscale-key-expiry
+
+on:
+  schedule:
+    # Daily, a quarter hour after terraform-drift so the two don't land in the
+    # Discord channel together. Daily rather than weekly because the warning is
+    # the whole point: inside the threshold it nags every morning until the
+    # token is rotated, which is harder to scroll past than one message a week.
+    - cron: "15 8 * * *"
+  pull_request:
+    paths:
+      - '.github/workflows/tailscale-key-expiry.yml'
+      - '.github/scripts/check-tailscale-key-expiry.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  check_expiry:
+    # Dependabot PRs run with an isolated, empty secret namespace, so the
+    # AWS read would fail for a reason that says nothing about the token.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: Warn before the prod-1 Tailscale API token expires
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.CI_PROD_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CI_PROD_AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: CITerraformRole
+      - name: Check remaining lifetime
+        run: ./.github/scripts/check-tailscale-key-expiry.sh
+
+  # Same reasoning as terraform-drift.yml's alert job: a scheduled run has no
+  # PR to turn red, so without this the only record is an entry in a run list
+  # nobody is watching — which is exactly how the token got to expire unnoticed.
+  # Restricted to `schedule`; the PR runs are already visible as a check.
+  alert:
+    needs: [check_expiry]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Alert Discord
+        # Best-effort, like the drift alert — a rotated webhook shouldn't turn
+        # a failure to report into a second failure.
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'The prod-1 Tailscale API token is expiring or already invalid — prod-1 terraform stops planning when it lapses: [run log]({{ RUN_URL }})'
