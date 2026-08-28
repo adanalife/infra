@@ -1248,6 +1248,73 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // The channel is dark while OBS still believes it is streaming. When the RTMP
+  // upload drops, OBS keeps outputActive=true and retries on a 2s loop, so every
+  // other rule in this group reads clean: the frame-skip and congestion counters
+  // go quiet rather than bad, because no frames are being sent at all.
+  // obs_stream_output_reconnecting is the only signal that separates "streaming"
+  // from "trying to stream", and nothing watched it.
+  //
+  // Motivating incident: 2026-08-28. An RTMP send error dropped the Twitch upload
+  // at 16:10:32Z, the retry loop ran for 34 minutes without re-establishing, and
+  // the channel stayed dark until a human noticed. The gauge sat at 1 for the
+  // entire window; output bitrate sat at 0 against a ~6175 kbps baseline.
+  //
+  // for=3m rather than the congestion rule's 2m: a healthy reconnect clears in
+  // seconds, so any multi-minute dwell is a stuck retry loop, not a blip.
+  rule {
+    name           = "OBS: stream output stuck reconnecting (channel dark)"
+    for            = "3m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS has been reconnecting to the platform ingest for 3m — the channel is dark"
+      description = "obs_stream_output_reconnecting has been 1 for 3m on prod-1: OBS lost its RTMP connection to the platform's ingest and its retry loop is not re-establishing it. Viewers see an offline channel while the rest of stream-health reads clean, because OBS reports outputActive=true throughout and the frame/congestion counters go quiet rather than bad. Confirm with `rate(obs_stream_output_bytes[2m])`, which sits at 0 against a ~6175 kbps baseline. Recovery is StopStream THEN StartStream over obs-websocket — a bare StartStream returns 500, because OBS still considers the output active: `kubectl -n prod-1 exec deploy/obs-<platform> -- /opt/obs/venv/bin/python -c 'import os,time,obsws_python as obs; c=obs.ReqClient(host=\"localhost\",port=4455,password=os.environ[\"OBS_WEBSOCKET_PASSWD\"],timeout=15); c.stop_stream(); time.sleep(5); c.start_stream()'`. Restarting the pod also works but is heavier: the replacement must clear the i915 device-plugin admission check, which has rejected pods for days at a time. If this fires alongside control-plane restarts, suspect a node-wide I/O stall breaking the socket rather than a platform-side fault."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 180
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_platform, deployment_environment) (obs_stream_output_reconnecting{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Corrupt-feed detector, sourced from Loki rather than the obs_* metrics: the
   // failure it catches is upstream of OBS's own counters. When the playout
   // publish path hands OBS a stream with broken H264 reference structure, OBS
