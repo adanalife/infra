@@ -43,13 +43,12 @@ locals {
   // hour, so the alerts can't join against KSM. The metric is prod-only, so the
   // service_platform join also keeps stage series out (stage never pages).
   //
-  // Rules whose result carries a service_platform label join on it; the
-  // twitch-only bare-max rules (no service_platform on the result) pin the
-  // platform in the gate and join on (). The gate-metric deadman (gate-health
-  // group) pages if console_platform_component_up disappears, so a lost gate
-  // signal is loud rather than a silent un-arming.
-  obs_mode_gate        = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
-  obs_twitch_mode_gate = "and on () (console_platform_component_up{component=\"obs\", service_platform=\"twitch\", deployment_environment=\"prod-1\"} > 0)"
+  // Every rule using it carries a service_platform label on its result and joins
+  // on it, so one platform's gate never arms or disarms another's. The
+  // gate-metric deadman (gate-health group) pages if
+  // console_platform_component_up disappears, so a lost gate signal is loud
+  // rather than a silent un-arming.
+  obs_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
 
   // Relay-side variant of the mode gate, for the playout rules. Keyed on the
   // mediamtx component rather than obs: mediamtx is up in both dark and live,
@@ -2119,26 +2118,30 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // Background-audio dead air — the Twitch music bed (Groove Salad Classic /
-  // SomaFM) is not playing. tripbot's audio-fallback watchdog swaps the source
-  // onto the local Car Hum bed when SomaFM drops, and the local file plays
-  // immediately, so obs_background_audio_playing returns to 1 within ~1m of any
-  // SomaFM blip. Sustained 0 for 5m therefore means the source is genuinely
-  // silent AND the fallback didn't restore it (fallback file missing, OBS
-  // WebSocket wedged, watchdog dead) — real dead air on a 24/7 stream, so
-  // critical. Twitch-only: the metric is emitted by tripbot, which only runs
-  // the watchdog Twitch-side. no_data=OK so it stays quiet until tripbot#993
-  // ships the metric. Silence in Grafana during planned audio-off stretches.
+  // Background-audio dead air — a platform's music bed is not playing. tripbot's
+  // audio-fallback watchdog swaps the source onto a local bed when SomaFM drops,
+  // and the local file plays immediately, so obs_background_audio_playing
+  // returns to 1 within ~1m of any SomaFM blip. Sustained 0 for 5m therefore
+  // means the source is genuinely silent AND the fallback didn't restore it
+  // (fallback file missing, OBS WebSocket wedged, watchdog dead) — real dead air
+  // on a 24/7 stream, so critical.
+  //
+  // Grouped by service_platform, and that is the whole rule. Every platform runs
+  // its own watchdog writing this series, so an ungrouped max() is one number
+  // across all of them and only reaches 0 when every platform is silent at the
+  // same moment. Prod TikTok ran silent for eight minutes on 2026-07-29 with the
+  // metric collecting the whole time and this rule not firing; Dana noticed by
+  // ear. Silence in Grafana during planned audio-off stretches.
   rule {
-    name           = "OBS: Twitch background audio dead air (not playing)"
+    name           = "OBS: background audio dead air (not playing)"
     for            = "5m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Twitch background audio has not been playing for 5m"
-      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m — the Twitch music bed (Groove Salad Classic) is silent and the audio-fallback watchdog has NOT restored audio via the local Car Hum bed. Viewers hear dead air. Check the obs-twitch pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart the obs-twitch deploy. See vault tripbot/obs/gotchas.md."
+      summary     = "{{ $labels.service_platform }} background audio has not been playing for 5m"
+      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m on {{ $labels.service_platform }} — that platform's music bed is silent and the audio-fallback watchdog has NOT restored audio via a local bed. Viewers hear dead air. Check the obs-{{ $labels.service_platform }} pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart that obs deploy. See vault tripbot/obs/gotchas.md."
     }
     labels = {
       severity = "critical"
@@ -2154,7 +2157,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_twitch_mode_gate}"
+        expr          = "max by (service_platform) (obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -2184,20 +2187,24 @@ resource "grafana_rule_group" "stream_health" {
 
   // SomaFM down a while — informational. The fallback keeps audible music on
   // air, so this isn't dead air (the dead-air rule above covers that); it's a
-  // heads-up that the stream has been on a local bed instead of the intended
+  // heads-up that a stream has been on a local bed instead of the intended
   // music for 20m, i.e. SomaFM's edge has been unreachable for a sustained
   // stretch. Warning → Discord, not a page. for=20m so a brief SomaFM blip the
   // fallback rides through doesn't notify.
+  //
+  // Grouped by service_platform for the same reason as the dead-air rule: only
+  // a platform that selected the SomaFM bed can be on its fallback, so an
+  // ungrouped max() reports "something is on the fallback" without saying what.
   rule {
-    name           = "OBS: Twitch on SomaFM fallback bed for 20m"
+    name           = "OBS: on SomaFM fallback bed for 20m"
     for            = "20m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Twitch background audio has been on the fallback bed for 20m"
-      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
+      summary     = "{{ $labels.service_platform }} background audio has been on the fallback bed for 20m"
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
     }
     labels = {
       severity = "warning"
@@ -2213,7 +2220,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_twitch_mode_gate}"
+        expr          = "max by (service_platform) (obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -2255,16 +2262,15 @@ resource "grafana_rule_group" "stream_health" {
   // where reading OBS fails — so they always agree with what the console's
   // now-playing line and !song report.
   //
-  // Every platform, not Twitch-only: the album is TikTok's default bed and any
-  // platform can be switched onto it from the console. Hence obs_mode_gate
-  // rather than obs_twitch_mode_gate — a parked platform's tripbot keeps running
+  // Every platform: the album is TikTok's default bed and any platform can be
+  // switched onto it from the console. A parked platform's tripbot keeps running
   // and reports a bed it cannot actually play, so gating per-platform on
   // console_platform_component_up is what keeps those instances quiet.
   //
   // for=2m, shorter than the 5m SomaFM rule: silence starts the moment a track
   // ends, so the wait exists only to ride out a switch caught mid-write, not to
-  // confirm a sustained condition. critical for the same reason dead air on the
-  // Twitch bed is — a music-led slow-TV stream with no music is off the air.
+  // confirm a sustained condition. critical for the same reason dead air is — a
+  // music-led slow-TV stream with no music is off the air.
   rule {
     name           = "OBS: album bed dead air (empty play order)"
     for            = "2m"
