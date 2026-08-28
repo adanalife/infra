@@ -17,11 +17,10 @@ from adanalife_k8s.eso import ESData, external_secret
 
 # Cross-cutting observability secrets (k8s/shared-secrets/base) — all
 # dataFrom.extract from SSM Parameter Store, materialized into the env
-# namespace, envFrom'd by tripbot / vlc-server with optional: false.
+# namespace, envFrom'd by tripbot / onscreens-server with optional: false.
 _SHARED_SECRETS = [
     ("grafana-cloud-otlp", "/k8s/grafana-cloud-otlp"),
     ("sentry-tripbot", "/k8s/sentry-tripbot"),
-    ("sentry-vlc-server", "/k8s/sentry-vlc-server"),
     ("sentry-onscreens-server", "/k8s/sentry-onscreens-server"),
 ]
 

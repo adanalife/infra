@@ -1,0 +1,23 @@
+# Shared HA proxy fleet for tailnet-exposed Ingresses. Delivered by the
+# tailscale-operator Argo Application, which carries this directory as a
+# raw-manifest source alongside the chart that ships the CRD (see
+# cdk8s/adanalife_k8s/constructs/argo_platform.py). Cluster-scoped singleton — the operator runs one StatefulSet
+# (ts-ingress-proxies-{0,1}) in its own namespace and serves every Ingress
+# annotated `tailscale.com/proxy-group: ingress-proxies` from it, instead of one
+# proxy pod per Ingress.
+#
+# Opting an Ingress in also needs the operator's OAuth client to hold write
+# scope for Tailscale Services and the tailnet policy to name an owner for the
+# Services tag; see
+# https://tailscale.com/kb/1443/kubernetes-operator-high-availability
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyGroup
+metadata:
+  name: ingress-proxies
+spec:
+  type: ingress
+  replicas: 2
+  # Matches proxyConfig.defaultTags in values.yml, so the ACL already lets the
+  # operator (tag:k8s-operator) assign it.
+  tags:
+    - tag:k8s

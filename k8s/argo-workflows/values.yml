@@ -1,0 +1,140 @@
+# Argo Workflows — the batch engine for spare-compute work on the minipc (the
+# video-pipeline passes that today are hand-applied one-shot Jobs). Chart
+# version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered by the
+# `argo-workflows` Argo Application (dist/platform-argo.k8s.yaml).
+#
+# Two things the install deliberately does NOT have yet, because neither is
+# needed to run a workflow and both cost an AWS resource: an artifact
+# repository (steps pass data through the PVCs they already share, not S3) and
+# the Postgres workflow archive (history is the Workflow objects themselves,
+# kept for the ttlStrategy below). Add the artifact repo the first time a
+# workflow needs to hand a file to a step that doesn't share its volume.
+crds:
+  # Templated CRDs applied as ordinary resources, reconciled by Argo CD like
+  # every other manifest. The chart's default (full=true) installs them from a
+  # pre-install hook Job instead. Minified CRDs
+  # (x-kubernetes-preserve-unknown-fields) are fully functional and small
+  # enough to apply without tripping the 256KB client-side apply limit.
+  install: true
+  keep: true
+  full: false
+
+controller:
+  # One workflow at a time. The node also runs the live stream, and the passes
+  # this exists to run are model-heavy — serializing them is the same property
+  # video-pipeline's `wait-embed-redo` init-gate hand-rolls, except a queued
+  # workflow here holds no pod and therefore no quota. Raise it when a workload
+  # shows up that is genuinely cheap.
+  parallelism: 1
+  # Workflow pods land in the namespace holding the PVCs they mount, so the SA
+  # + Role pair the chart creates has to exist there too. stage-1 is where the
+  # dashcam corpus, models and output claims live.
+  workflowNamespaces:
+    - argo-workflows
+    - stage-1
+  workflowDefaults:
+    spec:
+      serviceAccountName: argo-workflow
+      # Batch work yields to the stream: the same most-preemptible tier the
+      # video-pipeline Jobs run at (cdk8s/adanalife_k8s/priority.py).
+      podPriorityClassName: dashcam-cv-low
+      # No archive database, so the Workflow object IS the history — a week of
+      # it, which outlasts any pass worth reviewing.
+      ttlStrategy:
+        secondsAfterCompletion: 604800
+      # Keep failed pods for their logs; successful ones have nothing to say.
+      podGC:
+        strategy: OnWorkflowSuccess
+  metricsConfig:
+    enabled: true
+  podAnnotations:
+    # What makes alloy-metrics scrape the controller (the fleet convention —
+    # k8s/monitoring/prod-1/values.yml remaps the chart's k8s.grafana.com/*
+    # keys to prometheus.io/*). argo_workflows_workflows_by_phase is the family
+    # worth having: Pending vs Running is the queue depth this install exists
+    # to make visible.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+workflow:
+  serviceAccount:
+    # Every workflow runs as this SA (workflowDefaults above names it). Without
+    # it workflows fail outright — the namespace default SA cannot patch pods
+    # or report task results.
+    create: true
+    name: argo-workflow
+  rbac:
+    create: true
+
+server:
+  # The server itself does not authenticate: `server` mode acts as the server's
+  # own ServiceAccount and skips the login. It is reachable over the tailnet
+  # and the home LAN (the two Ingresses below), both treated as trusted
+  # networks — anyone on either can submit workflows, and a workflow is an
+  # arbitrary pod. Gate with `client` authModes before exposing it any wider.
+  authModes:
+    - server
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+extraObjects:
+  # Tailnet UI at argo-workflows-prod.<tailnet>.ts.net, served by the shared HA
+  # proxy fleet (k8s/tailscale-operator/proxygroup.yml). Same shape as Argo CD's
+  # and Burrito's tailnet Ingresses; carried here rather than in a cdk8s
+  # construct so the whole install is one values file. TLS terminates at the
+  # tailnet edge and forwards plain HTTP to argo-workflows-server:2746.
+  # LAN UI at argo-workflows.prod.whereisdana.today — the traefik sibling every
+  # platform UI carries (argocd/burrito/hubble follow the same shape). The
+  # record rides external-dns -> minipc.whereisdana.today, so it follows the
+  # box between networks; cert-manager issues the TLS cert via Route53 DNS-01.
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: argo-workflows-server-traefik
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-route53
+        external-dns.alpha.kubernetes.io/hostname: argo-workflows.prod.whereisdana.today
+    spec:
+      ingressClassName: traefik
+      rules:
+        - host: argo-workflows.prod.whereisdana.today
+          http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: argo-workflows-server
+                    port:
+                      number: 2746
+      tls:
+        - hosts:
+            - argo-workflows.prod.whereisdana.today
+          secretName: argo-workflows-server-tls
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: argo-workflows-server-tailscale
+      annotations:
+        tailscale.com/proxy-group: ingress-proxies
+    spec:
+      ingressClassName: tailscale
+      defaultBackend:
+        service:
+          name: argo-workflows-server
+          port:
+            number: 2746
+      tls:
+        - hosts:
+            - argo-workflows-prod

@@ -61,3 +61,11 @@ data "aws_region" "current" {}
 resource "random_password" "static_site_secret" {
   length = 32
 }
+
+# Passed straight through to the ci module; see its variables.tf. Empty in an
+# env that has not opted into keyless CI auth.
+variable "github_oidc_subjects" {
+  type        = list(string)
+  default     = []
+  description = "GitHub Actions OIDC `sub` claims allowed to assume CITerraformRole; empty disables OIDC entirely"
+}

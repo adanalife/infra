@@ -69,32 +69,116 @@ destinations:
     #                         the shared-encoder contention view; the iGPU is
     #                         the scarcest resource on the minipc, so this one
     #                         earns cloud residency despite being scraped.
-    # Everything else scraped is local-VM-only: node_* (node-exporter-full),
-    # container_*/machine_* (cadvisor), the rest of kube_* (kubernetes-views),
-    # cilium_*, traefik_*, coredns_*, certmanager_*, external(_)dns_*,
-    # externalsecret_*, windows_*. Those dashboards need a VictoriaMetrics
-    # datasource in Grafana Cloud, which does not exist yet (it needs the PDC
-    # agent) — until it does, query VM by port-forward. Only two
-    # scraped series feed any alert — paths and platform_gateway_up — and both
-    # are kept, so no alert goes blind.
+    #   burrito_terraform_layer_status  — terraform drift per layer, for the
+    #                         drift alert. One series per layer (the gauge
+    #                         deletes the other status labels), so four today.
+    #   burrito_runs_by_status  — one series per distinct run status, and the
+    #                         only series that moves while Burrito is wedged
+    #                         mid-run: the layer gauge keeps reporting the last
+    #                         COMPLETED plan's status, and runs_failed_total is
+    #                         a counter that stays absent until retries are
+    #                         exhausted. Feeds the runs-stuck-retrying alert.
+    #                         Burrito's other families (the rest of runs,
+    #                         reconcile, its controller-runtime self-metrics)
+    #                         stay local-VM-only.
+    #   node_boot_time_seconds  — the node's boot timestamp, for the
+    #                         host-lifecycle alerts (a reboot, and a repeated
+    #                         reboot). It is the only signal that distinguishes
+    #                         "the node went away and came back" from the dozens
+    #                         of downstream symptoms a reboot produces, and every
+    #                         one of those symptoms is cheaper to read once you
+    #                         know the box bounced.
+    #                         Two series per physical node, not one: node-exporter
+    #                         is scraped both by hostMetrics' integration
+    #                         (job=integrations/node_exporter, instance=the node
+    #                         name) and by annotation-autodiscovery via the
+    #                         Service (job=prometheus-node-exporter), and both
+    #                         report the same value. The alerts pin the former so
+    #                         one reboot doesn't read as two; the duplicate is
+    #                         left shipping because two series against a
+    #                         15000-series cap is not worth a relabel rule.
+    #   gha_{assigned,running}_jobs, gha_{registered,busy}_runners  — the
+    #                         ARC listener's queue depth and runner pool, for
+    #                         the CI-queued-with-nothing-running alert and the
+    #                         CI runners row on platform-services. Four series:
+    #                         one listener, one scale set, one series each.
+    #                         The rest of the family stays local-VM-only —
+    #                         gha_{started,completed}_jobs_total carry
+    #                         repository and job_name (~170 series), and the
+    #                         two duration histograms add a `le` dimension on
+    #                         top of that (~7800).
+    # The rest of what's scraped is local-VM-only: the other node_*
+    # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
+    # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
+    # external(_)dns_*, externalsecret_*, windows_*. Those dashboards need a
+    # VictoriaMetrics datasource in Grafana Cloud, which does not exist yet (it
+    # needs the PDC agent) — until it does, query VM by port-forward.
+    #
+    # Every scraped series an alert reads is on this list, so no alert goes
+    # blind. That property is the reason to check this file when adding a rule
+    # against a scraped metric: a rule written against a series that isn't kept
+    # evaluates as no-data forever, and no-data on a `no_data_state = "OK"` rule
+    # is indistinguishable from healthy.
     metricProcessingRules: |-
+      write_relabel_config {
+        // The one stage-1 exception, and it needs the marker below because RE2
+        // has no negative lookahead: mark what to spare first, then drop the
+        // stage-1 series that carry no mark.
+        //
+        // guessr's round-generation CronJob lives in stage-1 because it writes
+        // staging's D1, but it is the only thing standing between the game and
+        // a day with no rounds on it, and nothing else can see whether it ran.
+        //
+        // Scoped by metric rather than by CronJob, so it covers every stage-1
+        // CronJob (guessr-rounds and dashcam-cv-fill today) at two series each
+        // against a 15000-series cap. That makes the next batch alert free
+        // rather than another edit here, and the cost stays negligible because
+        // the family is one series per CronJob per metric — it does not scale
+        // with runs, pods or history.
+        source_labels = ["namespace", "__name__"]
+        separator = "/"
+        regex = "stage-1/kube_cronjob_(status_last_successful_time|created)"
+        target_label = "__tmp_cloud_keep"
+        replacement = "yes"
+        action = "replace"
+      }
       write_relabel_config {
         // stage-1 namespaces never ship to the cloud — prod-1 only from
         // this shared cluster. Runs before the keep-list: a stage-1 series
         // whose name is on the allowlist (e.g. a stage mediamtx `paths`)
         // would otherwise slip through. stage-1 logs + events still ship
         // (Loki, not Mimir); stage-1 metrics land in localMetrics.
-        source_labels = ["namespace"]
-        regex = "stage-1(-platform)?"
+        //
+        // An unmarked stage-1 series joins to "stage-1/" and matches, because
+        // these regexes are fully anchored; a marked one joins to "stage-1/yes"
+        // and survives.
+        source_labels = ["namespace", "__tmp_cloud_keep"]
+        separator = "/"
+        regex = "stage-1(-platform)?/"
         action = "drop"
+      }
+      write_relabel_config {
+        // Drop the marker rather than trusting remote-write to strip __-prefixed
+        // labels for us. One rule, one less assumption.
+        regex = "__tmp_cloud_keep"
+        action = "labeldrop"
       }
       write_relabel_config {
         // The allowlist. `keep` drops every scraped series whose __name__
         // isn't matched (regexes are fully anchored, RE2). Add a family
         // only when a cloud dashboard or alert queries it — the default
         // answer for a new scraped metric is local-VM-only.
-        source_labels = ["__name__"]
-        regex = "platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+"
+        //
+        // Matched against __name__ + mountpoint so the T5 fill alert
+        // (host-storage rule group) can have its two inputs without the
+        // whole node_filesystem_* family: node-exporter emits those per
+        // mount, and only /var/mnt/data is worth cloud residency. Every
+        // other kept family is mountpoint-less, so it joins to a bare
+        // trailing separator — which is what the "/" at the end of the
+        // first alternative matches, and what a new family must keep.
+        source_labels = ["__name__", "mountpoint"]
+        separator = "/"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
@@ -143,6 +227,15 @@ clusterMetrics:
         - kube_pod_container_status_last_terminated_exitcode
         - kube_pod_status_scheduled
         - kube_namespace_created
+        # CronJob liveness, for the batch-health alert. The chart's default
+        # allowlist carries no kube_cronjob_* at all, so these are absent from
+        # BOTH destinations until named here — the cloud drop-list is a separate
+        # question, handled in the destination's rules above. `created` is the
+        # floor the alert measures from before a CronJob has ever succeeded;
+        # without it a brand-new CronJob that has never run reads as no-data
+        # rather than as overdue. Cluster-wide these are two series per CronJob.
+        - kube_cronjob_status_last_successful_time
+        - kube_cronjob_created
       # Both overlap with cheaper metrics already in the default allowlist:
       # kube_pod_status_reason (~210 series) overlaps with kube_pod_status_phase;
       # kube_deployment_status_condition (~144 series) is rarely queried directly

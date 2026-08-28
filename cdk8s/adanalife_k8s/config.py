@@ -44,6 +44,10 @@ class EnvConfig:
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
+    # Emit the CNPG `pg` cluster (PITR via barman-cloud → S3) alongside the
+    # legacy StatefulSet. Stage-1 first; prod-1 flips on after the stage PITR
+    # restore drill passes. dev/local keep the legacy StatefulSet only.
+    cnpg: bool = False
     # "" → postgres co-locates in the app namespace (default, byte-identical
     # render). Set to an isolated namespace (e.g. "stage-1-data") to move the DB
     # StatefulSet + its ESO SecretStore out of the app namespace, so deleting the
@@ -54,9 +58,11 @@ class EnvConfig:
     external_dns_role_arn: str = (
         ""  # cert-manager DNS-01 Route53 role (per AWS account)
     )
-    lan_ip: str = (
-        "192.168.1.200"  # mini-PC node IP external-dns/traefik target (platform Helm)
-    )
+    # Approximates the external-dns/traefik target for the platform-Helm render
+    # only. Both components are task-installed from committed k8s/** values that
+    # carry the node's DNS alias instead, so nothing reads this value into a
+    # cluster — and it still holds the address of a network the mini-PC has left.
+    lan_ip: str = "192.168.1.200"
     nfs_server: str = ""  # dashcam NFS export (nfs mode); from $NFS_SERVER at synth
     nfs_path: str = ""  # dashcam NFS path; from the $nfs_path_env var at synth
     # Which env var supplies this env's dashcam path. Both nfs envs now read the
@@ -165,6 +171,7 @@ ENVS: dict[str, EnvConfig] = {
         tailscale=True,
         postgres_size="10Gi",
         postgres_storage_class="local-path",
+        cnpg=True,
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
         music_pv_name="obs-music-nfs-stage",

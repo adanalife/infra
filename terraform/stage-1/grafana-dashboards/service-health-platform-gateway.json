@@ -33,10 +33,27 @@
         "sort": 1
       },
       {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__DS_PROMETHEUS__"
+        },
+        "query": "label_values(platform_gateway_up, namespace)",
+        "current": {
+          "text": "prod-1",
+          "value": "prod-1"
+        },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
         "name": "platform",
         "label": "Platform",
         "type": "custom",
-        "query": "twitch,youtube,facebook",
+        "query": "twitch,youtube,facebook,instagram,tiktok",
         "current": {
           "text": "twitch",
           "value": "twitch"
@@ -53,13 +70,13 @@
       "title": "About this dashboard",
       "gridPos": {
         "x": 0,
-        "y": 37,
+        "y": 46,
         "w": 24,
         "h": 4
       },
       "options": {
         "mode": "markdown",
-        "content": "`gateway-$platform` is the per-platform API gateway (the `platform_gateway_*` metrics from `internal/metrics`, [platform-gateway#14](https://github.com/adanalife/platform-gateway/pull/14)). Unlike tripbot's OTel-push metrics, these are **annotation-scraped** (`prometheus.io/scrape` on the pod), so they carry `cluster`/`namespace`/`pod` — filtered here by `pod=~\"gateway-$platform.*\"`. Only **prod-1** ships to Grafana Cloud (stage-1 is dropped at the Alloy layer), so only prod `gateway-twitch` populates these panels. **The Twitch Helix row is the only place Twitch Helix metrics live** — the gateway is the single Helix caller, and the tripbot-side `twitch_helix_*` panels that used to sit on the Twitch Chat Activity dashboard are gone. Helix-row panels are twitch-only (`pod=~\"gateway-twitch.*\"`); a youtube gateway leaves them empty."
+        "content": "`gateway-$platform` is the per-platform API gateway (the `platform_gateway_*` metrics from `internal/metrics`, [platform-gateway#14](https://github.com/adanalife/platform-gateway/pull/14)). Unlike tripbot's OTel-push metrics, these are **annotation-scraped** (`prometheus.io/scrape` on the pod), so they carry `cluster`/`namespace`/`pod` — filtered here by `namespace=~\"$deployment_environment\"` and `pod=~\"gateway-$platform.*\"`. The environment variable is named `deployment_environment` (though it reads the `namespace` label) so a `?var-deployment_environment=` link presets it exactly as it does on the OTLP-fed service-health dashboards. Only **prod-1** ships to Grafana Cloud (stage-1 is dropped at the Alloy layer), so only prod `gateway-twitch` populates these panels. **The Twitch Helix row is the only place Twitch Helix metrics live** — the gateway is the single Helix caller, and the tripbot-side `twitch_helix_*` panels that used to sit on the Twitch Chat Activity dashboard are gone. Helix-row panels are twitch-only (`pod=~\"gateway-twitch.*\"`); a youtube gateway leaves them empty."
       }
     },
     {
@@ -91,7 +108,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(time() - max(timestamp(last_over_time(platform_gateway_up{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))) < bool 60"
+          "expr": "(time() - max(timestamp(last_over_time(platform_gateway_up{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[5m])))) < bool 60"
         }
       ],
       "options": {
@@ -154,7 +171,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))"
+          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[5m]))"
         }
       ],
       "options": {
@@ -191,7 +208,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"502\"}[5m]))"
+          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\", status=\"502\"}[5m]))"
         }
       ],
       "options": {
@@ -241,7 +258,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\", status=\"501\"}[5m]))"
+          "expr": "sum(rate(platform_gateway_requests_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\", status=\"501\"}[5m]))"
         }
       ],
       "options": {
@@ -278,7 +295,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (op) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))",
+          "expr": "sum by (op) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[5m]))",
           "legendFormat": "{{op}}"
         }
       ],
@@ -310,7 +327,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m]))",
+          "expr": "sum by (status) (rate(platform_gateway_requests_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[5m]))",
           "legendFormat": "{{status}}"
         }
       ],
@@ -345,12 +362,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[5m])))",
           "legendFormat": "p50 {{op}}"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (op, le) (rate(platform_gateway_request_duration_seconds_bucket{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[5m])))",
           "legendFormat": "p95 {{op}}"
         }
       ],
@@ -394,7 +411,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})"
+          "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"})"
         }
       ],
       "options": {
@@ -446,7 +463,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m]))"
+          "expr": "sum(increase(platform_gateway_helix_errors_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"}[5m]))"
         }
       ],
       "options": {
@@ -494,12 +511,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})",
+          "expr": "min(platform_gateway_helix_ratelimit_remaining{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"})",
           "legendFormat": "remaining"
         },
         {
           "refId": "B",
-          "expr": "max(platform_gateway_helix_ratelimit_limit{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"})",
+          "expr": "max(platform_gateway_helix_ratelimit_limit{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"})",
           "legendFormat": "limit"
         }
       ],
@@ -531,7 +548,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"}[5m])) * 60",
           "legendFormat": "{{endpoint}} ({{status}})"
         }
       ],
@@ -557,7 +574,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 50,
         "w": 24,
         "h": 10
       },
@@ -565,7 +582,7 @@
         {
           "refId": "A",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"platform-gateway\" } | select(resource.deployment.environment)",
+          "query": "{ resource.service.name = \"platform-gateway\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)",
           "limit": 20
         }
       ]
@@ -588,7 +605,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "platform_gateway_build_info{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"}",
+          "expr": "platform_gateway_build_info{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}",
           "legendFormat": "{{version}}"
         }
       ],
@@ -625,7 +642,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "time() - max(kube_pod_start_time{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"})"
+          "expr": "time() - max(kube_pod_start_time{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"})"
         }
       ],
       "options": {
@@ -663,7 +680,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_status_restarts_total{cluster=~\"$cluster\", pod=~\"gateway-$platform.*\"})"
+          "expr": "sum(kube_pod_container_status_restarts_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"})"
         }
       ],
       "options": {
@@ -694,6 +711,265 @@
           }
         },
         "overrides": []
+      }
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Fleet & config (all platforms — not $platform-scoped)",
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Platform enabled",
+      "description": "1 when that gateway reports its platform as enabled, 0 when it is switched off. One tile row per running gateway container. This metric carries no platform label — the platform is the container name — so this panel is deliberately not $platform-scoped: it is the fleet view, and a platform switched off is exactly what you want to see next to the ones that are on.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (container) (platform_gateway_platform_enabled{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"})",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DISABLED",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "enabled",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Chat connected",
+      "description": "1 when the gateway holds a live chat connection for its platform, 0 when it does not. Pair with tripbot's own 'Twitch Chat Connected' tile on dashboard 03: this one 0 while that one 1 localises the fault to the gateway rather than the path between them. Not $platform-scoped, for the same reason as the tile beside it — the metric carries no platform label.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 38,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (container) (platform_gateway_chat_connected{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"})",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DISCONNECTED",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "connected",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Stream metadata drift by field",
+      "description": "1 when the platform's live stream metadata no longer matches what the gateway intends for it, per field (title, category, tags, description). Drift means somebody or something changed the stream's title or category out from under us — the gateway notices but does not force it back, so this is the only signal. Flat 0 across every field is the healthy reading.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 38,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (platform, field) (platform_gateway_metadata_drift{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"})",
+          "legendFormat": "{{platform}} · {{field}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Sentry events dropped (per hour, by reason)",
+      "description": "Error events the gateway threw away instead of sending to Sentry, split by why: cooldown (same fingerprint too soon) or hourly_cap (budget exhausted). Nonzero is not a gateway fault — it is the self-limiter working — but a sustained hourly_cap means real errors are being discarded, so Sentry is no longer a complete picture of this service and the cap needs raising.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (increase(platform_gateway_sentry_events_dropped_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\"}[1h]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
       }
     }
   ]

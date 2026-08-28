@@ -97,8 +97,7 @@ resource "aws_iam_role_policy_attachment" "ci_role_access" {
 
 
 ## ci-terraform
-# create a special terraform role with extra permissions
-# IAM Role for CI Terraform
+# a read-only terraform role for CI plans and drift detection
 resource "aws_iam_role" "ci_terraform" {
   name               = "CITerraformRole"
   assume_role_policy = data.aws_iam_policy_document.ci_terraform_trust_policy.json
@@ -120,18 +119,49 @@ data "aws_iam_policy_document" "ci_terraform_trust_policy" {
       ]
     }
   }
+
+  # The keyless path, alongside the CIUser principal above rather than
+  # replacing it, so the access-key path keeps working until the workflows
+  # move. Present only in accounts that opted in (see oidc.tf).
+  dynamic "statement" {
+    for_each = length(var.github_oidc_subjects) > 0 ? [1] : []
+
+    content {
+      actions = ["sts:AssumeRoleWithWebIdentity"]
+
+      principals {
+        type        = "Federated"
+        identifiers = [aws_iam_openid_connect_provider.github_actions[0].arn]
+      }
+
+      # Both conditions are load-bearing. Without the aud check any GitHub
+      # token would be accepted; without the sub check any *repository* on
+      # GitHub could assume the role, which is the classic misconfiguration.
+      condition {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:aud"
+        values   = ["sts.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringLike"
+        variable = "token.actions.githubusercontent.com:sub"
+        values   = var.github_oidc_subjects
+      }
+    }
+  }
 }
 
-#TODO: empty this, then set env-specific lists (stage and prod will probable be identical)
+# Read-only on purpose: CI only ever plans (terraform.yml + the drift cron) —
+# applies are operator-driven from a workstation with their own credentials.
+# ReadOnlyAccess covers every provider read a plan needs, including the state
+# bucket objects; per-env write-shaped grants that plans need (none today)
+# belong in the env's own attached policies, not here.
 variable "managed_iam_policies_for_terraform" {
   description = "List of AWS-managed IAM policies to attach to the CI role"
   type        = list(string)
   default = [
-    "AmazonEC2FullAccess",
-    "AmazonRoute53FullAccess",
-    "AmazonS3FullAccess",
-    "IAMFullAccess",
-    "ReadOnlyAccess", #TODO: remove this after a while & add individual read-only policies
+    "ReadOnlyAccess",
   ]
 }
 

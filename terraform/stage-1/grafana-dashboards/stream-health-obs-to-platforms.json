@@ -252,7 +252,7 @@
       "id": 43,
       "type": "stat",
       "title": "SomaFM edge",
-      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing.",
+      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing. The probe only runs while a bot is stranded on the local fallback bed, so \"not probing\" is the healthy steady state.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
       "targets": [
@@ -270,8 +270,10 @@
             { "color": "red", "value": null },
             { "color": "green", "value": 1 }
           ]},
+          "noValue": "not probing",
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } },
+            { "type": "special", "options": { "match": "null", "result": { "text": "not probing", "color": "text" } } }
           ]
         },
         "overrides": []
@@ -331,7 +333,7 @@
       "id": 46,
       "type": "timeseries",
       "title": "Background audio state (playing / fallback / SomaFM reachable)",
-      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed.",
+      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed. The somafm reachable line only exists while the probe runs (i.e. while on fallback), so a gap there means not probing rather than unreachable.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
       "targets": [
@@ -348,10 +350,61 @@
       }
     },
     {
+      "id": 47,
+      "type": "timeseries",
+      "title": "Background audio bed (one-hot, per platform)",
+      "description": "Which of the three beds is feeding the stream, as a one-hot gauge: exactly one bed reads 1 per platform and the rest read 0, so a switch shows as one line handing off to another. The 'Source' stat above this only distinguishes SomaFM from fallback, which collapses carhum and album into one state — this is what tells them apart. Two platforms sitting on different beds is normal, not drift.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 40, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (bed, service_platform, deployment_environment) (tripbot_background_audio_bed{service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{bed}} · {{service_platform}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 48,
+      "type": "timeseries",
+      "title": "Album bed · tracks loaded",
+      "description": "How many tracks the album bed found on disk, per platform. Only meaningful while the album bed is the active one (see the panel beside this). A drop to 0 means the album directory came up empty — the bed will play silence rather than fall back, so this is the only warning. The two platforms legitimately carry different album sizes; watch each line against its own history, not against the other.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 40, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (service_platform, deployment_environment) (tripbot_background_audio_album_tracks{service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_platform}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
       "id": 50,
       "type": "row",
       "title": "Decoder corruption (OBS-side, from decode logs)",
-      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 1 }
+      "gridPos": { "x": 0, "y": 48, "w": 24, "h": 1 }
     },
     {
       "id": 51,
@@ -359,7 +412,7 @@
       "title": "OBS decode errors /s",
       "description": "Rate of H.264 decode errors in the OBS ffmpeg decoder (concealing, co-located POCs, MB-decode / cabac failures) — the decoder working on frames whose reference pictures are missing or mismatched. Spikes mean OBS is decoding across a clip splice without a clean reference reset. Baseline is near-zero on 3.17; a 10-20x jump was the gather (3.18) whole-frame block-corruption signature. Sourced from Loki (the errors exist only as decoder log lines, and prod is at the Prometheus active-series cap).",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
-      "gridPos": { "x": 0, "y": 41, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 49, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "sum by (pod) (rate({service_name=\"obs\", namespace=~\"$deployment_environment\", pod=~\"obs-($platform)-.*\"} |~ \"co located POCs unavailable|concealing [0-9]+ DC.*errors in [BP] frame|error while decoding MB|cabac decode of qscale diff failed\" [$__rate_interval]))", "legendFormat": "{{pod}}" }
       ],
@@ -383,7 +436,7 @@
       "title": "Co-located POC failures (splice-specific)",
       "description": "count/interval of `co located POCs unavailable` — ffmpeg's error for a B-frame whose co-located reference picture is gone, i.e. decoding a clip boundary with no reference reset. The cleanest gather-vs-baseline discriminator: ~10 per 10min on 3.17, 80-200 per 10min under gather (3.18).",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
-      "gridPos": { "x": 12, "y": 41, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 49, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "sum by (pod) (count_over_time({service_name=\"obs\", namespace=~\"$deployment_environment\", pod=~\"obs-($platform)-.*\"} |~ \"co located POCs unavailable\" [$__interval]))", "legendFormat": "{{pod}}" }
       ],

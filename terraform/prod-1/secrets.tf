@@ -28,7 +28,6 @@ locals {
     "prod-1/grafana-cloud-api"             = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
     "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
-    "k8s/sentry-vlc-server"                = "Sentry DSN for the vlc-server Go service. Consumed via the SENTRY_DSN env var."
     "k8s/sentry-onscreens-server"          = "Sentry DSN for the onscreens-server Go service. Consumed via the SENTRY_DSN env var."
     "k8s/sentry-platform-gateway"          = "Sentry DSN for the platform-gateway service. Consumed via the SENTRY_DSN env var."
     "k8s/sentry-tripbot-console"           = "Sentry DSN for the tripbot-console service. Consumed via the SENTRY_DSN env var."
@@ -92,6 +91,48 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
   })
 }
 
+# JSON array of email addresses, e.g. ["you@example.com"]. Whoever may open
+# guessr's /admin/ on the production game — the Access policy in
+# cloudflare-pages-guessr.tf includes one rule per address, and Access mails a
+# one-time PIN to it. Here rather than in the terraform because this repo is
+# public and these are personal addresses.
+#
+# Its own parameter rather than a read of the staging one, which lives in a
+# different AWS account: this list decides who can reshuffle the schedule players
+# are actually getting, and the two lists being separately editable is the point
+# rather than duplication to be tidied away. KEEP-IN-SYNC is not wanted here.
+#
+# Outside the map above because the placeholder has to be valid JSON that
+# jsondecode can read pre-seed, and the map's is an object rather than an array.
+# The empty placeholder is NOT a usable value — a policy with no rules is
+# rejected — so the policy carries a precondition that says so.
+resource "aws_ssm_parameter" "guessr_admin_emails" {
+  name        = "/prod-1/guessr-admin-emails"
+  description = "Email addresses allowed through Cloudflare Access to guessr's /admin/ on production. JSON array of addresses."
+  type        = "SecureString"
+  value       = "[]"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# Who may sign in to the cluster's internal admin UIs through Cloudflare
+# Access — burrito today (burrito-oidc.tf). Separate from the guessr list on
+# purpose: that one gates a game-scheduling surface, this one gates terraform.
+# Same empty-placeholder shape as guessr's, and the policy carries the
+# precondition that explains the two-apply bootstrap.
+resource "aws_ssm_parameter" "internal_admin_emails" {
+  name        = "/prod-1/internal-admin-emails"
+  description = "Email addresses allowed through Cloudflare Access to the cluster's internal admin UIs. JSON array of addresses."
+  type        = "SecureString"
+  value       = "[]"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # ============================================================================
 # Unmanaged parameters (deliberately NOT terraform resources)
 # ============================================================================
@@ -103,6 +144,16 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 #   - /k8s/obs/facebook-stream-key (Facebook Live Producer persistent key, prod Page)
 #   - /k8s/grafana-cloud-metrics-write
 #   - /k8s/external-dns/aws-credentials (hand-seeded from PGP outputs)
+#
+# Burrito's per-layer runner credentials also live here — one pair per
+# terraform workspace it plans, all in PROD's Parameter Store because that is
+# the account the cluster's ClusterSecretStore reads. Each is hand-seeded from
+# its own workspace's `burrito_*` PGP outputs, so no single workspace can
+# declare them:
+#   - /k8s/burrito/core-access-key-id     + -secret-access-key  (core's `burrito` user)
+#   - /k8s/burrito/platform-access-key-id + -secret-access-key  (core's `burrito-platform` user)
+#   - /k8s/burrito/stage-access-key-id    + -secret-access-key  (stage-1's `burrito` user)
+#   - /k8s/burrito/prod-access-key-id     + -secret-access-key  (prod-1's `burrito` user)
 
 # ============================================================================
 # Plan-time data sources
@@ -130,6 +181,14 @@ data "aws_ssm_parameter" "cloudflare_api_token" {
 # to apply time whenever any entry is added to the map.
 data "aws_ssm_parameter" "discord_alerts_webhook" {
   name = "/k8s/tripbot/discord-alerts-webhook"
+}
+
+data "aws_ssm_parameter" "guessr_admin_emails" {
+  name = aws_ssm_parameter.guessr_admin_emails.name
+}
+
+data "aws_ssm_parameter" "internal_admin_emails" {
+  name = aws_ssm_parameter.internal_admin_emails.name
 }
 
 # ============================================================================

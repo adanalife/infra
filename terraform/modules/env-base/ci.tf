@@ -5,6 +5,7 @@ module "ci" {
 
   static_website_bucket_arn = aws_s3_bucket.static_website.arn
   cdn_arn                   = aws_cloudfront_distribution.primary_cdn.arn
+  github_oidc_subjects      = var.github_oidc_subjects
 }
 
 output "ci_user_access_key" {

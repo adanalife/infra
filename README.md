@@ -7,7 +7,7 @@ app's own repo), and a Taskfile that ties the workflows together.
 
 ## running kubernetes locally (development)
 
-Dev app stack (postgres + tripbot + vlc-server + obs + onscreens-server) on a
+Dev app stack (postgres + tripbot + obs + onscreens-server) on a
 local k3d cluster (`adanalife-dev`). The infra manifests are authored in cdk8s
 (`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`;
 the tripbot app manifests live in the tripbot repo (obs manifests in the obs
@@ -28,7 +28,7 @@ task k8s:dev:up
 
 # Iterate on a LOCAL build — builds the image, imports it as :dev-local, and
 # pins the live Deployment to it (pauses Argo selfHeal so it sticks). APP=<app>
-# for one of tripbot|vlc|obs|onscreens; omit for all four:
+# for one of tripbot|obs|onscreens; omit for all three:
 task k8s:dev:deploy APP=tripbot
 
 # Revert to CI's :main image (re-enables selfHeal + re-syncs):
@@ -53,8 +53,6 @@ Ad-hoc access (no host-port bindings on the dev cluster — everything is
 kubectl port-forward -n development svc/tripbot-twitch 8080:8080 &
 curl http://localhost:8080/health/live
 # VNC:  kubectl port-forward -n development svc/obs-twitch 5902:5902  → vnc://localhost:5902
-#       kubectl port-forward -n development svc/vlc-twitch 5903:5903  → vnc://localhost:5903
-# RTSP: kubectl port-forward -n development svc/vlc-twitch 8554:8554  → rtsp://localhost:8554/dashcam
 ```
 
 The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
@@ -63,7 +61,26 @@ The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
 the dev k3d cluster is local-only.
 
 The bundled traefik handles the tripbot Ingress in-cluster; the bundled
-servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared
+servicelb (klipper-lb) fulfills the VNC LoadBalancer services declared
 by the app manifests. Both are k3s-only — stage-1/prod-1 co-tenant a bare-metal
 Talos cluster on a mini-PC with no LoadBalancer controller; traefik there runs
 on hostNetwork, binding the node's LAN IP :80/:443.
+
+## diagnosing minipc reboots
+
+The single-node Talos cluster leaves no record of its own restarts — nothing
+survives to mark the node NotReady, and `node_*` metrics are allowlisted to the
+in-cluster VictoriaMetrics rather than Grafana Cloud. `scripts/arc-crash-correlate.py`
+builds the census from `node_boot_time_seconds` and intersects it with the
+self-hosted (ARC) runner jobs that were on the box at each death, ending in a
+per-(repo, workflow, job) table of runs vs. runs-with-a-death:
+
+```bash
+task arc:crash-correlate -- --since 2026-08-22
+```
+
+The task port-forwards VictoriaMetrics for the duration; flags after `--` reach
+the script (`--label`, `--vm-url`, `--window`, `--refresh` to bust the job
+cache). Both traps it walks around — a scrape gap is not a reboot, and the plain
+`/jobs` endpoint hides every attempt but the latest — are written up in the
+script's docstring.

@@ -1,5 +1,5 @@
 {
-  "title": "07 — Twitch Chat Activity",
+  "title": "08 — Twitch Chat Activity",
   "uid": "twitch-chat-activity",
   "tags": ["tripbot", "product", "twitch"],
   "schemaVersion": 39,
@@ -15,7 +15,7 @@
       "gridPos": { "x": 0, "y": 62, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "These metrics populate when tripbot is receiving Twitch chat over gateway-twitch and messages are flowing. If panels look empty, check `kubectl logs deploy/gateway-twitch` for failing `inbound_chat` requests, and verify gateway-twitch's Twitch token is still valid. **Twitch Helix metrics are not here** — the platform-gateway is the single Helix caller, so rate-budget and Helix-error panels live on the Service Health / platform-gateway dashboard under its Twitch Helix row. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...}` for login/logout rate, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate. **Chat feed row** (added 2026-05-15): each chat message arrives as a Loki log record under `{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
+        "content": "These metrics populate when tripbot is receiving Twitch chat over gateway-twitch and messages are flowing. If panels look empty, check `kubectl logs deploy/gateway-twitch` for failing `inbound_chat` requests, and verify gateway-twitch's Twitch token is still valid. **Twitch Helix metrics are not here** — the platform-gateway is the single Helix caller, so rate-budget and Helix-error panels live on the Service Health / platform-gateway dashboard under its Twitch Helix row. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...,service_platform=...}` for the events-table write rate — every kind in the taxonomy, not just login/logout, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate. **Chat feed row** (added 2026-05-15): each chat message arrives as a Loki log record under `{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
       }
     },
     {
@@ -146,7 +146,7 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "Events / min (login + logout)",
+      "title": "Events / min (all kinds)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 33, "w": 8, "h": 5 },
       "targets": [
@@ -206,7 +206,7 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "Login / logout rate",
+      "title": "Event rate by kind",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 46, "w": 24, "h": 8 },
       "targets": [

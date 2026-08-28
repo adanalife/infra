@@ -24,6 +24,17 @@ locals {
 provider "grafana" {
   url  = lookup(local.grafana_creds, "GRAFANA_CLOUD_URL", "https://placeholder.grafana.net")
   auth = lookup(local.grafana_creds, "GRAFANA_CLOUD_API_TOKEN", "placeholder")
+  # Synthetic Monitoring is a separate API behind a separate token; the
+  # dashboard credentials above cannot reach it. Set here rather than on an
+  # aliased provider because every Grafana resource in this environment shares
+  # one stack. See grafana-guessr.tf for the check itself.
+  sm_access_token = data.aws_ssm_parameter.grafana_sm_access.value
+  # SM access tokens are region-scoped, and the provider's default sm_url is
+  # the region-less endpoint, which rejects a regional token as
+  # "invalid API token" — a 403 that reads like a bad credential. The region
+  # is the tail of the stack's Prometheus host
+  # (prometheus-prod-66-prod-us-east-3 → us-east-3).
+  sm_url = "https://synthetic-monitoring-api-us-east-3.grafana.net"
 }
 
 # Datasource UIDs follow the pattern grafanacloud-<slug>-{prom,logs,traces}
@@ -83,6 +94,7 @@ locals {
     "service-health-tripbot",
     "service-health-onscreens-server",
     "service-health-platform-gateway", # gateway façade request metrics + the Twitch Helix rate-limit/error panels that replace tripbot's in-process ones at cutover (platform-gateway#14)
+    "service-health-tripbot-console",  # the admin live console: SSE clients, its own HTTP surface, and its view of per-platform component health
     "igpu-performance",                # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
     "twitch-chat-activity",
     "logs-and-errors",

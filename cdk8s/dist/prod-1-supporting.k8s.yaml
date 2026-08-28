@@ -35,23 +35,6 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: sentry-vlc-server
-  namespace: prod-1
-spec:
-  dataFrom:
-    - extract:
-        key: /k8s/sentry-vlc-server
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: SecretStore
-    name: aws-parameterstore
-  target:
-    creationPolicy: Owner
-    name: sentry-vlc-server
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
   name: sentry-onscreens-server
   namespace: prod-1
 spec:
@@ -151,6 +134,15 @@ metadata:
 description: Prod support workloads (the console) — outrank default-priority co-tenants and preempt them under node pressure, but stay below the live-stream tier (prod-stream).
 globalDefault: false
 value: 900
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-low
+  namespace: prod-1
+description: CI runner pods (ARC) — most-preemptible tier, alongside dashcam-cv-low. Evicted before any default-priority workload; a killed build is just a re-run.
+globalDefault: false
+value: -10
 ---
 apiVersion: external-secrets.io/v1
 kind: SecretStore

@@ -263,3 +263,33 @@ spec:
   successfulJobsHistoryLimit: 3
   suspend: false
   timeZone: Etc/UTC
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: tripbot
+  name: postgres-ingress
+  namespace: prod-1-data
+spec:
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: prod-1
+      ports:
+        - port: 5432
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - port: 8000
+          protocol: TCP
+  podSelector: {}
+  policyTypes:
+    - Ingress

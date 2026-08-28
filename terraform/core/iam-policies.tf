@@ -132,6 +132,50 @@ data "aws_iam_policy_document" "bucket_policy" {
     }
   }
 
+  # Burrito's per-env plan runners need s3:ListBucket, which the S3 backend
+  # requires. They need nothing for the state object itself: each env's
+  # <account>.tfstate is OWNED by that env's account (the bucket keeps ACLs
+  # on, so the writer owns what it writes), which is why the statements above
+  # grant PutObject but never GetObject — and why a core-account principal
+  # gets a 403 reading stage-1.tfstate.
+  #
+  # ORDERING: a bucket policy naming a principal that does not exist yet is
+  # rejected as MalformedPolicy, so each env must be applied before core.
+  dynamic "statement" {
+    for_each = local.accounts
+
+    content {
+      sid       = "list-bucket-burrito-${local.accounts[statement.key].name}"
+      resources = ["arn:aws:s3:::${var.state_bucket}"]
+      actions   = ["s3:ListBucket"]
+
+      principals {
+        type = "AWS"
+        identifiers = [
+          "arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito",
+          "arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito-apply",
+        ]
+      }
+    }
+  }
+
+  # The apply identity additionally writes the state object back. Only it — the
+  # plan user above is read-only by construction and never needs this.
+  dynamic "statement" {
+    for_each = local.accounts
+
+    content {
+      sid       = "put-state-burrito-${local.accounts[statement.key].name}"
+      resources = ["arn:aws:s3:::${var.state_bucket}/${local.accounts[statement.key].name}.tfstate"]
+      actions   = ["s3:PutObject"]
+
+      principals {
+        type        = "AWS"
+        identifiers = ["arn:aws:iam::${local.accounts[statement.key].id}:user/bots/burrito-apply"]
+      }
+    }
+  }
+
   # give terraform role access to the core state file
   # (this is separate because core is not part of local.accounts)
   #TODO: refactor this so it's no longer a dynamic statement

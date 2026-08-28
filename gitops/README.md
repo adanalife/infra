@@ -77,7 +77,8 @@ every other ESO-backed secret).
 3. **Apply the Argo config** (project + appsets + ingress + repo secret):
 
    ```sh
-   kubectl apply -f cdk8s/dist/argocd.k8s.yaml
+   task gitops:diff    # read-only preview of what the apply would change
+   task gitops:apply
    ```
 
    The three ApplicationSets fan out into the per-component / supporting / data
@@ -175,25 +176,30 @@ Source: `cdk8s/adanalife_k8s/constructs/argo_platform.py`; the chart table is
 intentionally broad **`platform` AppProject** governs them (platform installs CRDs
 / ClusterRoles / webhooks), distinct from the restrictive `tripbot` app project.
 
+An Application can carry in-repo raw manifests as an extra source when they are
+custom resources of a CRD its chart ships: `tailscale-operator` also delivers
+`k8s/tailscale-operator/proxygroup.yml` (the `ingress-proxies` ProxyGroup), so the
+proxy fleet syncs with the operator that reconciles it.
+
 **Not Argo-managed — they stay task-installed (`task k8s:<env>:platform:up`):**
 
 - **cilium** (the CNI Argo itself rides on) and **argo-cd** (its own install) — the
   bootstrap floor.
-- **traefik** + **external-dns** — *host-coupled*. traefik's `ingressEndpoint.ip`
-  and external-dns's `--default-targets` are the node's **discovered InternalIP**,
-  written to the gitignored `values.local.yml` at bootstrap (prod's differs from the
-  committed `lan_ip`); external-dns also carries `--force-default-targets` in that
-  same gitignored arg list. Argo-rendering them from committed values would force
-  the wrong target / drop the flag on adoption, so the bootstrap (which discovers
-  the IP) owns them.
+- **traefik** + **external-dns** — *host-coupled via `development` only*. prod-1 and
+  stage-1 commit their target — the node's location-independent alias, a CNAME onto
+  whichever location is active — in `k8s/traefik/values.prod-1.yml`
+  (`ingressEndpoint.hostname`) and `k8s/external-dns/<env>/config.yml`
+  (`--default-targets` plus `--force-default-targets`). `development` is the env whose
+  target is the host's own public IP, written per-machine to a gitignored
+  `values.local.yml`, so the pair stays task-installed.
 - The kustomize-only bits (local-path-provisioner, intel-gpu/xpu, ESO
   cluster-store, cert-manager ClusterIssuers).
 
 **Argo is the delivery path for everything in the list above** — adoption of the
 live helm releases completed 2026-07-16. Day-2 changes (values edits, chart
 bumps, new platform charts) go: edit `helm_platform.py` / the values files →
-merge → `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml` (if the
-Application specs changed) → sync in Argo. Do **not** `helm upgrade --install`
+merge → `task gitops:apply` (if the Application specs changed; preview with
+`task gitops:diff`) → sync in Argo. Do **not** `helm upgrade --install`
 an adopted release against the live cluster: Argo owns the objects via
 server-side apply, and helm's apply fails with `argocd-controller`
 field-manager conflicts. The remaining `helm upgrade --install` steps in
@@ -208,7 +214,7 @@ future not-yet-Argo-managed release). Argo *adopts* releases that
 `helm upgrade --install` owns, so the risk is Helm/SSA field-manager conflicts.
 Mirror the app cutover:
 
-1. `kubectl apply -f cdk8s/dist/platform-argo.k8s.yaml` — the project + Applications
+1. `task gitops:apply` — the project + Applications
    come up **OutOfSync, monitor-only**; nothing changes.
 2. Review each Application's diff vs the live release in the Argo UI.
 3. **Rehearse on stage** — sync `stage-1-nats` (the only stage-scoped Application now

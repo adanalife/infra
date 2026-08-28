@@ -123,6 +123,13 @@ VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
 PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
+# The private flare repo — the social-video renderer's in-cluster unit (a render
+# WorkflowTemplate, its PVCs, the hosted editor) — stage-1 only; there is no
+# prod flare. Trunk-based like the rest: stage tracks main.
+FLARE_PROJECT = "flare"
+FLARE_REPO_URL = "git@github.com:adanalife/flare.git"
+FLARE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-flare"
+FLARE_REVISIONS = {"stage-1": "main"}
 # The obs repo — the OBS streaming encoder. PUBLIC, so Argo fetches it over
 # anonymous HTTPS — no deploy key / repo Secret (unlike the private
 # console/video-pipeline/gateway SSH sources, so no _repo_external_secret below).
@@ -238,6 +245,7 @@ class ArgoCD(Construct):
         lan_tls: bool = True,
         notifications_secret: bool = True,
         ups_monitor: bool = True,
+        arc: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -264,6 +272,8 @@ class ArgoCD(Construct):
         self.platform_gateway_envs = tuple(
             e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
         )
+        # Envs whose flare unit this Argo delivers — stage-1 on the minipc only.
+        self.flare_envs = tuple(e for e in envs if e in FLARE_REVISIONS)
         # Envs whose OBS is delivered from the standalone (public) obs repo —
         # every env, including the k3d dev instance (the obs repo is public, so
         # dev fetches it anonymously).
@@ -293,15 +303,18 @@ class ArgoCD(Construct):
             name=INFRA_PROJECT,
             description="shared cluster infrastructure (postgres data + supporting), from the infra repo",
             source_repos=[REPO_URL],
-            # + the UPS monitor's `ups` namespace on the minipc (the singleton
-            # Application below rides the infra project — same repo, same project).
+            # + the minipc singletons' namespaces (the UPS monitor + ARC
+            # Applications below ride the infra project — same repo, same
+            # project).
             namespaces=_project_namespaces(self.envs)
-            + (["ups"] if ups_monitor else []),
-            # + Namespace when the UPS monitor rides this project: the unit's own
-            # Namespace object is itself gated by this clusterResourceWhitelist,
-            # so a CreateNamespace=true sync fails without the entry.
+            + (["ups"] if ups_monitor else [])
+            + (["arc-systems", "arc-runners"] if arc else []),
+            # + Namespace when a singleton rides this project: its Namespace
+            # objects (owned by the unit, or via CreateNamespace=true) are
+            # gated by this clusterResourceWhitelist, so a sync fails without
+            # the entry.
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
-            + ([NAMESPACE_KIND] if ups_monitor else []),
+            + ([NAMESPACE_KIND] if (ups_monitor or arc) else []),
         )
         if self.console_envs:
             self._app_project(
@@ -339,6 +352,16 @@ class ArgoCD(Construct):
                 # App namespace only — the gateway needs no data-namespace access
                 # (no RBAC at all; it talks to the Twitch API, Postgres, NATS).
                 namespaces=list(self.platform_gateway_envs),
+                cluster_resources=[],
+            )
+        if self.flare_envs:
+            self._app_project(
+                id="project-flare",
+                name=FLARE_PROJECT,
+                description="flare social-video renderer (render template + hosted editor), from the private flare repo",
+                source_repos=[FLARE_REPO_URL],
+                # App namespace only; its dist creates nothing cluster-scoped.
+                namespaces=list(self.flare_envs),
                 cluster_resources=[],
             )
         if self.obs_envs:
@@ -484,6 +507,24 @@ class ArgoCD(Construct):
                 prune_disabled=False,
                 create_namespace=True,
             )
+        # The ARC supporting unit (namespaces + runner LimitRange + GitHub App
+        # ExternalSecret) — a cluster-SINGLETON like the UPS monitor, minipc-only
+        # (the k3d dev Argo passes arc=False; there's no runner host there).
+        # MANUAL sync (no automated block), matching the two ARC Helm
+        # Applications it underpins — runner capacity changes are hand-synced.
+        # No CreateNamespace: the unit owns its Namespace objects, because
+        # arc-runners needs PodSecurity labels a bare create can't set.
+        if arc:
+            self._application_set(
+                id="appset-arc",
+                name="arc",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="arc",
+                include_tmpl="arc.k8s.yaml",
+                dest_ns_tmpl="arc-runners",
+                prune_disabled=False,
+            )
         # The cross-repo console unit: one Application per env, sourcing the
         # PRIVATE tripbot-console repo's committed dist (per-env revision —
         # every env follows main). Same autosync posture
@@ -533,6 +574,27 @@ class ArgoCD(Construct):
                 # ignores .spec.replicas. dist births it at its declared count.
                 ignore_replicas=True,
                 repo_url=VIDEO_PIPELINE_REPO_URL,
+                target_revision_tmpl="{{.revision}}",
+            )
+        # The cross-repo flare unit: one Application per env, sourcing the PRIVATE
+        # flare repo's committed dist (<env>.k8s.yaml). Autosync like the others,
+        # so a merge to flare's main is the deploy of its editor and render template.
+        if self.flare_envs:
+            self._application_set(
+                id="appset-flare",
+                name="flare",
+                project=FLARE_PROJECT,
+                elements=[
+                    {"env": e, "revision": FLARE_REVISIONS[e]} for e in self.flare_envs
+                ],
+                app_name_tmpl="{{.env}}-flare",
+                include_tmpl="{{.env}}.k8s.yaml",
+                prune_disabled=False,
+                automated_envs=autosync_envs,
+                selfheal=self._selfheal,
+                # Runtime-owned replicas so parking the editor sticks with selfHeal on.
+                ignore_replicas=True,
+                repo_url=FLARE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
             )
         # The cross-repo platform-gateway unit: one Application per unit that the
@@ -665,6 +727,13 @@ class ArgoCD(Construct):
                 name="argocd-repo-platform-gateway",
                 url=PLATFORM_GATEWAY_REPO_URL,
                 sm_key=PLATFORM_GATEWAY_REPO_SM_KEY,
+            )
+        if self.flare_envs:
+            self._repo_external_secret(
+                id="repo-secret-flare",
+                name="argocd-repo-flare",
+                url=FLARE_REPO_URL,
+                sm_key=FLARE_REPO_SM_KEY,
             )
         # The dev cluster runs notifications.enabled=false (values.k3d.yml), so it
         # skips the webhook secret too.
@@ -966,10 +1035,16 @@ class ArgoCD(Construct):
     def _ui_ingress(self):
         # TLS terminates at the tailnet edge; forwards plain HTTP to
         # argocd-server:80 (chart runs server.insecure). UI at argocd-prod.<tailnet>.
+        # Served by the shared HA proxy fleet (k8s/tailscale-operator/proxygroup.yml)
+        # instead of a dedicated per-Ingress proxy pod.
         k8s.KubeIngress(
             self,
             "ui-ingress",
-            metadata=k8s.ObjectMeta(name="argocd-server-tailscale", namespace=ARGO_NS),
+            metadata=k8s.ObjectMeta(
+                name="argocd-server-tailscale",
+                namespace=ARGO_NS,
+                annotations={"tailscale.com/proxy-group": "ingress-proxies"},
+            ),
             spec=k8s.IngressSpec(
                 ingress_class_name="tailscale",
                 default_backend=k8s.IngressBackend(

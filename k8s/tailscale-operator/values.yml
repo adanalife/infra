@@ -10,7 +10,7 @@
 
 # API server proxy — lets kubectl reach kube-apiserver by the operator's tailnet
 # name (tailscale-operator.<tailnet>.ts.net), which is stable and collision-proof
-# (a 100.x/CGNAT name, unlike the 192.168.1.200 LAN IP). Supersedes the
+# (a 100.x/CGNAT name, unlike the node's RFC1918 LAN address). Supersedes the
 # cert-SAN + per-wipe-IP-churn workaround on ~/.kube/adanalife-minipc-ts.
 #
 # mode "true" (auth mode): the proxy maps your tailnet identity to a Kubernetes

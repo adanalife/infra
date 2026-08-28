@@ -41,6 +41,20 @@ namespace: kube-system
 resources:
   - github.com/intel/intel-device-plugins-for-kubernetes/deployments/gpu_plugin?ref=v0.35.0
 
+#   `system-node-critical` makes kubelet start this DaemonSet ahead of ordinary
+#   workloads after a node restart, which is what the upstream device-plugin
+#   docs recommend and what the chart leaves unset. The ordering matters on
+#   reboot: kubelet re-admits the pods it had before the restart, and a pod
+#   holding a `gpu.intel.com/i915` claim is rejected outright —
+#   `UnexpectedAdmissionError: Allocate failed due to no healthy devices
+#   present` — if the plugin has not re-registered its devices by then. The
+#   rejected pod is abandoned, not retried, so both prod OBS pods are left dead
+#   and the streams stay dark until the ReplicaSet builds replacements. The
+#   2026-08-23 reboot storm did this ten times (five reboots × twitch +
+#   youtube), each costing ~2min of stream downtime beyond the reboot itself.
+#   Priority narrows the race rather than closing it — the plugin still has to
+#   register before the first GPU pod is admitted — so treat a recurrence as
+#   expected-but-rarer, not fixed.
 patches:
   - target:
       kind: DaemonSet
@@ -51,3 +65,6 @@ patches:
         value:
           - -enable-monitoring
           - -shared-dev-num=8
+      - op: add
+        path: /spec/template/spec/priorityClassName
+        value: system-node-critical

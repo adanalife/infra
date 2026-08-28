@@ -282,7 +282,7 @@
       "id": 52,
       "type": "state-timeline",
       "title": "Dashcam streaming by platform",
-      "description": "One lane per platform, colored by the platform's brand color. A band means that platform's playout is actively streaming the dashcam (tripbot_current_state resolves to a US state); a gap means it's dark. Surfaces per-platform streaming presence now that each platform runs its own playout. Per-state detail lives on the tripbot service-health dashboard; this launch view trades it for per-platform brand color.",
+      "description": "One lane per platform, colored by the platform's brand color. A band means that platform's playout is actively streaming the dashcam (tripbot_current_state resolves to a US state); a gap means it's dark. Surfaces per-platform streaming presence now that each platform runs its own playout. Which state each lane is in is not shown here — this launch view trades per-state detail for per-platform brand color. The crossings panel below reads the transitions between them.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 25, "w": 24, "h": 8 },
       "targets": [
@@ -303,6 +303,18 @@
           { "matcher": { "id": "byName", "options": "tiktok" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "#25f4ee" } } ] }
         ]
       }
+    },
+    {
+      "id": 53,
+      "type": "timeseries",
+      "title": "State crossings / hour",
+      "description": "How often the aired footage crossed a state line, from the state_crossing events tripbot writes to the append-only events table. Sparse by nature — a clip change only counts when the new clip's state differs from the previous one, which on the current corpus runs well under one per hour — so read it as bars of individual crossings, not a rate. Zero for hours at a time is normal; a long flat zero while the Dashcam-streaming lanes above are banded means the playhead is stuck in one state, which the 'stuck on unknown' alert covers separately. Breaks down by platform once every instance stamps service_platform on the counter (tripbot 5.1.2+); before that every platform sums into one unlabeled series.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 33, "w": 24, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (service_platform) (increase(tripbot_events_total{service_name=\"tripbot\", event=\"state_crossing\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "{{service_platform}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60 } }, "overrides": [] }
     }
   ]
 }

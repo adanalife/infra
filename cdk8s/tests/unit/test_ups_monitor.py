@@ -14,6 +14,7 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
 from adanalife_k8s.constructs.ups_monitor import IMAGE, UpsMonitor
+from adanalife_k8s.naming import CONFIG_HASH_ANNOTATION, config_hash
 
 _DEV = dict(
     envs=("development",),
@@ -25,6 +26,7 @@ _DEV = dict(
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
     ups_monitor=False,
+    arc=False,
 )
 
 
@@ -225,3 +227,12 @@ def test_dev_omits_ups_monitor():
     assert "Namespace" not in {
         c["kind"] for c in infra["spec"]["clusterResourceWhitelist"]
     }
+
+
+def test_pod_template_carries_the_config_digest():
+    # The reader scripts live in the ConfigMap and python reads them once at
+    # startup, so a script edit only lands if the Deployment rolls.
+    objs = _synth()
+    cm = next(o for o in objs if o["kind"] == "ConfigMap")
+    annotations = _deploy(objs)["spec"]["template"]["metadata"]["annotations"]
+    assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])

@@ -50,7 +50,7 @@ resource "aws_s3_bucket" "primary_naked_redirect" {
     routing_rules = <<EOF
 [{
     "Redirect": {
-        "Protocol": "http",
+        "Protocol": "https",
         "HostName": "www.dana.lol",
         "HttpRedirectCode": "301"
     }

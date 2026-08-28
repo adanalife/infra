@@ -1,0 +1,397 @@
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformRepository
+metadata:
+  name: infra
+  namespace: burrito
+spec:
+  repository:
+    url: https://github.com/adanalife/infra.git
+  terraform:
+    enabled: true
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: core
+  namespace: burrito
+spec:
+  path: terraform/core
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+    envFrom:
+      - secretRef:
+          name: burrito-aws-core
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-core
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/core-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/core-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-core
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: platform
+  namespace: burrito
+spec:
+  path: terraform/platform
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+    envFrom:
+      - secretRef:
+          name: burrito-aws-platform
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-platform
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/platform-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/platform-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-platform
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: stage-1
+  namespace: burrito
+spec:
+  path: terraform/stage-1
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/gcp/credential-config.json
+      - name: TF_VAR_gcp_impersonate
+        value: "false"
+    envFrom:
+      - secretRef:
+          name: burrito-aws-stage-apply
+    volumes:
+      - name: gcp-token
+        projected:
+          sources:
+            - serviceAccountToken:
+                audience: adanalife-burrito
+                expirationSeconds: 3600
+                path: token
+      - name: gcp-credential-config
+        configMap:
+          name: burrito-gcp-stage-1
+    volumeMounts:
+      - name: gcp-token
+        mountPath: /var/run/secrets/gcp
+        readOnly: true
+      - name: gcp-credential-config
+        mountPath: /etc/gcp
+        readOnly: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-stage-apply
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/stage-apply-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/stage-apply-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-stage-apply
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burrito-gcp-stage-1
+  namespace: burrito
+data:
+  credential-config.json: |-
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/574760983858/locations/global/workloadIdentityPools/minipc/providers/minipc",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/burrito-plan@tripbot-stage.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "file": "/var/run/secrets/gcp/token",
+        "format": {
+          "type": "text"
+        }
+      }
+    }
+---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: prod-1
+  namespace: burrito
+spec:
+  path: terraform/prod-1
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/gcp/credential-config.json
+      - name: TF_VAR_gcp_impersonate
+        value: "false"
+    envFrom:
+      - secretRef:
+          name: burrito-aws-prod-apply
+    volumes:
+      - name: gcp-token
+        projected:
+          sources:
+            - serviceAccountToken:
+                audience: adanalife-burrito
+                expirationSeconds: 3600
+                path: token
+      - name: gcp-credential-config
+        configMap:
+          name: burrito-gcp-prod-1
+    volumeMounts:
+      - name: gcp-token
+        mountPath: /var/run/secrets/gcp
+        readOnly: true
+      - name: gcp-credential-config
+        mountPath: /etc/gcp
+        readOnly: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-prod-apply
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/prod-apply-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/prod-apply-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-prod-apply
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burrito-gcp-prod-1
+  namespace: burrito
+data:
+  credential-config.json: |-
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/876608406330/locations/global/workloadIdentityPools/minipc/providers/minipc",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/burrito-plan@tripbot-prod.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "file": "/var/run/secrets/gcp/token",
+        "format": {
+          "type": "text"
+        }
+      }
+    }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-oidc-client-secret
+  namespace: burrito-system
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/oidc-client-secret
+      secretKey: BURRITO_SERVER_OIDC_CLIENTSECRET
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-oidc-client-secret
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-datastore-s3
+  namespace: burrito-system
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/datastore-s3-credentials
+        property: AWS_ACCESS_KEY_ID
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/datastore-s3-credentials
+        property: AWS_SECRET_ACCESS_KEY
+      secretKey: AWS_SECRET_ACCESS_KEY
+    - remoteRef:
+        key: /k8s/burrito/datastore-s3-credentials
+        property: AWS_REGION
+      secretKey: AWS_REGION
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-datastore-s3
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tripbot-console-burrito
+  namespace: burrito
+rules:
+  - apiGroups:
+      - config.terraform.padok.cloud
+    resources:
+      - terraformlayers
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tripbot-console-burrito
+  namespace: burrito
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tripbot-console-burrito
+subjects:
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: prod-1
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: stage-1
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    tailscale.com/proxy-group: ingress-proxies
+  name: burrito-server-tailscale
+  namespace: burrito-system
+spec:
+  defaultBackend:
+    service:
+      name: burrito-server
+      port:
+        name: http
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - burrito-prod
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: burrito.prod.whereisdana.today
+  name: burrito-server-traefik
+  namespace: burrito-system
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: burrito.prod.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: burrito-server
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - burrito.prod.whereisdana.today
+      secretName: burrito-server-tls
