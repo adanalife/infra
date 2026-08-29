@@ -18,7 +18,7 @@
 # wrangler 4 provisions a missing R2 binding on `wrangler deploy`, so the
 # worker's first deploy creates this bucket before terraform gets to it.
 # Adopt rather than recreate:
-#   terraform import cloudflare_r2_bucket.post_inbox <account_id>/dana-lol-post-inbox
+#   terraform import cloudflare_r2_bucket.post_inbox <account_id>/dana-lol-post-inbox/default
 resource "cloudflare_r2_bucket" "post_inbox" {
   account_id = var.cloudflare_account_id
   name       = "dana-lol-post-inbox"
