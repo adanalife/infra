@@ -9,6 +9,22 @@
 # The public repos stay on GitHub-hosted runners: their minutes are free, and
 # the org's default runner group excludes public repos (fork-PR code must never
 # reach this pool).
+#
+# THERE IS NO DOCKER DAEMON HERE, deliberately — no `containerMode`, so no dind
+# sidecar. Every container build in the fleet (dev-image, release, image-smoke)
+# runs on GitHub-hosted runners instead, and a `docker` step added to an
+# arc-amd64 job will fail with a missing socket rather than work.
+#
+# The reason is that this node also serves both production streams, and running
+# a Docker daemon on it is the one workload class every node self-reboot has had
+# in common: seventeen crashes over 2026-08-23/24 traced to a `docker run` from a
+# pre-commit hook, and a further one on 2026-08-29 to a plain buildx `dev-image`
+# build, which is why removing the hook class was not enough. The kernel
+# mechanism is still unidentified (vault/infra/TODO.md), so this is avoidance,
+# not a fix — but it is the only lever that has held. Builds are ~500 hosted
+# minutes/month across the four private repos, against a 2,000-minute free
+# allowance; everything Docker-free (pytest, go test, lint, pre-commit,
+# cdk8s-synth) still runs here for nothing.
 githubConfigUrl: https://github.com/adanalife
 # Pre-existing Secret materialized by the arc-github-app ExternalSecret
 # (constructs/arc.py). Holds the GitHub App triple ARC registers with.
@@ -66,12 +82,9 @@ listenerTemplate:
 # and query the in-cluster VictoriaMetrics, since Grafana Cloud takes an
 # allowlist and holds none of these series.
 #
-# A runner pod is the runner container below plus the chart-injected dind native
-# sidecar, whose resources come from the arc-runners LimitRange in
-# cdk8s/adanalife_k8s/constructs/arc.py — a `dind` entry in the containers list
-# here is silently dropped, so that file is the only place to change them. dind
-# measures 229Mi at peak across 112 runner pods including a real `docker build`,
-# against the 2Gi it requests.
+# A runner pod is the runner container below and nothing else. Anything it does
+# not declare falls back to the arc-runners LimitRange in
+# cdk8s/adanalife_k8s/constructs/arc.py.
 #
 # ci-low priority decides who the kubelet evicts once memory is already tight;
 # it does not stop a burst from exhausting the node in the first place. Honest
@@ -88,14 +101,6 @@ listenerTemplate:
 # protect private repos, so merges never block).
 minRunners: 1
 maxRunners: 1
-
-# dind: each ephemeral runner gets a Docker daemon sidecar, so the existing
-# `docker build` / buildx steps (dev-image, release, image-smoke) work
-# unchanged. The chart injects the dind sidecar; we only override the runner
-# container below. Requires the arc-runners namespace's privileged
-# PodSecurity exemption (constructs/arc.py).
-containerMode:
-  type: dind
 
 template:
   spec:
@@ -146,9 +151,9 @@ template:
         # EPHEMERAL volume etcd fsyncs to, and CI write bursts there stall
         # etcd past its 5s lease deadline — every leader-election client in
         # the cluster (kube-scheduler, kube-controller-manager, cilium-operator,
-        # cnpg, the alloy operator) then exits and restarts together. Image
-        # layers still land on /var: the gha-runner-scale-set chart hardcodes
-        # dind's volumeMounts, so its data-root cannot be redirected from here.
+        # cnpg, the alloy operator) then exits and restarts together. Every
+        # heavy write path a job has — these caches and the _work workspace
+        # below — is mounted off /var for that reason.
         #
         # Only shared where the tool is multi-writer safe: uv hardlinks,
         # go-build is content-addressed, pre-commit locks, and the setup actions
@@ -167,10 +172,16 @@ template:
             mountPath: /home/runner/go/pkg/mod
           - name: cache-toolcache
             mountPath: /opt/hostedtoolcache
+          # The job workspace. Mounted explicitly: the chart mounts the `work`
+          # volume into the runner only in dind or kubernetes container mode,
+          # and this pool runs in neither. Declaring the volume without this
+          # mount silently puts _work back on the container filesystem — i.e.
+          # on /var, the disk this whole block exists to keep jobs off.
+          - name: work
+            mountPath: /home/runner/_work
         # 4-CPU limit makes a self-hosted job as fast as a GitHub-hosted
-        # ubuntu-latest (4 vCPU) while capping what a hot build can take from
-        # the streams; the dind sidecar declares nothing and gets the
-        # LimitRange defaults (2 CPU / 4Gi).
+        # ubuntu-latest (4 vCPU) while capping what a hot job can take from
+        # the streams.
         #
         # The memory REQUEST must be honest, not minimal: a real job (pytest,
         # golangci-lint, uv sync) uses multiple GiB, and a runner requesting
@@ -198,11 +209,10 @@ template:
         hostPath:
           path: /var/mnt/data/arc-cache/toolcache
           type: DirectoryOrCreate
-      # The job workspace — checkout, build context, test artifacts. The chart
-      # defaults it to an emptyDir, which lands on /var and puts the heaviest
-      # per-job write path on the disk etcd fsyncs to; declaring `work` here is
-      # the one override the chart honours (gha-runner-scale-set.runner-mode-
-      # work-volume takes a user-supplied volume of this name over its default).
+      # The job workspace — checkout, test artifacts. The chart defaults it to
+      # an emptyDir, which lands on /var and puts the heaviest per-job write
+      # path on the disk etcd fsyncs to; a user-supplied volume of this name
+      # replaces that default. The runner container mounts it above.
       #
       # The tradeoff: an emptyDir is recreated per pod, so each ephemeral runner
       # starts from a clean workspace. A hostPath persists across jobs. That is
