@@ -25,12 +25,13 @@ resource "cloudflare_r2_bucket" "post_inbox" {
   location   = "WNAM"
 }
 
-# Enabling routing on the zone also writes the MX + SPF records it needs.
-# (cloudflare_email_routing_dns is for routing on a *subdomain*; the API
-# rejects it for the apex.)
-resource "cloudflare_email_routing_settings" "stage_1" {
-  zone_id = cloudflare_zone.stage_1.id
-}
+# Email Routing itself is enabled BY HAND on the zone (dashboard → whalecore.com
+# → Email → Email Routing → Get started, which also writes the MX + SPF
+# records). cloudflare_email_routing_settings is the resource for it, but the
+# provider's model is missing the API's `support_subaddress` field and every
+# create/refresh fails (cloudflare/terraform-provider-cloudflare#7301, open as
+# of 5.24.0). Reintroduce it once that lands. cloudflare_email_routing_dns is
+# the wrong tool — it's for routing on a subdomain and rejects the apex.
 
 resource "cloudflare_email_routing_rule" "post_inbox" {
   zone_id = cloudflare_zone.stage_1.id
@@ -48,5 +49,4 @@ resource "cloudflare_email_routing_rule" "post_inbox" {
     value = ["dana-lol-post-inbox"]
   }]
 
-  depends_on = [cloudflare_email_routing_settings.stage_1]
 }
