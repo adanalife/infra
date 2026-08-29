@@ -15,21 +15,21 @@
 # (see cloudflare-pages.tf in prod-1). Nothing is lost: the address is a
 # private drop box, not a public contact point.
 
+# wrangler 4 provisions a missing R2 binding on `wrangler deploy`, so the
+# worker's first deploy creates this bucket before terraform gets to it.
+# Adopt rather than recreate:
+#   terraform import cloudflare_r2_bucket.post_inbox <account_id>/dana-lol-post-inbox
 resource "cloudflare_r2_bucket" "post_inbox" {
   account_id = var.cloudflare_account_id
   name       = "dana-lol-post-inbox"
   location   = "WNAM"
 }
 
-# Adds the MX + SPF records Email Routing needs on the zone.
-resource "cloudflare_email_routing_dns" "stage_1" {
-  zone_id = cloudflare_zone.stage_1.id
-  name    = cloudflare_zone.stage_1.name
-}
-
+# Enabling routing on the zone also writes the MX + SPF records it needs.
+# (cloudflare_email_routing_dns is for routing on a *subdomain*; the API
+# rejects it for the apex.)
 resource "cloudflare_email_routing_settings" "stage_1" {
-  zone_id    = cloudflare_zone.stage_1.id
-  depends_on = [cloudflare_email_routing_dns.stage_1]
+  zone_id = cloudflare_zone.stage_1.id
 }
 
 resource "cloudflare_email_routing_rule" "post_inbox" {
