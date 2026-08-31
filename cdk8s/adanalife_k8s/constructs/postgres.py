@@ -68,7 +68,6 @@ DUMP=/tmp/dump.pgcustom
 echo "Dumping ${POSTGRES_DB}"
 PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \\
   --format=custom \\
-  --host=postgres \\
   --username="$POSTGRES_USER" \\
   --exclude-table-data=frame_embeddings \\
   "$POSTGRES_DB" \\
@@ -97,7 +96,7 @@ class Postgres(Construct):
         super().__init__(scope, NAME)
         # postgres lives in the data namespace — the app namespace by default
         # (parity), or an isolated one (env.data_namespace). The backup CronJob
-        # rides along here, so its --host=postgres stays a same-namespace lookup.
+        # rides along here, so its PGHOST stays a same-namespace lookup.
         ns = env.data_ns or None
         labels = meta_labels(NAME)
         sel = selector(NAME)
@@ -272,7 +271,7 @@ class Postgres(Construct):
         if env.postgres_backup:
             self._storage_class()
             self._backup_external_secret(ns)
-            self._backup_cronjob(ns)
+            self._backup_cronjob(ns, cnpg=env.cnpg)
 
         # --- data-namespace ingress guard (isolated envs only). NetworkPolicy
         #     is allowlist-only, so "stage can't reach prod's DB" is expressed
@@ -414,12 +413,16 @@ class Postgres(Construct):
             )
         )
 
-    def _backup_cronjob(self, ns):
+    def _backup_cronjob(self, ns, *, cnpg):
+        # The client major must be >= the server's: a 16 pg_dump refuses an
+        # 18 server outright. PGHOST picks the server the same way — the CNPG
+        # Cluster's rw Service, or the legacy StatefulSet's Service.
         backup = k8s.Container(
             name="backup",
-            image="postgres:16-alpine",  # PG16 pg_dump, matches the server image
+            image="postgres:18-alpine" if cnpg else "postgres:16-alpine",
             command=["/bin/sh", "-c"],
             args=[_BACKUP_SCRIPT],
+            env=[k8s.EnvVar(name="PGHOST", value="pg-rw" if cnpg else "postgres")],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME)),
                 k8s.EnvFromSource(
