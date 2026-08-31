@@ -155,6 +155,9 @@ ENVS: dict[str, EnvConfig] = {
         # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
         # take years of irreplaceable data.
         data_namespace="prod-1-data",
+        # CloudNativePG cluster `pg` alongside the legacy StatefulSet. Syncing
+        # prod-1-data with this set runs the one-shot import from `postgres`.
+        cnpg=True,
         # The full supported set gets a per-platform mediamtx relay here; a new
         # platform gets one automatically on the next sync. The gateway/obs/
         # playout workloads self-discover from their own repos' indexes and park
