@@ -101,6 +101,25 @@ updates:
     cooldown:
       default-days: 7
     rebase-strategy: disabled
+  # The platform workspace holds the org's GitHub App wiring, so a provider bump
+  # here moves repo and secret resources rather than infrastructure -- its plan
+  # wants a closer read than the environment directories' do.
+  - package-ecosystem: terraform
+    directory: terraform/platform
+    schedule:
+      interval: weekly
+      day: monday
+      time: "13:00"
+    groups:
+      platform-providers:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    cooldown:
+      default-days: 7
+    rebase-strategy: disabled
   # The cdk8s CLI and its jsii toolchain. Dependabot has no mise backend, so
   # this is only reachable because the CLI is pinned in package-lock.json
   # rather than cdk8s/.mise.toml. cdk8s-synth re-synths on the bump PR, so a
