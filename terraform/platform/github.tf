@@ -41,6 +41,7 @@ locals {
     "website",
     "video-pipeline",
     "guessr",
+    "flare",
   ])
 }
 
