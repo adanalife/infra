@@ -220,7 +220,6 @@ spec:
                   echo "Dumping ${POSTGRES_DB}"
                   PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
                     --format=custom \
-                    --host=postgres \
                     --username="$POSTGRES_USER" \
                     --exclude-table-data=frame_embeddings \
                     "$POSTGRES_DB" \
@@ -244,12 +243,15 @@ spec:
               command:
                 - /bin/sh
                 - -c
+              env:
+                - name: PGHOST
+                  value: pg-rw
               envFrom:
                 - secretRef:
                     name: postgres-secret
                 - secretRef:
                     name: postgres-backup-s3
-              image: postgres:16-alpine
+              image: postgres:18-alpine
               name: backup
               resources:
                 limits:
