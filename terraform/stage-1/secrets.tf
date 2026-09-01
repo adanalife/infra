@@ -39,12 +39,6 @@
 # Seeding notes for the non-obvious ones:
 #   - stage-1/cloudflare-api-token — token scopes: Zone:Edit, Tunnel:Edit,
 #     Pages:Edit, Access:Apps and Policies:Edit, DNS:Edit, Zone Settings:Edit.
-#   - stage-1/grafana-cloud-api — JSON {"GRAFANA_CLOUD_URL": "https://<stack>.grafana.net",
-#     "GRAFANA_CLOUD_API_TOKEN": ..., "GRAFANA_CLOUD_STACK_SLUG": ...}. Mint a
-#     stack service account (Admin role) + token; slug = the URL subdomain.
-#     Feeds the provider in grafana-service-accounts.tf; the rest of the
-#     Grafana Cloud stack lives in terraform/platform with its own copy
-#     (/platform/grafana-cloud-api).
 #   - k8s/grafana-cloud-otlp — JSON {"OTEL_EXPORTER_OTLP_ENDPOINT": ...,
 #     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Basic <base64(id:key)>"}.
 #   - k8s/sentry-* — JSON {"SENTRY_DSN": "https://<key>@<org>.ingest.sentry.io/<project>"}.
@@ -74,8 +68,6 @@ locals {
   # parameter name (sans leading /) => description
   ssm_parameters = {
     "stage-1/cloudflare-api-token"         = "Cloudflare API token used by the cloudflare provider."
-    "stage-1/grafana-cloud-api"            = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
-    "stage-1/grafana-sm-access"            = "Synthetic Monitoring access token for the grafana provider's sm_access_token."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
     "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
     "k8s/sentry-onscreens-server"          = "Sentry DSN for the onscreens-server Go service. Consumed via the SENTRY_DSN env var."
@@ -221,14 +213,6 @@ data "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
 
 data "aws_ssm_parameter" "guessr_admin_emails" {
   name = aws_ssm_parameter.guessr_admin_emails.name
-}
-
-data "aws_ssm_parameter" "grafana_cloud_api" {
-  name = "/stage-1/grafana-cloud-api"
-}
-
-data "aws_ssm_parameter" "grafana_sm_access" {
-  name = "/stage-1/grafana-sm-access"
 }
 
 data "aws_ssm_parameter" "discord_alerts_webhook" {
