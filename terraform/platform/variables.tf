@@ -16,3 +16,10 @@ variable "github_app_installation_id" {
   description = "Installation ID of the adanalife-automation App on the adanalife org (from the installation page URL)."
   type        = string
 }
+
+# Identifier, not a credential — the D1 REST URL the guessr Grafana datasource
+# queries names the account in its path (grafana-guessr.tf).
+variable "cloudflare_account_id" {
+  description = "Cloudflare account ID"
+  type        = string
+}

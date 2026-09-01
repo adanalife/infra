@@ -11,6 +11,11 @@ terraform {
       source  = "integrations/github"
       version = "~> 6.0"
     }
+    # c.p. registry.terraform.io/providers/grafana/grafana/latest/docs
+    grafana = {
+      source  = "grafana/grafana"
+      version = "~> 4.35"
+    }
   }
 
   # Rides in the core account's state bucket under its own key — platform is

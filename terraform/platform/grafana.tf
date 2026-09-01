@@ -1,11 +1,10 @@
 # Grafana Cloud dashboards-as-code via the grafana/grafana provider.
 #
-# The provider auths against the Grafana Cloud stack URL using a service
-# account API token, both pulled from the `/stage-1/grafana-cloud-api` SSM
-# parameter (declared in secrets.tf). The provider block lives here rather
-# than providers.tf so prod-1 — which keeps providers.tf identical but has no
-# Grafana resources — doesn't inherit a provider it can't authenticate, same
-# shape as the cloudflare provider in cloudflare-pages.tf.
+# The Grafana Cloud stack is single-tenant — one stack serves stage-1, prod-1
+# and development — which is why the whole Grafana surface lives in this
+# env-agnostic workspace rather than an env root. The provider auths against
+# the stack URL using a service account API token, both pulled from the
+# `/platform/grafana-cloud-api` SSM parameter (declared in secrets.tf).
 #
 # Dashboard JSON lives in ./grafana-dashboards/. Each `grafana_dashboard`
 # resource references a JSON file via `file()`; the JSON is the same
@@ -15,7 +14,7 @@
 #   1. Build/edit a dashboard in the UI.
 #   2. Share → Export → "Export for sharing externally" off, copy JSON.
 #   3. Save into grafana-dashboards/<name>.json (or update in place).
-#   4. `task tf:stage:apply` to apply.
+#   4. `task tf:platform:apply` to apply.
 
 locals {
   grafana_creds = jsondecode(data.aws_ssm_parameter.grafana_cloud_api.value)
@@ -26,8 +25,8 @@ provider "grafana" {
   auth = lookup(local.grafana_creds, "GRAFANA_CLOUD_API_TOKEN", "placeholder")
   # Synthetic Monitoring is a separate API behind a separate token; the
   # dashboard credentials above cannot reach it. Set here rather than on an
-  # aliased provider because every Grafana resource in this environment shares
-  # one stack. See grafana-guessr.tf for the check itself.
+  # aliased provider because every Grafana resource in this workspace shares
+  # one stack. See grafana-synthetic-monitoring.tf for the checks.
   sm_access_token = data.aws_ssm_parameter.grafana_sm_access.value
   # SM access tokens are region-scoped, and the provider's default sm_url is
   # the region-less endpoint, which rejects a regional token as

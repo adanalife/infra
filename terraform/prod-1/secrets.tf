@@ -174,7 +174,7 @@ data "aws_ssm_parameter" "cloudflare_api_token" {
 # endpoint as a Function binding (cloudflare-pages-guessr.tf). Third consumer of
 # this one value, after Grafana's contact point and tripbot's !report — rotating
 # it means re-applying everything that reads it, which is what the
-# alert-delivery-failure rule in stage-1/grafana-alerts.tf already says.
+# alert-delivery-failure rule in platform/grafana-alerts.tf already says.
 #
 # Literal name for the reason the block comment above gives: this parameter is a
 # managed mirror entry, and a data source pointing at the mirror resource defers

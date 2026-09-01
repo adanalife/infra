@@ -2,7 +2,7 @@
 #
 # Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
 # in-cluster collectors that fill the dashboards defined in
-# terraform/stage-1/grafana-dashboards/:
+# terraform/platform/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
