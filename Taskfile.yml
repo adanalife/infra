@@ -2643,6 +2643,39 @@ tasks:
           echo "Pinned to archive/ (permanent)."
         fi
 
+  # Physical (base) backup via CNPG, distinct from :db:backup's logical dump:
+  # includes every table (the dump excludes frame_embeddings data), lands in
+  # the WAL bucket under barman's layout, and becomes the newest PITR restore
+  # base. The pre-change reflex before risky ops — cheaper than a dump, no
+  # local artifact, and a restore from it replays WAL to any point after it.
+  tripbot:prod:db:basebackup:
+    desc: "take an on-demand CNPG base backup of prod-1 Postgres to S3 (physical, all tables; the PITR restore base)"
+    vars:
+      NS: '{{.NS | default "prod-1-data"}}'
+    preconditions:
+      - sh: kubectl get cluster.postgresql.cnpg.io pg -n {{.NS}} >/dev/null 2>&1
+        msg: "CNPG cluster pg not found in {{.NS}} — is this env cut over to CNPG?"
+    cmds:
+      - |
+        set -euo pipefail
+        name="pg-manual-$(date -u +%Y%m%d-%H%M%S)"
+        echo "Creating Backup ${name} (barman-cloud plugin, same target as pg-daily)..."
+        kubectl create -n {{.NS}} -f - <<EOF
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Backup
+        metadata:
+          name: ${name}
+        spec:
+          cluster:
+            name: pg
+          method: plugin
+          pluginConfiguration:
+            name: barman-cloud.cloudnative-pg.io
+        EOF
+        echo "Waiting for ${name} to complete..."
+        kubectl wait -n {{.NS}} --for=jsonpath='{.status.phase}'=completed "backup/${name}" --timeout=600s
+        kubectl get -n {{.NS}} "backup/${name}"
+
   # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
   # env creds (no credential handling here). Then clears a stale
   # schema_migrations dirty flag if the dump carried one — the historical

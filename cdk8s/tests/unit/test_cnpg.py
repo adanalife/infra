@@ -69,6 +69,16 @@ def test_cluster_carries_the_anti_oom_import_settings():
     assert spec["resources"]["limits"]["memory"] == "2Gi"
 
 
+def test_cluster_pods_inherit_scrape_annotations():
+    # annotationAutodiscovery scrapes by these; losing them silently blinds
+    # the pitr-health alerts (which are no-data=Alerting for exactly that)
+    annotations = _cluster(_synth("stage-1"))["spec"]["inheritedMetadata"][
+        "annotations"
+    ]
+    assert annotations["prometheus.io/scrape"] == "true"
+    assert annotations["prometheus.io/port"] == "9187"
+
+
 def test_cluster_archive_timeout_bounds_the_rpo():
     params = _cluster(_synth("stage-1"))["spec"]["postgresql"]["parameters"]
     assert params["archive_timeout"] == "5min"

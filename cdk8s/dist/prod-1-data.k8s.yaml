@@ -399,6 +399,10 @@ metadata:
 spec:
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:18.6-202608240816-standard-bookworm
+  inheritedMetadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
   storage:
     size: 50Gi
     storageClass: local-path-retain
