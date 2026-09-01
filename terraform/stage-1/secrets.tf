@@ -75,6 +75,7 @@ locals {
   ssm_parameters = {
     "stage-1/cloudflare-api-token"         = "Cloudflare API token used by the cloudflare provider."
     "stage-1/grafana-cloud-api"            = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
+    "stage-1/grafana-sm-access"            = "Synthetic Monitoring access token for the grafana provider's sm_access_token."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
     "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
     "k8s/sentry-onscreens-server"          = "Sentry DSN for the onscreens-server Go service. Consumed via the SENTRY_DSN env var."
@@ -224,6 +225,10 @@ data "aws_ssm_parameter" "guessr_admin_emails" {
 
 data "aws_ssm_parameter" "grafana_cloud_api" {
   name = "/stage-1/grafana-cloud-api"
+}
+
+data "aws_ssm_parameter" "grafana_sm_access" {
+  name = "/stage-1/grafana-sm-access"
 }
 
 data "aws_ssm_parameter" "discord_alerts_webhook" {

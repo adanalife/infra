@@ -26,6 +26,13 @@ locals {
 provider "grafana" {
   url  = lookup(local.grafana_creds, "GRAFANA_CLOUD_URL", "https://placeholder.grafana.net")
   auth = lookup(local.grafana_creds, "GRAFANA_CLOUD_API_TOKEN", "placeholder")
+  # The synthetic-monitoring checks written by terraform/platform were
+  # originally created from this state; while any remain here, planning them
+  # (including their destroy) requires the SM client. Goes away with the
+  # bridge — see the header. sm_url: SM tokens are region-scoped and the
+  # provider's region-less default rejects them as "invalid API token".
+  sm_access_token = data.aws_ssm_parameter.grafana_sm_access.value
+  sm_url          = "https://synthetic-monitoring-api-us-east-3.grafana.net"
 }
 
 resource "grafana_service_account" "claude_code_mcp" {
