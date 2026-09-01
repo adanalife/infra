@@ -3105,11 +3105,12 @@ resource "grafana_rule_group" "batch_health" {
     }
   }
 
-  // Prod Postgres dumps hourly to S3 from an in-cluster CronJob, and that is
-  // the only durable copy — stage has none by design and the PVC has been lost
-  // outright twice (a talosctl upgrade wiping EPHEMERAL, and an HNSW bulk index
-  // build OOMing the pod). So the window between "backups quietly stopped" and
-  // "we need one" is the whole risk, and nothing was watching it.
+  // Prod Postgres dumps hourly to S3 from an in-cluster CronJob — the logical
+  // complement to the CNPG WAL archive (pitr-health group), in a separate
+  // failure domain. The PVC has been lost outright twice (a talosctl upgrade
+  // wiping EPHEMERAL, and an HNSW bulk index build OOMing the pod), so the
+  // window between "backups quietly stopped" and "we need one" is the whole
+  // risk, and for a long time nothing was watching it.
   //
   // On 2026-08-23 the CronJob controller stopped creating jobs for nine hours
   // while the CronJob object itself stayed present and unsuspended. No job
@@ -3134,7 +3135,7 @@ resource "grafana_rule_group" "batch_health" {
 
     annotations = {
       summary     = "prod Postgres has not completed an hourly backup in over 2 hours"
-      description = "The postgres-backup CronJob in prod-1-data dumps the prod database to s3://adanalife-prod-1-postgres-backups/hourly/ every hour, and it has not recorded a success in over two hours. Prod Postgres has no other durable copy. Check whether jobs are being created at all with `kubectl -n prod-1-data get jobs --sort-by=.metadata.creationTimestamp` — a gap in the sequence with no Failed job means the CronJob controller stopped scheduling rather than the dump failing, which is a control-plane problem and not a backup one. Confirm what actually landed with `task -d ~/adanalife/infra tripbot:prod:db:backups`. Run one by hand with `kubectl -n prod-1-data create job --from=cronjob/postgres-backup postgres-backup-manual`. Restore path and the S3 layout are in vault/infra/backups.md."
+      description = "The postgres-backup CronJob in prod-1-data dumps the prod database to s3://adanalife-prod-1-postgres-backups/hourly/ every hour, and it has not recorded a success in over two hours. The dump is the logical complement to the CNPG WAL archive (pitr-health group) — a separate failure domain, and the only copy that survives a fault in the physical/WAL path itself. Check whether jobs are being created at all with `kubectl -n prod-1-data get jobs --sort-by=.metadata.creationTimestamp` — a gap in the sequence with no Failed job means the CronJob controller stopped scheduling rather than the dump failing, which is a control-plane problem and not a backup one. Confirm what actually landed with `task -d ~/adanalife/infra tripbot:prod:db:backups`. Run one by hand with `kubectl -n prod-1-data create job --from=cronjob/postgres-backup postgres-backup-manual`. Restore path and the S3 layout are in vault/infra/backups.md."
     }
     labels = {
       severity = "critical"
@@ -3177,6 +3178,162 @@ resource "grafana_rule_group" "batch_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [7200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+# PITR health — the CNPG WAL archive and base backups watching themselves.
+# Since the 2026-08-31 cutover the WAL archive is prod's primary recovery
+# path (RPO ≤5min); the hourly dump the batch-health rule watches is the
+# logical complement in a separate failure domain. Nothing in the operator
+# pages on its own: a cluster whose archiving is broken keeps serving reads
+# and writes happily, and `ContinuousArchiving=False` is just a status
+# condition nobody looks at — the same "quietly stopped" shape as the dump
+# CronJob wedge this file already guards against.
+#
+# Both rules read the CNPG instance exporter (port 9187, scraped via the
+# cluster's inherited prometheus.io annotations), and both are
+# no_data_state=Alerting for the standard reason: the series vanishing IS a
+# failure — annotations dropped, the keep-allowlist regressed, or the pod
+# stopped exposing metrics — and a rule that reads no-data as OK can never be
+# told apart from one that works. Consequence: these fire until the metrics
+# actually flow, so apply this file only after the prod-1-data Argo sync has
+# delivered the pod annotations.
+#
+# Metric choice notes, verified against the live stage exporter 2026-08-31:
+#   * cnpg_collector_last_available_backup_timestamp reads 0 when backups run
+#     through the barman-cloud CNPG-I plugin (it mirrors .status fields the
+#     plugin path never populates) — the plugin's own
+#     barman_cloud_cloudnative_pg_io_last_available_backup_timestamp gauge is
+#     the one that moves.
+#   * cnpg_pg_stat_archiver_seconds_since_last_archival is NOT a usable
+#     staleness signal: archive_timeout only forces a segment switch when WAL
+#     was written, so an idle database legitimately goes many hours between
+#     archivals (stage read 19h with a healthy archive). The ready-queue
+#     depth is activity-independent: a segment sits in `ready` only between
+#     switch and upload, seconds when healthy, so any nonzero value that
+#     persists means WAL is being produced but not reaching S3.
+resource "grafana_rule_group" "pitr_health" {
+  name             = "pitr-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Postgres: prod WAL archiving is stalled"
+    for            = "30m"
+    condition      = "C"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "prod Postgres WAL segments are waiting in the archive ready-queue and not reaching S3"
+      description = "The CNPG cluster pg in prod-1-data has had WAL segments sitting in the archiver's ready-queue for over 30 minutes. A healthy archiver drains a segment in seconds, so this means WAL is being produced but not landing in s3://adanalife-prod-1-postgres-wal/ — the PITR recovery point is frozen while the database keeps writing, and RPO degrades toward the hourly logical dump. Read the cluster's view first: `kubectl -n prod-1-data describe cluster pg` (the ContinuousArchiving condition carries the actual barman error), then the instance logs `kubectl -n prod-1-data logs pg-1 | grep -i wal-archive`. Usual suspects: the postgres-wal-s3 credentials (ESO/SSM), S3 reachability, or the barman-cloud plugin pods in cnpg-system. If this fires as NoData instead, the metric pipeline broke: check the pod still carries the prometheus.io scrape annotations and that the values.yml keep-allowlist still lists cnpg_collector_pg_wal_archive_status."
+    }
+    labels = {
+      severity = "critical"
+      service  = "postgres"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // value="ready" is the count of segments switched but not yet
+        // uploaded; value="done" is history and never drains to zero.
+        expr          = "max(cnpg_collector_pg_wal_archive_status{namespace=\"prod-1-data\", value=\"ready\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // gt 0 rather than a depth threshold: healthy is exactly zero except
+        // for the seconds an upload is in flight, and the 30m `for` already
+        // absorbs those blips. A depth threshold would just slow detection on
+        // a quiet database that switches segments every archive_timeout.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Base backups are restore *speed* and retention-window health rather than
+  // RPO — with the WAL archive intact a stale base still restores to now, it
+  // just replays days of WAL and ages toward the 30d object retention. So a
+  // warning, not a page: fix-it-today, same tier as the Burrito rules.
+  rule {
+    name           = "Postgres: prod base backup is over 26h old"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "prod Postgres has not completed a daily base backup in over 26 hours"
+      description = "The pg-daily ScheduledBackup in prod-1-data takes a base backup at 04:00Z and the newest one in S3 is now over 26 hours old, so the nightly cycle was missed. PITR still works while WAL archiving is green (the sibling rule), but every restore replays all WAL since this backup, and once it ages past the 30d barman retention the recovery window starts shrinking. Check recent attempts with `kubectl -n prod-1-data get backups.postgresql.cnpg.io --sort-by=.metadata.creationTimestamp` — a Backup stuck without a phase means the plugin never picked it up (barman-cloud pods in cnpg-system); no Backup at all for today means the operator didn't schedule it (ScheduledBackup pg-daily present and not suspended?). Run one now with `task -d ~/adanalife/infra tripbot:prod:db:basebackup`."
+    }
+    labels = {
+      severity = "warning"
+      service  = "postgres"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace=\"prod-1-data\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // 26h = the daily cadence plus two hours of slack for a slow or
+        // retried 04:00Z run; the 15m `for` cushions scrape gaps on the
+        // boundary, same as the hourly-dump rule.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [93600] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
