@@ -38,6 +38,7 @@ from adanalife_k8s.naming import meta_labels, selector
 NAME = "postgres"
 SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
 PORT = 5432
+METRICS_PORT = 9187  # CNPG's exporter, scraped by alloy in the monitoring ns
 
 # SSM parameter paths (terraform-owned values; the SM names with a leading
 # slash since the SM → SSM migration). See base/external-secret.yaml.
@@ -276,8 +277,11 @@ class Postgres(Construct):
         # --- data-namespace ingress guard (isolated envs only). NetworkPolicy
         #     is allowlist-only, so "stage can't reach prod's DB" is expressed
         #     as default-deny ingress on every pod in the data namespace,
-        #     allowing only same-namespace traffic (the backup CronJob) and the
-        #     env's OWN app namespace on the postgres port. Cilium enforces it.
+        #     allowing only same-namespace traffic (the backup CronJob), the
+        #     env's OWN app namespace on the postgres port, the operator on the
+        #     status port, and the monitoring namespace on the metrics port.
+        #     Cilium enforces it. Anything that needs to reach this namespace
+        #     needs a rule here — a missing one fails as silence, not an error.
         #     Co-located envs skip it: a default-deny in the shared app
         #     namespace would black-hole every other workload there. Kubelet
         #     probes and `kubectl port-forward` arrive from the host, which
@@ -331,6 +335,28 @@ class Postgres(Construct):
                             ports=[
                                 k8s.NetworkPolicyPort(
                                     port=k8s.IntOrString.from_number(8000),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                        # Alloy scrapes the CNPG exporter from the monitoring
+                        # namespace. Without this the scrape is dropped, every
+                        # cnpg_* series is absent, and the two pitr-health
+                        # alerts fire on NoData while the database is healthy —
+                        # which is indistinguishable from a real WAL stall.
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": "monitoring"
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(METRICS_PORT),
                                     protocol="TCP",
                                 )
                             ],

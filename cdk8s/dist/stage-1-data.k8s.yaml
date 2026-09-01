@@ -173,6 +173,13 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9187
+          protocol: TCP
   podSelector: {}
   policyTypes:
     - Ingress
