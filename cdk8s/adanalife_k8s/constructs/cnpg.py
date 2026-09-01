@@ -178,6 +178,18 @@ class CnpgCluster(Construct):
                 {
                     "instances": 1,
                     "imageName": _IMAGE,
+                    # Inherited by the instance pods, where grafana-k8s-
+                    # monitoring's annotationAutodiscovery picks them up. 9187
+                    # is CNPG's built-in exporter (the postgres container's
+                    # `metrics` port): ~150 native metrics plus the barman
+                    # plugin's backup timestamps — feeds the pitr-health
+                    # alert group.
+                    "inheritedMetadata": {
+                        "annotations": {
+                            "prometheus.io/scrape": "true",
+                            "prometheus.io/port": "9187",
+                        }
+                    },
                     "storage": {
                         "size": env.postgres_size,
                         **(
