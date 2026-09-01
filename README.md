@@ -84,3 +84,21 @@ the script (`--label`, `--vm-url`, `--window`, `--refresh` to bust the job
 cache). Both traps it walks around — a scrape gap is not a reboot, and the plain
 `/jobs` endpoint hides every attempt but the latest — are written up in the
 script's docstring.
+
+## the month-end leaderboard post
+
+On the 1st, `scripts/monthly-leaderboards.py` renders the Discord post for the
+month that just ended — miles, state guesses and the guessr board as one message
+to paste:
+
+```bash
+task tripbot:prod:leaderboards            # last month
+task tripbot:prod:leaderboards -- --month 2026-08
+```
+
+Three boards from two places. Miles and state guesses are tripbot's, read out of
+`scoreboard_snapshots` in prod Postgres — the cluster has no inbound path, so the
+read goes through `kubectl exec` into the CNPG primary. The guessr board is a
+public JSON read from the game's own API, the same fetch the onscreen overlay
+does. Both are read-only, and the snapshot rows only exist once a month has
+rolled over, which is what makes the 1st the day to run it.
