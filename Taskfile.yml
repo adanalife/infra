@@ -2586,6 +2586,20 @@ tasks:
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
         echo "Next: task tripbot:stage:db:seed:vectors  (NS=prod-1-data for prod)"
 
+  # The month-end Discord post: miles, state guesses and the guessr board, as
+  # one message to paste. Read-only — one SELECT against the snapshot table and
+  # one GET against the game's public API. Run it on the 1st: the tripbot boards
+  # come from scoreboard_snapshots, which pkg/rollups writes on its first tick
+  # after rollover, so a month is only readable once it is over.
+  #
+  # Flags after `--`. See scripts/monthly-leaderboards.py.
+  tripbot:prod:leaderboards:
+    desc: "render the month-end leaderboard post for Discord (read-only); flags after --, e.g. task tripbot:prod:leaderboards -- --month 2026-08"
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - ./scripts/monthly-leaderboards.py {{.CLI_ARGS}}
+
   # prod-1 Postgres restore — the recovery path when the live PVC is gone or
   # corrupt, restoring from the most recent S3 dump written by the
   # postgres-backup CronJob (pg_dump -Fc).
