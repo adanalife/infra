@@ -10,6 +10,8 @@ dist/platform-*.k8s.yaml
 dist/*-platform.k8s.yaml
 dist/*.log
 dist/.*
+# Scratch output the synth tasks render into before swapping it over dist/.
+.dist.tmp/
 # Exception: the Argo-native platform delivery is just small Application objects
 # (offline, no rendered charts), so it IS committed + golden-gated like the apps.
 !dist/platform-argo.k8s.yaml
