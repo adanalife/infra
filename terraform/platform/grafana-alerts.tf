@@ -2094,7 +2094,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Tripbot's {{ $labels.account }} Twitch token is expired or missing"
-      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot needs re-consent, which is a browser click: open the {{ $labels.account }} auth-status card in tripbot-console and follow its 'Sign in as ...' link, which lands on gateway-twitch's consent flow. gateway-twitch is the sole writer of oauth_tokens; tripbot only reads them, and picks up a new row within one tokenReloadInterval (5m) with no restart. There is no CLI bootstrap — cmd/auth-bootstrap was deleted, so the old `task tripbot:auth:bootstrap:*` targets no longer have a binary to run."
+      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot needs re-consent, which is a browser click: open the {{ $labels.account }} auth-status card in tripbot-console and follow its 'Sign in as ...' link, which lands on gateway-twitch's consent flow. gateway-twitch is the sole writer of oauth_tokens; tripbot only reads them, and picks up a new row within one tokenReloadInterval (5m) with no restart. There is no CLI bootstrap; re-consent is browser-only."
     }
     labels = {
       severity = "critical"
