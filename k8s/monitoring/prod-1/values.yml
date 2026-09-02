@@ -453,6 +453,21 @@ collectorCommon:
         extra:
           - name: tmp-alloy
             mountPath: /tmp/alloy
+    # The operator injects a config-reloader sidecar next to alloy; it takes
+    # its own securityContext, so the container-level block above doesn't
+    # cover it and restricted PSA flags it separately. Same posture as alloy,
+    # minus the cap `add: []` wipe — the reloader has no chart-side default
+    # capability set to undo.
+    configReloader:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 4242
+        seccompProfile:
+          type: RuntimeDefault
     controller:
       volumes:
         extra:
