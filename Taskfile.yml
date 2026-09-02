@@ -62,7 +62,12 @@ tasks:
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
-      - mise exec -- uv run npx cdk8s synth
+      # cdk8s wipes the output dir before it runs the app, so a synth that aborts
+      # mid-way would leave every committed dist file showing as deleted. Render
+      # into a scratch dir and swap it in only on success (same in the two synth
+      # tasks below).
+      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - rm -rf dist && mv .dist.tmp dist
 
   cdk8s:synth:platform:
     desc: Synthesize apps + the platform Helm stack (needs helm + network)
@@ -71,7 +76,8 @@ tasks:
     env:
       CDK8S_PLATFORM: "1"
     cmds:
-      - mise exec -- uv run npx cdk8s synth
+      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - rm -rf dist && mv .dist.tmp dist
 
   # The NFS PersistentVolumes (dashcam corpus + background-music share) are
   # host-specific bootstrap infra kept OUT of Argo (their own NfsPVChart ->
@@ -259,7 +265,8 @@ tasks:
       NFS_SERVER: '<NFS server address>'
       NFS_PATH: '<export path>'
     cmds:
-      - mise exec -- uv run npx cdk8s synth
+      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - rm -rf dist && mv .dist.tmp dist
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
 
   # Schema-validate the committed dist/ (what Argo actually applies) against
