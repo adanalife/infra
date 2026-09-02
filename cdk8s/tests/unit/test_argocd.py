@@ -397,6 +397,9 @@ def test_mediamtx_appset_autosyncs_both_envs():
     assert "selfHeal: true" in patch
     assert "selfHeal: false" not in patch
     assert _ignores_replicas(mtx)
+    # ...and the sync respects that ignore, which is what keeps a sync of the
+    # parked-at-0 dist from scaling the live relays down.
+    assert _respects_ignore_replicas(mtx)
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "mediamtx")
 
