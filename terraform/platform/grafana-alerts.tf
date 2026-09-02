@@ -3242,7 +3242,8 @@ resource "grafana_rule_group" "gateway_health" {
 // Batch health — the scheduled work that keeps a *future* promise, where the
 // symptom of failure arrives days after the cause and looks like nothing at all.
 //
-// guessr's round-generation CronJob is the whole population so far. It runs
+// The population: guessr's round-generation CronJob, the hourly prod Postgres
+// dump, and video-pipeline's long batch passes (last rule). guessr's runs
 // weekly and keeps the game's schedule topped up; the game goes dark the day
 // after its last scheduled date, and nothing about that is loud. publish.sh has
 // a depth guard that fails the run when the post-run horizon is thin, and the
@@ -3399,6 +3400,85 @@ resource "grafana_rule_group" "batch_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [7200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // video-pipeline's long passes (coords, embed, transcode) read the corpus off
+  // a hard NFS mount. When the NAS's link flaps, the reader blocks in D-state
+  // instead of erroring: the process never exits, backoffLimit never trips,
+  // nothing restarts or OOMs, and every kube_job_* / kube_pod_* series keeps
+  // reading healthy while zero work happens. That cost 9.76 h on 2026-08-05
+  // and nothing noticed. Cluster state cannot see a stall, so this reads the
+  // one signal that moves: each pass prints one `[i/total]` line per clip.
+  //
+  // Loki-only on purpose. KSM Job series for stage-1 don't reach the cloud
+  // (the marker-label exception above covers CronJobs, not Jobs), so "the Job
+  // is active" is inferred from the stream itself: a pod that logged a clip
+  // line in the last 12 h, has not printed its `<stage> summary` table, and has
+  // logged nothing for 30 min. Keyed on `instance` (pod-level) so one shard
+  // finishing never masks a sibling, and a Job retry is a fresh pod rather than
+  // a continuation. A pod that died without finishing (OOM, backoffLimit) fires
+  // too, which is the right answer — nothing else watches those either.
+  //
+  // 30 min is the measured cost of the slowest clip class with room to spare:
+  // the 2026-08-21/22 embed re-pass logged 8–17 clips/hour per shard
+  // (3.5–7.5 min/clip; the summary tables put it at ~267 s/clip), coords ran
+  // 22–33 s/clip in the 2026-08-05 pass. A window under a pass's per-clip cost
+  // would fire on every slow clip. ponytail: a stall longer than the 12 h
+  // activity window resolves itself silently — the page already went out at 30
+  // min, and widening the window makes every dead pod ring for that long.
+  rule {
+    name           = "video-pipeline: a running pass has gone quiet"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK" // no series means no pass is mid-flight and stalled
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "a video-pipeline pass has logged no clip for 30 min without finishing"
+      description = "A coords/embed/transcode pod in stage-1 printed clip lines within the last 12 h, has not printed its summary table, and has been silent for 30 min. The usual cause is the corpus NFS mount hanging on a NAS link flap (the reader sits in D-state and the Job looks healthy); the other is the pod dying without finishing. Look at `kubectl -n stage-1 get pods -l app.kubernetes.io/name=video-pipeline` and the pod's logs — a live process with a frozen last line is the NFS stall, and it resumes on its own when the NAS is back (or delete the pod and re-run the shard explicitly, never with --resume). Its `elapsed` figures will count the stall as work."
+    }
+    labels = {
+      severity = "warning"
+      service  = "video-pipeline"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant" // Grafana reflects the model's queryType back; see the T5 rule
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ \"\\[[0-9]+/[0-9]+\\]\" [12h])) unless sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ \"\\[[0-9]+/[0-9]+\\]\" [30m])) unless sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ \"^(coords|embed|transcode) summary\" [12h]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
