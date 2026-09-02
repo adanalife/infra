@@ -3017,6 +3017,76 @@ resource "grafana_rule_group" "gateway_health" {
       })
     }
   }
+
+  // The gauge that was right when everything else was wrong. Through the 15.5h
+  // chat outage of 2026-08-30 this read 0 on gateway-twitch the whole time,
+  // while tripbot_twitch_connected sat green on a flag that only meant "RunChat
+  // is running" — and nothing was watching it. This is that watch.
+  //
+  // Scoped to gateway-twitch by job, and it has to be: the gauge carries no
+  // platform label, and gateway-youtube correctly reads 0 every night the
+  // channel is off-air, because YouTube chat exists only during a broadcast.
+  // An unscoped rule here would page nightly on a healthy system.
+  //
+  // Pairs with "Tripbot: disconnected from Twitch chat" rather than duplicating
+  // it: this one is the gateway's own view of its IRC connection, that one is
+  // tripbot's view of its poll of the gateway. Gateway 0 is the IRC leg or the
+  // tripbot4000 token; gateway 1 with tripbot 0 is the hop between them.
+  //
+  // no_data is OK: an absent series means the gateway isn't reporting at all,
+  // which is what "No platform_gateway_up from prod-1" above is for.
+  rule {
+    name           = "Gateway: gateway-twitch is not connected to Twitch chat"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "gateway-twitch has not been connected to Twitch chat for 5m"
+      description = "platform_gateway_chat_connected{job=\"gateway-twitch\"} has been 0 for 5m — the gateway is not holding an IRC connection to the channel, so no chat reaches tripbot and no command can run. Twitch chat is reachable off-stream, so unlike YouTube this is never explained by the channel being off-air. Check the pod (`kubectl -n prod-1 logs deploy/gateway-twitch | grep -i chat`), then the tripbot4000 credential: the oauth_tokens row for (twitch, tripbot4000) must exist with expires_at in the future, and re-consent is a browser click from the console's auth-status card. Compare against tripbot_twitch_connected to localise: both 0 is this gateway leg, gateway 1 with tripbot 0 is the hop between them."
+    }
+    labels = {
+      severity = "critical"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(platform_gateway_chat_connected{job=\"gateway-twitch\", namespace=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 // Batch health — the scheduled work that keeps a *future* promise, where the
