@@ -178,41 +178,29 @@ data "aws_iam_policy_document" "bucket_policy" {
 
   # give terraform role access to the core state file
   # (this is separate because core is not part of local.accounts)
-  #TODO: refactor this so it's no longer a dynamic statement
-  dynamic "statement" {
-    for_each = [local.core_account_id]
+  statement {
+    sid       = "put-state-${local.core_account_id}"
+    resources = ["arn:aws:s3:::${var.state_bucket}/${local.account_name}.tfstate"]
+    actions   = ["s3:PutObject", "s3:GetObject"]
 
-    content {
-      sid       = "put-state-${local.core_account_id}"
-      resources = ["arn:aws:s3:::${var.state_bucket}/${local.account_name}.tfstate"]
-      actions   = ["s3:PutObject", "s3:GetObject"]
-
-      principals {
-        type = "AWS"
-        identifiers = [
-          "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
-        ]
-      }
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
+      ]
     }
   }
 
-  # give terraform role access to the core state file
-  # (this is separate because core is not part of local.accounts)
-  #TODO: refactor this so it's no longer a dynamic statement
-  dynamic "statement" {
-    for_each = [local.core_account_id]
+  statement {
+    sid       = "list-bucket-${local.core_account_id}"
+    resources = ["arn:aws:s3:::${var.state_bucket}"]
+    actions   = ["s3:ListBucket"]
 
-    content {
-      sid       = "list-bucket-${local.core_account_id}"
-      resources = ["arn:aws:s3:::${var.state_bucket}"]
-      actions   = ["s3:ListBucket"]
-
-      principals {
-        type = "AWS"
-        identifiers = [
-          "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
-        ]
-      }
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:aws:iam::${local.core_account_id}:role/${var.ci_terraform_role}"
+      ]
     }
   }
 
