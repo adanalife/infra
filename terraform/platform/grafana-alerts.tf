@@ -1833,7 +1833,7 @@ resource "grafana_rule_group" "stream_health" {
     annotations = {
       summary     = "OBS silent-disconnect watchdog has restarted the output 3+ times in an hour and the stream is not staying up"
       link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
-      description = "tripbot_obs_silent_disconnect_restarts_total (any result) rose by 3 or more in the last hour on {{ $labels.service_platform }} — the watchdog keeps forcing a recovery and the platform keeps reporting the channel offline afterwards, so restarting the OBS output is not fixing this and it will keep cycling until something else does. The fault is below the output: OBS itself wedged (obs_stream_output_total_frames flat while obs_streaming_active=1 — the encoder-wedged rule fires alongside), or the platform rejecting the stream (a 403 'Stream is inactive' from YouTube on every egress start; check Sentry). Bounce the OBS pod for that platform from the console's restart control — ~30s of hard downtime — and if the platform side is what's broken, re-arm the broadcast by hand (YouTube Studio go-live) before the next watchdog cycle."
+      description = "tripbot_obs_silent_disconnect_restarts_total (any result) rose by 3 or more in the last hour on {{ $labels.service_platform }} — the watchdog keeps forcing a recovery and the platform keeps reporting the channel offline afterwards, so restarting the OBS output is not fixing this; after its third attempt the watchdog stands down, and the stood-down rule below carries the state from there. The fault is below the output: OBS itself wedged (obs_stream_output_total_frames flat while obs_streaming_active=1 — the encoder-wedged rule fires alongside), or the platform rejecting the stream (a 403 'Stream is inactive' from YouTube on every egress start; check Sentry). Bounce the OBS pod for that platform from the console's restart control — ~30s of hard downtime — and if the platform side is what's broken, re-arm the broadcast by hand (YouTube Studio go-live) before the next watchdog cycle."
     }
     labels = {
       severity = "critical"
@@ -1869,6 +1869,75 @@ resource "grafana_rule_group" "stream_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [2] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Where the loop rule above can't follow. The watchdog stops after three
+  // consecutive recoveries the channel never came back from (tripbot
+  // pkg/obs/watchdog, maxRecoveryRounds) and holds
+  // tripbot_obs_recovery_exhausted at 1 for as long as it is stood down. A
+  // counter window can't carry that state: increase() over an hour goes quiet
+  // an hour after the last restart while the stream is still dark, and
+  // TikTok's 30m cooldown spreads three attempts across more than an hour, so
+  // the loop rule never trips there at all. The gauge reads the state itself
+  // for the whole length of the outage and clears on its own when the channel
+  // comes back or the output is stopped.
+  //
+  // Gated like the silent-disconnect rule: parking a platform's OBS clears the
+  // gauge anyway (the watchdog re-arms on an inactive output), and the gate
+  // keeps a reading from a pod that died mid-stand-down from paging across a
+  // park.
+  rule {
+    name           = "OBS: silent-disconnect watchdog stood down (recovery exhausted)"
+    for            = "1m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "OBS silent-disconnect watchdog has given up on {{ $labels.service_platform }} — the stream is dark and nothing automated will fix it"
+      link        = "${local.watchdog_panel_link} · ${local.tripbot_sentry_link}"
+      description = "tripbot_obs_recovery_exhausted=1 on {{ $labels.service_platform }}: the watchdog forced three recoveries in a row, the platform reported the channel offline after every one, and it has stopped restarting the output. The fault is upstream of the OBS output — the platform is not serving the stream (youtube: a broadcast YouTube marked inactive, check YouTube Studio and go live by hand; tiktok: the room is gone and the re-mint is not taking, check the gateway's egress logs; twitch: check the channel's ingest health) or OBS is pushing frames nowhere useful (the encoder-wedged rule fires alongside). Fix the platform side first. The watchdog re-arms itself once the channel reads live for three ticks; to re-arm it by hand, stop and start the OBS output or restart the tripbot pod."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_platform) (tripbot_obs_recovery_exhausted{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) ${local.obs_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
