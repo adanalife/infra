@@ -1807,7 +1807,7 @@ tasks:
   # youtube's key); the SM container is `k8s/obs/<platform>-stream-key`.
   #
   # PROD goes through ESO: the stream-key ExternalSecret ships inside the
-  # per-platform obs app dist (tripbot repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
+  # per-platform obs app dist (obs repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
   # Argo-delivered), so a normal sync materializes the Secret and OBS streams
   # with no manual step. `obs:prod:stream:on` re-applies just that
   # ExternalSecret (yq-extracted from the obs dist — it has no standalone
@@ -1870,7 +1870,7 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
       NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
       SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
-      OBS_DIST: '../tripbot/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
+      OBS_DIST: '{{.SIBLINGS}}/obs/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
     preconditions:
       - *minipc-context-guard
       - sh: command -v kubectl >/dev/null
@@ -1880,7 +1880,11 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
       - sh: test -f {{.OBS_DIST}}
-        msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling tripbot checkout; is ~/adanalife/tripbot present + synthed?"
+        msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling obs checkout; is it present + synthed?"
+      # The dist is another repo's working tree, so a stale or wrong-branch
+      # obs checkout would apply a stale ExternalSecret instead of erroring.
+      - sh: git -C {{.SIBLINGS}}/obs fetch -q origin && git -C {{.SIBLINGS}}/obs diff --quiet origin/main -- cdk8s/dist/
+        msg: "{{.SIBLINGS}}/obs cdk8s/dist differs from origin/main — pull (or re-synth) the obs checkout so this applies the current ExternalSecret"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
       - sh: kubectl get secretstore aws-parameterstore -n {{.NAMESPACE}} >/dev/null 2>&1
