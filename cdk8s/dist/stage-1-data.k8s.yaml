@@ -307,6 +307,7 @@ spec:
       max_parallel_maintenance_workers: "0"
   plugins:
     - name: barman-cloud.cloudnative-pg.io
+      enabled: true
       isWALArchiver: true
       parameters:
         barmanObjectName: pg-store

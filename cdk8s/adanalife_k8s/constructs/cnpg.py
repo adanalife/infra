@@ -219,6 +219,15 @@ class CnpgCluster(Construct):
                     "plugins": [
                         {
                             "name": _BARMAN_PLUGIN,
+                            # The CRD defaults this to true and `plugins` is an
+                            # atomic list (no x-kubernetes-list-type), so the whole
+                            # array is compared element-for-element: omitting a field
+                            # the apiserver then stamps makes the live array differ
+                            # from ours and leaves the -data Applications OutOfSync
+                            # forever, with an empty diff because every OTHER
+                            # defaulted field lands in a map and merges away. Declare
+                            # it so the two arrays match exactly.
+                            "enabled": True,
                             "isWALArchiver": True,
                             "parameters": {
                                 "barmanObjectName": OBJECT_STORE_NAME,
