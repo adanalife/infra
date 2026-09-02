@@ -112,6 +112,12 @@ def test_cluster_wires_the_barman_plugin_as_wal_archiver():
     assert plugins == [
         {
             "name": "barman-cloud.cloudnative-pg.io",
+            # Declared, not inherited: the CRD defaults enabled to true, and
+            # `plugins` is an atomic list (no x-kubernetes-list-type), so Argo
+            # compares the array whole. Omitting it makes the live array differ
+            # from ours and the -data Applications never reach Synced. Do not
+            # drop it as redundant.
+            "enabled": True,
             "isWALArchiver": True,
             "parameters": {
                 "barmanObjectName": "pg-store",
