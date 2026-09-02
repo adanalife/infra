@@ -1984,9 +1984,14 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+        '
       - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
 
   obs:vnc:down:
@@ -2332,9 +2337,14 @@ tasks:
     aliases: [tripbot:db:up]
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward -n development svc/postgres 5432:5432 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl port-forward -n development svc/postgres 5432:5432 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+        '
       - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
 
   tripbot:dev:db:down:
@@ -2354,9 +2364,14 @@ tasks:
     desc: start a kubectl port-forward to the stage-1 cluster Postgres at localhost:5433 (5433 to avoid colliding with a dev/prod forward on 5432)
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward -n stage-1 svc/postgres 5433:5432 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/tripbot-stage-db.pid
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl port-forward -n stage-1 svc/postgres 5433:5432 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/tripbot-stage-db.pid
+        '
       - 'echo "stage-1 Postgres port-forward started — psql at localhost:5433 (PID $(cat /tmp/adanalife-tasks/tripbot-stage-db.pid))"'
 
   tripbot:stage:db:down:
