@@ -465,6 +465,9 @@ class ArgoCD(Construct):
             dest_ns_tmpl="{{.ns}}",
             # NEVER prune the stateful unit.
             prune_disabled=True,
+            # The CNPG Cluster is the fleet's most heavily-defaulted CRD, so this
+            # unit is the one that needs the dry-run diff (see _application_set).
+            server_side_diff=True,
         )
         # The MediaMTX relays (infra-authored, one Application per (env,
         # platform) reconciling its own <env>-mediamtx-<platform>.k8s.yaml —
@@ -830,6 +833,7 @@ class ArgoCD(Construct):
         automated_holdouts: tuple[tuple[str, str], ...] = (),
         selfheal: bool = True,
         ignore_replicas: bool = False,
+        server_side_diff: bool = False,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
         create_namespace: bool = False,
@@ -866,6 +870,20 @@ class ArgoCD(Construct):
             "CreateNamespace=true" if create_namespace else "CreateNamespace=false",
             "ServerSideApply=true",  # adopt live objects by name on sync
         ]
+        if server_side_diff:
+            # Diff via a server-side apply dry-run instead of comparing our
+            # manifest to the live object. A CRD that defaults heavily otherwise
+            # reads OutOfSync forever on fields nobody wrote: CNPG's Cluster
+            # gains 18 defaulted spec keys plus initdb locale/encoding, 22
+            # postgresql.parameters, storage.resizeInUseVolumes and
+            # plugins[].enabled. Those are apiserver schema defaults with no
+            # field-manager owner, so -- exactly like the ExternalSecret case
+            # below -- managedFieldsManagers cannot waive them, and enumerating
+            # them would be 45 jq paths that rot on every CNPG bump. The dry-run
+            # returns what the apiserver WOULD store, defaults included, so the
+            # comparison is against the same shape and only real drift shows.
+            # Requires ServerSideApply (set above).
+            sync_options.append("ServerSideDiff=true")
         if prune_disabled:
             sync_options.append("Prune=false")  # never delete stateful resources
         if ignore_replicas:
