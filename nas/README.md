@@ -6,8 +6,7 @@ rather than in the cluster.
 The NAS is **not** a Kubernetes node and is not going to become one: its Atom
 C3538 has roughly a third of the node's single-thread performance, and DSM's
 custom kernel plus Container Manager's patched Docker break k3s/k3d installs in
-non-obvious ways that DSM upgrades re-break. That call is recorded in
-`vault/infra/hardware.md`. So anything here is a plain script or a Container
+non-obvious ways that DSM upgrades re-break. So anything here is a plain script or a Container
 Manager compose file, version-controlled in this repo and copied over — not
 orchestrated.
 
@@ -43,7 +42,7 @@ reconfiguration, and nothing to back up first.
    ```
 
    Do not paste the file's contents anywhere. A previous talosconfig was echoed
-   into a terminal transcript and needed rotating (`vault/infra/TODO.md`).
+   into a terminal transcript and needed rotating.
 
 2. **Place the three files** in `/volume1/ADanaLife/kmsg/` on the NAS —
    `talosctl` (the `linux-amd64` build matching the cluster's Talos version; the

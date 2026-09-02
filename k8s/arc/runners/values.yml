@@ -20,7 +20,7 @@
 # in common: seventeen crashes over 2026-08-23/24 traced to a `docker run` from a
 # pre-commit hook, and a further one on 2026-08-29 to a plain buildx `dev-image`
 # build, which is why removing the hook class was not enough. The kernel
-# mechanism is still unidentified (vault/infra/TODO.md), so this is avoidance,
+# mechanism is still unidentified, so this is avoidance,
 # not a fix — but it is the only lever that has held. Builds are ~500 hosted
 # minutes/month across the four private repos, against a 2,000-minute free
 # allowance; everything Docker-free (pytest, go test, lint, pre-commit,
