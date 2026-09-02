@@ -114,11 +114,12 @@ controllers:
 
 tenants:
   # The tenant namespace holds the CRs + runner pods; the chart creates the
-  # namespace and the runner ServiceAccount (referenced nowhere yet — runner
-  # AWS creds arrive via overrideRunnerSpec envFrom instead, see
-  # constructs/burrito.py).
+  # namespace and a default `burrito-runner` ServiceAccount in it (referenced
+  # nowhere yet — runner AWS creds arrive via overrideRunnerSpec envFrom
+  # instead, see constructs/burrito.py). Don't list `burrito-runner` under
+  # `serviceAccounts` here: the chart renders the default one unconditionally,
+  # so naming it again emits the same ServiceAccount twice and cdk8s's Helm
+  # include refuses the duplicate.
   - namespace:
       create: true
       name: burrito
-    serviceAccounts:
-      - name: burrito-runner
