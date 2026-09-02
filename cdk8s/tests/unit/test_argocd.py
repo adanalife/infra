@@ -408,6 +408,34 @@ def test_data_appset_never_prunes_either_variant():
         assert "Prune=false" in opts
 
 
+def test_data_appset_diffs_server_side():
+    """The data unit diffs via a server-side apply dry-run, and that option is
+    inert without ServerSideApply — Argo silently falls back to the client-side
+    diff if it is missing, which is the failure this asserts against. CNPG's
+    Cluster defaults 45-odd spec fields nobody wrote, so a client-side diff
+    reads OutOfSync forever on them."""
+    for kwargs in ({}, _DEV):
+        data = _appset(_synth(**kwargs), "tripbot-data")
+        opts = data["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
+        assert "ServerSideDiff=true" in opts
+        assert "ServerSideApply=true" in opts
+
+
+def test_server_side_diff_is_scoped_to_the_data_unit():
+    """Only the data unit opts in. The dry-run diff costs an apiserver round trip
+    per resource, so it stays where a defaulting CRD makes it worth paying."""
+    objs = _synth()
+    others = [
+        a
+        for a in objs
+        if a.get("kind") == "ApplicationSet" and a["metadata"]["name"] != "tripbot-data"
+    ]
+    assert others, "expected other ApplicationSets to compare against"
+    for a in others:
+        opts = a["spec"]["template"]["spec"]["syncPolicy"].get("syncOptions", [])
+        assert "ServerSideDiff=true" not in opts, a["metadata"]["name"]
+
+
 def _by_name(objs, kind, name):
     return next(o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name)
 
