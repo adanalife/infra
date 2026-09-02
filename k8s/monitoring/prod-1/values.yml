@@ -117,6 +117,19 @@ destinations:
     #                         repository and job_name (~170 series), and the
     #                         two duration histograms add a `le` dimension on
     #                         top of that (~7800).
+    #   up                  — every scrape target's own health, for the
+    #                         scrape-health alert. This is the family that
+    #                         tells "the condition an alert watches is true"
+    #                         apart from "nobody could scrape the condition":
+    #                         on 2026-09-01 both pitr-health rules fired on a
+    #                         healthy database because a default-deny netpol
+    #                         dropped alloy's scrape of the CNPG exporter, and
+    #                         nothing here could distinguish that from a real
+    #                         WAL stall. One series per target, and it does not
+    #                         scale with anything: 21 annotated pods
+    #                         cluster-wide (3 of them stage-dropped) plus the
+    #                         integrations' own, against 2802 active series of
+    #                         a 15000 cap measured 2026-09-02.
     # The rest of what's scraped is local-VM-only: the other node_*
     # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
     # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
@@ -129,6 +142,13 @@ destinations:
     # against a scraped metric: a rule written against a series that isn't kept
     # evaluates as no-data forever, and no-data on a `no_data_state = "OK"` rule
     # is indistinguishable from healthy.
+    #
+    # Being on this list is necessary and NOT sufficient, which is the harder
+    # half to remember. A series also has to be scrapable: the *-data
+    # namespaces run a default-deny NetworkPolicy, so a target there is blind
+    # until a rule admits the monitoring namespace to its metrics port, and
+    # neither file knows the other exists (infra#1106). `up` is kept for
+    # exactly this reason — it is the signal that separates the two failures.
     metricProcessingRules: |-
       write_relabel_config {
         // The one stage-1 exception, and it needs the marker below because RE2
@@ -188,7 +208,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 

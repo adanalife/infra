@@ -812,6 +812,87 @@ resource "grafana_rule_group" "metrics_budget" {
   }
 }
 
+// Scrape health — the difference between "the thing an alert watches is broken"
+// and "nobody could look at the thing".
+//
+// Every rule in this file that reads a *scraped* series sets no_data_state =
+// "OK" or "Alerting", and either choice is a guess when the scrape itself is
+// down: OK hides a real fault, Alerting invents one. On 2026-09-01 both
+// pitr-health rules fired against a verifiably healthy Postgres because the
+// default-deny NetworkPolicy in prod-1-data had no rule admitting the
+// monitoring namespace, so alloy's scrape of the CNPG exporter on :9187 was
+// dropped and every cnpg_* series was simply absent (infra#1106). The rules
+// were correct, the data was missing, and nothing said so.
+//
+// `up` is the discriminator, and it works precisely because a netpol drop is
+// not a discovery failure: alloy still finds the pod from its annotations, so
+// the target exists and reports up = 0. That is a positive signal, which is why
+// this is an `up == 0` rule and not an absent() one — absent() would need one
+// rule per target and would still miss the case where discovery works.
+//
+// Grouped by job/namespace/pod so a rolled pod resolves by its series going
+// away rather than by recovering. for = 15m and severity warning deliberately:
+// the minipc's NVMe fault restarts leader-elected pods in bursts, and a
+// tighter/louder rule here would page on that instead of on blindness.
+resource "grafana_rule_group" "scrape_health" {
+  name             = "scrape-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Monitoring: a scrape target is unreachable"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "alloy cannot scrape {{ $labels.job }} in {{ $labels.namespace }}"
+      description = "up{job=\"{{ $labels.job }}\"} has been 0 for 15m on pod {{ $labels.pod }} — the target was discovered but every scrape of it failed, so any alert or dashboard reading that job's metrics is now blind rather than green. Treat every no-data verdict from that job as unknown until this clears. Most likely a NetworkPolicy: the *-data namespaces are default-deny, so a new exporter port needs an explicit rule admitting the monitoring namespace (infra#1106 is the worked example). Otherwise check the pod is up and its metrics port still matches its prometheus.io/port annotation. no_data is OK here because an absent `up` means the target was never discovered at all, which is a scrape-config problem rather than a reachability one."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "min by (job, namespace, pod) (up)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // Alerts that watch the alerting pipeline itself — the gap the 2026-06-15
 // incident exposed (rules fired all night, but the Discord webhook was dead, so
 // nothing was delivered). Both rules route OFF Discord by design.
