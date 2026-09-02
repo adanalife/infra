@@ -421,6 +421,27 @@ def test_data_appset_diffs_server_side():
         assert "ServerSideApply=true" in opts
 
 
+def test_sync_policy_brake_is_scoped_to_automated():
+    """The manual-override brake must cover /spec/syncPolicy/automated and no more.
+    The ApplicationSet controller never writes an ignored path, so a brake over the
+    whole /spec/syncPolicy also blocks declared syncOptions from reaching an
+    already-generated Application — which is how the ServerSideDiff rollout landed
+    on the ApplicationSet and never on either -data Application."""
+    for kwargs in ({}, _DEV):
+        for appset in _synth(**kwargs):
+            if appset.get("kind") != "ApplicationSet":
+                continue
+            ptrs = [
+                p
+                for entry in appset["spec"].get("ignoreApplicationDifferences", [])
+                for p in entry.get("jsonPointers", [])
+            ]
+            assert ptrs == ["/spec/syncPolicy/automated"], (
+                appset["metadata"]["name"],
+                ptrs,
+            )
+
+
 def test_server_side_diff_is_scoped_to_the_data_unit():
     """Only the data unit opts in. The dry-run diff costs an apiserver round trip
     per resource, so it stays where a defaulting CRD makes it worth paying."""

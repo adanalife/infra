@@ -225,7 +225,7 @@ spec:
           - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -294,7 +294,7 @@ spec:
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-tripbot-identity"
@@ -349,7 +349,7 @@ spec:
           - env: stage-1
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-supporting"
@@ -405,7 +405,7 @@ spec:
             ns: stage-1-data
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-data"
@@ -479,7 +479,7 @@ spec:
             app: mediamtx-tiktok
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -547,7 +547,7 @@ spec:
           - {}
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: ups-monitor
@@ -600,7 +600,7 @@ spec:
           - {}
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: arc
@@ -656,7 +656,7 @@ spec:
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-console"
@@ -725,7 +725,7 @@ spec:
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-video-pipeline"
@@ -792,7 +792,7 @@ spec:
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-flare"
@@ -861,7 +861,7 @@ spec:
           - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -932,7 +932,7 @@ spec:
           - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -1003,7 +1003,7 @@ spec:
           - path: cdk8s/dist/apps/stage-1-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"

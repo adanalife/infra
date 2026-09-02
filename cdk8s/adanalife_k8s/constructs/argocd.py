@@ -975,7 +975,7 @@ class ArgoCD(Construct):
             # and — paired with RespectIgnoreDifferences=true in syncOptions above
             # — out of the apply too (so a sync of the parked-at-0 dist doesn't
             # scale a live pod down); selfHeal still heals image/config/existence
-            # drift. Unlike the /spec/syncPolicy brake below, this ignore lives in
+            # drift. Unlike the /spec/syncPolicy/automated brake below, this ignore lives in
             # the rendered Application template, so it survives appset
             # regeneration. dist parks every workload at replicas:0, so a fresh
             # cluster comes up parked and a re-sync/regen preserves the live count.
@@ -990,15 +990,25 @@ class ArgoCD(Construct):
             "goTemplate": True,
             "goTemplateOptions": ["missingkey=error"],
             "generators": [generator],
-            # Emergency brake: let a manual sync-policy change on a generated
+            # Emergency brake: let a manual autosync change on a generated
             # Application STICK instead of being stomped back within seconds by
             # this controller. With this, `argocd app set <app> --sync-policy none`
             # (or the UI autosync toggle) durably disables selfHeal on one
-            # Application so its workloads can be scaled down by hand. The
-            # override survives until a template change regenerates the
-            # Application (e.g. re-applying this file), which doubles as the
-            # recovery path back to the declared policy.
-            "ignoreApplicationDifferences": [{"jsonPointers": ["/spec/syncPolicy"]}],
+            # Application so its workloads can be scaled down by hand.
+            #
+            # Scoped to /automated, which is the only subtree those two gestures
+            # touch. The brake used to cover all of /spec/syncPolicy, and that is
+            # strictly broader than the thing it protects: the controller never
+            # writes an ignored path, so syncOptions declared here could not reach
+            # an already-generated Application either. That silently swallowed the
+            # ServerSideDiff=true rollout -- the ApplicationSet carried it, the
+            # controller logged "generated 2 applications", and both -data
+            # Applications kept their old syncOptions and stayed OutOfSync. Recovery
+            # from a manual override is unchanged: regenerate the Application (delete
+            # it, or re-apply after a template change that alters /automated).
+            "ignoreApplicationDifferences": [
+                {"jsonPointers": ["/spec/syncPolicy/automated"]}
+            ],
             "template": {
                 "metadata": {"name": app_name_tmpl},
                 "spec": spec,
