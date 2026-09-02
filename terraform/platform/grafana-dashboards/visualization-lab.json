@@ -59,7 +59,7 @@
       "gridPos": { "x": 0, "y": 42, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/OBS data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. **The two Helix-errors panels read `platform_gateway_helix_errors_total`** (the platform-gateway is the single Helix caller), which is annotation-scraped and so carries `pod`, not `deployment_environment` — the env variable does not filter them. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
+        "content": "**Experimental dashboard for Tufte-inspired visualization techniques.** Each panel demos a technique against real tripbot/OBS data — heatmap vs. quantile lines, state-timeline vs. point-in-time stat, sorted Pareto vs. flat bargauge, color-as-meaning vs. random palette, direct-labeling vs. legend chips, small multiples vs. stacked-color chart, comparison delta vs. raw value, daily sparkline strip, annotated timeseries. None of these alert; they exist to be A/B'd against the canonical panels. When a technique earns its keep, promote it into one of the 00-13 dashboards and retire it here. **The two Helix-errors panels read `platform_gateway_upstream_errors_total`** (the platform-gateway is the single Helix caller), which is annotation-scraped and so carries `pod`, not `deployment_environment` — the env variable does not filter them. **Dashboard-level annotation:** every timeseries below carries vertical lines at moments when `obs_streaming_active` transitions 0→1 (stream-start)."
       }
     },
     {
@@ -155,15 +155,15 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Helix errors — legend to the right (direct-label approximation)",
+      "title": "Upstream errors — legend to the right (direct-label approximation)",
       "description": "Same data as the canonical 'Helix errors by endpoint and status' on dashboard 05, but with the legend placed at the right edge so series names sit close to where their lines end. Grafana doesn't natively render Tufte-style end-of-line labels — this is the closest pragmatic approximation. Lines thickened slightly to read at a glance.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{pod=~\"gateway-twitch.*\"}[5m])) * 60",
-          "legendFormat": "{{endpoint}} ({{status}})"
+          "expr": "sum by (provider, endpoint, status) (rate(platform_gateway_upstream_errors_total{pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "legendFormat": "{{provider}} {{endpoint}} ({{status}})"
         }
       ],
       "options": {
@@ -263,15 +263,15 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Helix errors — colored by HTTP status class",
+      "title": "Upstream errors — colored by HTTP status class",
       "description": "Same Helix errors data, with explicit color overrides by status_code class: 4xx muted gray, 429 loud yellow (rate-limited), 5xx loud red (server fault). Tufte: color carries meaning, not decoration. Compare to dashboard 05's panel where color is assigned by Grafana's classic palette and series end up indistinguishable.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 23, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{pod=~\"gateway-twitch.*\"}[5m])) * 60",
-          "legendFormat": "{{endpoint}} ({{status}})"
+          "expr": "sum by (provider, endpoint, status) (rate(platform_gateway_upstream_errors_total{pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "legendFormat": "{{provider}} {{endpoint}} ({{status}})"
         }
       ],
       "options": {
