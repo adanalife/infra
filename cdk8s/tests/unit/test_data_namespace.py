@@ -136,6 +136,30 @@ def test_isolated_data_ns_gets_ingress_policy_scoped_to_own_app_ns():
         assert rule["ports"] == [{"port": 5432, "protocol": "TCP"}]
 
 
+def test_isolated_data_ns_allows_monitoring_to_scrape_metrics():
+    # Without this rule alloy's scrape is dropped, every cnpg_* series is
+    # absent, and the pitr-health alerts fire on NoData against a healthy
+    # database — a failure that looks exactly like a real WAL stall.
+    for name in ("prod-1", "stage-1"):
+        env = load_env(name)
+        objs = _synth(DataChart, env)
+        pol = _by(objs, "NetworkPolicy", "postgres-ingress")[0]
+        scrape = [
+            r
+            for r in pol["spec"]["ingress"]
+            if r.get("from")
+            == [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "monitoring"}
+                    }
+                }
+            ]
+        ]
+        assert len(scrape) == 1, f"{env.data_namespace} has no monitoring scrape rule"
+        assert scrape[0]["ports"] == [{"port": 9187, "protocol": "TCP"}]
+
+
 def test_colocated_data_ns_gets_no_ingress_policy():
     # a default-deny in the shared app namespace would black-hole every other
     # workload there — co-located envs must not emit the policy
