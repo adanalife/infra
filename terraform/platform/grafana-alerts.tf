@@ -1926,10 +1926,11 @@ resource "grafana_rule_group" "stream_health" {
   }
 
   // Catches the failure mode the "disconnected from Twitch chat" rule above
-  // can't see: the IRC connection stays alive (gauge = 1) but the user-access-
-  // token has expired or been blanked. Twitch only validates the token on
-  // initial PASS, so IRC won't drop; meanwhile Helix calls 401 and the admin
-  // panel surfaces a "Sign in as X" banner that needs a human click.
+  // can't see: chat keeps arriving (gauge = 1) but the user-access-token has
+  // expired or been blanked. Twitch validates the chat token only when
+  // gateway-twitch opens the IRC connection, so an expiry mid-session doesn't
+  // drop it; meanwhile Helix calls 401 and the console's auth-status card
+  // surfaces a "Sign in as X" link that needs a human click.
   //
   // The gauge emits 0 for "missing / blanked" — that subtraction yields
   // time(), which is huge-positive, so missing accounts fire the same alert.
@@ -1943,7 +1944,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Tripbot's {{ $labels.account }} Twitch token is expired or missing"
-      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot will need re-auth — open the admin panel and click the 'Sign in as ...' link, or run `task tripbot:auth:bootstrap:{{ $labels.account }}`."
+      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot needs re-consent, which is a browser click: open the {{ $labels.account }} auth-status card in tripbot-console and follow its 'Sign in as ...' link, which lands on gateway-twitch's consent flow. gateway-twitch is the sole writer of oauth_tokens; tripbot only reads them, and picks up a new row within one tokenReloadInterval (5m) with no restart. There is no CLI bootstrap — cmd/auth-bootstrap was deleted, so the old `task tripbot:auth:bootstrap:*` targets no longer have a binary to run."
     }
     labels = {
       severity = "critical"
@@ -3009,6 +3010,76 @@ resource "grafana_rule_group" "gateway_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The gauge that was right when everything else was wrong. Through the 15.5h
+  // chat outage of 2026-08-30 this read 0 on gateway-twitch the whole time,
+  // while tripbot_twitch_connected sat green on a flag that only meant "RunChat
+  // is running" — and nothing was watching it. This is that watch.
+  //
+  // Scoped to gateway-twitch by job, and it has to be: the gauge carries no
+  // platform label, and gateway-youtube correctly reads 0 every night the
+  // channel is off-air, because YouTube chat exists only during a broadcast.
+  // An unscoped rule here would page nightly on a healthy system.
+  //
+  // Pairs with "Tripbot: disconnected from Twitch chat" rather than duplicating
+  // it: this one is the gateway's own view of its IRC connection, that one is
+  // tripbot's view of its poll of the gateway. Gateway 0 is the IRC leg or the
+  // tripbot4000 token; gateway 1 with tripbot 0 is the hop between them.
+  //
+  // no_data is OK: an absent series means the gateway isn't reporting at all,
+  // which is what "No platform_gateway_up from prod-1" above is for.
+  rule {
+    name           = "Gateway: gateway-twitch is not connected to Twitch chat"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "gateway-twitch has not been connected to Twitch chat for 5m"
+      description = "platform_gateway_chat_connected{job=\"gateway-twitch\"} has been 0 for 5m — the gateway is not holding an IRC connection to the channel, so no chat reaches tripbot and no command can run. Twitch chat is reachable off-stream, so unlike YouTube this is never explained by the channel being off-air. Check the pod (`kubectl -n prod-1 logs deploy/gateway-twitch | grep -i chat`), then the tripbot4000 credential: the oauth_tokens row for (twitch, tripbot4000) must exist with expires_at in the future, and re-consent is a browser click from the console's auth-status card. Compare against tripbot_twitch_connected to localise: both 0 is this gateway leg, gateway 1 with tripbot 0 is the hop between them."
+    }
+    labels = {
+      severity = "critical"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(platform_gateway_chat_connected{job=\"gateway-twitch\", namespace=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
