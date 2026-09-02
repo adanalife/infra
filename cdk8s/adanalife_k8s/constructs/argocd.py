@@ -465,9 +465,6 @@ class ArgoCD(Construct):
             dest_ns_tmpl="{{.ns}}",
             # NEVER prune the stateful unit.
             prune_disabled=True,
-            # The CNPG Cluster is the fleet's most heavily-defaulted CRD, so this
-            # unit is the one that needs the dry-run diff (see _application_set).
-            server_side_diff=True,
         )
         # The MediaMTX relays (infra-authored, one Application per (env,
         # platform) reconciling its own <env>-mediamtx-<platform>.k8s.yaml —
@@ -833,7 +830,6 @@ class ArgoCD(Construct):
         automated_holdouts: tuple[tuple[str, str], ...] = (),
         selfheal: bool = True,
         ignore_replicas: bool = False,
-        server_side_diff: bool = False,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
         create_namespace: bool = False,
@@ -870,20 +866,6 @@ class ArgoCD(Construct):
             "CreateNamespace=true" if create_namespace else "CreateNamespace=false",
             "ServerSideApply=true",  # adopt live objects by name on sync
         ]
-        if server_side_diff:
-            # Diff via a server-side apply dry-run instead of comparing our
-            # manifest to the live object. A CRD that defaults heavily otherwise
-            # reads OutOfSync forever on fields nobody wrote: CNPG's Cluster
-            # gains 18 defaulted spec keys plus initdb locale/encoding, 22
-            # postgresql.parameters, storage.resizeInUseVolumes and
-            # plugins[].enabled. Those are apiserver schema defaults with no
-            # field-manager owner, so -- exactly like the ExternalSecret case
-            # below -- managedFieldsManagers cannot waive them, and enumerating
-            # them would be 45 jq paths that rot on every CNPG bump. The dry-run
-            # returns what the apiserver WOULD store, defaults included, so the
-            # comparison is against the same shape and only real drift shows.
-            # Requires ServerSideApply (set above).
-            sync_options.append("ServerSideDiff=true")
         if prune_disabled:
             sync_options.append("Prune=false")  # never delete stateful resources
         if ignore_replicas:
@@ -997,15 +979,14 @@ class ArgoCD(Construct):
             # Application so its workloads can be scaled down by hand.
             #
             # Scoped to /automated, which is the only subtree those two gestures
-            # touch. The brake used to cover all of /spec/syncPolicy, and that is
-            # strictly broader than the thing it protects: the controller never
-            # writes an ignored path, so syncOptions declared here could not reach
-            # an already-generated Application either. That silently swallowed the
-            # ServerSideDiff=true rollout -- the ApplicationSet carried it, the
-            # controller logged "generated 2 applications", and both -data
-            # Applications kept their old syncOptions and stayed OutOfSync. Recovery
-            # from a manual override is unchanged: regenerate the Application (delete
-            # it, or re-apply after a template change that alters /automated).
+            # touch. Anything broader is a trap: the controller never WRITES an
+            # ignored path, so a brake over all of /spec/syncPolicy also stops
+            # declared syncOptions from reaching an already-generated Application --
+            # the ApplicationSet carries the change, the controller reports the
+            # Applications generated, and their syncOptions silently never move.
+            # Verify a syncPolicy change by reading the generated Application, not
+            # this template. Recovery from a manual override: regenerate the
+            # Application (delete it, or change /automated here).
             "ignoreApplicationDifferences": [
                 {"jsonPointers": ["/spec/syncPolicy/automated"]}
             ],

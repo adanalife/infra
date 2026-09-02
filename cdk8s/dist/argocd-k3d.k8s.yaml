@@ -268,7 +268,6 @@ spec:
         syncOptions:
           - CreateNamespace=false
           - ServerSideApply=true
-          - ServerSideDiff=true
           - Prune=false
       ignoreDifferences:
         - group: external-secrets.io
