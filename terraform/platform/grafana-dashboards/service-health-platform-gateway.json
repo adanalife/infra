@@ -449,7 +449,7 @@
     {
       "id": 11,
       "type": "stat",
-      "title": "Helix errors (5m)",
+      "title": "Upstream errors (5m)",
       "datasource": {
         "type": "prometheus",
         "uid": "__DS_PROMETHEUS__"
@@ -463,7 +463,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(platform_gateway_helix_errors_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"}[5m]))"
+          "expr": "sum(increase(platform_gateway_upstream_errors_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"}[5m]))"
         }
       ],
       "options": {
@@ -534,7 +534,7 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Helix errors by endpoint and status (per min)",
+      "title": "Upstream errors by provider, endpoint and status (per min)",
       "datasource": {
         "type": "prometheus",
         "uid": "__DS_PROMETHEUS__"
@@ -548,8 +548,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (endpoint, status) (rate(platform_gateway_helix_errors_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"}[5m])) * 60",
-          "legendFormat": "{{endpoint}} ({{status}})"
+          "expr": "sum by (provider, endpoint, status) (rate(platform_gateway_upstream_errors_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-twitch.*\"}[5m])) * 60",
+          "legendFormat": "{{provider}} {{endpoint}} ({{status}})"
         }
       ],
       "fieldConfig": {
