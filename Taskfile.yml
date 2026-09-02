@@ -2335,7 +2335,7 @@ tasks:
   #
   # The :db:* tasks open kubectl port-forwards to the cluster Postgres
   # (a headless ClusterIP, otherwise unreachable from outside the cluster) —
-  # primarily for the auth-bootstrap CLI and psql poking.
+  # primarily for psql poking.
   tripbot:dev:db:up:
     desc: start a local kubectl port-forward to the development cluster Postgres at localhost:5432
     aliases: [tripbot:db:up]
@@ -2788,107 +2788,6 @@ tasks:
           exit 1
         fi
       - kubectl logs job/tripbot-seed -n development
-
-  tripbot:dev:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against development back-to-back; dev uses the non-prod test bot, so sign in as tripbot4001 then adanalife_staging
-    aliases: [tripbot:auth:bootstrap]
-    cmds:
-      - task: tripbot:dev:auth:bootstrap:bot
-      - task: tripbot:dev:auth:bootstrap:broadcaster
-
-  tripbot:dev:auth:bootstrap:bot:
-    desc: bootstrap the BOT Twitch OAuth token against development (development namespace); port-forwards 8080 so the browser callback reaches the pod
-    cmds:
-      # Authored per-env in the tripbot repo's cdk8s; applied from its committed
-      # dist in the sibling tripbot checkout (same source as `task contract:sync`).
-      - kubectl delete job tripbot-auth-bootstrap-bot -n development --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-bot.k8s.yaml -n development
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4001 (the non-prod test bot, NOT prod's tripbot4000)."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n development 2>/dev/null || true
-      - echo "Bot bootstrap complete — token written to dev Postgres."
-
-  tripbot:dev:auth:bootstrap:broadcaster:
-    desc: bootstrap the BROADCASTER Twitch OAuth token against development; required for subscriber/follower polling + real-time EventSub
-    cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n development --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-broadcaster.k8s.yaml -n development
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
-      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n development 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n development\` to bring the bot online with both identities."'
-
-  tripbot:prod:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against prod-1 back-to-back; sign in as tripbot4000 on the first browser tab, then adanalife_ on the second
-    cmds:
-      - task: tripbot:prod:auth:bootstrap:bot
-      - task: tripbot:prod:auth:bootstrap:broadcaster
-
-  tripbot:prod:auth:bootstrap:bot:
-    desc: bootstrap the BOT Twitch OAuth token (chat:read/edit etc.) against prod-1; port-forwards 8080 so the browser callback reaches the pod
-    cmds:
-      # The auth-bootstrap Jobs are deliberately their own deploy unit (NOT in any
-      # app sync — they'd otherwise re-run every reconcile and burn each leg's
-      # 5min timeout). Authored per-env in the tripbot repo's cdk8s and envFrom the
-      # namespace's tripbot-config + ESO Secrets; applied from its committed dist
-      # in the sibling tripbot checkout (same source as `task contract:sync`).
-      - kubectl delete job tripbot-auth-bootstrap-bot -n prod-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-bot.k8s.yaml -n prod-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n prod-1 2>/dev/null || true
-      - echo "Bot bootstrap complete — tripbot4000 token written to prod Postgres."
-
-  tripbot:prod:auth:bootstrap:broadcaster:
-    desc: bootstrap the BROADCASTER Twitch OAuth token (channel:read:subscriptions, moderator:read:followers, user:edit:broadcast) against prod-1; required for subscriber/follower polling + real-time EventSub
-    cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n prod-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-broadcaster.k8s.yaml -n prod-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
-      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n prod-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot-twitch -n prod-1\` to bring the bot online with both identities loaded."'
-
-  tripbot:stage:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4001 then adanalife_staging
-    cmds:
-      - task: tripbot:stage:auth:bootstrap:bot
-      - task: tripbot:stage:auth:bootstrap:broadcaster
-
-  tripbot:stage:auth:bootstrap:bot:
-    desc: bootstrap the BOT Twitch OAuth token against stage-1 (stage-1 namespace); port-forwards 8080 so the browser callback reaches the pod
-    cmds:
-      # Authored per-env in the tripbot repo's cdk8s (envFrom the stage-1
-      # tripbot-config + the stage ESO Secrets); applied from its committed dist in
-      # the sibling tripbot checkout (same source as `task contract:sync`).
-      - kubectl delete job tripbot-auth-bootstrap-bot -n stage-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-bot.k8s.yaml -n stage-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4001 (the non-prod test bot, NOT prod's tripbot4000)."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n stage-1 2>/dev/null || true
-      - echo "Bot bootstrap complete — tripbot4001 token written to stage Postgres."
-
-  tripbot:stage:auth:bootstrap:broadcaster:
-    desc: bootstrap the BROADCASTER Twitch OAuth token against stage-1; required for subscriber/follower polling + real-time EventSub
-    cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n stage-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-broadcaster.k8s.yaml -n stage-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1
-      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n stage-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n stage-1\` to bring the bot online with both identities."'
 
   tripbot:stage:db:seed:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
