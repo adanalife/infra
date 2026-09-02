@@ -1926,10 +1926,11 @@ resource "grafana_rule_group" "stream_health" {
   }
 
   // Catches the failure mode the "disconnected from Twitch chat" rule above
-  // can't see: the IRC connection stays alive (gauge = 1) but the user-access-
-  // token has expired or been blanked. Twitch only validates the token on
-  // initial PASS, so IRC won't drop; meanwhile Helix calls 401 and the admin
-  // panel surfaces a "Sign in as X" banner that needs a human click.
+  // can't see: chat keeps arriving (gauge = 1) but the user-access-token has
+  // expired or been blanked. Twitch validates the chat token only when
+  // gateway-twitch opens the IRC connection, so an expiry mid-session doesn't
+  // drop it; meanwhile Helix calls 401 and the console's auth-status card
+  // surfaces a "Sign in as X" link that needs a human click.
   //
   // The gauge emits 0 for "missing / blanked" — that subtraction yields
   // time(), which is huge-positive, so missing accounts fire the same alert.
@@ -1943,7 +1944,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Tripbot's {{ $labels.account }} Twitch token is expired or missing"
-      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot will need re-auth — open the admin panel and click the 'Sign in as ...' link, or run `task tripbot:auth:bootstrap:{{ $labels.account }}`."
+      description = "tripbot_twitch_token_expires_at_seconds for the {{ $labels.account }} identity is in the past (or 0 = missing). The bot needs re-consent, which is a browser click: open the {{ $labels.account }} auth-status card in tripbot-console and follow its 'Sign in as ...' link, which lands on gateway-twitch's consent flow. gateway-twitch is the sole writer of oauth_tokens; tripbot only reads them, and picks up a new row within one tokenReloadInterval (5m) with no restart. There is no CLI bootstrap — cmd/auth-bootstrap was deleted, so the old `task tripbot:auth:bootstrap:*` targets no longer have a binary to run."
     }
     labels = {
       severity = "critical"
