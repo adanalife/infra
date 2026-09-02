@@ -677,6 +677,16 @@ tasks:
     cmds:
       - aws-vault exec adanalife-stage -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
+  tf:stage:import:
+    desc: >-
+      terraform import against stage-1 — usage:
+      task tf:stage:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- mise exec -- terraform import {{.CLI_ARGS}}
+
   tf:prod:apply:
     desc: terraform apply against prod-1
     dir: terraform/prod-1
@@ -712,6 +722,16 @@ tasks:
     dir: terraform/prod-1
     cmds:
       - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
+  tf:prod:import:
+    desc: >-
+      terraform import against prod-1 — usage:
+      task tf:prod:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform import {{.CLI_ARGS}}
 
   # Core uses --no-session because session tokens can't make IAM changes.
   tf:core:apply:
@@ -749,6 +769,16 @@ tasks:
     dir: terraform/core
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
+  tf:core:import:
+    desc: >-
+      terraform import against core — usage:
+      task tf:core:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform import {{.CLI_ARGS}}
 
   # platform = env-agnostic config, i.e. things not owned by any specific
   # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
@@ -790,6 +820,16 @@ tasks:
     dir: terraform/platform
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
+  tf:platform:import:
+    desc: >-
+      terraform import against platform — usage:
+      task tf:platform:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform import {{.CLI_ARGS}}
 
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
