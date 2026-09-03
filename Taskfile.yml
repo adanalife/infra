@@ -993,7 +993,13 @@ tasks:
   #   k8s:dev:sync    → re-sync Argo apps / revert a local image to CI :main
   #   k8s:dev:status  → pods + running image tags + Argo health
   k8s:dev:cluster:up:
-    desc: "create the local k3d dev cluster — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
+    desc: "create the local k3d dev cluster — example video by default (override with EXAMPLE_VIDEO=<host path>); DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
+    vars:
+      # The committed example video lives in the sibling tripbot checkout, so
+      # the mount source is derived rather than hardcoded — k3d configs do no
+      # variable substitution, hence the `--volume` flag. Override with
+      # EXAMPLE_VIDEO=<host path> for a checkout laid out differently.
+      EXAMPLE_VIDEO: '{{.EXAMPLE_VIDEO | default (printf "%s/tripbot/assets/video" .SIBLINGS)}}'
     cmds:
       # Development plays the committed example video (mounted at
       # /host/dashcam) by default — the 99% case. To stream a real dashcam
@@ -1004,11 +1010,15 @@ tasks:
       # real footage location never gets committed. k3d bind-mounts are
       # fixed at create time, so this must be set on cluster:up, not apply.
       - |
+        echo "mounting example video: {{.EXAMPLE_VIDEO}} -> /host/dashcam"
         if [ -n "{{.DASHCAM_NAS}}" ]; then
           echo "mounting dashcam: {{.DASHCAM_NAS}} -> /host/nas-dashcam (:ro)"
-          k3d cluster create -c k8s/k3d-config.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
+          k3d cluster create -c k8s/k3d-config.yaml \
+            --volume "{{.EXAMPLE_VIDEO}}:/host/dashcam@server:*" \
+            --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
         else
-          k3d cluster create -c k8s/k3d-config.yaml
+          k3d cluster create -c k8s/k3d-config.yaml \
+            --volume "{{.EXAMPLE_VIDEO}}:/host/dashcam@server:*"
         fi
 
   k8s:dev:cluster:down:
@@ -1037,7 +1047,7 @@ tasks:
     aliases: ["k8s:dev:cluster:rebuild"]
     cmds:
       - task: k8s:dev:cluster:up
-        vars: { DASHCAM_NAS: '{{.DASHCAM_NAS}}' }
+        vars: { DASHCAM_NAS: '{{.DASHCAM_NAS}}', EXAMPLE_VIDEO: '{{.EXAMPLE_VIDEO}}' }
       - task: k8s:dev:platform:up
       - task: k8s:dev:sync
 
