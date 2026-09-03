@@ -9,13 +9,15 @@
 # was confusing on a fresh box. A laptop dev cluster doesn't flip envs, so a
 # fixed `adanalife-dev` name + context is clearer and portable.)
 #
-# This is the only k3d config for development — it mounts the committed
-# example video and is what `task k8s:dev:cluster:up` always uses. To
-# stream a real dashcam directory instead, pass DASHCAM_NAS=<host path>
-# to cluster:up; the task adds a :ro `/host/nas-dashcam` bind-mount via a
-# `--volume` CLI flag (k3d merges it with this config), keeping the real
-# footage path out of git. (Note: the legacy development-nas overlay that
-# consumed this mount is gone; cdk8s dev doesn't read it yet.)
+# This is the only k3d config for development, and is what
+# `task k8s:dev:cluster:up` always uses. It declares no host bind-mounts:
+# k3d configs don't do variable substitution, so every host path is passed
+# by the task as a `--volume` CLI flag (k3d merges those with this config).
+# The task mounts the committed example video at `/host/dashcam`; pass
+# DASHCAM_NAS=<host path> to also bind-mount a real dashcam directory :ro
+# at `/host/nas-dashcam`, keeping the real footage path out of git. (Note:
+# the legacy development-nas overlay that consumed this mount is gone;
+# cdk8s dev doesn't read it yet.)
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
 # *.dev.whereisdana.today URLs (managed by external-dns in development
@@ -42,20 +44,6 @@ metadata:
 
 servers: 1
 agents: 0
-
-# Mount host paths into the k3d node so pod hostPath volumes can reach
-# them. k3d nodes are themselves containers, so without this the host
-# filesystem isn't visible to pods.
-#
-# The development-nas overlay reads from an additional `/host/nas-dashcam`
-# mount. That entry is omitted here because the source path is
-# host-specific; it's added at create time via `task k8s:dev:cluster:up
-# DASHCAM_NAS=<host path>` when you intend to apply the development-nas
-# overlay.
-volumes:
-  - volume: /Users/dmerrick/adanalife/tripbot/assets/video:/host/dashcam
-    nodeFilters:
-      - server:*
 
 # Disable k3s's bundled Traefik. We install traefik/traefik via helm
 # in `task k8s:dev:platform:up` instead, so the full chart's CRDs (default
