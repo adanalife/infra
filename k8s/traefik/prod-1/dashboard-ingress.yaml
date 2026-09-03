@@ -25,6 +25,12 @@ metadata:
   annotations:
     external-dns.alpha.kubernetes.io/hostname: traefik.prod.whereisdana.today
     cert-manager.io/cluster-issuer: letsencrypt-route53
+    # Rewrite bare `/` → `/dashboard/` so the host root serves the dashboard
+    # without the visible 301 redirect (Traefik's dashboard handler is strict
+    # about the trailing-slash path). See dashboard-middleware.yaml — the
+    # `^/$` anchor means /api/... and /dashboard/... pass through unchanged,
+    # so the dashboard's own JS API calls still work.
+    traefik.ingress.kubernetes.io/router.middlewares: kube-system-traefik-dashboard-root@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
