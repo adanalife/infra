@@ -289,14 +289,9 @@ tasks:
       # -kubernetes-version tracks the live cluster (kubectl version); bump it with talos upgrades
       - mise exec -- kubeconform -strict -summary -kubernetes-version 1.36.0 -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{`{{.Group}}`}}/{{`{{.ResourceKind}}`}}_{{`{{.ResourceAPIVersion}}`}}.json' -ignore-missing-schemas dist/
 
-  # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
-  # live cluster (read-only; safe pre-cutover check). Output is colorized via the
-  # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
-  # when a diff exists, so `|| true` keeps Task from treating "there's a diff" as
-  # a failure. Point kubectl at the right context first.
-  # The tripbot APP manifests (per <env>-<component>-<platform>) moved to the
-  # tripbot repo's cdk8s; diff them there (`task cdk8s:{stage,prod}:diff` in
-  # ~/adanalife/tripbot). infra keeps only the data + supporting + dashcam units.
+  # infra synthesizes only the data + supporting + dashcam units. The tripbot APP
+  # manifests (per <env>-<component>-<platform>) live in the tripbot repo's
+  # cdk8s — diff them from there with `task cdk8s:{stage,prod}:diff`.
 
   # cdk8s:dev:apply — bootstrap the development (k3d) DATA unit directly.
   # dev's apps + supporting + identity are Argo-managed (the k3d Argo reads the
