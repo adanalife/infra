@@ -15,6 +15,16 @@ resource "aws_s3_bucket" "dashcam_videos" {
   }
 }
 
+# the 2018 footage and the pre-revival tripbot archive under archive/ are both
+# irreplaceable, and this bucket has no lifecycle rules to fall back on
+resource "aws_s3_bucket_versioning" "dashcam_videos" {
+  bucket = aws_s3_bucket.dashcam_videos.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 resource "aws_s3_bucket_website_configuration" "dashcam_videos" {
   bucket = aws_s3_bucket.dashcam_videos.id
 
