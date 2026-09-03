@@ -198,12 +198,12 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "audio" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_background_audio_playing{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
       },
       "fieldConfig": {
@@ -227,12 +227,12 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 28, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "source" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_background_audio_on_fallback{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
       },
       "fieldConfig": {
@@ -256,12 +256,12 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max(somafm_reachable{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (somafm_reachable{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
       },
       "fieldConfig": {
@@ -287,12 +287,12 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 28, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(obs_background_audio_swaps_total{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "swaps/1h" }
+        { "refId": "A", "expr": "sum by (deployment_environment, service_platform) (increase(obs_background_audio_swaps_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[1h]))", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
       },
       "fieldConfig": {
@@ -314,7 +314,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "min(obs_background_audio_level_db{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "peak dBFS" }
+        { "refId": "A", "expr": "min by (deployment_environment, service_platform) (obs_background_audio_level_db{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "peak dBFS [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -337,15 +337,15 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "max(obs_background_audio_playing{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "playing" },
-        { "refId": "B", "expr": "max(obs_background_audio_on_fallback{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "on fallback" },
-        { "refId": "C", "expr": "max(somafm_reachable{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm reachable" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_background_audio_playing{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "playing [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "B", "expr": "max by (deployment_environment, service_platform) (obs_background_audio_on_fallback{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "on fallback [{{deployment_environment}} / {{service_platform}}]" },
+        { "refId": "C", "expr": "max by (deployment_environment, service_platform) (somafm_reachable{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm reachable [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10 } },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "on fallback" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
-          { "matcher": { "id": "byName", "options": "playing" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+          { "matcher": { "id": "byRegexp", "options": "/^on fallback/" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byRegexp", "options": "/^playing/" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
         ]
       }
     },
