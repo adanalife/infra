@@ -30,10 +30,17 @@ vars:
 
 tasks:
   # ---------------------------------------------------------------------------
-  # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/), migrating off
-  # the Kustomize overlays. These are ADDITIVE: the live `k8s:<env>:apply` tasks
-  # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
-  # the safe read-only way to compare cdk8s output against the live cluster.
+  # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/). `cdk8s:synth`
+  # renders infra's deploy units into the committed cdk8s/dist/, and Argo serves
+  # the app + platform-Helm layers from there (see gitops/README.md), so these
+  # tasks build and gate the manifests rather than push them.
+  #
+  # Kustomize covers only the platform bits Argo deliberately excludes, applied
+  # by `k8s:{dev,prod}:platform:up` / `k8s:stage:platform-env:up`: the ESO
+  # cluster-store, cert-manager's ClusterIssuers, external-dns, the Intel
+  # GPU/XPU plugins, local-path-provisioner, and the ExternalSecrets the Helm
+  # releases read their credentials from. The exclusion list is authoritative in
+  # `cdk8s/adanalife_k8s/constructs/argo_platform.py`'s docstring.
   # ---------------------------------------------------------------------------
   cdk8s:cli:
     desc: Install the pinned cdk8s CLI into cdk8s/node_modules from the committed package-lock.json
