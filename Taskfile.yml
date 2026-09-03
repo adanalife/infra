@@ -717,6 +717,12 @@ tasks:
   contract:sync:
     desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
     dir: cdk8s
+    preconditions:
+      # The copy reads the sibling's working tree, and a checkout behind
+      # origin/main syncs stale content and succeeds silently. Refuse unless the
+      # synced files match origin/main.
+      - sh: git -C {{.SIBLINGS}}/tripbot fetch -q origin && git -C {{.SIBLINGS}}/tripbot diff --quiet origin/main -- pkg/contract/
+        msg: "{{.SIBLINGS}}/tripbot pkg/contract/ differs from origin/main — pull that checkout (or push its change) first; syncing from it copies stale content"
     cmds:
       - cp {{.SIBLINGS}}/tripbot/pkg/contract/contract.json contract.json
       - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
@@ -727,6 +733,12 @@ tasks:
   # platforms); never hand-edit it here.
   platforms:sync:
     desc: Re-sync platforms.json from the sibling platform-gateway checkout (the fleet-wide source of truth)
+    preconditions:
+      # The copy reads the sibling's working tree, and a checkout behind
+      # origin/main syncs stale content and succeeds silently. Refuse unless the
+      # synced files match origin/main.
+      - sh: git -C {{.SIBLINGS}}/platform-gateway fetch -q origin && git -C {{.SIBLINGS}}/platform-gateway diff --quiet origin/main -- platforms.json
+        msg: "{{.SIBLINGS}}/platform-gateway platforms.json differs from origin/main — pull that checkout (or push its change) first; syncing from it copies stale content"
     cmds:
       - cp {{.SIBLINGS}}/platform-gateway/platforms.json platforms.json
 
@@ -1058,7 +1070,7 @@ tasks:
   # only for iterating on a LOCAL build.
   k8s:dev:images:build:
     desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
-    dir: ../tripbot
+    dir: '{{.SIBLINGS}}/tripbot'
     cmds:
       # --project-directory + --env-file mirror bin/devenv so build contexts
       # resolve relative to the tripbot repo root and ${VAR} substitutions in
@@ -2949,7 +2961,7 @@ tasks:
       # the namespace baked in); applied from its committed dist in the sibling
       # tripbot checkout (same source assumption as `task contract:sync`).
       - kubectl delete job tripbot-seed -n development --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-seed.k8s.yaml -n development
+      - kubectl apply -f {{.SIBLINGS}}/tripbot/cdk8s/dist/development-job-seed.k8s.yaml -n development
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
@@ -2967,7 +2979,7 @@ tasks:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
     cmds:
       - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
+      - kubectl apply -f {{.SIBLINGS}}/tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
