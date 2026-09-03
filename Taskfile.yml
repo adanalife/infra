@@ -2021,6 +2021,42 @@ tasks:
           scripts/arc-crash-correlate.py {{.CLI_ARGS}}
         '
 
+  # Local kubectl port-forward to the in-cluster VictoriaMetrics, plus its VMUI
+  # query console — the only way to read node_* and the other series that are
+  # not allowlisted out to Grafana Cloud. Same PID-file mechanics as obs:vnc:*;
+  # if :down can't find a lingering kubectl, fall back to
+  # `pkill -f "port-forward svc/victoria-metrics"`.
+  vm:up:
+    desc: start a local kubectl port-forward to the in-cluster VictoriaMetrics and open VMUI at localhost:8428
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl -n monitoring port-forward svc/victoria-metrics 8428:8428 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/victoria-metrics.pid
+        '
+      # Bounded wait so VMUI does not open onto a not-yet-listening port.
+      - for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:8428/health && break; sleep 1; done
+      - open http://localhost:8428/vmui
+      - 'echo "VictoriaMetrics port-forward started — VMUI at http://localhost:8428/vmui (PID $(cat /tmp/adanalife-tasks/victoria-metrics.pid))"'
+
+  vm:down:
+    desc: stop the local kubectl port-forward to the in-cluster VictoriaMetrics
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/victoria-metrics.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/victoria-metrics.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/victoria-metrics.pid
+          echo "VictoriaMetrics port-forward stopped"
+        else
+          echo "No VictoriaMetrics port-forward PID file found — nothing to stop"
+        fi
+
   # Local kubectl port-forward wrapper for OBS VNC — the
   # cluster-agnostic way in, working on any env without a host-access
   # LoadBalancer. The backgrounded kubectl PID is parked under
