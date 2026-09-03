@@ -2203,6 +2203,14 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM]
     preconditions:
+      # The helpers live in the sibling obs checkout's working tree: a checkout
+      # that predates a script fails with a bare "no such file", and a stale one
+      # silently runs an old helper.
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-browser-refresh
+        msg: "{{.SIBLINGS}}/obs/bin/obs-browser-refresh not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - &obs-bin-fresh-guard
+        sh: git -C {{.SIBLINGS}}/obs fetch -q origin && git -C {{.SIBLINGS}}/obs diff --quiet origin/main -- bin/
+        msg: "{{.SIBLINGS}}/obs bin/ differs from origin/main — run `git -C {{.SIBLINGS}}/obs pull` so this runs the current helper"
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2218,7 +2226,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
+          {{.SIBLINGS}}/obs/bin/obs-browser-refresh
 
   # Repoint an OBS media source at a different RTSP URL — the incident move
   # when the MediaMTX relay is unhealthy and the Dashcam source has to fall
@@ -2260,6 +2268,9 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM, SOURCE, URL]
     preconditions:
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-input-repoint
+        msg: "{{.SIBLINGS}}/obs/bin/obs-input-repoint not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2275,7 +2286,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
+          {{.SIBLINGS}}/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
 
   # Swap the stream key on a running OBS — the alternative to re-seeding the
   # secret and restarting the pod, which drops the stream. Same port-forward +
@@ -2321,6 +2332,9 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM]
     preconditions:
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-stream-key-rotate
+        msg: "{{.SIBLINGS}}/obs/bin/obs-stream-key-rotate not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2338,7 +2352,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
+          {{.SIBLINGS}}/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
 
   # Screenshot every source in the live OBS scene and fail on the blank ones —
   # release acceptance for the overlays. A crashed browser_source stays in the
@@ -2378,6 +2392,9 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM, MIN_BYTES]
     preconditions:
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-screenshot-check
+        msg: "{{.SIBLINGS}}/obs/bin/obs-screenshot-check not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2395,7 +2412,7 @@ tasks:
         SCREENSHOT_DIR='{{.SCREENSHOT_DIR}}' \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-screenshot-check
+          {{.SIBLINGS}}/obs/bin/obs-screenshot-check
 
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)
@@ -2403,6 +2420,9 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - *minipc-context-guard
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-media-restart
+        msg: "{{.SIBLINGS}}/obs/bin/obs-media-restart not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
@@ -2418,7 +2438,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-media-restart
+          {{.SIBLINGS}}/obs/bin/obs-media-restart
 
   # Talos PKI (adanalife-minipc). The generated machine configs + talosconfig
   # hold the cluster CA key, bootstrap/trustd tokens, and etcd encryption
