@@ -224,12 +224,12 @@ data "aws_ssm_parameter" "discord_alerts_webhook" {
 # ============================================================================
 
 # Terraform reads managed aws_ssm_parameter values (ssm:GetParameter) during
-# plan refresh, and CI applies need parameter lifecycle. Read is granted
-# account-wide MINUS an explicit Deny on the sensitive unmanaged parameters —
-# the Deny is load-bearing: AWS's ReadOnlyAccess (already attached to
-# CITerraformRole) includes broad ssm:Get*, so without it CI could read every
-# SecureString in the account. Folded into one policy document because
-# CITerraformRole is at AWS's 10-managed-policies-per-role cap.
+# plan refresh. Read is granted account-wide MINUS an explicit Deny on the
+# sensitive unmanaged parameters — the Deny is load-bearing: AWS's
+# ReadOnlyAccess (already attached to CITerraformRole) includes broad
+# ssm:Get*, so without it CI could read every SecureString in the account.
+# Folded into one policy document because CITerraformRole is at AWS's
+# 10-managed-policies-per-role cap.
 data "aws_iam_policy_document" "ci_terraform_secrets_read" {
   statement {
     sid = "SSMParameterRead"
@@ -256,24 +256,12 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
       "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
     ]
   }
-
-  statement {
-    sid = "SSMParameterLifecycle"
-    actions = [
-      "ssm:PutParameter",
-      "ssm:DeleteParameter",
-      "ssm:AddTagsToResource",
-      "ssm:RemoveTagsFromResource",
-      "ssm:ListTagsForResource",
-    ]
-    resources = [
-      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/*",
-    ]
-  }
 }
 
 resource "aws_iam_policy" "ci_terraform_secrets_read" {
-  name        = "AllowCITerraformReadStage1Secrets"
+  name = "AllowCITerraformReadStage1Secrets"
+  # description is ForceNew on aws_iam_policy, so the stale "+ lifecycle" wording
+  # stays: rewording it would replace the attached policy.
   description = "SSM parameter read + lifecycle for CITerraformRole in stage-1 (read denied on the sensitive unmanaged parameters)."
   policy      = data.aws_iam_policy_document.ci_terraform_secrets_read.json
 }
