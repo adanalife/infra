@@ -259,8 +259,10 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
 }
 
 resource "aws_iam_policy" "ci_terraform_secrets_read" {
-  name        = "AllowCITerraformReadStage1Secrets"
-  description = "SSM parameter read + lifecycle for CITerraformRole in stage-1 (read denied on the sensitive unmanaged parameters)."  # description is ForceNew on aws_iam_policy; the wording is stale so the attached policy is not replaced
+  name = "AllowCITerraformReadStage1Secrets"
+  # description is ForceNew on aws_iam_policy, so the stale "+ lifecycle" wording
+  # stays: rewording it would replace the attached policy.
+  description = "SSM parameter read + lifecycle for CITerraformRole in stage-1 (read denied on the sensitive unmanaged parameters)."
   policy      = data.aws_iam_policy_document.ci_terraform_secrets_read.json
 }
 
