@@ -745,22 +745,12 @@ tasks:
       - aws-vault exec adanalife-stage -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:stage:init:
-    desc: terraform init against stage-1
+    desc: >-
+      terraform init against stage-1 — pass extra flags after --,
+      e.g. task tf:stage:init -- -migrate-state
     dir: terraform/stage-1
     cmds:
       - aws-vault exec adanalife-stage -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:stage:init:reconfigure:
-    desc: terraform init -reconfigure against stage-1
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:stage:init:migrate:
-    desc: terraform init -migrate-state against stage-1
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:stage:destroy:
     desc: terraform destroy against stage-1
@@ -791,22 +781,12 @@ tasks:
       - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:prod:init:
-    desc: terraform init against prod-1
+    desc: >-
+      terraform init against prod-1 — pass extra flags after --,
+      e.g. task tf:prod:init -- -migrate-state
     dir: terraform/prod-1
     cmds:
       - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:prod:init:reconfigure:
-    desc: terraform init -reconfigure against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:prod:init:migrate:
-    desc: terraform init -migrate-state against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:prod:destroy:
     desc: terraform destroy against prod-1
@@ -838,22 +818,12 @@ tasks:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:core:init:
-    desc: terraform init against core
+    desc: >-
+      terraform init against core — pass extra flags after --,
+      e.g. task tf:core:init -- -migrate-state
     dir: terraform/core
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:core:init:reconfigure:
-    desc: terraform init -reconfigure against core
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:core:init:migrate:
-    desc: terraform init -migrate-state against core
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:core:destroy:
     desc: terraform destroy against core
@@ -889,22 +859,12 @@ tasks:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:platform:init:
-    desc: terraform init against platform
+    desc: >-
+      terraform init against platform — pass extra flags after --,
+      e.g. task tf:platform:init -- -migrate-state
     dir: terraform/platform
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:platform:init:reconfigure:
-    desc: terraform init -reconfigure against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:platform:init:migrate:
-    desc: terraform init -migrate-state against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:platform:destroy:
     desc: terraform destroy against platform
