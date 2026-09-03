@@ -211,19 +211,9 @@ spec:
             - args:
                 - |
                   set -euo pipefail
-                  apk add --no-cache aws-cli
                   TS=$(date -u +%Y%m%d-%H%M%SZ)
                   HOUR=$(date -u +%H)
                   DOW=$(date -u +%u)   # 1=Mon ... 7=Sun
-                  DUMP=/tmp/dump.pgcustom
-
-                  echo "Dumping ${POSTGRES_DB}"
-                  PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
-                    --format=custom \
-                    --username="$POSTGRES_USER" \
-                    --exclude-table-data=frame_embeddings \
-                    "$POSTGRES_DB" \
-                    > "$DUMP"
 
                   echo "Uploading hourly/${TS}.dump"
                   aws s3 cp --no-progress "$DUMP" "s3://${S3_BUCKET}/hourly/${TS}.dump"
@@ -238,28 +228,86 @@ spec:
                     aws s3 cp --no-progress "$DUMP" "s3://${S3_BUCKET}/weekly/${TS}.dump"
                   fi
 
-                  rm -f "$DUMP"
                   echo "OK"
               command:
                 - /bin/sh
                 - -c
               env:
-                - name: PGHOST
-                  value: pg-rw
+                - name: DUMP
+                  value: /backup/dump.pgcustom
+                - name: HOME
+                  value: /tmp
               envFrom:
                 - secretRef:
-                    name: postgres-secret
-                - secretRef:
                     name: postgres-backup-s3
-              image: postgres:18-alpine
-              name: backup
+              image: public.ecr.aws/aws-cli/aws-cli:2.36.38
+              name: upload
               resources:
                 limits:
                   memory: 512Mi
                 requests:
                   cpu: 100m
                   memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                runAsNonRoot: true
+                runAsUser: 65532
+              volumeMounts:
+                - mountPath: /backup
+                  name: dump
+          initContainers:
+            - args:
+                - |
+                  set -euo pipefail
+                  echo "Dumping ${POSTGRES_DB}"
+                  PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
+                    --format=custom \
+                    --username="$POSTGRES_USER" \
+                    --exclude-table-data=frame_embeddings \
+                    "$POSTGRES_DB" \
+                    > "$DUMP"
+                  echo "Dumped $(wc -c < "$DUMP") bytes"
+              command:
+                - /bin/sh
+                - -c
+              env:
+                - name: PGHOST
+                  value: pg-rw
+                - name: DUMP
+                  value: /backup/dump.pgcustom
+              envFrom:
+                - secretRef:
+                    name: postgres-secret
+              image: postgres:18-alpine
+              name: dump
+              resources:
+                limits:
+                  memory: 512Mi
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                runAsNonRoot: true
+                runAsUser: 70
+              volumeMounts:
+                - mountPath: /backup
+                  name: dump
           restartPolicy: Never
+          securityContext:
+            fsGroup: 65532
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - emptyDir: {}
+              name: dump
       ttlSecondsAfterFinished: 604800
   schedule: 0 * * * *
   successfulJobsHistoryLimit: 3
