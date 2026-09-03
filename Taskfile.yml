@@ -1531,9 +1531,6 @@ tasks:
   # cert-manager: issues LE certs via DNS-01 against Route53 for any
   # Ingress annotated with `cert-manager.io/cluster-issuer`. Issuance
   # works regardless of inbound network state — only serving TLS does.
-  # A smoke-test Certificate (cert-test.<env>.whereisdana.today, LE
-  # staging) ships in the cert-manager kustomize so the pipeline is
-  # exercised even before any app Ingress requests a cert.
   k8s:dev:platform:up:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the dev cluster
     deps: [k8s:dev:bootstrap-secrets]
