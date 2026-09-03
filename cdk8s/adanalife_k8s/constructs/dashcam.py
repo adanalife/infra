@@ -1,10 +1,10 @@
 """The dashcam NFS storage primitives — the cluster-scoped PersistentVolume and
-the namespace PersistentVolumeClaim that the vlc-server pods mount read-only.
+the namespace PersistentVolumeClaim that the playout pods mount read-only.
 
 These are DATA infra (they outlive the stateless app workloads), so they stay in
-infra even though the vlc-server *app* manifests now live in the tripbot repo:
-the PV/PVC are emitted into infra's DataChart / NfsPVChart, while the vlc
-Deployment that mounts the `vlc-dashcam` claim is synthesized from the tripbot
+infra even though the playout *app* manifests live in the playout repo: the
+PV/PVC are emitted into infra's DataChart / NfsPVChart, while the playout
+Deployment that mounts the `vlc-dashcam` claim is synthesized from the playout
 repo and references it by name (a cross-repo coupling on the claim name, same as
 the materialized-Secret names).
 """
@@ -18,8 +18,8 @@ from adanalife_k8s.config import EnvConfig
 
 
 def emit_dashcam_pvc(scope: Construct, env: EnvConfig) -> None:
-    """The dashcam PVC — Argo-managed, emitted into DataChart (not the vlc app) so
-    the stateless vlc Deployment can churn without disturbing it. Binds 1:1 by
+    """The dashcam PVC — Argo-managed, emitted into DataChart (not the playout app)
+    so the stateless playout Deployment can churn without disturbing it. Binds 1:1 by
     name (volumeName + storageClassName "") to the cluster-scoped NFS PV that's
     provisioned out-of-band — see emit_dashcam_pv / `task k8s:<env>:nfs-pv`.
     No host specifics here, so it's safe in the committed dist. No-op on hostPath
@@ -73,7 +73,7 @@ def emit_dashcam_pv(scope: Construct, env: EnvConfig) -> None:
     )
 
 
-# The local-path corpus cache, the live vlc pods, and the copy Job all pin to this
+# The local-path corpus cache, the live playout pods, and the copy Job all pin to this
 # node: local-path is node-local, and the minipc is the only node with the iGPU and
 # the NAS reach the stream needs.
 MINIPC_NODE = "adanalife-minipc"
@@ -110,12 +110,12 @@ echo "dashcam-localize done: $(find "$DST" -maxdepth 1 -type f -name '*.MP4' | w
 
 def emit_dashcam_local_pvc(scope: Construct, env: EnvConfig) -> None:
     """The node-local dashcam corpus PVC — a local-path cache of the NFS _opt/clips
-    corpus so vlc can serve the stream off local NVMe. Argo-managed (lives with the
+    corpus so playout can serve the stream off local NVMe. Argo-managed (lives with the
     NFS PVC: DataChart when co-located, SupportingChart when the DB is isolated),
     prune-only-on-deliberate-disable. ReadWriteOnce because local-path is node-local;
-    every vlc pod is co-located on the minipc, so same-node multi-mount is fine.
+    every playout pod is co-located on the minipc, so same-node multi-mount is fine.
     local-path is WaitForFirstConsumer, so the volume consumes zero disk until the
-    copy Job (or vlc) first mounts it. No-op (golden render unchanged) until an env
+    copy Job (or playout) first mounts it. No-op (golden render unchanged) until an env
     sets dashcam_local_enabled."""
     if not env.dashcam_local_enabled:
         return
