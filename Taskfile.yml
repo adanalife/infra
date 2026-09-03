@@ -504,8 +504,8 @@ tasks:
         last_attempt=$(kubectl -n burrito get terraformruns -l burrito/managed-by={{.LAYER}} -o json 2>/dev/null \
           | jq -r '[.items[] | select(.spec.action == "apply") | .metadata.creationTimestamp | fromdateiso8601] | max // 0')
         if [ "$plan_epoch" -gt 0 ]; then
-          [ "$apply_epoch" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates the last apply ($applied) — the state has moved since; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
-          [ "$last_attempt" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates an apply attempt at $(jq -rn --argjson t "$last_attempt" '$t | todate') — even a failed one moves the state; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
+          [ "$apply_epoch" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates the last apply ($applied) — the state has moved since; re-plan first: task burrito:{{.PLAN_ENV}}:plan" || true
+          [ "$last_attempt" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates an apply attempt at $(jq -rn --argjson t "$last_attempt" '$t | todate') — even a failed one moves the state; re-plan first: task burrito:{{.PLAN_ENV}}:plan" || true
         fi
 
         # The apply verdict is read from the layer afterwards, so remember what
