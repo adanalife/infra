@@ -6,8 +6,8 @@
 #
 # DNS authority for dana.lol stays in Route53 — there is no
 # cloudflare_zone for dana.lol here, and no cloudflare_dns_record
-# partner for the cloudflare_pages_domain below. Cloudflare validates
-# the custom-domain TLS cert via the Route53-managed CNAME pointing
+# partner for the custom domain below. Cloudflare validates the
+# custom-domain TLS cert via the Route53-managed CNAME pointing
 # at dana-lol-production.pages.dev.
 
 variable "cloudflare_account_id" {
@@ -34,37 +34,35 @@ provider "cloudflare" {
   api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
 
-resource "cloudflare_pages_project" "prod_1" {
-  account_id = var.cloudflare_account_id
-  name       = var.project_name
+module "pages" {
+  source = "../modules/cloudflare-pages-project"
 
+  account_id        = var.cloudflare_account_id
+  project_name      = var.project_name
   production_branch = var.production_branch
 
-  # Direct Upload project — no `source` block. We deploy via
-  # `wrangler pages deploy` from GitHub Actions (release.yml), so the
-  # Cloudflare → GitHub App integration is dead weight here, and an
-  # unhealthy install was throwing a 401 "Cloudflare Pages Git
-  # installation" error on terraform apply (CF error 8000011) that
-  # Direct Upload sidesteps.
+  # Cloudflare provisions the TLS cert via DNS-01 against the Route53 CNAME
+  # (terraform/core/route53.tf:aws_route53_record.primary_www), which targets
+  # dana-lol-production.pages.dev.
+  domains = ["www.${var.primary_domain}"]
+}
+
+moved {
+  from = cloudflare_pages_project.prod_1
+  to   = module.pages.cloudflare_pages_project.this
+}
+
+moved {
+  from = cloudflare_pages_domain.prod_1_dana_lol_www
+  to   = module.pages.cloudflare_pages_domain.this["www.dana.lol"]
 }
 
 output "pages_url" {
   description = "Cloudflare Pages URL"
-  value       = "${var.project_name}.pages.dev"
+  value       = module.pages.pages_url
 }
 
 output "pages_project_name" {
   description = "Cloudflare Pages project name (used by wrangler)"
-  value       = cloudflare_pages_project.prod_1.name
-}
-
-# Custom domain: bind www.dana.lol to the production Pages project.
-# Cloudflare provisions a TLS cert via DNS-01 against the Route53
-# CNAME (terraform/core/route53.tf:aws_route53_record.primary_www),
-# which targets dana-lol-production.pages.dev. No cloudflare_dns_record
-# here because dana.lol's authoritative DNS lives in Route53.
-resource "cloudflare_pages_domain" "prod_1_dana_lol_www" {
-  account_id   = var.cloudflare_account_id
-  project_name = cloudflare_pages_project.prod_1.name
-  name         = "www.${var.primary_domain}"
+  value       = module.pages.project_name
 }
