@@ -331,17 +331,82 @@ tasks:
   # ReadOnlyAccess credential and a run against them fails at the first write —
   # the intended answer, not a gap, so there is deliberately no task for them
   # (see constructs/burrito.py).
-  burrito:stage:apply:
-    desc: "Apply the stage-1 burrito layer's reviewed plan (one terraform apply, in-cluster)"
+  # A plan is the only thing Burrito's UI sync button can ask for, and the only
+  # way to refresh a plan that terraform will otherwise refuse to replay: any
+  # state change after the plan — a partial apply, a `terraform import` — makes
+  # the saved plan stale. This is that button, with the wait and the verdict.
+  burrito:stage:plan:
+    desc: "Re-plan the stage-1 burrito layer (Burrito's sync-now annotation), wait for it, print the result"
     cmds:
-      - task: burrito:_apply
+      - task: burrito:_plan
         vars: { LAYER: stage-1 }
 
-  burrito:prod:apply:
-    desc: "Apply the prod-1 burrito layer's reviewed plan (one terraform apply, in-cluster)"
+  burrito:prod:plan:
+    desc: "Re-plan the prod-1 burrito layer (Burrito's sync-now annotation), wait for it, print the result"
+    cmds:
+      - task: burrito:_plan
+        vars: { LAYER: prod-1 }
+
+  burrito:stage:apply:
+    desc: "Apply the stage-1 burrito layer's reviewed plan (one terraform apply, in-cluster). Stale plan? burrito:stage:plan first"
     cmds:
       - task: burrito:_apply
-        vars: { LAYER: prod-1 }
+        vars: { LAYER: stage-1, PLAN_ENV: stage }
+
+  burrito:prod:apply:
+    desc: "Apply the prod-1 burrito layer's reviewed plan (one terraform apply, in-cluster). Stale plan? burrito:prod:plan first"
+    cmds:
+      - task: burrito:_apply
+        vars: { LAYER: prod-1, PLAN_ENV: prod }
+
+  # The sync-now annotation is what the UI's sync button sets
+  # (internal/server/api/sync.go); the layer controller consumes it, schedules
+  # a plan run, and the runner stamps the layer's plan-run/plan-date
+  # annotations when the plan finishes. So "the plan is done" is plan-run
+  # moving, read off the layer — same reasoning as the apply verdict below.
+  burrito:_plan:
+    internal: true
+    requires:
+      vars: [LAYER]
+    preconditions:
+      - *minipc-context-guard
+      - sh: kubectl -n burrito get terraformlayer {{.LAYER}} >/dev/null 2>&1
+        msg: "No TerraformLayer named '{{.LAYER}}' — kubectl -n burrito get terraformlayers"
+    cmds:
+      - |
+        set -eu
+        ann() {
+          kubectl -n burrito get terraformlayer {{.LAYER}} -o json 2>/dev/null \
+            | jq -r --arg k "$1" '.metadata.annotations[$k] // ""'
+        }
+        cond() {
+          kubectl -n burrito get terraformlayer {{.LAYER}} -o json 2>/dev/null \
+            | jq -r --arg t "$1" '(.status.conditions[]? | select(.type == $t) | .status) // "Unknown"'
+        }
+        [ "$(cond IsRunning)" = "True" ] && { echo "a run is already in flight on {{.LAYER}} — wait for it" >&2; exit 1; } || true
+        before=$(ann runner.terraform.padok.cloud/plan-run)
+        kubectl -n burrito annotate terraformlayer {{.LAYER}} api.terraform.padok.cloud/sync-now=true --overwrite >/dev/null
+        echo "Re-plan requested on {{.LAYER}} (current plan: ${before:-none}) — waiting for the runner"
+        # maxConcurrentRunnerPods is 1 and a plan itself takes a minute or two,
+        # so the wait is patient. The plan-run annotation only moves when a
+        # plan has finished; HasLastPlanFailed says how it went.
+        for i in $(seq 1 120); do
+          now=$(ann runner.terraform.padok.cloud/plan-run)
+          if [ -n "$now" ] && [ "$now" != "$before" ]; then
+            result=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o json | jq -r '.status.lastResult // "unknown"')
+            if [ "$(cond HasLastPlanFailed)" = "True" ]; then
+              echo "--- {{.LAYER}}: plan $now FAILED: $result ---" >&2
+              echo "log: kubectl -n burrito logs -l burrito/managed-by=${now%/*} --tail=-1" >&2
+              exit 1
+            fi
+            echo "--- {{.LAYER}}: plan $now at $(ann runner.terraform.padok.cloud/plan-date): $result ---"
+            exit 0
+          fi
+          [ "$i" = "12" ] && echo "still waiting (one runner pod at a time; a plan takes a minute or two)"
+          sleep 5
+        done
+        echo "no new plan after 10m — the layer still reports ${before:-none}. Check: kubectl -n burrito get terraformruns -l burrito/managed-by={{.LAYER}}" >&2
+        exit 1
 
   # Burrito has no standing apply loop — every layer keeps
   # remediationStrategy.autoApply false — so an apply only ever happens because
@@ -375,7 +440,7 @@ tasks:
   burrito:_apply:
     internal: true
     requires:
-      vars: [LAYER]
+      vars: [LAYER, PLAN_ENV]
     preconditions:
       - *minipc-context-guard
       - sh: kubectl -n burrito get terraformlayer {{.LAYER}} >/dev/null 2>&1
@@ -438,6 +503,27 @@ tasks:
         case "$result" in
           Error*) refuse "the last plan's result cannot be read ($result) — its artifacts are gone; re-plan first" ;;
         esac
+        # terraform refuses to replay a plan made before the state last moved
+        # (`Saved plan is stale`), and the state moves on every apply attempt
+        # that gets as far as touching a resource — a partial apply that failed
+        # midway included. So an apply attempt newer than the plan means the
+        # plan is dead: refuse here, with the fix, rather than after a runner
+        # pod has spun up to say the same thing. The successful attempts are
+        # the layer's apply-date; the failed ones only survive as TerraformRun
+        # objects until the layer's history pruning takes them, which is why
+        # both are checked. Dates come as `date`'s default text (`Tue Sep  1
+        # 17:20:19 UTC 2026`); jq's strptime can't take the zone token on
+        # macOS, so it is dropped — the runner always writes UTC.
+        planned=$(ann runner.terraform.padok.cloud/plan-date)
+        plan_epoch=$(jq -rn --arg d "$planned" '$d | sub(" UTC "; " ") | strptime("%a %b %e %H:%M:%S %Y") | mktime' 2>/dev/null || echo 0)
+        applied=$(ann runner.terraform.padok.cloud/apply-date)
+        apply_epoch=$(jq -rn --arg d "$applied" 'if $d == "" then 0 else ($d | sub(" UTC "; " ") | strptime("%a %b %e %H:%M:%S %Y") | mktime) end' 2>/dev/null || echo 0)
+        last_attempt=$(kubectl -n burrito get terraformruns -l burrito/managed-by={{.LAYER}} -o json 2>/dev/null \
+          | jq -r '[.items[] | select(.spec.action == "apply") | .metadata.creationTimestamp | fromdateiso8601] | max // 0')
+        if [ "$plan_epoch" -gt 0 ]; then
+          [ "$apply_epoch" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates the last apply ($applied) — the state has moved since; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
+          [ "$last_attempt" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates an apply attempt at $(jq -rn --argjson t "$last_attempt" '$t | todate') — even a failed one moves the state; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
+        fi
 
         # The apply verdict is read from the layer afterwards, so remember what
         # it said before — a re-apply of the same revision changes the date and
@@ -535,6 +621,11 @@ tasks:
           echo "--- {{.LAYER}}: $verdict ---"
         else
           echo "apply did not land: the layer still reports apply-date '${before_apply:-none}'. Run log above, and at layers/burrito/{{.LAYER}}/$run/ in the datastore bucket" >&2
+          # The one failure with a known fix: terraform's own text for a plan
+          # the state has outgrown.
+          if kubectl -n burrito logs "$pod" 2>/dev/null | grep -q "Saved plan is stale"; then
+            echo "the saved plan is stale — re-plan and apply again: task burrito:{{.PLAN_ENV}}:plan && task burrito:{{.PLAN_ENV}}:apply" >&2
+          fi
           exit 1
         fi
 
