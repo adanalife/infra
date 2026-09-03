@@ -52,14 +52,20 @@
       {
         "name": "platform",
         "label": "Platform",
-        "type": "custom",
-        "query": "twitch,youtube,facebook,instagram,tiktok",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__DS_PROMETHEUS__"
+        },
+        "query": "label_values(platform_gateway_chat_sent_total, platform)",
         "current": {
           "text": "twitch",
           "value": "twitch"
         },
         "includeAll": false,
-        "multi": false
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
       }
     ]
   },
