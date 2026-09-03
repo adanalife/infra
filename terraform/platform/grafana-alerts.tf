@@ -88,6 +88,36 @@ locals {
   // the runner pool against node reboots. The alert says CI is stuck; this is
   // where you see whether the box bounced underneath it.
   ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
+
+  // The frame gauge the encoder-wedged rule fires on, in Explore rather than on
+  // a dashboard: the only panel plotting it is scoped to service_name=vlc-server
+  // and would show none of the alert's series. Responders want to see when the
+  // gauge flattened before bouncing the pod.
+  obs_frames_link = "[frames](${local.grafana_url}/explore?left=${urlencode(jsonencode({
+    queries = [{
+      refId      = "A"
+      datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus.uid }
+      expr       = "max by (service_platform) (obs_stream_output_total_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+    }]
+    range = { from = "now-6h", to = "now" }
+  }))})"
+
+  // The obs container's decoder complaints, on the same Loki matchers the
+  // decode-error rule counts. OBS's own counters stay clean through a corrupt
+  // feed, so these log lines are the only place the failure is visible — and
+  // the alert asks the responder to compare the two platforms' obs logs, which
+  // is this query with the platform selector dropped.
+  //
+  // jsonencode + urlencode rather than a hand-escaped literal: Explore's left
+  // parameter is JSON and a LogQL matcher is mostly quotes.
+  obs_decode_errors_link = "[obs logs](${local.grafana_url}/explore?left=${urlencode(jsonencode({
+    queries = [{
+      refId      = "A"
+      datasource = { type = "loki", uid = data.grafana_data_source.loki.uid }
+      expr       = "{namespace=\"prod-1\", container=\"obs\"} |~ \"Missing reference picture|reference picture missing|mmco: unref|co located POCs\""
+    }]
+    range = { from = "now-1h", to = "now" }
+  }))})"
 }
 
 // Discord contact point + root notification policy. Wires every alert in this
@@ -1354,6 +1384,7 @@ resource "grafana_rule_group" "stream_health" {
     annotations = {
       summary     = "OBS is logging a storm of H264 decode errors — the playout feed is corrupt"
       description = "The prod OBS container is logging sustained H264 decode errors (missing reference pictures / mmco failures) — the RTSP feed from playout has broken reference structure and viewers see heavy artifacts, while the frame-skip metrics stay clean. If this started at a playout deploy or restart, roll playout back to the previous image (`kubectl -n prod-1 set image deployment/playout-<platform> playout=ghcr.io/adanalife/playout:<prev>`); the artifacts persist through clip changes and skips, so waiting does not clear it. Compare against the other platform's obs logs to confirm it's one feed rather than both."
+      link        = local.obs_decode_errors_link
     }
     labels = {
       severity = "warning"
@@ -1979,6 +2010,7 @@ resource "grafana_rule_group" "stream_health" {
     annotations = {
       summary     = "OBS says it is streaming but has sent no frames for 15m"
       description = "obs_stream_output_total_frames has not advanced in 10m while obs_streaming_active is 1 — OBS holds the output open and the encoder is producing nothing, so the stream is dark while every 'is it streaming' signal reads healthy. service_platform on the series says which platform. Restarting the OBS output will not fix this and the silent-disconnect watchdog can do nothing else: the fault is below the output, in the render pipeline or something it blocks on (a hung NFS mount did this for 9h41m on 2026-08-05). Bounce the OBS pod for that platform, then look for what the render thread was waiting on."
+      link        = local.obs_frames_link
     }
     labels = {
       severity = "critical"
@@ -2633,11 +2665,14 @@ resource "grafana_rule_group" "relay_health" {
   // feed (>100 matched lines per 5m); a chronic 0.2% loss produces ~1.
   //
   // Zero is the baseline this asserts. The hop is pod-to-pod on one node over
-  // RTSP-interleaved TCP, which cannot drop packets — the read side has
-  // measured exactly 0 lost across 13.5M packets since obs#106, and the
-  // publish side joined it in playout#139. A nonzero rate means something put
-  // the transport back on UDP: a playout image predating that fix, or a sink
-  // rebuilt without protocols=tcp.
+  // RTSP-interleaved TCP, which cannot drop packets. Two measurements attest
+  // the read hop: rtsp_sessions_outbound_rtp_packets_reported_lost{state="read"}
+  // sits at 0 against the 17.9M and 40.3M packets the relays had sent
+  // (2026-08-21), and obs's own "RTP: missed" evidence — the signal obs#106 was
+  // judged on — is clean. The publish side joined the TCP transport in
+  // playout#139. A nonzero rate means something put the transport back on UDP:
+  // a playout image predating that fix, or a sink rebuilt without
+  // protocols=tcp.
   //
   // 100 per 15m rather than >0 so a session teardown mid-window can't page.
   // The regime a viewer reported on 2026-08-20 ran ~1400 per 15m (0.22% of
