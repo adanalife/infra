@@ -1,0 +1,226 @@
+# gha-runner-scale-set — one amd64 runner pool on the minipc, registered at the
+# ORG level so a single scale set serves every private repo (tripbot-console,
+# platform-gateway, video-pipeline, flare). Their CI + release workflows target
+# it with `runs-on: arc-amd64`; GitHub-hosted minutes on private repos are
+# metered, minutes here are free. Org registration requires the ARC GitHub App
+# to hold Organization → Self-hosted runners: read/write — without it the
+# listener fails registration and jobs sit queued.
+#
+# The public repos stay on GitHub-hosted runners: their minutes are free, and
+# the org's default runner group excludes public repos (fork-PR code must never
+# reach this pool).
+#
+# THERE IS NO DOCKER DAEMON HERE, deliberately — no `containerMode`, so no dind
+# sidecar. Every container build in the fleet (dev-image, release, image-smoke)
+# runs on GitHub-hosted runners instead, and a `docker` step added to an
+# arc-amd64 job will fail with a missing socket rather than work.
+#
+# The reason is that this node also serves both production streams, and running
+# a Docker daemon on it is the one workload class every node self-reboot has had
+# in common: seventeen crashes over 2026-08-23/24 traced to a `docker run` from a
+# pre-commit hook, and a further one on 2026-08-29 to a plain buildx `dev-image`
+# build, which is why removing the hook class was not enough. The kernel
+# mechanism is still unidentified, so this is avoidance,
+# not a fix — but it is the only lever that has held. Builds are ~500 hosted
+# minutes/month across the four private repos, against a 2,000-minute free
+# allowance; everything Docker-free (pytest, go test, lint, pre-commit,
+# cdk8s-synth) still runs here for nothing.
+githubConfigUrl: https://github.com/adanalife
+# Pre-existing Secret materialized by the arc-github-app ExternalSecret
+# (constructs/arc.py). Holds the GitHub App triple ARC registers with.
+githubConfigSecret: arc-github-app
+
+runnerScaleSetName: arc-amd64
+
+# Pin the controller's ServiceAccount explicitly. The chart otherwise
+# auto-discovers it via a cluster lookup, which returns empty under offline
+# templating (Argo's `helm template`, and PlatformChart's cdk8s.Helm render)
+# and fails the manifest with "No gha-rs-controller deployment found". Names
+# the arc-controller release's SA in arc-systems.
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-controller-gha-rs-controller
+
+# The listener pod holds the pool's own metrics — gha_busy_runners,
+# gha_registered_runners, gha_desired_runners and the
+# gha_job_{startup,execution}_duration_seconds histograms. Its metrics port
+# comes from the controller's `metrics:` stanza (../controller/values.yml);
+# these annotations are what points alloy-metrics at it. The stub `listener`
+# container is load-bearing: the controller copies this template verbatim into
+# the AutoscalingListener object, whose CRD requires a non-empty container
+# list — a metadata-only template fails validation, no listener is created,
+# and every queued job in the org sits undispatched. The controller merges its
+# real listener container over the stub.
+# The series land in the in-cluster VictoriaMetrics; Grafana Cloud takes an
+# allowlist, so add a gha_* entry there only when a dashboard or alert asks.
+listenerTemplate:
+  metadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics"
+  spec:
+    containers:
+      - name: listener
+
+# minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
+# spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
+# showing arc-amd64 online is a true health signal.
+#
+# maxRunners is held at 1 because CI activity correlates with the node dying
+# and nobody knows why yet. Six node deaths on 2026-08-23 each landed minutes
+# after a CI burst, so the pool runs one job at a time until the mechanism is
+# identified — a throughput cost accepted deliberately, against a node whose
+# failure takes both prod streams and every co-tenant with it.
+#
+# It is NOT a memory cap — the node was never short of memory. Measured against
+# the in-cluster VictoriaMetrics across those crash windows: MemAvailable never fell below ~15.8Gi of ~30.5Gi, load15 peaked at 4
+# of 20 CPUs, the USB-attached T5 wrote 0.05 MiB/s, and every arc-runners pod
+# together peaked at 487Mi. Scheduler commitment ran high while consumption
+# stayed low, so the requests were inflated relative to reality rather than the
+# node being exhausted. Reason from the metrics, not from the request totals —
+# and query the in-cluster VictoriaMetrics, since Grafana Cloud takes an
+# allowlist and holds none of these series.
+#
+# A runner pod is the runner container below and nothing else. Anything it does
+# not declare falls back to the arc-runners LimitRange in
+# cdk8s/adanalife_k8s/constructs/arc.py.
+#
+# ci-low priority decides who the kubelet evicts once memory is already tight;
+# it does not stop a burst from exhausting the node in the first place. Honest
+# requests remain worth keeping so the scheduler queues a runner it cannot place
+# rather than overpacking the node — that is hygiene, not the fix for the
+# crashes.
+#
+# Widening the pool waits on knowing what kills the node. The kernel log is the
+# outstanding evidence: Talos does not persist dmesg across reboot, so six
+# deaths produced none.
+#
+# There is no GitHub-hosted fallback job routing — if the minipc is down,
+# checks queue until it returns (none are required checks; the free plan can't
+# protect private repos, so merges never block).
+minRunners: 1
+maxRunners: 1
+
+template:
+  spec:
+    # CI loses every scramble: prod preemption picks the lowest tier first,
+    # so a runner pod is evicted before any stage workload. A mid-build
+    # eviction just fails the check — rerun it.
+    priorityClassName: ci-low
+    # hostPath dirs are created root-owned; hand them to the runner user
+    # (uid 1001, group docker/123 — see the image Dockerfile) before the
+    # runner starts. Non-recursive: children are created by 1001 afterward.
+    initContainers:
+      - name: chown-caches
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+          - sudo
+          - chown
+          - "1001:123"
+          - /cache/dot-cache
+          - /cache/gomod
+          - /cache/toolcache
+          - /cache/work
+        volumeMounts:
+          - name: cache-dot-cache
+            mountPath: /cache/dot-cache
+          - name: cache-gomod
+            mountPath: /cache/gomod
+          - name: cache-toolcache
+            mountPath: /cache/toolcache
+          - name: work
+            mountPath: /cache/work
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+          # Point the setup actions (setup-python, setup-uv, setup-go, …) at
+          # the shared tool cache so a toolchain downloads once per version,
+          # not once per job. GitHub-hosted runners use this same path.
+          - name: RUNNER_TOOL_CACHE
+            value: /opt/hostedtoolcache
+        # Warm caches shared across runner pods via hostPath — a single-node
+        # cluster, so every pod sees the same disk. Ephemeral runners
+        # otherwise re-download every toolchain and package on every job,
+        # which dominates job wall-clock. Cache-only data: losing the
+        # directory costs one cold run, nothing to back up.
+        #
+        # They sit on the T5 (/var/mnt/data), not the NVMe. /var is the
+        # EPHEMERAL volume etcd fsyncs to, and CI write bursts there stall
+        # etcd past its 5s lease deadline — every leader-election client in
+        # the cluster (kube-scheduler, kube-controller-manager, cilium-operator,
+        # cnpg, the alloy operator) then exits and restarts together. Every
+        # heavy write path a job has — these caches and the _work workspace
+        # below — is mounted off /var for that reason.
+        #
+        # Only shared where the tool is multi-writer safe: uv hardlinks,
+        # go-build is content-addressed, pre-commit locks, and the setup actions
+        # guard the tool cache with completion markers. mise's INSTALLS dir is
+        # deliberately NOT shared — one pod exec-ing a shared python while
+        # another pod's `mise install` re-extracts it throws ETXTBSY and
+        # fails whatever test is running (a venv symlinks its interpreter
+        # into that dir). Each pod extracts its own toolchain from mise's
+        # download cache in ~/.cache instead — seconds, and race-free.
+        volumeMounts:
+          # uv, pre-commit envs, pip, go-build, mise's download cache
+          - name: cache-dot-cache
+            mountPath: /home/runner/.cache
+          # Go module cache (GOMODCACHE default)
+          - name: cache-gomod
+            mountPath: /home/runner/go/pkg/mod
+          - name: cache-toolcache
+            mountPath: /opt/hostedtoolcache
+          # The job workspace. Mounted explicitly: the chart mounts the `work`
+          # volume into the runner only in dind or kubernetes container mode,
+          # and this pool runs in neither. Declaring the volume without this
+          # mount silently puts _work back on the container filesystem — i.e.
+          # on /var, the disk this whole block exists to keep jobs off.
+          - name: work
+            mountPath: /home/runner/_work
+        # 4-CPU limit makes a self-hosted job as fast as a GitHub-hosted
+        # ubuntu-latest (4 vCPU) while capping what a hot job can take from
+        # the streams.
+        #
+        # The memory REQUEST must be honest, not minimal: a real job (pytest,
+        # golangci-lint, uv sync) uses multiple GiB, and a runner requesting
+        # 1Gi while using 4 is the kubelet's first eviction victim when a full
+        # burst puts the node under memory pressure — which kills a job
+        # mid-run. At 2.5Gi the scheduler queues the runner a full node can't
+        # feed (the job waits) instead of overpacking and evicting.
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2.5Gi
+          limits:
+            cpu: "4"
+            memory: 6Gi
+    volumes:
+      - name: cache-dot-cache
+        hostPath:
+          path: /var/mnt/data/arc-cache/dot-cache
+          type: DirectoryOrCreate
+      - name: cache-gomod
+        hostPath:
+          path: /var/mnt/data/arc-cache/gomod
+          type: DirectoryOrCreate
+      - name: cache-toolcache
+        hostPath:
+          path: /var/mnt/data/arc-cache/toolcache
+          type: DirectoryOrCreate
+      # The job workspace — checkout, test artifacts. The chart defaults it to
+      # an emptyDir, which lands on /var and puts the heaviest per-job write
+      # path on the disk etcd fsyncs to; a user-supplied volume of this name
+      # replaces that default. The runner container mounts it above.
+      #
+      # The tradeoff: an emptyDir is recreated per pod, so each ephemeral runner
+      # starts from a clean workspace. A hostPath persists across jobs. That is
+      # safe at maxRunners: 1 (no concurrent writers) and actions/checkout runs
+      # `git clean -ffdx` by default, so the checkout itself is still clean —
+      # but _temp and _actions now carry over between jobs. Revert this volume
+      # alone if a job starts failing on state it did not create.
+      - name: work
+        hostPath:
+          path: /var/mnt/data/arc-work
+          type: DirectoryOrCreate

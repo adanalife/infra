@@ -29,6 +29,7 @@ locals {
     "k8s/argocd/repo-ssh-key-console"          = "Read-only SSH deploy key for Argo CD to clone the private tripbot-console repo. Consumed via ESO into the argocd-repo-tripbot-console repository Secret."
     "k8s/argocd/repo-ssh-key-video-pipeline"   = "Read-only SSH deploy key for Argo CD to clone the private video-pipeline repo. Consumed via ESO into the argocd-repo-video-pipeline repository Secret."
     "k8s/argocd/repo-ssh-key-platform-gateway" = "Read-only SSH deploy key for Argo CD to clone the private platform-gateway repo. Consumed via ESO into the argocd-repo-platform-gateway repository Secret."
+    "k8s/argocd/repo-ssh-key-flare"            = "Read-only SSH deploy key for Argo CD to clone the private flare repo. Consumed via ESO into the argocd-repo-flare repository Secret."
   }
 }
 

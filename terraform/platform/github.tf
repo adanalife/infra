@@ -1,9 +1,9 @@
 # GitHub org config, managed through the adanalife-automation GitHub App.
 #
 # The provider auths AS the App (no PAT anywhere): the App's private key
-# lives in SM (platform/github-automation-app-private-key, seeded out-of-band
-# per secrets.tf), and the App ID / installation ID are plain config in
-# terraform.tfvars.
+# lives in Parameter Store (/platform/github-automation-app-private-key,
+# seeded out-of-band per secrets.tf), and the App ID / installation ID are
+# plain config in terraform.tfvars.
 #
 # Required App repository permissions: Contents r/w, Pull requests r/w
 # (workflow pushes/PRs), plus Secrets r/w and Variables r/w (so terraform
@@ -14,11 +14,11 @@
 # short-lived installation tokens via actions/create-github-app-token —
 # GITHUB_TOKEN can't be used for those jobs because commits/PRs it creates
 # never trigger workflow runs, and cross-repo dispatch needs real auth.
-# Consumers: infra cdk8s-synth.yml (auto-synth push-back), infra bump-prs.yml
-# (prod version-bump PRs), tripbot release.yml (repository_dispatch to infra),
-# and release-please.yml in the release repos — as an ordinary actor the App
-# gets the release PR's checks run unheld (github-actions[bot] parks them at
-# action_required) and its tag fires release.yml without an explicit dispatch.
+# Consumers: release-please.yml in every release repo — as an ordinary actor
+# the App gets the release PR's checks run unheld (github-actions[bot] parks
+# them at action_required) and its tag fires release.yml without an explicit
+# dispatch — plus changelog-number.yml, pr-gates.yml and platforms-contract.yml
+# where they exist, and infra's cdk8s-synth.yml for auto-synth push-back.
 
 provider "github" {
   owner = "adanalife"
@@ -36,10 +36,12 @@ locals {
     "tripbot",
     "tripbot-console",
     "obs",
+    "playout",
     "platform-gateway",
     "website",
     "video-pipeline",
     "guessr",
+    "flare",
   ])
 }
 

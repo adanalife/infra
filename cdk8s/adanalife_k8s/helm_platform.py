@@ -53,6 +53,10 @@ REPOS = {
     "argo": "https://argoproj.github.io/argo-helm",
     "cloudnative-pg": "https://cloudnative-pg.github.io/charts",
     "victoria-metrics": "https://victoriametrics.github.io/helm-charts/",
+    # OCI registry — no scheme, the form Argo's repoURL wants. emit() detects
+    # the missing scheme and passes helm the full oci:// chart ref instead.
+    "burrito": "ghcr.io/padok-team/charts",
+    "actions-runner": "ghcr.io/actions/actions-runner-controller-charts",
 }
 
 # --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
@@ -74,7 +78,7 @@ VERSIONS = {
     "cilium": "1.19.4",
     "metrics-server": "3.13.1",  # app v0.8.1 — Talos-only (k3s bundles its own)
     "nats": "2.14.0",  # already pinned in the legacy task
-    "tailscale-operator": "1.98.3",  # already pinned in the legacy task
+    "tailscale-operator": "1.98.3",  # kubectl over the tailnet + tailnet Ingress
     "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
     # CNPG — operator v1.30.0 + the barman-cloud CNPG-I plugin v0.13.0 (WAL
     # archiving / PITR to S3). Verified latest stable at add time (2026-07-10).
@@ -83,6 +87,18 @@ VERSIONS = {
     # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
     # live minipc release.
     "victoria-metrics-single": "0.42.0",
+    # Argo Workflows app v4.1.2 — the batch engine for spare-compute work.
+    # Latest stable at add time (2026-08-22).
+    "argo-workflows": "2.0.2",
+    # Burrito v0.13.0 — terraform GitOps controller (plan/drift-detect trial).
+    # Latest stable at add time (2026-08-19); pre-1.0, so minors can break —
+    # read the release notes before bumping.
+    "burrito": "0.13.0",
+    # ARC — self-hosted GHA runners for the private repos' CI + release
+    # workflows. Latest stable at re-add time (2026-08-22); same pin the
+    # retired rpi5 stack ran.
+    "arc-controller": "0.14.2",
+    "arc-runner-set": "0.14.2",
 }
 
 
@@ -106,11 +122,19 @@ class HelmComponent:
         flags = ["--namespace", self.namespace]
         for vf in self.value_files:
             flags += ["-f", f"{K8S}/{vf}"]
+        repo = REPOS[self.repo_key]
+        if "://" not in repo:
+            # OCI registry (scheme-less in REPOS, matching Argo's repoURL
+            # format). helm can't take an OCI registry via --repo — it wants
+            # the full oci:// chart ref as the chart argument.
+            chart, repo = f"oci://{repo}/{self.chart}", None
+        else:
+            chart = self.chart
         return Helm(
             scope,
             self.release,
-            chart=self.chart,
-            repo=REPOS[self.repo_key],
+            chart=chart,
+            repo=repo,
             version=VERSIONS[self.version_key],
             release_name=self.release,
             namespace=self.namespace,
@@ -205,15 +229,81 @@ def cluster_components(
             )
         )
 
+    # Burrito — terraform GitOps controller ("Argo CD for terraform"), a
+    # plan/drift-detect TRIAL: no layer enables remediationStrategy.autoApply
+    # and the runner credential is read-only, so applies stay Dana-driven per
+    # the write-side preference. Mock (in-memory) datastore — plan artifacts
+    # don't survive a datastore restart; a real S3 bucket is the promotion
+    # step if the trial sticks. Cleanly Argo-manageable (no host-coupled
+    # values). The CRs it reconciles (TerraformRepository/TerraformLayer) live
+    # in dist/burrito.k8s.yaml — see constructs/burrito.py.
+    if minipc:
+        components.append(
+            HelmComponent(
+                "burrito",
+                "burrito",
+                "burrito",
+                "burrito",
+                "burrito-system",
+                value_files=("burrito/values.yml",),
+            )
+        )
+
+    # Argo Workflows — the batch/DAG engine for the spare-compute passes that are
+    # hand-applied one-shot Jobs today (video-pipeline's embed/coords/auto-trim).
+    # Runs one workflow at a time at the most-preemptible priority, so a queue of
+    # them yields to the stream. Cleanly Argo-manageable (no host-coupled values).
+    # The CRs it runs are Workflows, submitted by hand or by the video-pipeline
+    # repo — nothing in this repo declares one.
+    if minipc:
+        components.append(
+            HelmComponent(
+                "argo-workflows",
+                "argo",
+                "argo-workflows",
+                "argo-workflows",
+                "argo-workflows",
+                value_files=("argo-workflows/values.yml",),
+            )
+        )
+
+    # ARC (Actions Runner Controller) — self-hosted GitHub Actions runners for
+    # the private repos (free-plan minutes are metered there). Two OCI charts:
+    # the reconciler in arc-systems, plus one amd64 runner scale set registered
+    # at the ORG level so a single pool serves every private repo
+    # (runs-on: arc-amd64). The supporting namespaces / LimitRange /
+    # GitHub App ExternalSecret are the ArcChart singleton (constructs/arc.py).
+    if minipc:
+        components.append(
+            HelmComponent(
+                "arc-controller",
+                "actions-runner",
+                "gha-runner-scale-set-controller",
+                "arc-controller",
+                "arc-systems",
+                value_files=("arc/controller/values.yml",),
+            )
+        )
+        components.append(
+            HelmComponent(
+                "arc-amd64",
+                "actions-runner",
+                "gha-runner-scale-set",
+                "arc-runner-set",
+                "arc-runners",
+                value_files=("arc/runners/values.yml",),
+            )
+        )
+
     # traefik on the mini-PC runs hostNetwork and stamps the LAN IP into
     # Ingress status (replaces values.local.yml's ingressEndpoint.ip).
     #
-    # NOT Argo-manageable (argo=False): ingressEndpoint.ip is the node's
-    # InternalIP, discovered at bootstrap and written to the gitignored
-    # values.local.yml — it's host state, not git-declarable (prod's differs from
-    # the committed lan_ip). Inlining env.lan_ip would make Argo stamp the wrong
-    # IP into every Ingress on adoption, so traefik stays task-installed (the
-    # bootstrap discovers the IP). Same class as cilium/argo-cd.
+    # NOT Argo-manageable (argo=False), and what installs on the minipc is
+    # k8s/traefik/values.prod-1.yml — which stamps ingressEndpoint.hostname with
+    # the location-independent alias, not an address. env.lan_ip below is the
+    # render's stale approximation of that and reaches no cluster. development is
+    # the env that genuinely can't be git-declared: its target is the host's own
+    # public IP, per-machine. Same class as cilium/argo-cd.
     traefik_files = ["traefik/values.yml"]
     traefik_values: dict = {}
     if minipc:
@@ -340,18 +430,23 @@ def env_components(env: EnvConfig) -> list[HelmComponent]:
             "external-dns",
             edns_ns,
             value_files=(f"external-dns/{env.name}/config.yml",),
-            # `extraArgs` (--default-targets=<node IP> + --force-default-targets)
-            # lives in the gitignored values.local.yml, written by bootstrap from
-            # the node's discovered InternalIP. The cdk8s.Helm path approximates it
-            # with the committed lan_ip, but it's NOT git-declarable — NOT
-            # Argo-manageable (argo=False). Like traefik (its IP source) and
-            # cilium/argo-cd, external-dns stays task-installed so the bootstrap
-            # owns the discovered IP + the force flag. Inlining lan_ip here would
-            # make Argo drop --force-default-targets and force the wrong target on
-            # adoption.
+            # prod-1 and stage-1 commit their own `extraArgs`
+            # (--default-targets=<node alias> + --force-default-targets) in
+            # k8s/external-dns/<env>/config.yml, and that is what
+            # `task k8s:<env>:platform:up` installs. The value rendered here from
+            # env.lan_ip approximates it and reaches no cluster. external-dns
+            # stays task-installed (argo=False) alongside traefik and
+            # cilium/argo-cd because development's target is the host's own
+            # public IP, written per-machine to a gitignored values.local.yml.
             values={"extraArgs": [f"--default-targets={env.lan_ip}"]},
             argo=False,
         ),
+        # The release name is what the chart names the Service, so it is the
+        # `services.nats` every consumer dials (tripbot, playout and the console
+        # each build nats://<name>.<env>-platform.svc.cluster.local from the
+        # contract). Deliberately a literal rather than a contract read: renaming
+        # a Helm release is an uninstall/install, so this name must move on its
+        # own schedule and not because a JSON key changed under it.
         HelmComponent(
             "nats",
             "nats",

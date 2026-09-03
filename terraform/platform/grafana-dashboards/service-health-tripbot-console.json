@@ -1,0 +1,472 @@
+{
+  "title": "06 — Service Health: tripbot-console",
+  "uid": "tripbot-console-service-health",
+  "tags": ["tripbot", "tripbot-console", "service-health"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "deployment_environment",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(target_info{service_name=\"tripbot-console\"}, deployment_environment)",
+        "current": { "text": "prod-1", "value": "prod-1" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 301,
+      "type": "stat",
+      "title": "Running version",
+      "description": "service.version from the OTel resource, set on the console's meter provider from APP_VERSION — the version stamped into the image at build, which is where the running version actually lives. One row per live version; two rows means a rollout in flight. A stage instance reads main-<sha> rather than a release number, because that is the tag it runs.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "group by (service_version) (target_info{service_name=\"tripbot-console\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
+      ],
+      "options": {
+        "colorMode": "none", "graphMode": "none", "textMode": "name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": { "defaults": { "noValue": "not reported" }, "overrides": [] }
+    },
+    {
+      "id": 300,
+      "type": "stat",
+      "title": "NATS control plane",
+      "description": "1 = the console's NATS connection is up; 0 = down, so the live event feed behind every auto-updating panel in the UI is dead even though the page still serves. Catches the boot-race where the console starts before NATS is reachable and stays deaf until restart. No data reads as disconnected.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "min by (deployment_environment) (console_nats_connected{deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "NATS DISCONNECTED", "color": "red" }, "1": { "text": "NATS connected", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 302,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Wall-clock age of the most-recently-started console pod (time() - max pod start), from kube-state-metrics. Resets on every deploy or restart; a value that keeps resetting means the pod is cycling. Scoped by namespace, which is what carries the environment for cluster scrapes.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(kube_pod_start_time{namespace=~\"$deployment_environment\", pod=~\"tripbot-console.*\"})" }
+      ],
+      "options": {
+        "colorMode": "value", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": { "defaults": { "unit": "s", "noValue": "no pods" }, "overrides": [] }
+    },
+    {
+      "id": 303,
+      "type": "stat",
+      "title": "Pod restarts",
+      "description": "Total container restarts across the console's pods in the selected env (kube-state-metrics). Green at 0; any restart turns it red — a crash-loop or OOMKill signal the process-level metrics cannot show.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 3 },
+      "targets": [
+        { "refId": "A", "expr": "sum(kube_pod_container_status_restarts_total{namespace=~\"$deployment_environment\", pod=~\"tripbot-console.*\"})" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Data fresh (last 1m)",
+      "description": "1 when the console pushed telemetry within the last 60s. 0 means the process is not reporting — either it is down, or its OTLP export is broken, which would make every other panel on this page stale without them going obviously empty.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "(time() - max(timestamp(last_over_time(console_nats_connected{deployment_environment=~\"$deployment_environment\"}[5m])))) < bool 60" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "STALE", "color": "red" }, "1": { "text": "fresh", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Requests / sec",
+      "description": "HTTP request rate across every route. The console is an HTMX app whose panels poll their own partials, so a steady baseline here with no humans watching is normal; a drop to zero means nothing is polling, which usually means nothing is loading the page.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(console_http_requests_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "value", "graphMode": "area", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2, "noValue": "0" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Error rate (5xx)",
+      "description": "Share of requests answered with a 5xx. Note that /health/ready legitimately returns 503 while the console is waiting on NATS, so a burst here right after a deploy is the readiness gate doing its job rather than a fault — check the NATS tile before chasing it.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (deployment_environment) (rate(console_http_requests_total{deployment_environment=~\"$deployment_environment\", http_status=~\"5..\"}[5m])) / clamp_min(sum by (deployment_environment) (rate(console_http_requests_total{deployment_environment=~\"$deployment_environment\"}[5m])), 0.001)", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit", "decimals": 2, "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 0.01 },
+            { "color": "red", "value": 0.05 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "SSE clients",
+      "description": "Browsers currently holding the console's server-sent-events stream open — effectively how many console tabs are live. Zero is normal when nobody is watching. This is the console's own take on 'is anyone using me', and the number the SSE fan-out cost scales with.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (console_sse_clients{deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "options": {
+        "colorMode": "value", "graphMode": "area", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": { "defaults": { "unit": "short", "noValue": "0" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP latency (p50 / p95 / p99)",
+      "description": "Server-side request latency, in seconds. Reads a flat 2.5 / 4.75 / 4.95 until tripbot-console#337 ships: the histogram was left on the OTel SDK default bucket boundaries, which are spaced for milliseconds, so every seconds-valued observation fell into the single (0, 5] bucket and each quantile was `q * 5` from interpolating inside it rather than a measurement. True mean over that period was 78ms (sum/count). Once the explicit seconds boundaries deploy, a window spanning the deploy shows a one-time step as the old le series stop and the new ones start.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(console_http_request_duration_seconds_bucket{deployment_environment=~\"$deployment_environment\"}[5m])))", "legendFormat": "p50 [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(console_http_request_duration_seconds_bucket{deployment_environment=~\"$deployment_environment\"}[5m])))", "legendFormat": "p95 [{{deployment_environment}}]" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, deployment_environment) (rate(console_http_request_duration_seconds_bucket{deployment_environment=~\"$deployment_environment\"}[5m])))", "legendFormat": "p99 [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Requests / sec by status",
+      "description": "Request rate split by HTTP status. 304s are the static-asset revalidations and are healthy. 404s on the 'unmatched' route are scanners and stray favicon probes rather than broken links.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (http_status, deployment_environment) (rate(console_http_requests_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{http_status}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Requests / sec by route (top 10)",
+      "description": "The busiest routes. Unlike tripbot's HTTP dashboard, the console does get real route templates (/partials/stream/{platform} rather than an empty label), so this is a genuine per-endpoint view. Expect the /partials/* family to dominate — those are the self-polling panels.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, sum by (http_route, deployment_environment) (rate(console_http_requests_total{deployment_environment=~\"$deployment_environment\"}[5m])))", "legendFormat": "{{http_route}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "SSE clients over time",
+      "description": "Open server-sent-events connections over time. A sawtooth is normal (tabs open and close); a flat line pinned above zero with nobody watching means connections are not being reaped, which leaks a goroutine and a NATS subscription per stuck client.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment) (console_sse_clients{deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 400,
+      "type": "row",
+      "title": "Fleet health (as the console sees it)",
+      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 1 }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Components reported down",
+      "description": "How many platform components the console currently reports as down, across every component and platform it watches. This is the console's own view of the fleet, not an independent check — if the console's NATS connection is down, treat this tile as unknown rather than as good news, because a console that cannot hear anything reports nothing down.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(console_platform_component_up{deployment_environment=~\"$deployment_environment\"} == 0)" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Components down over time, by component",
+      "description": "How many platforms each component is down on, over time. Aggregating by component rather than by platform answers the more common question first — 'is obs broken everywhere or just on tiktok' — and keeps the series count at one per component instead of one per pair.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 24, "w": 18, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (component, deployment_environment) (console_platform_component_up{deployment_environment=~\"$deployment_environment\"} == bool 0)", "legendFormat": "{{component}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Component × platform (current)",
+      "description": "One tile per component/platform pair the console tracks — six components across the five supported platforms. A pair with no tile is a pair the console is not reporting on at all, which is different from a pair reporting down and usually means that platform's component was never wired up in this environment.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 6 },
+      "targets": [
+        { "refId": "A", "expr": "max by (component, service_platform) (console_platform_component_up{deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{component}} · {{service_platform}}" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "up", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 401,
+      "type": "row",
+      "title": "Dependencies (NATS and the Kubernetes API)",
+      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 1 }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "NATS messages / sec by subject",
+      "description": "Per-channel throughput, consumed and published. The NATS control plane tile above only says the socket is up — a subject that stopped delivering while the connection stayed healthy shows here and nowhere else. Subjects are the concrete ones NATS delivered, so the wildcard auth.status.* subscription splits per platform.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 35, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (nats_subject, direction, deployment_environment) (rate(console_nats_messages_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{nats_subject}} {{direction}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "k8s API calls / sec by status",
+      "description": "Every call the console makes to the API server, counted at its shared client. A rising 403 line is a revoked Role on the restart/status RBAC path — which otherwise shows up only as an empty status table with nothing saying why. `error` means the call never got a status back at all (timeout, closed connection), a different fault from an API server that answered.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 35, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (k8s_status, deployment_environment) (rate(console_k8s_api_calls_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{k8s_status}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "k8s API calls / sec by resource path",
+      "description": "Which resources the console is asking about. Paths are templated, so a named Deployment or Application never becomes its own series.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 43, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (k8s_path, deployment_environment) (rate(console_k8s_api_calls_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{k8s_path}} [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 700,
+      "type": "table",
+      "title": "Recent traces (tripbot-console)",
+      "description": "Most recent traces for this service. The deployment_environment column disambiguates rows when the env selector is set to All.",
+      "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
+      "gridPos": { "x": 0, "y": 51, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"tripbot-console\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)", "limit": 20 }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "logs",
+      "title": "Recent errors & warnings",
+      "description": "Error and warning lines from the console, newest first. Severity comes from the detected_level label (lowercase values), not severity_text.",
+      "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
+      "gridPos": { "x": 0, "y": 61, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "expr": "{service_name=\"tripbot-console\", deployment_environment=~\"$deployment_environment\"} | detected_level =~ \"error|warn\"" }
+      ],
+      "options": { "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true, "dedupStrategy": "none" }
+    },
+    {
+      "id": 99,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "x": 0, "y": 71, "w": 24, "h": 5 },
+      "options": {
+        "mode": "markdown",
+        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **Recent traces** carries one server span per console request with the calls to tripbot and the gateways nested underneath (tripbot-console#389, 2026-09-02). Health probes and the SSE stream are left out on purpose. Before that the console exported no spans at all — a TraceQL search for `{ resource.service.name = \"tripbot-console\" }` over 7 days returned nothing, checked 2026-08-31 — so an empty table on an older console image is the unwired state, not a broken service.\n\nThe **Running version** tile reads `service.version`, which the console sets on its meter provider from the image's `APP_VERSION`. A stage instance shows `main-<sha>` rather than a release number, because that is the tag it runs.\n\nThe request-duration panel is labelled seconds because the data is seconds. Its quantiles read as interpolation artifacts (`q * 5`) while the SDK's default bucket boundaries — spaced for milliseconds — put every seconds-valued observation into a single bucket.\n\nThe **Dependencies** row reads `console_nats_messages_total` and `console_k8s_api_calls_total`, added in tripbot-console#360 — both panels are empty on an environment still running an earlier release."
+      }
+    }
+  ]
+}

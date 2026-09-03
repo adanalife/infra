@@ -18,7 +18,9 @@ import os
 from cdk8s import App
 
 from adanalife_k8s.charts import (
+    ArcChart,
     ArgoCDChart,
+    BurritoChart,
     DashcamLocalizeChart,
     NfsPVChart,
     DataChart,
@@ -103,16 +105,26 @@ if not only:
         lan_host=f"argocd.{load_env('development').dns_base}",
         lan_tls=False,
         ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
+        arc=False,  # no runner host on the dev cluster; runners are minipc-only
     )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
     # charts). MONITOR-ONLY until adopted; see gitops/README.md.
     PlatformArgoChart(app, "platform-argo")
+    # Burrito trial config (TerraformRepository + core layer + runner creds +
+    # UI ingress) — plan/drift-detect only, applied after the Burrito chart
+    # syncs. See constructs/burrito.py.
+    BurritoChart(app, "burrito")
     # UPS monitor (observe-only NUT client) — cluster-singleton in the `ups`
     # namespace, env-agnostic. Delivered by a minipc-only Argo Application (the
     # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
     # NUT server). See constructs/ups_monitor.py.
     UpsMonitorChart(app, "ups-monitor")
+    # ARC supporting unit (namespaces + runner LimitRange + GitHub App
+    # ExternalSecret) — cluster-singleton, delivered by a minipc-only Argo
+    # Application. The two ARC Helm charts are platform components
+    # (helm_platform.py). See constructs/arc.py.
+    ArcChart(app, "arc")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

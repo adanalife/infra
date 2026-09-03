@@ -20,6 +20,7 @@ _DEV = dict(
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
     ups_monitor=False,  # dev can't reach the Synology NUT server
+    arc=False,  # no runner host on the dev cluster
 )
 
 
@@ -82,6 +83,16 @@ def test_minipc_default_has_both_uis_and_both_envs():
         o["spec"].get("ingressClassName") for o in objs if o["kind"] == "Ingress"
     }
     assert classes == {"tailscale", "traefik"}  # tailnet UI + LAN UI
+    # the tailnet UI rides the shared proxy fleet, not its own proxy pod
+    tailnet_ui = next(
+        o
+        for o in objs
+        if o["kind"] == "Ingress" and o["spec"].get("ingressClassName") == "tailscale"
+    )
+    assert (
+        tailnet_ui["metadata"]["annotations"]["tailscale.com/proxy-group"]
+        == "ingress-proxies"
+    )
     # tripbot-apps self-discovers deploy units from the tripbot repo's index
     # (git files generator); the per-env globs scope which envs it delivers.
     globs = _appset(objs, "tripbot-apps")["spec"]["generators"][0]["git"]["files"]
@@ -134,6 +145,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         "platform-gateway": ["git@github.com:adanalife/platform-gateway.git"],
         "obs": ["https://github.com/adanalife/obs.git"],
         "playout": ["https://github.com/adanalife/playout.git"],
+        "flare": ["git@github.com:adanalife/flare.git"],
     }
     assert {o["metadata"]["name"] for o in objs if o["kind"] == "AppProject"} == set(
         want_repos
@@ -151,6 +163,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
         ("platform-gateway", "platform-gateway"),
         ("obs", "obs"),
         ("playout", "playout"),
+        ("flare", "flare"),
         ("mediamtx", "infra"),
     ):
         assert _appset(objs, appset)["spec"]["template"]["spec"]["project"] == project
@@ -172,6 +185,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     assert kinds("tripbot-console") == set()
     assert kinds("platform-gateway") == set()
     assert kinds("playout") == set()
+    assert kinds("flare") == set()
     # destinations are scoped to the namespaces each project's apps target. The
     # console reaches into the isolated data namespace too (read-only RBAC for
     # the live status views), so its project must permit both — tripbot apps and
@@ -189,6 +203,7 @@ def test_per_repo_projects_scope_to_one_repo_each():
     assert dests("video-pipeline") == {"prod-1", "stage-1"}
     assert dests("platform-gateway") == {"prod-1", "stage-1"}
     assert dests("playout") == {"prod-1", "stage-1"}
+    assert dests("flare") == {"stage-1"}  # no prod flare
 
 
 def test_minipc_apps_autosync_except_prod_obs():
@@ -267,6 +282,7 @@ def test_notifications_secret_minipc_only():
         "argocd-repo-tripbot-console",
         "argocd-repo-video-pipeline",
         "argocd-repo-platform-gateway",
+        "argocd-repo-flare",
         "argocd-notifications",
     }
     # dev runs notifications.enabled=false, so no webhook secret there
@@ -381,6 +397,9 @@ def test_mediamtx_appset_autosyncs_both_envs():
     assert "selfHeal: true" in patch
     assert "selfHeal: false" not in patch
     assert _ignores_replicas(mtx)
+    # ...and the sync respects that ignore, which is what keeps a sync of the
+    # parked-at-0 dist from scaling the live relays down.
+    assert _respects_ignore_replicas(mtx)
     with pytest.raises(StopIteration):
         _appset(_synth(**_DEV), "mediamtx")
 
@@ -390,6 +409,27 @@ def test_data_appset_never_prunes_either_variant():
         data = _appset(_synth(**kwargs), "tripbot-data")
         opts = data["spec"]["template"]["spec"]["syncPolicy"]["syncOptions"]
         assert "Prune=false" in opts
+
+
+def test_sync_policy_brake_is_scoped_to_automated():
+    """The manual-override brake must cover /spec/syncPolicy/automated and no more.
+    The ApplicationSet controller never writes an ignored path, so a brake over the
+    whole /spec/syncPolicy also blocks any declared syncOption from ever reaching an
+    already-generated Application — silently, since the ApplicationSet itself shows
+    the change and the controller reports the Applications generated."""
+    for kwargs in ({}, _DEV):
+        for appset in _synth(**kwargs):
+            if appset.get("kind") != "ApplicationSet":
+                continue
+            ptrs = [
+                p
+                for entry in appset["spec"].get("ignoreApplicationDifferences", [])
+                for p in entry.get("jsonPointers", [])
+            ]
+            assert ptrs == ["/spec/syncPolicy/automated"], (
+                appset["metadata"]["name"],
+                ptrs,
+            )
 
 
 def _by_name(objs, kind, name):
@@ -422,3 +462,20 @@ def test_no_console_argo_rbac_on_dev():
         and o["metadata"]["name"] == "tripbot-console-argo"
         for o in objs
     )
+
+
+def test_flare_appset_stage_only_cross_repo():
+    objs = _synth()
+    fl = _appset(objs, "flare")
+    revs = {
+        e["env"]: e["revision"] for e in fl["spec"]["generators"][0]["list"]["elements"]
+    }
+    assert revs == {"stage-1": "main"}
+    src = fl["spec"]["template"]["spec"]["source"]
+    assert src["repoURL"] == "git@github.com:adanalife/flare.git"
+    assert src["directory"]["include"] == "{{.env}}.k8s.yaml"
+    assert "automated" in fl["spec"]["templatePatch"]
+    # dev runs no flare (private repo, no deploy key there)
+    assert "flare" not in {
+        o["metadata"]["name"] for o in _synth(**_DEV) if o["kind"] == "AppProject"
+    }

@@ -4,15 +4,6 @@
 # into shared modules. Any structural change here SHOULD be mirrored to the
 # sibling file unless the divergence is the whole point of the change.
 
-provider "aws" {
-  alias  = "stage_1"
-  region = var.region
-
-  assume_role {
-    role_arn = "arn:aws:iam::${var.core_account_id}:role/AdminUser"
-  }
-}
-
 # The cloudflare provider lives in cloudflare-pages.tf so that prod-1
 # (which symlinks this file) doesn't inherit it — prod-1 has no
 # Cloudflare resources today.

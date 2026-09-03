@@ -39,17 +39,6 @@
 # Seeding notes for the non-obvious ones:
 #   - stage-1/cloudflare-api-token — token scopes: Zone:Edit, Tunnel:Edit,
 #     Pages:Edit, Access:Apps and Policies:Edit, DNS:Edit, Zone Settings:Edit.
-#   - stage-1/grafana-cloud-api — JSON {"GRAFANA_CLOUD_URL": "https://<stack>.grafana.net",
-#     "GRAFANA_CLOUD_API_TOKEN": ..., "GRAFANA_CLOUD_STACK_SLUG": ...}. Mint a
-#     stack service account (Admin role) + token; slug = the URL subdomain.
-#   - stage-1/grafana-sm-access — a bare token, not JSON. Synthetic Monitoring
-#     authenticates separately from the rest of the Grafana API, so the admin
-#     token above cannot reach it: Grafana → Testing & synthetics → Config →
-#     Access tokens. The tenant is already installed; generating a token does
-#     not re-install it.
-#   - stage-1/cloudflare-d1-read — a bare token. Scope it to D1 read and
-#     nothing else. D1 tokens cannot be scoped per-database, so this reaches
-#     both tiers' databases; read-only is what bounds it.
 #   - k8s/grafana-cloud-otlp — JSON {"OTEL_EXPORTER_OTLP_ENDPOINT": ...,
 #     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Basic <base64(id:key)>"}.
 #   - k8s/sentry-* — JSON {"SENTRY_DSN": "https://<key>@<org>.ingest.sentry.io/<project>"}.
@@ -60,9 +49,10 @@
 #     Stage and prod are distinct keys, restricted to Geocoding + Maps JS.
 #   - k8s/tripbot/youtube-creds — JSON {"YOUTUBE_CLIENT_ID": ...,
 #     "YOUTUBE_CLIENT_SECRET": ..., optionally "YOUTUBE_CHANNEL_ID": ...}.
-#   - k8s/tripbot/discord-alerts-webhook — one webhook URL, two consumers:
-#     the Grafana contact point (grafana-alerts.tf, plan-time data source) and
-#     tripbot's !report command (via ESO). Same value seeded in adanalife-prod.
+#   - k8s/tripbot/discord-alerts-webhook — one webhook URL, consumed by
+#     tripbot's !report command (via ESO) and the guessr Pages functions.
+#     Same value seeded in adanalife-prod, and in the core account as
+#     /platform/discord-alerts-webhook for the Grafana contact point.
 #   - k8s/*/ghcr-pull-token — JSON {"username": ..., "token": ...} — a
 #     fine-grained GitHub token with read:packages on the package.
 #   - k8s/guessr/cloudflare-publish — JSON {"CLOUDFLARE_API_TOKEN": ...,
@@ -78,11 +68,6 @@ locals {
   # parameter name (sans leading /) => description
   ssm_parameters = {
     "stage-1/cloudflare-api-token"         = "Cloudflare API token used by the cloudflare provider."
-    "stage-1/grafana-cloud-api"            = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
-    "stage-1/grafana-sm-access"            = "Synthetic Monitoring access token for the grafana provider's sm_access_token."
-    "stage-1/cloudflare-d1-read"           = "Cloudflare API token, D1 read only, for the Grafana Infinity datasource over guessr's play data."
-    "stage-1/ntfy-critical-webhook"        = "ntfy webhook URL for the Grafana independent critical-alert contact point."
-    "stage-1/healthchecks-deadman-ping"    = "healthchecks.io ping URL for the Grafana alerting deadman switch."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
     "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
     "k8s/sentry-onscreens-server"          = "Sentry DSN for the onscreens-server Go service. Consumed via the SENTRY_DSN env var."
@@ -99,6 +84,7 @@ locals {
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
+    "k8s/flare/ghcr-pull-token"            = "GitHub token (read:packages) for pulling the private flare image from GHCR. Keys: username, token."
   }
 }
 
@@ -229,33 +215,8 @@ data "aws_ssm_parameter" "guessr_admin_emails" {
   name = aws_ssm_parameter.guessr_admin_emails.name
 }
 
-data "aws_ssm_parameter" "grafana_cloud_api" {
-  name = "/stage-1/grafana-cloud-api"
-}
-
-# Synthetic Monitoring authenticates separately from the rest of the Grafana
-# API, with a token minted from its own settings page. See grafana-guessr.tf.
-data "aws_ssm_parameter" "grafana_sm_access" {
-  name = "/stage-1/grafana-sm-access"
-}
-
-# Read-only against D1, for the Grafana datasource that charts guessr's play
-# data. Scoped to D1 alone: the databases it can reach hold every recorded
-# guess, and nothing charting them needs to write.
-data "aws_ssm_parameter" "cloudflare_d1_read" {
-  name = "/stage-1/cloudflare-d1-read"
-}
-
 data "aws_ssm_parameter" "discord_alerts_webhook" {
   name = "/k8s/tripbot/discord-alerts-webhook"
-}
-
-data "aws_ssm_parameter" "ntfy_critical_webhook" {
-  name = "/stage-1/ntfy-critical-webhook"
-}
-
-data "aws_ssm_parameter" "healthchecks_deadman_ping" {
-  name = "/stage-1/healthchecks-deadman-ping"
 }
 
 # ============================================================================

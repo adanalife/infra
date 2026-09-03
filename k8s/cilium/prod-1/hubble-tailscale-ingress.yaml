@@ -2,7 +2,7 @@
 # Additive — the cilium-chart-templated traefik Ingress (hubble.prod.whereisdana.today,
 # on-LAN, see k8s/cilium/values.yml's hubble.ui.ingress) stays. Gives
 # https://hubble-prod.<tailnet>.ts.net, reachable from ANY network (a 100.x/CGNAT
-# name that never collides with a 192.168.1.x LAN). Auto HTTPS via the tailnet cert.
+# name that never collides with an RFC1918 home LAN). Auto HTTPS via the tailnet cert.
 #
 # Applied by `task k8s:prod:platform:up` (kubectl apply -f) after the Cilium helm
 # install — not a kustomize target, since Cilium itself is helm-managed.
@@ -11,6 +11,10 @@ kind: Ingress
 metadata:
   name: hubble-ui-tailscale
   namespace: kube-system
+  annotations:
+    # Served by the shared HA proxy fleet (k8s/tailscale-operator/proxygroup.yml)
+    # instead of a dedicated per-Ingress proxy pod.
+    tailscale.com/proxy-group: ingress-proxies
 spec:
   ingressClassName: tailscale
   defaultBackend:

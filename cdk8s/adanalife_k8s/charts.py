@@ -16,6 +16,7 @@ from cdk8s import Chart
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.constructs.cnpg import CnpgCluster
 from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_local_pvc,
     emit_dashcam_localize_job,
@@ -128,6 +129,12 @@ class DataChart(Chart):
         #     Lands in env.data_ns — the deletion boundary this unit protects. ---
         Postgres(self, env=env)
 
+        # --- CNPG `pg` cluster (PITR via barman-cloud → S3), side-by-side with
+        #     the legacy StatefulSet while the migration is in flight. Apps pick
+        #     which one via DATABASE_HOST (tripbot repo's postgres_host). ---
+        if env.cnpg:
+            CnpgCluster(self, env=env)
+
         # --- dashcam PVC (nfs envs only; no-op on hostPath local/dev). The PV it
         #     binds to is provisioned out-of-band via NfsPVChart. Mounted by
         #     vlc (namespace-local), so it can only live in the app namespace:
@@ -218,6 +225,20 @@ class UpsMonitorChart(Chart):
         UpsMonitor(self)
 
 
+class ArcChart(Chart):
+    """The ARC (self-hosted GHA runner) supporting unit — namespaces + runner
+    LimitRange + GitHub App ExternalSecret, a cluster-singleton in the same
+    shape as the UPS monitor (dist/arc.k8s.yaml, minipc-only Argo delivery).
+    The ARC Helm charts themselves are platform components (helm_platform.py).
+    See constructs/arc.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        from adanalife_k8s.constructs.arc import Arc
+
+        Arc(self)
+
+
 class ArgoCDChart(Chart):
     """Argo CD GitOps config (AppProject + ApplicationSets + UI Ingress + repo
     ExternalSecret) — the objects that drive the controller. Applied after the
@@ -232,6 +253,21 @@ class ArgoCDChart(Chart):
         # argo_kwargs select the cluster's env-set + UI mode: defaults give the
         # minipc instance; main.py passes the k3d dev variant (development, no UI).
         ArgoCD(self, **argo_kwargs)
+
+
+class BurritoChart(Chart):
+    """Burrito trial config (chart-registry Secret + TerraformRepository +
+    the core TerraformLayer + runner-creds ExternalSecret + tailnet UI
+    Ingress) — the objects the controller plans from, applied after the
+    Burrito install (the `burrito` HelmComponent, Argo-delivered). Offline +
+    deterministic → dist/burrito.k8s.yaml, applied via
+    `task k8s:prod:burrito:apply`. See constructs/burrito.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        from adanalife_k8s.constructs.burrito import Burrito
+
+        Burrito(self)
 
 
 class PlatformArgoChart(Chart):

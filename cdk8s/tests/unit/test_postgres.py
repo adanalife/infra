@@ -117,8 +117,12 @@ def test_backup_cronjob_prod_only():
     tmpl = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]
     assert tmpl["restartPolicy"] == "Never"
     backup = tmpl["containers"][0]
-    assert backup["image"] == "postgres:16-alpine"
+    # cnpg env: an 18 client (a 16 pg_dump refuses an 18 server) aimed at the
+    # Cluster's rw Service.
+    assert backup["image"] == "postgres:18-alpine"
+    assert {"name": "PGHOST", "value": "pg-rw"} in backup["env"]
     assert "pg_dump" in backup["args"][0]
+    assert "--host" not in backup["args"][0]
     # vectors are derived + reproducible; excluding them keeps tiered dumps small
     assert "--exclude-table-data=frame_embeddings" in backup["args"][0]
     env_secrets = {e["secretRef"]["name"] for e in backup["envFrom"]}

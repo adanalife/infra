@@ -1,14 +1,15 @@
 name: platforms-contract
 
-# Guards the fleet-wide platform-set contract: platform-gateway owns
-# platforms.json (its Go adapter registry is the source of truth) and every repo
-# syncs a copy via `task platforms:sync`. This asserts the synced copy still
-# matches the gateway's main — catching both a stale local copy and the gateway
-# adding/removing a platform we haven't re-synced.
+# Guards the generated contracts this repo syncs copies of: platforms.json (the
+# fleet-wide platform set, owned by platform-gateway's Go adapter registry) and
+# cdk8s/contract.json (canonical service names, ports and env-var keys, owned by
+# tripbot's pkg/contract). This asserts each synced copy still matches its
+# owner's main — catching both a stale local copy and an upstream change we
+# haven't re-synced.
 #
-# The daily schedule is the point of this workflow: gateway-side drift lands
-# with no PR here to notice it. The PR-time check is a step of the `gates` job
-# in pr-gates.yml.
+# The daily schedule is the point of this workflow: upstream drift lands with no
+# PR here to notice it. The PR-time checks are steps of the `gates` job in
+# pr-gates.yml.
 on:
   push:
     branches:
@@ -53,3 +54,34 @@ jobs:
             exit 1
           fi
           rm -f gateway-platforms.json
+
+      # tripbot is public, so GITHUB_TOKEN reads it — no app token needed.
+      - name: Assert contract.json matches tripbot/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository_owner }}/tripbot/contents/pkg/contract/contract.json?ref=main" \
+            -H "Accept: application/vnd.github.raw" > tripbot-contract.json
+          if ! diff -u tripbot-contract.json cdk8s/contract.json; then
+            echo "::error::cdk8s/contract.json is out of sync with tripbot/main — run 'task contract:sync' and commit."
+            exit 1
+          fi
+          rm -f tripbot-contract.json
+
+  # Same reasoning as terraform-drift.yml: the daily cron is the run nobody
+  # watches, so a contract that silently rots is invisible until something
+  # breaks. Push and workflow_dispatch runs are already visible as a check.
+  alert:
+    needs: [platforms-contract]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Alert Discord on contract drift
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Contract drift in [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): platforms.json or contract.json is behind its source of truth. [run log]({{ RUN_URL }})'

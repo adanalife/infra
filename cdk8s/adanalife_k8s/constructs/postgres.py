@@ -38,6 +38,7 @@ from adanalife_k8s.naming import meta_labels, selector
 NAME = "postgres"
 SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
 PORT = 5432
+METRICS_PORT = 9187  # CNPG's exporter, scraped by alloy in the monitoring ns
 
 # SSM parameter paths (terraform-owned values; the SM names with a leading
 # slash since the SM → SSM migration). See base/external-secret.yaml.
@@ -68,7 +69,6 @@ DUMP=/tmp/dump.pgcustom
 echo "Dumping ${POSTGRES_DB}"
 PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \\
   --format=custom \\
-  --host=postgres \\
   --username="$POSTGRES_USER" \\
   --exclude-table-data=frame_embeddings \\
   "$POSTGRES_DB" \\
@@ -97,7 +97,7 @@ class Postgres(Construct):
         super().__init__(scope, NAME)
         # postgres lives in the data namespace — the app namespace by default
         # (parity), or an isolated one (env.data_namespace). The backup CronJob
-        # rides along here, so its --host=postgres stays a same-namespace lookup.
+        # rides along here, so its PGHOST stays a same-namespace lookup.
         ns = env.data_ns or None
         labels = meta_labels(NAME)
         sel = selector(NAME)
@@ -272,7 +272,98 @@ class Postgres(Construct):
         if env.postgres_backup:
             self._storage_class()
             self._backup_external_secret(ns)
-            self._backup_cronjob(ns)
+            self._backup_cronjob(ns, cnpg=env.cnpg)
+
+        # --- data-namespace ingress guard (isolated envs only). NetworkPolicy
+        #     is allowlist-only, so "stage can't reach prod's DB" is expressed
+        #     as default-deny ingress on every pod in the data namespace,
+        #     allowing only same-namespace traffic (the backup CronJob), the
+        #     env's OWN app namespace on the postgres port, the operator on the
+        #     status port, and the monitoring namespace on the metrics port.
+        #     Cilium enforces it. Anything that needs to reach this namespace
+        #     needs a rule here — a missing one fails as silence, not an error.
+        #     Co-located envs skip it: a default-deny in the shared app
+        #     namespace would black-hole every other workload there. Kubelet
+        #     probes and `kubectl port-forward` arrive from the host, which
+        #     Cilium allows regardless of policy.
+        if env.data_isolated:
+            k8s.KubeNetworkPolicy(
+                self,
+                "ingress-policy",
+                metadata=k8s.ObjectMeta(
+                    name=f"{NAME}-ingress", namespace=ns, labels=labels
+                ),
+                spec=k8s.NetworkPolicySpec(
+                    pod_selector=k8s.LabelSelector(),
+                    policy_types=["Ingress"],
+                    ingress=[
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(pod_selector=k8s.LabelSelector())
+                            ]
+                        ),
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": env.namespace
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(PORT),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                        # The CloudNativePG operator polls each instance's
+                        # status API; without this the Cluster never reports
+                        # Ready ("Instance Status Extraction Error").
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": "cnpg-system"
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(8000),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                        # Alloy scrapes the CNPG exporter from the monitoring
+                        # namespace. Without this the scrape is dropped, every
+                        # cnpg_* series is absent, and the two pitr-health
+                        # alerts fire on NoData while the database is healthy —
+                        # which is indistinguishable from a real WAL stall.
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": "monitoring"
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(METRICS_PORT),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            )
 
     # ---- helpers ----
     def _storage_class(self):
@@ -348,12 +439,16 @@ class Postgres(Construct):
             )
         )
 
-    def _backup_cronjob(self, ns):
+    def _backup_cronjob(self, ns, *, cnpg):
+        # The client major must be >= the server's: a 16 pg_dump refuses an
+        # 18 server outright. PGHOST picks the server the same way — the CNPG
+        # Cluster's rw Service, or the legacy StatefulSet's Service.
         backup = k8s.Container(
             name="backup",
-            image="postgres:16-alpine",  # PG16 pg_dump, matches the server image
+            image="postgres:18-alpine" if cnpg else "postgres:16-alpine",
             command=["/bin/sh", "-c"],
             args=[_BACKUP_SCRIPT],
+            env=[k8s.EnvVar(name="PGHOST", value="pg-rw" if cnpg else "postgres")],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME)),
                 k8s.EnvFromSource(

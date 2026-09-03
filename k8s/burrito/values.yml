@@ -1,0 +1,125 @@
+# Burrito (padok-team/burrito) — terraform GitOps controller, plan/drift-detect
+# trial. Chart version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered
+# by the `burrito` Argo Application (platform-argo.k8s.yaml). The
+# TerraformRepository/TerraformLayer CRs it reconciles live in
+# cdk8s/dist/burrito.k8s.yaml (task k8s:prod:burrito:apply).
+config:
+  burrito:
+    controller:
+      timers:
+        # Every drift check spawns a runner pod that terraform-plans on the
+        # minipc — keep it hourly so the trial doesn't compete with the live
+        # stream for CPU (chart default is 10m).
+        driftDetection: 1h
+      # One runner at a time, same reasoning.
+      maxConcurrentRunnerPods: 1
+    datastore:
+      storage:
+        # Plan artifacts and run logs in S3. Not a nice-to-have over the
+        # chart's in-memory mock: an apply replays the reviewed plan's artifact
+        # bundle, and the mock backend cannot serve one, so applies reconcile
+        # forever without ever scheduling a runner. The mock also drops any
+        # in-flight run when the datastore restarts, parking the layer.
+        #
+        # Bucket + the datastore's own scoped IAM user:
+        # terraform/prod-1/burrito-datastore.tf. KEEP-IN-SYNC with the bucket
+        # name there. Credentials arrive as AWS_* env vars via the
+        # ExternalSecret in constructs/burrito.py (see datastore.envFrom
+        # below).
+        mock: false
+        s3:
+          bucket: adanalife-prod-1-burrito-datastore
+
+    # SSO through Cloudflare Access, which is already the login for guessr's
+    # admin surface. Access has no identity provider behind it, so a sign-in is
+    # a one-time PIN mailed to an address on the allowlist in
+    # /prod-1/internal-admin-emails (terraform/prod-1/burrito-oidc.tf).
+    #
+    # This is the login for a UI that can trigger terraform, so basic auth is
+    # off rather than left as a fallback: the chart generates that password
+    # itself, nothing owns or can rotate it, and upstream marks it
+    # not-for-production. With both disabled the server would be wide open, so
+    # oidc.enabled and basicAuth.enabled must never both be false.
+    #
+    # clientId and issuerUrl are not secrets — a client id travels in the
+    # browser's address bar during the flow. Only the client secret is, and it
+    # arrives as BURRITO_SERVER_OIDC_CLIENTSECRET via the ExternalSecret in
+    # constructs/burrito.py. The issuer is per-application rather than the bare
+    # team domain: Access serves each SaaS app its own discovery document,
+    # which is why the client id appears in both fields.
+    server:
+      basicAuth:
+        enabled: false
+      oidc:
+        enabled: true
+        issuerUrl: "https://adanalife.cloudflareaccess.com/cdn-cgi/access/sso/oidc/7fe510da9b31163fe5cec2a32ffdbadc468a74d1e91eba398698d3170a64e388"
+        clientId: "7fe510da9b31163fe5cec2a32ffdbadc468a74d1e91eba398698d3170a64e388"
+        # The LAN host, the only redirect URI registered on the Access
+        # application. Burrito takes exactly one.
+        redirectUrl: "https://burrito.prod.whereisdana.today/auth/callback"
+        # scopes defaults to openid/profile/email, which is what the
+        # application grants — left unset rather than restated.
+      session:
+        # Both UI paths terminate TLS (traefik + cert-manager on the LAN host,
+        # the tailnet edge on the other), so the session cookie is
+        # HTTPS-only. The chart's default assumes plain HTTP.
+        secure: true
+
+# The client secret, the one OIDC setting the chart takes as an env var rather
+# than a value. The Secret is an ExternalSecret in constructs/burrito.py, and
+# it has to exist BEFORE this lands — a Deployment whose envFrom names a
+# missing Secret parks in CreateContainerConfigError and does not retry when it
+# appears.
+server:
+  deployment:
+    envFrom:
+      - secretRef:
+          name: burrito-oidc-client-secret
+
+# The controllers pod serves Burrito's own Prometheus metrics on :8080, and
+# these three annotations are what makes alloy-metrics scrape it (the fleet
+# convention — see k8s/monitoring/prod-1/values.yml, which remaps the chart's
+# k8s.grafana.com/* keys to prometheus.io/*). Without them the endpoint exists
+# and nothing reads it.
+#
+# The family worth having is burrito_terraform_layer_status{layer_name,status}:
+# per layer, `warning` when the last plan was not empty, `error` when it failed,
+# `running` mid-plan. That is the drift verdict from the component that owns it,
+# which is why the console exports only the one thing Burrito omits — a last-run
+# timestamp (see tripbot-console src/console/metrics.py).
+#
+# Everything scraped reaches the cluster's VictoriaMetrics; only the allowlisted
+# family reaches Grafana Cloud, per that same monitoring values file. Restating
+# the chart's default-container annotation is deliberate — podAnnotations
+# replaces the map rather than merging, so omitting it would drop it.
+# The datastore's bucket credential, the one storage setting the chart takes as
+# env vars rather than values. Same shape as the server's OIDC secret above:
+# an ExternalSecret in constructs/burrito.py, whose keys ARE the env var names
+# the AWS SDK reads. It has to exist BEFORE this lands — a Deployment whose
+# envFrom names a missing Secret parks in CreateContainerConfigError and does
+# not retry when it appears.
+datastore:
+  deployment:
+    envFrom:
+      - secretRef:
+          name: burrito-datastore-s3
+
+controllers:
+  deployment:
+    podAnnotations:
+      kubectl.kubernetes.io/default-container: burrito
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics"
+
+tenants:
+  # The tenant namespace holds the CRs + runner pods; the chart creates the
+  # namespace and a default `burrito-runner` ServiceAccount in it (referenced
+  # nowhere yet — runner AWS creds arrive via overrideRunnerSpec envFrom
+  # instead, see constructs/burrito.py). Don't list `burrito-runner` under
+  # `serviceAccounts` here: the chart renders the default one unconditionally,
+  # so naming it again emits the same ServiceAccount twice and cdk8s's Helm
+  # include refuses the duplicate.
+  - namespace:
+      create: true
+      name: burrito

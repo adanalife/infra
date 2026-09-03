@@ -74,7 +74,7 @@ spec:
           - path: cdk8s/dist/apps/development-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"
@@ -141,7 +141,7 @@ spec:
             revision: main
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-tripbot-identity"
@@ -195,7 +195,7 @@ spec:
           - env: development
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-supporting"
@@ -249,7 +249,7 @@ spec:
             ns: development
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-data"
@@ -305,7 +305,7 @@ spec:
           - path: cdk8s/dist/apps/development-*.json
   ignoreApplicationDifferences:
     - jsonPointers:
-        - /spec/syncPolicy
+        - /spec/syncPolicy/automated
   template:
     metadata:
       name: "{{.env}}-{{.app}}"

@@ -135,6 +135,15 @@ description: Prod support workloads (the console) — outrank default-priority c
 globalDefault: false
 value: 900
 ---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-low
+  namespace: prod-1
+description: CI runner pods (ARC) — most-preemptible tier, alongside dashcam-cv-low. Evicted before any default-priority workload; a killed build is just a re-run.
+globalDefault: false
+value: -10
+---
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:

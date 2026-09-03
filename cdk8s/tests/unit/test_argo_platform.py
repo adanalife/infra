@@ -46,9 +46,7 @@ def test_non_argo_manageable_charts_excluded():
 
 def test_every_app_is_multisource_pinned_with_values_ref():
     for a in _apps(_synth()):
-        sources = a["spec"]["sources"]
-        assert len(sources) == 2
-        chart_src, values_src = sources
+        chart_src, values_src = a["spec"]["sources"][:2]
         assert chart_src["chart"]
         assert chart_src["targetRevision"]  # version-pinned, never floating
         assert values_src["ref"] == "values"  # the in-repo $values source
@@ -72,3 +70,12 @@ def test_per_env_apps_name_qualified():
     # (external-dns is excluded — host-coupled — so it's not here.)
     assert {"prod-1-nats", "stage-1-nats"} <= names
     assert not any(n.endswith("-external-dns") for n in names)
+
+
+def test_tailscale_operator_delivers_the_ingress_proxygroup():
+    (app,) = [a for a in _apps(_synth()) if _release(a) == "tailscale-operator"]
+    # third source: the in-repo ProxyGroup, scoped so the chart's values file
+    # isn't picked up as a manifest.
+    raw = app["spec"]["sources"][2]
+    assert raw["path"] == "k8s/tailscale-operator"
+    assert raw["directory"] == {"include": "proxygroup.yml"}

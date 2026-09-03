@@ -1,7 +1,7 @@
 # KEEP-IN-SYNC: k8s/external-dns/{prod-1,stage-1}/config.yml
 #
 # Helm values for the upstream external-dns chart. Installed by
-# `task k8s:stage:apply` into the stage-1-platform namespace, after the
+# `task k8s:stage:platform-env:up` into the stage-1-platform namespace, after the
 # ExternalSecret materialises external-dns-aws-credentials there.
 #
 # Same shape as prod-1's; the deltas are `domainFilters` (stage subdomain)

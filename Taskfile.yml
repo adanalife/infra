@@ -9,6 +9,25 @@ env:
   # flags, so this is portable across hosts.
   KUBECTL_EXTERNAL_DIFF: diff -u -N --color=always
 
+vars:
+  # Every manifest that declares top-level Argo objects for the minipc.
+  # gitops:{diff,apply,prune} all read this list, so adding a manifest here
+  # wires it into the preview, the apply and the orphan report at once — and
+  # missing one means gitops:prune reports its objects as orphaned.
+  # argocd-k3d.k8s.yaml is deliberately absent: it targets the dev cluster,
+  # which the minipc context guard forbids.
+  GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
+  # Parent of the sibling checkouts (tripbot, platform-gateway, …) that the
+  # *:sync tasks copy from. They sit next to this repo's *main* worktree, which
+  # is not the working directory when a task runs from ~/adanalife/worktrees/ —
+  # there, `..` is the worktrees dir. `--git-common-dir` always names the
+  # shared .git regardless of which worktree asks, so its grandparent is the
+  # siblings' parent either way. `--path-format=absolute` matters: from the
+  # main checkout the common dir is the relative `.git`, whose grandparent
+  # would otherwise be `.`.
+  SIBLINGS:
+    sh: dirname "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+
 tasks:
   # ---------------------------------------------------------------------------
   # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/), migrating off
@@ -43,7 +62,12 @@ tasks:
     dir: cdk8s
     deps: [cdk8s:imports]
     cmds:
-      - mise exec -- uv run npx cdk8s synth
+      # cdk8s wipes the output dir before it runs the app, so a synth that aborts
+      # mid-way would leave every committed dist file showing as deleted. Render
+      # into a scratch dir and swap it in only on success (same in the two synth
+      # tasks below).
+      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - rm -rf dist && mv .dist.tmp dist
 
   cdk8s:synth:platform:
     desc: Synthesize apps + the platform Helm stack (needs helm + network)
@@ -52,7 +76,8 @@ tasks:
     env:
       CDK8S_PLATFORM: "1"
     cmds:
-      - mise exec -- uv run npx cdk8s synth
+      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - rm -rf dist && mv .dist.tmp dist
 
   # The NFS PersistentVolumes (dashcam corpus + background-music share) are
   # host-specific bootstrap infra kept OUT of Argo (their own NfsPVChart ->
@@ -240,8 +265,22 @@ tasks:
       NFS_SERVER: '<NFS server address>'
       NFS_PATH: '<export path>'
     cmds:
-      - mise exec -- uv run npx cdk8s synth
+      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - rm -rf dist && mv .dist.tmp dist
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
+
+  # Schema-validate the committed dist/ (what Argo actually applies) against
+  # the cluster's k8s API version — catches API-version drift after a k8s
+  # bump. CRD kinds (ESO, Argo, cert-manager) resolve via the datree
+  # CRDs-catalog; anything not there (none today) is skipped, not failed.
+  # The {{`{{.Group}}`}} backtick wrapping keeps kubeconform's URL template
+  # out of Task's own templating. Mirrored in cdk8s-synth.yml.
+  cdk8s:validate:
+    desc: Validate the committed dist/ manifests against the k8s API schemas (kubeconform)
+    dir: cdk8s
+    cmds:
+      # -kubernetes-version tracks the live cluster (kubectl version); bump it with talos upgrades
+      - mise exec -- kubeconform -strict -summary -kubernetes-version 1.36.0 -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{`{{.Group}}`}}/{{`{{.ResourceKind}}`}}_{{`{{.ResourceAPIVersion}}`}}.json' -ignore-missing-schemas dist/
 
   # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
   # live cluster (read-only; safe pre-cutover check). Output is colorized via the
@@ -271,12 +310,343 @@ tasks:
     cmds:
       - kubectl apply -f dist/development-data.k8s.yaml
 
-  gitops:apply:
-    desc: Apply the Argo CD config (project + appset + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md)
+  # Burrito's config unit is NOT in GITOPS_MANIFESTS: its CRs need the Burrito
+  # CRDs, which only exist once the `burrito` Argo Application has synced — a
+  # blanket gitops:apply would fail on a cluster that hasn't installed it.
+  k8s:prod:burrito:apply:
+    desc: "Apply the Burrito config (TerraformRepository + the four layers + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
+    preconditions:
+      - *minipc-context-guard
+      - sh: kubectl get crd terraformlayers.config.terraform.padok.cloud >/dev/null 2>&1
+        msg: "Burrito CRDs missing — sync the `burrito` Application first (it ships them with the chart): argocd app sync burrito --core"
+    cmds:
+      - kubectl apply -f cdk8s/dist/burrito.k8s.yaml
+
+  # Run `terraform apply` for one layer, once. Named per ENV, not per cluster:
+  # every burrito layer lives on the one prod cluster, so the old
+  # k8s:prod:burrito:run LAYER=stage-1 spelling put "prod" and "stage" in the
+  # same gesture and read like a footgun.
+  #
+  # Only stage-1 and prod-1 appear here. core and platform hold a
+  # ReadOnlyAccess credential and a run against them fails at the first write —
+  # the intended answer, not a gap, so there is deliberately no task for them
+  # (see constructs/burrito.py).
+  # A plan is the only thing Burrito's UI sync button can ask for, and the only
+  # way to refresh a plan that terraform will otherwise refuse to replay: any
+  # state change after the plan — a partial apply, a `terraform import` — makes
+  # the saved plan stale. This is that button, with the wait and the verdict.
+  burrito:stage:plan:
+    desc: "Re-plan the stage-1 burrito layer (Burrito's sync-now annotation), wait for it, print the result"
+    cmds:
+      - task: burrito:_plan
+        vars: { LAYER: stage-1 }
+
+  burrito:prod:plan:
+    desc: "Re-plan the prod-1 burrito layer (Burrito's sync-now annotation), wait for it, print the result"
+    cmds:
+      - task: burrito:_plan
+        vars: { LAYER: prod-1 }
+
+  burrito:stage:apply:
+    desc: "Apply the stage-1 burrito layer's reviewed plan (one terraform apply, in-cluster). Stale plan? burrito:stage:plan first"
+    cmds:
+      - task: burrito:_apply
+        vars: { LAYER: stage-1, PLAN_ENV: stage }
+
+  burrito:prod:apply:
+    desc: "Apply the prod-1 burrito layer's reviewed plan (one terraform apply, in-cluster). Stale plan? burrito:prod:plan first"
+    cmds:
+      - task: burrito:_apply
+        vars: { LAYER: prod-1, PLAN_ENV: prod }
+
+  # The sync-now annotation is what the UI's sync button sets
+  # (internal/server/api/sync.go); the layer controller consumes it, schedules
+  # a plan run, and the runner stamps the layer's plan-run/plan-date
+  # annotations when the plan finishes. So "the plan is done" is plan-run
+  # moving, read off the layer — same reasoning as the apply verdict below.
+  burrito:_plan:
+    internal: true
+    requires:
+      vars: [LAYER]
+    preconditions:
+      - *minipc-context-guard
+      - sh: kubectl -n burrito get terraformlayer {{.LAYER}} >/dev/null 2>&1
+        msg: "No TerraformLayer named '{{.LAYER}}' — kubectl -n burrito get terraformlayers"
+    cmds:
+      - |
+        set -eu
+        ann() {
+          kubectl -n burrito get terraformlayer {{.LAYER}} -o json 2>/dev/null \
+            | jq -r --arg k "$1" '.metadata.annotations[$k] // ""'
+        }
+        cond() {
+          kubectl -n burrito get terraformlayer {{.LAYER}} -o json 2>/dev/null \
+            | jq -r --arg t "$1" '(.status.conditions[]? | select(.type == $t) | .status) // "Unknown"'
+        }
+        [ "$(cond IsRunning)" = "True" ] && { echo "a run is already in flight on {{.LAYER}} — wait for it" >&2; exit 1; } || true
+        before=$(ann runner.terraform.padok.cloud/plan-run)
+        kubectl -n burrito annotate terraformlayer {{.LAYER}} api.terraform.padok.cloud/sync-now=true --overwrite >/dev/null
+        echo "Re-plan requested on {{.LAYER}} (current plan: ${before:-none}) — waiting for the runner"
+        # maxConcurrentRunnerPods is 1 and a plan itself takes a minute or two,
+        # so the wait is patient. The plan-run annotation only moves when a
+        # plan has finished; HasLastPlanFailed says how it went.
+        for i in $(seq 1 120); do
+          now=$(ann runner.terraform.padok.cloud/plan-run)
+          if [ -n "$now" ] && [ "$now" != "$before" ]; then
+            result=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o json | jq -r '.status.lastResult // "unknown"')
+            if [ "$(cond HasLastPlanFailed)" = "True" ]; then
+              echo "--- {{.LAYER}}: plan $now FAILED: $result ---" >&2
+              echo "log: kubectl -n burrito logs -l burrito/managed-by=${now%/*} --tail=-1" >&2
+              exit 1
+            fi
+            echo "--- {{.LAYER}}: plan $now at $(ann runner.terraform.padok.cloud/plan-date): $result ---"
+            exit 0
+          fi
+          [ "$i" = "12" ] && echo "still waiting (one runner pod at a time; a plan takes a minute or two)"
+          sleep 5
+        done
+        echo "no new plan after 10m — the layer still reports ${before:-none}. Check: kubectl -n burrito get terraformruns -l burrito/managed-by={{.LAYER}}" >&2
+        exit 1
+
+  # Burrito has no standing apply loop — every layer keeps
+  # remediationStrategy.autoApply false — so an apply only ever happens because
+  # someone asked for it, and this is the only way to ask. Burrito's UI cannot:
+  # at v0.13.0 its one mutating call is POST /api/layers/:ns/:layer/sync, which
+  # sets the SyncNow annotation and gets you a *plan*
+  # (internal/server/api/sync.go); plan/apply buttons are still "more to come"
+  # upstream.
+  #
+  # The run replays the plan burrito already computed and displayed
+  # (applyWithoutPlanArtifact stays false), so what runs is what you reviewed —
+  # which is why spec.artifact has to name that plan run. An apply run without
+  # it has no bundle to replay and dies in reconcile with `could not check
+  # bundle, there's an issue with the storage backend`. Both fields are copied
+  # off the layer's own annotations, exactly as burrito's ApplyNeeded handler
+  # does it (internal/controllers/terraformlayer/run.go getRun).
+  #
+  # The burrito/managed-by label is load-bearing too, not decoration: the layer
+  # finds its runs by that selector, so an unlabelled apply is invisible to the
+  # layer's state machine and its history. It also makes the run eligible for
+  # the layer's history pruning, so a finished apply disappears from `kubectl
+  # get terraformruns` after a few rounds — the run.log in the datastore bucket
+  # is the durable record, not the object.
+  #
+  # Whether the plan is safe to replay is read from the layer's own conditions
+  # rather than recomputed here. In particular: do NOT gate on plan-commit ==
+  # branch-commit. Any commit to main bumps branch-commit, while a layer only
+  # re-plans when a commit touches its own path, so plan-commit legitimately
+  # lags most of the time — comparing them refuses almost every valid apply.
+  # IsLastRelevantCommitPlanned is the condition that actually answers it.
+  burrito:_apply:
+    internal: true
+    requires:
+      vars: [LAYER, PLAN_ENV]
+    preconditions:
+      - *minipc-context-guard
+      - sh: kubectl -n burrito get terraformlayer {{.LAYER}} >/dev/null 2>&1
+        msg: "No TerraformLayer named '{{.LAYER}}' — kubectl -n burrito get terraformlayers"
+    cmds:
+      - |
+        set -eu
+        layer=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o json)
+        # printf, not echo: the layer carries a last-applied-configuration
+        # annotation full of \n escapes, and POSIX echo expands them, handing jq
+        # a string with raw control characters in it.
+        cond() {
+          printf %s "$layer" | jq -r --arg t "$1" \
+            '(.status.conditions[]? | select(.type == $t) | .status) // "Unknown"'
+        }
+        ann() {
+          printf %s "$layer" | jq -r --arg k "$1" '.metadata.annotations[$k] // ""'
+        }
+        plan_run=$(ann runner.terraform.padok.cloud/plan-run)
+        revision=$(ann webhook.terraform.padok.cloud/branch-commit)
+        uid=$(printf %s "$layer" | jq -r .metadata.uid)
+        result=$(printf %s "$layer" | jq -r '.status.lastResult // "unknown"')
+
+        refuse() { echo "refusing to apply {{.LAYER}}: $1" >&2; exit 1; }
+        [ -n "$plan_run" ] || refuse "no plan to replay yet (no plan-run annotation)"
+        [ -n "$revision" ] || refuse "no branch commit known yet"
+        [ "$(cond IsRunning)" = "True" ] && refuse "a run is already in flight — wait for it" || true
+        [ "$(cond HasLastPlanFailed)" = "True" ] && refuse "the last plan failed; there is no good plan to replay" || true
+        [ "$(cond IsLastRelevantCommitPlanned)" = "False" ] && refuse "a commit touching this layer has not been planned yet — let the plan finish first" || true
+        # That condition only covers commits burrito already KNOWS about: the
+        # repository controller syncs every 5 minutes, so for up to five minutes
+        # after a merge burrito has planned everything it has seen and still
+        # reports IsLastRelevantCommitPlanned true. Applying in that window
+        # replays a plan that predates the merge. It happened — an alert-rule PR
+        # merged at 16:12:56, an apply fired at 16:13:52, and the run correctly
+        # applied the previous revision.
+        #
+        # So compare burrito's view of main against the remote's, from here,
+        # and refuse only when the commits it has not caught up to actually
+        # touch THIS layer's path. Unrelated pending commits are none of this
+        # layer's business.
+        git fetch --quiet origin main 2>/dev/null || true
+        remote_head=$(git rev-parse origin/main 2>/dev/null || echo "")
+        if [ -n "$remote_head" ] && [ "$remote_head" != "$revision" ]; then
+          path=$(kubectl -n burrito get terraformlayer {{.LAYER}} -o jsonpath='{.spec.path}')
+          # An unknown revision (force-push, or a local checkout that never had
+          # it) makes the range invalid — treat that as "cannot prove it is
+          # safe" rather than as safe.
+          if ! git merge-base --is-ancestor "$revision" "$remote_head" 2>/dev/null; then
+            refuse "burrito is on revision $revision, which is not an ancestor of origin/main — cannot tell what it has missed"
+          fi
+          touched=$(git diff --name-only "$revision".."$remote_head" -- "$path" | head -5)
+          [ -n "$touched" ] && refuse "burrito has not synced $(git rev-parse --short "$remote_head") yet, and it changes this layer:
+        $touched
+        The plan it would replay predates those changes. The repository syncs every 5m — wait for the new plan." || true
+        fi
+        # `Error getting last Result` is burrito's own text for "the plan's
+        # artifacts are not in the datastore" — pruned, or written to a storage
+        # backend that has since been replaced. There is nothing to replay.
+        case "$result" in
+          Error*) refuse "the last plan's result cannot be read ($result) — its artifacts are gone; re-plan first" ;;
+        esac
+        # terraform refuses to replay a plan made before the state last moved
+        # (`Saved plan is stale`), and the state moves on every apply attempt
+        # that gets as far as touching a resource — a partial apply that failed
+        # midway included. So an apply attempt newer than the plan means the
+        # plan is dead: refuse here, with the fix, rather than after a runner
+        # pod has spun up to say the same thing. The successful attempts are
+        # the layer's apply-date; the failed ones only survive as TerraformRun
+        # objects until the layer's history pruning takes them, which is why
+        # both are checked. Dates come as `date`'s default text (`Tue Sep  1
+        # 17:20:19 UTC 2026`); jq's strptime can't take the zone token on
+        # macOS, so it is dropped — the runner always writes UTC.
+        planned=$(ann runner.terraform.padok.cloud/plan-date)
+        plan_epoch=$(jq -rn --arg d "$planned" '$d | sub(" UTC "; " ") | strptime("%a %b %e %H:%M:%S %Y") | mktime' 2>/dev/null || echo 0)
+        applied=$(ann runner.terraform.padok.cloud/apply-date)
+        apply_epoch=$(jq -rn --arg d "$applied" 'if $d == "" then 0 else ($d | sub(" UTC "; " ") | strptime("%a %b %e %H:%M:%S %Y") | mktime) end' 2>/dev/null || echo 0)
+        last_attempt=$(kubectl -n burrito get terraformruns -l burrito/managed-by={{.LAYER}} -o json 2>/dev/null \
+          | jq -r '[.items[] | select(.spec.action == "apply") | .metadata.creationTimestamp | fromdateiso8601] | max // 0')
+        if [ "$plan_epoch" -gt 0 ]; then
+          [ "$apply_epoch" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates the last apply ($applied) — the state has moved since; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
+          [ "$last_attempt" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates an apply attempt at $(jq -rn --argjson t "$last_attempt" '$t | todate') — even a failed one moves the state; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
+        fi
+
+        # The apply verdict is read from the layer afterwards, so remember what
+        # it said before — a re-apply of the same revision changes the date and
+        # nothing else.
+        before_apply=$(ann runner.terraform.padok.cloud/apply-date)
+
+        echo "Replaying ${plan_run} on {{.LAYER}}: ${result}"
+        # generateName, so repeated runs don't collide on a name — which is why
+        # the created name has to be read back rather than assumed.
+        run=$(kubectl create -f - -o jsonpath='{.metadata.name}' <<EOF
+        apiVersion: config.terraform.padok.cloud/v1alpha1
+        kind: TerraformRun
+        metadata:
+          generateName: {{.LAYER}}-manual-apply-
+          namespace: burrito
+          labels:
+            burrito/managed-by: {{.LAYER}}
+          ownerReferences:
+            - apiVersion: config.terraform.padok.cloud/v1alpha1
+              kind: TerraformLayer
+              name: {{.LAYER}}
+              uid: ${uid}
+        spec:
+          action: apply
+          layer:
+            name: {{.LAYER}}
+            namespace: burrito
+            revision: ${revision}
+          artifact:
+            run: ${plan_run%/*}
+            attempt: "${plan_run##*/}"
+        EOF
+        )
+        echo "Created $run — waiting for its runner pod"
+
+        # Follow the run to its end, rather than printing a kubectl command and
+        # leaving. Two reasons: the terraform output belongs in the scrollback of
+        # whoever asked for the apply, and the run object is pruned from the API
+        # by the layer's history cleanup within a few rounds — so "go look at it
+        # later" is not actually an option. The copy in the datastore bucket
+        # outlives the object but needs AWS credentials to read.
+        #
+        # maxConcurrentRunnerPods is 1, so a pod can legitimately be minutes
+        # away while another layer's plan finishes. Hence the patient wait, and
+        # the note saying why nothing is happening.
+        pod=""
+        for i in $(seq 1 120); do
+          pod=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.runnerPod}' 2>/dev/null || true)
+          [ -n "$pod" ] && break
+          [ "$i" = "6" ] && echo "still queued (one runner pod at a time) — waiting"
+          sleep 5
+        done
+        [ -n "$pod" ] || { echo "no runner pod after 10m; check: kubectl -n burrito describe terraformrun $run" >&2; exit 1; }
+
+        # `logs -f` errors while the container is still pulling or waiting, so
+        # hold until it has actually started. Succeeded is fine to tail — it
+        # just replays what was written.
+        for i in $(seq 1 120); do
+          phase=$(kubectl -n burrito get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          case "$phase" in Running|Succeeded|Failed) break ;; esac
+          sleep 5
+        done
+        echo "--- $pod ---"
+        kubectl -n burrito logs -f "$pod" 2>&1 || true
+
+        # The pod exiting is not the verdict — the runner writes that a beat
+        # later. Read it off the LAYER, not the run: the layer's apply-date and
+        # apply-commit annotations are what the runner stamps on success, and
+        # unlike the run object they are not pruned. Reading the run's
+        # status.state here looked obvious and failed the first time it ran for
+        # real — the object was already gone, `kubectl get` said NotFound, and a
+        # successful apply reported "unknown".
+        #
+        # A run that fails reports as failure, and the log above is that
+        # attempt's — a retry gets a new pod this does not follow. That is the
+        # right bias for a gesture someone is watching: an apply that did not
+        # land is one to go and look at.
+        verdict=""
+        for i in $(seq 1 24); do
+          now_apply=$(kubectl -n burrito get terraformlayer {{.LAYER}} \
+            -o jsonpath='{.metadata.annotations.runner\.terraform\.padok\.cloud/apply-date}' 2>/dev/null || true)
+          now_commit=$(kubectl -n burrito get terraformlayer {{.LAYER}} \
+            -o jsonpath='{.metadata.annotations.runner\.terraform\.padok\.cloud/apply-commit}' 2>/dev/null || true)
+          if [ -n "$now_apply" ] && [ "$now_apply" != "$before_apply" ] && [ "$now_commit" = "$revision" ]; then
+            verdict="applied $now_commit at $now_apply"
+            break
+          fi
+          # Still reachable while it exists, and the only thing that reports a
+          # terminal failure — the layer says nothing when an apply fails.
+          run_state=$(kubectl -n burrito get terraformrun "$run" -o jsonpath='{.status.state}' 2>/dev/null || true)
+          [ "$run_state" = "Failed" ] && break
+          sleep 5
+        done
+        if [ -n "$verdict" ]; then
+          echo "--- {{.LAYER}}: $verdict ---"
+        else
+          echo "apply did not land: the layer still reports apply-date '${before_apply:-none}'. Run log above, and at layers/burrito/{{.LAYER}}/$run/ in the datastore bucket" >&2
+          # The one failure with a known fix: terraform's own text for a plan
+          # the state has outgrown.
+          if kubectl -n burrito logs "$pod" 2>/dev/null | grep -q "Saved plan is stale"; then
+            echo "the saved plan is stale — re-plan and apply again: task burrito:{{.PLAN_ENV}}:plan && task burrito:{{.PLAN_ENV}}:apply" >&2
+          fi
+          exit 1
+        fi
+
+  # The read-only preview for gitops:apply — same manifests, `kubectl diff`
+  # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
+  # keeps Task from reading "there's a diff" as a failure.
+  gitops:diff:
+    desc: "Preview what gitops:apply would change: kubectl diff the Argo config against the live cluster (read-only)"
     preconditions:
       - *minipc-context-guard
     cmds:
-      - kubectl apply -f cdk8s/dist/argocd.k8s.yaml
+      - for: { var: GITOPS_MANIFESTS, split: ' ' }
+        cmd: kubectl diff -f {{.ITEM}} || true
+
+  gitops:apply:
+    desc: Apply the Argo CD config (project + appsets + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md). Preview with gitops:diff.
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - for: { var: GITOPS_MANIFESTS, split: ' ' }
+        cmd: kubectl apply -f {{.ITEM}}
 
   # `gitops:apply` is a plain `kubectl apply`, which never deletes. Dropping an
   # AppProject or ApplicationSet from cdk8s/dist therefore leaves the live object
@@ -295,11 +665,6 @@ tasks:
     preconditions:
       - *minipc-context-guard
     vars:
-      # Every manifest that declares top-level Argo objects for the minipc.
-      # Missing one here reports its objects as orphaned, so a new such manifest
-      # must be added. argocd-k3d.k8s.yaml is deliberately absent — it targets the
-      # dev cluster, which the context guard already forbids.
-      GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
       # Argo CD ships this AppProject with the install; it is owned by no manifest
       # and is the fallback project, so pruning it would break every Application
       # that does not name a project.
@@ -353,7 +718,7 @@ tasks:
     desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
     dir: cdk8s
     cmds:
-      - cp ../../tripbot/pkg/contract/contract.json contract.json
+      - cp {{.SIBLINGS}}/tripbot/pkg/contract/contract.json contract.json
       - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
 
   # platforms.json is the fleet-wide supported-platform set, owned by
@@ -363,7 +728,7 @@ tasks:
   platforms:sync:
     desc: Re-sync platforms.json from the sibling platform-gateway checkout (the fleet-wide source of truth)
     cmds:
-      - cp ../platform-gateway/platforms.json platforms.json
+      - cp {{.SIBLINGS}}/platform-gateway/platforms.json platforms.json
 
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
@@ -403,6 +768,16 @@ tasks:
     cmds:
       - aws-vault exec adanalife-stage -- mise exec -- terraform destroy {{.CLI_ARGS}}
 
+  tf:stage:import:
+    desc: >-
+      terraform import against stage-1 — usage:
+      task tf:stage:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/stage-1
+    cmds:
+      - aws-vault exec adanalife-stage -- mise exec -- terraform import {{.CLI_ARGS}}
+
   tf:prod:apply:
     desc: terraform apply against prod-1
     dir: terraform/prod-1
@@ -438,6 +813,16 @@ tasks:
     dir: terraform/prod-1
     cmds:
       - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
+  tf:prod:import:
+    desc: >-
+      terraform import against prod-1 — usage:
+      task tf:prod:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/prod-1
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform import {{.CLI_ARGS}}
 
   # Core uses --no-session because session tokens can't make IAM changes.
   tf:core:apply:
@@ -475,6 +860,16 @@ tasks:
     dir: terraform/core
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
+  tf:core:import:
+    desc: >-
+      terraform import against core — usage:
+      task tf:core:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/core
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform import {{.CLI_ARGS}}
 
   # platform = env-agnostic config, i.e. things not owned by any specific
   # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
@@ -516,6 +911,16 @@ tasks:
     dir: terraform/platform
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
+  tf:platform:import:
+    desc: >-
+      terraform import against platform — usage:
+      task tf:platform:import -- '<address>' <id>
+      (single-quote the address; for_each keys like
+      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
+    dir: terraform/platform
+    cmds:
+      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform import {{.CLI_ARGS}}
 
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
@@ -641,18 +1046,18 @@ tasks:
     cmds:
       - task: k8s:dev:cluster:down
 
-  # prod-1 is the bare-metal Talos mini-PC (192.168.1.200), not a k3d
+  # prod-1 is the bare-metal Talos mini-PC (minipc.whereisdana.today), not a k3d
   # cluster — its lifecycle is talosctl wipe-and-rebuild. The k8s:prod:*
   # tasks below (bootstrap-secrets / platform:up / apply) target the live
   # Talos cluster; there is no k8s:prod:cluster:*.
 
   # Build the dev app images locally, tag them :dev-local, and import them into
-  # the k3d dev cluster's image store. APP=tripbot|vlc|obs|onscreens builds just
-  # one; omit for all four. The committed manifests still pin CI's :main so a
+  # the k3d dev cluster's image store. APP=tripbot|obs|onscreens builds just
+  # one; omit for all three. The committed manifests still pin CI's :main so a
   # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
   # only for iterating on a LOCAL build.
   k8s:dev:images:build:
-    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|vlc|obs|onscreens for one; default all four)"
+    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
     dir: ../tripbot
     cmds:
       # --project-directory + --env-file mirror bin/devenv so build contexts
@@ -668,7 +1073,6 @@ tasks:
         target="{{.APP}}"
         # app : compose-service : image-repo
         all="tripbot:tripbot:adanalife/tripbot \
-             vlc:vlc:adanalife/vlc \
              obs:obs:adanalife/obs \
              onscreens:onscreens-server:adanalife/onscreens-server"
         args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
@@ -690,7 +1094,7 @@ tasks:
   # a re-pull. Argo will show the app OutOfSync while you iterate; that's
   # expected. Revert to CI :main (and re-enable selfHeal) with k8s:dev:sync.
   k8s:dev:deploy:
-    desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all four. Revert with k8s:dev:sync"
+    desc: "run a locally-built image in the dev cluster (build+import :dev-local, pin the Deployment to it). APP=<app> for one; default all three. Revert with k8s:dev:sync"
     deps:
       - task: k8s:dev:images:build
         vars: { APP: '{{.APP}}' }
@@ -704,7 +1108,6 @@ tasks:
         # app : deployment : container : image-repo  (dev platform suffix = twitch;
         # obs's container is named `obs`, the others `<app>-twitch`)
         all="tripbot:tripbot-twitch:tripbot-twitch:adanalife/tripbot \
-             vlc:vlc-twitch:vlc-twitch:adanalife/vlc \
              obs:obs-twitch:obs:adanalife/obs \
              onscreens:onscreens-twitch:onscreens-twitch:adanalife/onscreens-server"
         for row in $all; do
@@ -765,7 +1168,7 @@ tasks:
   # Workloads are per-platform (`<app>-<platform>`, e.g. tripbot-twitch),
   # so PLATFORM selects which one to roll — default `twitch` (present in
   # every env's steady state), override `PLATFORM=youtube` for the YouTube
-  # stack. `:all` rolls the default platform's four apps; pass PLATFORM= on
+  # stack. `:all` rolls the default platform's three apps; pass PLATFORM= on
   # the command line to roll a different platform's set.
   k8s:prod:rollout:tripbot:
     desc: restart prod-1 tripbot so it re-pulls the image (override PLATFORM=, default twitch)
@@ -776,16 +1179,6 @@ tasks:
     cmds:
       - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n prod-1
       - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n prod-1 --timeout=120s
-
-  k8s:prod:rollout:vlc-server:
-    desc: restart prod-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
-    preconditions:
-      - *minipc-context-guard
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
-    cmds:
-      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n prod-1
-      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:obs:
     desc: restart prod-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
@@ -808,10 +1201,9 @@ tasks:
       - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n prod-1 --timeout=120s
 
   k8s:prod:rollout:all:
-    desc: restart all four prod-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
+    desc: restart all three prod-1 app deployments (tripbot + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:prod:rollout:tripbot
-      - k8s:prod:rollout:vlc-server
       - k8s:prod:rollout:obs
       - k8s:prod:rollout:onscreens
 
@@ -824,16 +1216,6 @@ tasks:
     cmds:
       - kubectl rollout restart deploy/tripbot-{{.PLATFORM}} -n stage-1
       - kubectl rollout status deploy/tripbot-{{.PLATFORM}} -n stage-1 --timeout=120s
-
-  k8s:stage:rollout:vlc-server:
-    desc: restart stage-1 vlc-server so it re-pulls the image (override PLATFORM=, default twitch)
-    preconditions:
-      - *minipc-context-guard
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
-    cmds:
-      - kubectl rollout restart deploy/vlc-{{.PLATFORM}} -n stage-1
-      - kubectl rollout status deploy/vlc-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:obs:
     desc: restart stage-1 obs so it re-pulls the image (override PLATFORM=, default twitch)
@@ -856,10 +1238,9 @@ tasks:
       - kubectl rollout status deploy/onscreens-{{.PLATFORM}} -n stage-1 --timeout=120s
 
   k8s:stage:rollout:all:
-    desc: restart all four stage-1 app deployments (tripbot + vlc-server + obs + onscreens-server; override PLATFORM=, default twitch)
+    desc: restart all three stage-1 app deployments (tripbot + obs + onscreens-server; override PLATFORM=, default twitch)
     deps:
       - k8s:stage:rollout:tripbot
-      - k8s:stage:rollout:vlc-server
       - k8s:stage:rollout:obs
       - k8s:stage:rollout:onscreens
 
@@ -1360,14 +1741,16 @@ tasks:
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
   # mirror to both unless deliberately env-specific.
   #
-  # DAY-0 BRING-UP ONLY. The Argo-adoptable platform releases in here (ESO,
-  # metrics-server, tailscale-operator, cert-manager, cnpg, node-exporter,
-  # k8s-monitoring, NATS) are Argo-owned on the live cluster
-  # (platform-argo.k8s.yaml; adopted 2026-07-16) — re-running their helm
-  # steps against it fails with argocd-controller field-manager conflicts.
-  # Day-2 changes go through git + Argo sync; see gitops/README.md
-  # ("Platform stack"). On an empty cluster this task still works: helm
-  # installs everything, Argo adopts on first sync.
+  # DAY-0 BRING-UP ONLY. The Argo-adoptable platform releases still installed in
+  # here (ESO, cert-manager, cnpg, node-exporter, k8s-monitoring, NATS) are
+  # Argo-owned on the live cluster (platform-argo.k8s.yaml; adopted 2026-07-16) —
+  # re-running their helm steps against it fails with argocd-controller
+  # field-manager conflicts. Day-2 changes go through git + Argo sync; see
+  # gitops/README.md ("Platform stack"). On an empty cluster this task brings up
+  # the floor Argo needs (cilium, storage, ESO + the cluster store, the tailscale
+  # OAuth Secret, Argo CD itself); charts with no helm step here — metrics-server,
+  # tailscale-operator, victoria-metrics — arrive on the first Argo sync, and
+  # everything else Argo adopts.
   k8s:prod:platform:up:
     desc: "day-0 bring-up of an empty cluster (live releases are Argo-owned — see gitops/README.md)"
     deps: [k8s:prod:bootstrap-secrets]
@@ -1393,19 +1776,9 @@ tasks:
       - kubectl -n kube-system rollout status daemonset/cilium --timeout=180s
       - kubectl wait --for=condition=Ready node --all --timeout=180s
       - 'echo "Cilium up; node Ready. CNI + eBPF kube-proxy replacement online."'
-      # metrics-server — backs `kubectl top` + the HPA metrics API. Talos
-      # doesn't bundle it (k3s does, hence dev k3d has it and this step is
-      # prod-only). --kubelet-insecure-tls in values.yml works around Talos's
-      # self-signed kubelet serving certs. No deps beyond a Ready node.
-      - helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
-      - helm repo update metrics-server
-      - helm upgrade --install metrics-server metrics-server/metrics-server
-          --version 3.13.1
-          -n kube-system
-          -f k8s/metrics-server/values.yml
-      - kubectl wait --for=condition=Available --timeout=120s
-          deployment/metrics-server -n kube-system
-      - 'echo "metrics-server up. kubectl top nodes/pods now works on the minipc."'
+      # metrics-server (backs `kubectl top` + the HPA metrics API; Talos doesn't
+      # bundle it, unlike k3s) has no helm step here — it's Argo-delivered only
+      # (platform-argo.k8s.yaml, synced after gitops:apply), never helm-CLI-owned.
       # local-path-provisioner — cluster storage backing. Must precede any
       # PVC-consuming workload (postgres). See k8s/local-path-provisioner/prod-1.
       - kubectl apply -k k8s/local-path-provisioner/prod-1
@@ -1430,19 +1803,16 @@ tasks:
       - kubectl apply -k k8s/external-secrets/cluster-store
       - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       # Tailscale operator — kubectl over the tailnet (API server proxy) + app-UI
-      # exposure as tailnet services. Needs ESO up (the operator-oauth Secret is
-      # materialized from SM via the cluster store). prod-1 only — the tailnet is
-      # global, managed once (see terraform/prod-1/tailscale.tf).
+      # exposure as tailnet services — is Argo-delivered (platform-argo.k8s.yaml),
+      # together with the ingress-proxies ProxyGroup that rides its Application.
+      # Its OAuth credentials are the bootstrap half and belong here: the chart
+      # expects the operator-oauth Secret to already exist, so ESO must have
+      # materialized it from SM (via the cluster store, up above) before the first
+      # Argo sync brings the operator up. prod-1 only — the tailnet is global,
+      # managed once (see terraform/prod-1/tailscale.tf).
       - kubectl apply -f k8s/tailscale-operator/operator-oauth.yml
       - for i in $(seq 1 30); do kubectl get secret operator-oauth -n tailscale >/dev/null 2>&1 && break; sleep 2; done
-      - helm repo add tailscale https://pkgs.tailscale.com/helmcharts
-      - helm repo update tailscale
-      - helm upgrade --install tailscale-operator tailscale/tailscale-operator
-          --version 1.98.3
-          -n tailscale
-          -f k8s/tailscale-operator/values.yml
-      - kubectl wait --for=condition=Available --timeout=120s deployment --all -n tailscale
-      - 'echo "Tailscale operator up. kubectl over tailnet: tailscale configure kubeconfig tailscale-operator"'
+      - 'echo "operator-oauth Secret materialized in the tailscale namespace; the operator comes up on the first Argo sync. kubectl over tailnet: tailscale configure kubeconfig tailscale-operator"'
       - helm upgrade --install traefik traefik/traefik
           -n kube-system
           -f k8s/traefik/values.yml
@@ -1534,7 +1904,7 @@ tasks:
       - kubectl rollout status statefulset/nats -n prod-1-platform --timeout=120s
       - 'echo "NATS up in prod-1-platform. Connect via nats://nats.prod-1-platform.svc.cluster.local:4222. Smoke test: kubectl port-forward -n prod-1-platform svc/nats 4222:4222 then nats pub foo bar from a local nats CLI"'
       # Intel GPU device plugin + XPU Manager. Plugin registers
-      # gpu.intel.com/i915 (+ i915_monitoring) so OBS/vlc-server pods
+      # gpu.intel.com/i915 (+ i915_monitoring) so OBS/playout pods
       # can claim the iGPU as an extended resource without hostPath.
       # XPU Manager scrapes iGPU telemetry off the i915_monitoring
       # device and exposes it on :29999 with the xpum_ prefix; Grafana
@@ -1575,7 +1945,7 @@ tasks:
   # youtube's key); the SM container is `k8s/obs/<platform>-stream-key`.
   #
   # PROD goes through ESO: the stream-key ExternalSecret ships inside the
-  # per-platform obs app dist (tripbot repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
+  # per-platform obs app dist (obs repo cdk8s -> dist/<env>-obs-<platform>.k8s.yaml,
   # Argo-delivered), so a normal sync materializes the Secret and OBS streams
   # with no manual step. `obs:prod:stream:on` re-applies just that
   # ExternalSecret (yq-extracted from the obs dist — it has no standalone
@@ -1638,7 +2008,7 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
       NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
       SECRET: '{{if eq .PLATFORM "twitch"}}obs-stream-key{{else}}obs-{{.PLATFORM}}-stream-key{{end}}'
-      OBS_DIST: '../tripbot/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
+      OBS_DIST: '{{.SIBLINGS}}/obs/cdk8s/dist/{{.NAMESPACE}}-obs-{{.PLATFORM}}.k8s.yaml'
     preconditions:
       - *minipc-context-guard
       - sh: command -v kubectl >/dev/null
@@ -1648,7 +2018,11 @@ tasks:
       - sh: kubectl cluster-info >/dev/null 2>&1
         msg: "no reachable cluster — point kubectl at the target cluster first"
       - sh: test -f {{.OBS_DIST}}
-        msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling tripbot checkout; is ~/adanalife/tripbot present + synthed?"
+        msg: "{{.OBS_DIST}} not found — the obs app dist lives in the sibling obs checkout; is it present + synthed?"
+      # The dist is another repo's working tree, so a stale or wrong-branch
+      # obs checkout would apply a stale ExternalSecret instead of erroring.
+      - sh: git -C {{.SIBLINGS}}/obs fetch -q origin && git -C {{.SIBLINGS}}/obs diff --quiet origin/main -- cdk8s/dist/
+        msg: "{{.SIBLINGS}}/obs cdk8s/dist differs from origin/main — pull (or re-synth) the obs checkout so this applies the current ExternalSecret"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
         msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}} — apply the overlay first"
       - sh: kubectl get secretstore aws-parameterstore -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -1715,7 +2089,66 @@ tasks:
     cmds:
       - kubectl logs -l app.kubernetes.io/part-of=tripbot --all-containers --tail=50 -f
 
-  # Local kubectl port-forward wrappers for OBS / vlc-server VNC — the
+  # Read-only crash forensics for the minipc: intersect the node's reboot census
+  # (node_boot_time_seconds, in-cluster VictoriaMetrics only — node_* is not
+  # allowlisted to Grafana Cloud) with the self-hosted runner jobs that were on
+  # the box at each death. The port-forward lives for the duration of the run;
+  # the script's own flags go after `--`. See scripts/arc-crash-correlate.py.
+  arc:crash-correlate:
+    desc: "correlate minipc reboots with the ARC CI jobs running at the time (read-only); flags after --, e.g. task arc:crash-correlate -- --since 2026-08-22"
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      # Task's shell interpreter reports a job id (`g1`) for `$!` rather than a
+      # PID, so a kill/trap written here cannot reach the backgrounded forward.
+      # Run the whole thing in a real bash, where `$!` is a PID and the EXIT trap
+      # tears the forward down on success, failure and Ctrl-C alike.
+      - |
+        bash -eu -c '
+          kubectl -n monitoring port-forward svc/victoria-metrics 8428 >/dev/null 2>&1 &
+          trap "kill $! 2>/dev/null || true" EXIT
+          # Bounded wait: if it never comes up, the script says so actionably.
+          for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:8428/health && break; sleep 1; done
+          scripts/arc-crash-correlate.py {{.CLI_ARGS}}
+        '
+
+  # Local kubectl port-forward to the in-cluster VictoriaMetrics, plus its VMUI
+  # query console — the only way to read node_* and the other series that are
+  # not allowlisted out to Grafana Cloud. Same PID-file mechanics as obs:vnc:*;
+  # if :down can't find a lingering kubectl, fall back to
+  # `pkill -f "port-forward svc/victoria-metrics"`.
+  vm:up:
+    desc: start a local kubectl port-forward to the in-cluster VictoriaMetrics and open VMUI at localhost:8428
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - mkdir -p /tmp/adanalife-tasks
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl -n monitoring port-forward svc/victoria-metrics 8428:8428 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/victoria-metrics.pid
+        '
+      # Bounded wait so VMUI does not open onto a not-yet-listening port.
+      - for _ in $(seq 30); do curl -sf -o /dev/null http://localhost:8428/health && break; sleep 1; done
+      - open http://localhost:8428/vmui
+      - 'echo "VictoriaMetrics port-forward started — VMUI at http://localhost:8428/vmui (PID $(cat /tmp/adanalife-tasks/victoria-metrics.pid))"'
+
+  vm:down:
+    desc: stop the local kubectl port-forward to the in-cluster VictoriaMetrics
+    cmds:
+      - |
+        if [ -f /tmp/adanalife-tasks/victoria-metrics.pid ]; then
+          kill "$(cat /tmp/adanalife-tasks/victoria-metrics.pid)" 2>/dev/null || true
+          rm -f /tmp/adanalife-tasks/victoria-metrics.pid
+          echo "VictoriaMetrics port-forward stopped"
+        else
+          echo "No VictoriaMetrics port-forward PID file found — nothing to stop"
+        fi
+
+  # Local kubectl port-forward wrapper for OBS VNC — the
   # cluster-agnostic way in, working on any env without a host-access
   # LoadBalancer. The backgrounded kubectl PID is parked under
   # /tmp/adanalife-tasks/ so :down can find it. Re-running :up overwrites the PID
@@ -1729,9 +2162,14 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl port-forward svc/obs-{{.PLATFORM}} 5902:5900 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/obs-vnc.pid
+        '
       - 'echo "OBS VNC port-forward started — connect a VNC client to localhost:5902 (PID $(cat /tmp/adanalife-tasks/obs-vnc.pid))"'
 
   obs:vnc:down:
@@ -1798,8 +2236,185 @@ tasks:
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
 
+  # Repoint an OBS media source at a different RTSP URL — the incident move
+  # when the MediaMTX relay is unhealthy and the Dashcam source has to fall
+  # back to vlc-server (or back again). Same port-forward + ConfigMap-password
+  # plumbing as obs:{prod,stage}:browser:refresh above.
+  #
+  # This is a RUNTIME override: OBS reloads its scene collection on boot, so
+  # the pod reverts on the next restart. The declarative default lives in the
+  # obs repo's cdk8s/contract.py (dashcam_rtsp_url). The helper prints the
+  # current URL before changing it — keep that line, it's the rollback value.
+  #
+  # URL is required; SOURCE selects the OBS input (default Dashcam).
+  obs:prod:input:repoint:
+    desc: 'repoint a prod-1 OBS source at a new URL, e.g. URL=rtsp://vlc-twitch:8554/dashcam (override SOURCE=, default Dashcam; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:input:repoint:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          SOURCE: '{{.SOURCE | default "Dashcam"}}'
+          URL: '{{.URL}}'
+
+  obs:stage:input:repoint:
+    desc: 'repoint a stage-1 OBS source at a new URL, e.g. URL=rtsp://vlc-twitch:8554/dashcam (override SOURCE=, default Dashcam; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:input:repoint:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          SOURCE: '{{.SOURCE | default "Dashcam"}}'
+          URL: '{{.URL}}'
+
+  obs:input:repoint:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM, SOURCE, URL]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
+
+  # Swap the stream key on a running OBS — the alternative to re-seeding the
+  # secret and restarting the pod, which drops the stream. Same port-forward +
+  # ConfigMap-password plumbing as obs:{prod,stage}:input:repoint above.
+  #
+  # SHARP EDGE: this writes to a live OBS's stream output. The helper prints the
+  # current settings with the key masked before changing anything — keep that
+  # line, it's the rollback breadcrumb. Run with DRY_RUN=1 first to read only.
+  #
+  # This is a RUNTIME override: OBS reloads its stream service settings on boot,
+  # so the seeded secret wins on the next restart. Rotate the secret too.
+  #
+  # The key is read from $NEW_STREAM_KEY in the environment, never a task arg —
+  # a task arg lands in `ps`. The invocation that keeps it out of shell history
+  # as well is:
+  #
+  #   read -rs NEW_STREAM_KEY && export NEW_STREAM_KEY
+  #   task obs:stage:key:rotate
+  obs:prod:key:rotate:
+    desc: 'MUTATES A LIVE STREAM — swap the stream key on the running prod-1 OBS (export NEW_STREAM_KEY first; DRY_RUN=1 to only read; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:key:rotate:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          DRY_RUN: '{{.DRY_RUN}}'
+
+  obs:stage:key:rotate:
+    desc: 'MUTATES A LIVE STREAM — swap the stream key on the running stage-1 OBS (export NEW_STREAM_KEY first; DRY_RUN=1 to only read; PLATFORM=, default twitch)'
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:key:rotate:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          DRY_RUN: '{{.DRY_RUN}}'
+
+  obs:key:rotate:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+      - sh: '[ -n "{{.DRY_RUN}}" ] || [ -n "$NEW_STREAM_KEY" ]'
+        msg: "NEW_STREAM_KEY is not set — export it into the environment (a task arg would land in `ps`), or pass DRY_RUN=1 to only read"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
+
+  # Screenshot every source in the live OBS scene and fail on the blank ones —
+  # release acceptance for the overlays. A crashed browser_source stays in the
+  # scene and the pod stays healthy, but it renders as a transparent PNG of a
+  # couple hundred bytes (the 2026-06-21 right-rotator outage). Read-only, so
+  # it's safe against the live prod stream. Same port-forward +
+  # ConfigMap-password plumbing as obs:{prod,stage}:browser:refresh above.
+  #
+  # MIN_BYTES is the blank threshold; SCREENSHOT_DIR keeps the PNGs for
+  # eyeballing (nothing is written without it).
+  obs:prod:screenshot:check:
+    desc: screenshot every prod-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:screenshot:check:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "prod-1"}}'
+          MIN_BYTES: '{{.MIN_BYTES | default "1000"}}'
+          SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
+
+  obs:stage:screenshot:check:
+    desc: screenshot every stage-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - task: obs:screenshot:check:_run
+        vars:
+          PLATFORM: '{{.PLATFORM | default "twitch"}}'
+          NAMESPACE: '{{.NAMESPACE | default "stage-1"}}'
+          MIN_BYTES: '{{.MIN_BYTES | default "1000"}}'
+          SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
+
+  obs:screenshot:check:_run:
+    internal: true
+    requires:
+      vars: [NAMESPACE, PLATFORM, MIN_BYTES]
+    preconditions:
+      - sh: command -v uv >/dev/null
+        msg: "uv not found — install with `brew install uv`"
+      - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
+        msg: "obs-{{.PLATFORM}} Deployment not found in namespace {{.NAMESPACE}}"
+    cmds:
+      - |
+        set -eo pipefail
+        kubectl port-forward svc/obs-{{.PLATFORM}} 4455:4455 -n {{.NAMESPACE}} >/dev/null 2>&1 &
+        PF=$!
+        cleanup() { kill "$PF" 2>/dev/null || true; wait 2>/dev/null || true; }
+        trap cleanup EXIT
+        sleep 1
+        OBS_WEBSOCKET_HOST=localhost \
+        OBS_SCREENSHOT_MIN_BYTES={{.MIN_BYTES}} \
+        SCREENSHOT_DIR='{{.SCREENSHOT_DIR}}' \
+        OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
+        uv run --with obsws-python \
+          {{.HOME}}/adanalife/obs/bin/obs-screenshot-check
+
   obs:media:restart:
-    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after a vlc-server restart (override PLATFORM=, default twitch)
+    desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)
     vars:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
@@ -1820,31 +2435,6 @@ tasks:
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
           {{.HOME}}/adanalife/obs/bin/obs-media-restart
-
-  vlc:vnc:up:
-    desc: start a local kubectl port-forward to vlc-server VNC at localhost:5903 (override PLATFORM=, default twitch)
-    preconditions:
-      - *minipc-context-guard
-    vars:
-      PLATFORM: '{{.PLATFORM | default "twitch"}}'
-    cmds:
-      - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward svc/vlc-{{.PLATFORM}} 5903:5900 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/vlc-vnc.pid
-      - 'echo "vlc-server VNC port-forward started — connect a VNC client to localhost:5903 (PID $(cat /tmp/adanalife-tasks/vlc-vnc.pid))"'
-
-  vlc:vnc:down:
-    desc: stop the local kubectl port-forward to vlc-server VNC
-    cmds:
-      - |
-        if [ -f /tmp/adanalife-tasks/vlc-vnc.pid ]; then
-          kill "$(cat /tmp/adanalife-tasks/vlc-vnc.pid)" 2>/dev/null || true
-          rm -f /tmp/adanalife-tasks/vlc-vnc.pid
-          echo "vlc-server VNC port-forward stopped"
-        else
-          echo "No vlc-server VNC port-forward PID file found — nothing to stop"
-        fi
 
   # Talos PKI (adanalife-minipc). The generated machine configs + talosconfig
   # hold the cluster CA key, bootstrap/trustd tokens, and etcd encryption
@@ -1905,7 +2495,13 @@ tasks:
   talos:minipc:dashboard:
     desc: open the talosctl TUI dashboard against the minipc node
     cmds:
-      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes 192.168.1.200
+      # --nodes= wants the equals sign; the space-separated form errors. The
+      # hostname is the location-independent alias carried as a machine certSAN,
+      # so this survives a physical-network move that changes the LAN IP.
+      # --endpoints= pins the API endpoint to the same alias rather than
+      # inheriting whatever the talosconfig context happens to carry, whose
+      # nodes/endpoints lists are regenerated PKI material and can drift.
+      - TALOSCONFIG={{.ROOT_DIR}}/talos/adanalife-minipc/talosconfig mise exec -- talosctl dashboard --nodes=minipc.whereisdana.today --endpoints=minipc.whereisdana.today
 
   # tripbot operational tasks. Naming follows <tool>:<env>:<verb>[:<subverb>]
   # so it's clear which cluster each one targets. Aliases preserve the
@@ -1913,15 +2509,20 @@ tasks:
   #
   # The :db:* tasks open kubectl port-forwards to the cluster Postgres
   # (a headless ClusterIP, otherwise unreachable from outside the cluster) —
-  # primarily for the auth-bootstrap CLI and psql poking.
+  # primarily for psql poking.
   tripbot:dev:db:up:
     desc: start a local kubectl port-forward to the development cluster Postgres at localhost:5432
     aliases: [tripbot:db:up]
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward -n development svc/postgres 5432:5432 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl port-forward -n development svc/postgres 5432:5432 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/tripbot-db.pid
+        '
       - 'echo "tripbot Postgres port-forward started — psql at localhost:5432 (PID $(cat /tmp/adanalife-tasks/tripbot-db.pid))"'
 
   tripbot:dev:db:down:
@@ -1941,9 +2542,14 @@ tasks:
     desc: start a kubectl port-forward to the stage-1 cluster Postgres at localhost:5433 (5433 to avoid colliding with a dev/prod forward on 5432)
     cmds:
       - mkdir -p /tmp/adanalife-tasks
-      # PID capture must happen in the same shell as the backgrounded process —
-      # each task cmd runs in its own shell, so `$!` in a separate cmd is empty.
-      - kubectl port-forward -n stage-1 svc/postgres 5433:5432 > /dev/null 2>&1 & echo $! > /tmp/adanalife-tasks/tripbot-stage-db.pid
+      # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
+      # the background + PID capture runs in a real bash, where `$!` is the PID
+      # :down needs. The forward outlives that short-lived bash.
+      - |
+        bash -eu -c '
+          kubectl port-forward -n stage-1 svc/postgres 5433:5432 >/dev/null 2>&1 &
+          echo $! > /tmp/adanalife-tasks/tripbot-stage-db.pid
+        '
       - 'echo "stage-1 Postgres port-forward started — psql at localhost:5433 (PID $(cat /tmp/adanalife-tasks/tripbot-stage-db.pid))"'
 
   tripbot:stage:db:down:
@@ -2183,6 +2789,20 @@ tasks:
         echo "OK: ${out} ($(du -h "$out" | cut -f1))"
         echo "Next: task tripbot:stage:db:seed:vectors  (NS=prod-1-data for prod)"
 
+  # The month-end Discord post: miles, state guesses and the guessr board, as
+  # one message to paste. Read-only — one SELECT against the snapshot table and
+  # one GET against the game's public API. Run it on the 1st: the tripbot boards
+  # come from scoreboard_snapshots, which pkg/rollups writes on its first tick
+  # after rollover, so a month is only readable once it is over.
+  #
+  # Flags after `--`. See scripts/monthly-leaderboards.py.
+  tripbot:prod:leaderboards:
+    desc: "render the month-end leaderboard post for Discord (read-only); flags after --, e.g. task tripbot:prod:leaderboards -- --month 2026-08"
+    preconditions:
+      - *minipc-context-guard
+    cmds:
+      - ./scripts/monthly-leaderboards.py {{.CLI_ARGS}}
+
   # prod-1 Postgres restore — the recovery path when the live PVC is gone or
   # corrupt, restoring from the most recent S3 dump written by the
   # postgres-backup CronJob (pg_dump -Fc).
@@ -2239,6 +2859,39 @@ tasks:
           aws-vault exec adanalife-prod -- aws s3 cp "s3://{{.BUCKET}}/hourly/${newest}" "s3://{{.BUCKET}}/archive/${newest}"
           echo "Pinned to archive/ (permanent)."
         fi
+
+  # Physical (base) backup via CNPG, distinct from :db:backup's logical dump:
+  # includes every table (the dump excludes frame_embeddings data), lands in
+  # the WAL bucket under barman's layout, and becomes the newest PITR restore
+  # base. The pre-change reflex before risky ops — cheaper than a dump, no
+  # local artifact, and a restore from it replays WAL to any point after it.
+  tripbot:prod:db:basebackup:
+    desc: "take an on-demand CNPG base backup of prod-1 Postgres to S3 (physical, all tables; the PITR restore base)"
+    vars:
+      NS: '{{.NS | default "prod-1-data"}}'
+    preconditions:
+      - sh: kubectl get cluster.postgresql.cnpg.io pg -n {{.NS}} >/dev/null 2>&1
+        msg: "CNPG cluster pg not found in {{.NS}} — is this env cut over to CNPG?"
+    cmds:
+      - |
+        set -euo pipefail
+        name="pg-manual-$(date -u +%Y%m%d-%H%M%S)"
+        echo "Creating Backup ${name} (barman-cloud plugin, same target as pg-daily)..."
+        kubectl create -n {{.NS}} -f - <<EOF
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Backup
+        metadata:
+          name: ${name}
+        spec:
+          cluster:
+            name: pg
+          method: plugin
+          pluginConfiguration:
+            name: barman-cloud.cloudnative-pg.io
+        EOF
+        echo "Waiting for ${name} to complete..."
+        kubectl wait -n {{.NS}} --for=jsonpath='{.status.phase}'=completed "backup/${name}" --timeout=600s
+        kubectl get -n {{.NS}} "backup/${name}"
 
   # Streams S3 → pg_restore inside postgres-0, reusing the pod's own POSTGRES_*
   # env creds (no credential handling here). Then clears a stale
@@ -2309,107 +2962,6 @@ tasks:
           exit 1
         fi
       - kubectl logs job/tripbot-seed -n development
-
-  tripbot:dev:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against development back-to-back; dev uses the non-prod test bot, so sign in as tripbot4001 then adanalife_staging
-    aliases: [tripbot:auth:bootstrap]
-    cmds:
-      - task: tripbot:dev:auth:bootstrap:bot
-      - task: tripbot:dev:auth:bootstrap:broadcaster
-
-  tripbot:dev:auth:bootstrap:bot:
-    desc: bootstrap the BOT Twitch OAuth token against development (development namespace); port-forwards 8080 so the browser callback reaches the pod
-    cmds:
-      # Authored per-env in the tripbot repo's cdk8s; applied from its committed
-      # dist in the sibling tripbot checkout (same source as `task contract:sync`).
-      - kubectl delete job tripbot-auth-bootstrap-bot -n development --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-bot.k8s.yaml -n development
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n development
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4001 (the non-prod test bot, NOT prod's tripbot4000)."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n development 2>/dev/null || true
-      - echo "Bot bootstrap complete — token written to dev Postgres."
-
-  tripbot:dev:auth:bootstrap:broadcaster:
-    desc: bootstrap the BROADCASTER Twitch OAuth token against development; required for subscriber/follower polling + real-time EventSub
-    cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n development --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-auth-bootstrap-broadcaster.k8s.yaml -n development
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n development --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n development
-      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n development 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n development\` to bring the bot online with both identities."'
-
-  tripbot:prod:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against prod-1 back-to-back; sign in as tripbot4000 on the first browser tab, then adanalife_ on the second
-    cmds:
-      - task: tripbot:prod:auth:bootstrap:bot
-      - task: tripbot:prod:auth:bootstrap:broadcaster
-
-  tripbot:prod:auth:bootstrap:bot:
-    desc: bootstrap the BOT Twitch OAuth token (chat:read/edit etc.) against prod-1; port-forwards 8080 so the browser callback reaches the pod
-    cmds:
-      # The auth-bootstrap Jobs are deliberately their own deploy unit (NOT in any
-      # app sync — they'd otherwise re-run every reconcile and burn each leg's
-      # 5min timeout). Authored per-env in the tripbot repo's cdk8s and envFrom the
-      # namespace's tripbot-config + ESO Secrets; applied from its committed dist
-      # in the sibling tripbot checkout (same source as `task contract:sync`).
-      - kubectl delete job tripbot-auth-bootstrap-bot -n prod-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-bot.k8s.yaml -n prod-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n prod-1
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4000."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n prod-1 2>/dev/null || true
-      - echo "Bot bootstrap complete — tripbot4000 token written to prod Postgres."
-
-  tripbot:prod:auth:bootstrap:broadcaster:
-    desc: bootstrap the BROADCASTER Twitch OAuth token (channel:read:subscriptions, moderator:read:followers, user:edit:broadcast) against prod-1; required for subscriber/follower polling + real-time EventSub
-    cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n prod-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/prod-1-job-auth-bootstrap-broadcaster.k8s.yaml -n prod-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n prod-1
-      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n prod-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete — adanalife_ token written to prod Postgres. Run \`kubectl rollout restart deploy/tripbot-twitch -n prod-1\` to bring the bot online with both identities loaded."'
-
-  tripbot:stage:auth:bootstrap:
-    desc: bootstrap BOTH Twitch OAuth identities (bot + broadcaster) against stage-1 back-to-back; sign in as tripbot4001 then adanalife_staging
-    cmds:
-      - task: tripbot:stage:auth:bootstrap:bot
-      - task: tripbot:stage:auth:bootstrap:broadcaster
-
-  tripbot:stage:auth:bootstrap:bot:
-    desc: bootstrap the BOT Twitch OAuth token against stage-1 (stage-1 namespace); port-forwards 8080 so the browser callback reaches the pod
-    cmds:
-      # Authored per-env in the tripbot repo's cdk8s (envFrom the stage-1
-      # tripbot-config + the stage ESO Secrets); applied from its committed dist in
-      # the sibling tripbot checkout (same source as `task contract:sync`).
-      - kubectl delete job tripbot-auth-bootstrap-bot -n stage-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-bot.k8s.yaml -n stage-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-bot -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-bot -n stage-1
-      - echo "Port-forwarding localhost:8080 → bot job pod. Open the URL above and sign in as tripbot4001 (the non-prod test bot, NOT prod's tripbot4000)."
-      - kubectl port-forward job/tripbot-auth-bootstrap-bot 8080:8080 -n stage-1 2>/dev/null || true
-      - echo "Bot bootstrap complete — tripbot4001 token written to stage Postgres."
-
-  tripbot:stage:auth:bootstrap:broadcaster:
-    desc: bootstrap the BROADCASTER Twitch OAuth token against stage-1; required for subscriber/follower polling + real-time EventSub
-    cmds:
-      - kubectl delete job tripbot-auth-bootstrap-broadcaster -n stage-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-auth-bootstrap-broadcaster.k8s.yaml -n stage-1
-      - until kubectl get pod -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 --no-headers 2>/dev/null | grep -q Running; do sleep 1; done
-      - until kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1 2>/dev/null | grep -q "id.twitch.tv"; do sleep 1; done
-      - kubectl logs -l job-name=tripbot-auth-bootstrap-broadcaster -n stage-1
-      - echo "Port-forwarding localhost:8080 → broadcaster job pod. Open the URL above and sign in as adanalife_staging."
-      - kubectl port-forward job/tripbot-auth-bootstrap-broadcaster 8080:8080 -n stage-1 2>/dev/null || true
-      - 'echo "Broadcaster bootstrap complete. Run \`kubectl rollout restart deploy/tripbot-twitch -n stage-1\` to bring the bot online with both identities."'
 
   tripbot:stage:db:seed:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows

@@ -18,13 +18,18 @@ name: pr-gates
 
 on:
   pull_request:
-    branches: [main]
+    # Every PR, whatever it targets. Filtering to `branches: [main]` would leave a
+    # PR stacked on another feature branch running no tests at all — the review
+    # that most wants them, since its diff is against a branch nobody has looked
+    # at rather than against main.
+    #
     # `edited` is what makes the title check re-run when a title is fixed.
     types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 concurrency:
   group: pr-gates-${{ github.event.pull_request.number }}
@@ -85,3 +90,61 @@ jobs:
             exit 1
           fi
           rm -f gateway-platforms.json
+
+      # Guards the service-name/port/env-key contract: tripbot owns
+      # contract.json (generated from its pkg/contract Go constants) and this
+      # repo syncs a copy into cdk8s/ via `task contract:sync`. Unguarded by
+      # changed paths for the same reason as platforms.json above — tripbot-side
+      # drift touches nothing here. tripbot is public, so GITHUB_TOKEN reads it;
+      # no app token to mint means no Dependabot skip either.
+      - name: Assert contract.json matches tripbot/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository_owner }}/tripbot/contents/pkg/contract/contract.json?ref=main" \
+            -H "Accept: application/vnd.github.raw" > tripbot-contract.json
+          if ! diff -u tripbot-contract.json cdk8s/contract.json; then
+            echo "::error::cdk8s/contract.json is out of sync with tripbot/main — run 'task contract:sync' and commit."
+            exit 1
+          fi
+          rm -f tripbot-contract.json
+
+      # The gates run as steps of one job (see the header), so a red reads
+      # `gates` in the checks list with nothing saying which gate died. This step
+      # reads the job's own step verdicts back and reports them: a gate/verdict
+      # table on the run summary, and one error annotation per failed gate,
+      # which is what the PR's checks tab shows under the check. Reporting only —
+      # the job topology, and its single billed minute, are unchanged.
+      - name: Name the failing gate
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          JOB: ${{ github.job }}
+        run: |
+          # A step's verdict lands in the API a beat after the step ends.
+          for _ in 1 2; do
+            gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" > jobs.json \
+              || { echo "::warning::could not read this job's step verdicts"; exit 0; }
+            jq -r --arg job "$JOB" '
+              .jobs[] | select(.name == $job) | .steps[]
+              | select(.conclusion != null)
+              | select(.name | test("^(Set up job|Complete job|Post )") | not)
+              | "\(.conclusion)\t\(.name)"' jobs.json > verdicts
+            grep -q '^failure' verdicts && break
+            sleep 5
+          done
+          {
+            echo "## pr-gates"
+            echo
+            echo "| Gate | Verdict |"
+            echo "|---|---|"
+            awk -F'\t' '{
+              v = $1 == "success" ? "✅ pass" : $1 == "failure" ? "❌ **fail**" : $1 == "skipped" ? "⏭️ skipped" : $1
+              printf "| %s | %s |\n", $2, v
+            }' verdicts
+          } >> "$GITHUB_STEP_SUMMARY"
+          awk -F'\t' '$1 == "failure" {
+            printf "::error title=pr-gates: %s failed::Open the \"%s\" step in this run'\''s log.\n", $2, $2
+          }' verdicts

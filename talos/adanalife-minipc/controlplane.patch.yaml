@@ -9,12 +9,13 @@
 # the PKI material this patch doesn't.
 #
 # NIC uses DHCP. Stable IP is enforced by a DHCP reservation at the router
-# (MAC 58:47:ca:7d:7b:b0 → 192.168.1.200 on the Texas network). When the box
-# moves to Maine, set up an equivalent reservation on the Maine router with
-# the same target IP and no Talos-side reconfig is needed. The K8s API
-# endpoint (https://192.168.1.200:6443) is baked into the generated
-# controlplane.yaml; if the reservation IP ever changes, regenerate the
-# config with the new endpoint.
+# (MAC 58:47:ca:7d:7b:b0 → 192.168.40.111 on the Maine network). A move needs an
+# equivalent reservation on the new router; the reservation address does not have
+# to be preserved, because what is baked into the generated controlplane.yaml is
+# the alias endpoint https://minipc.whereisdana.today:6443, not an address. That
+# alias is a CNAME onto the active location, managed in terraform/core, and it is
+# carried as a machine certSAN — so repointing DNS is the whole move and no
+# Talos-side regeneration is needed.
 #
 # Hostname is set via the HostnameConfig sub-resource (Talos 1.13+ pattern).
 # Setting machine.network.hostname in v1alpha1 conflicts with HostnameConfig.

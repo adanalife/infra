@@ -117,6 +117,22 @@ resource "aws_ssm_parameter" "guessr_admin_emails" {
   }
 }
 
+# Who may sign in to the cluster's internal admin UIs through Cloudflare
+# Access — burrito today (burrito-oidc.tf). Separate from the guessr list on
+# purpose: that one gates a game-scheduling surface, this one gates terraform.
+# Same empty-placeholder shape as guessr's, and the policy carries the
+# precondition that explains the two-apply bootstrap.
+resource "aws_ssm_parameter" "internal_admin_emails" {
+  name        = "/prod-1/internal-admin-emails"
+  description = "Email addresses allowed through Cloudflare Access to the cluster's internal admin UIs. JSON array of addresses."
+  type        = "SecureString"
+  value       = "[]"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # ============================================================================
 # Unmanaged parameters (deliberately NOT terraform resources)
 # ============================================================================
@@ -128,6 +144,16 @@ resource "aws_ssm_parameter" "guessr_admin_emails" {
 #   - /k8s/obs/facebook-stream-key (Facebook Live Producer persistent key, prod Page)
 #   - /k8s/grafana-cloud-metrics-write
 #   - /k8s/external-dns/aws-credentials (hand-seeded from PGP outputs)
+#
+# Burrito's per-layer runner credentials also live here — one pair per
+# terraform workspace it plans, all in PROD's Parameter Store because that is
+# the account the cluster's ClusterSecretStore reads. Each is hand-seeded from
+# its own workspace's `burrito_*` PGP outputs, so no single workspace can
+# declare them:
+#   - /k8s/burrito/core-access-key-id     + -secret-access-key  (core's `burrito` user)
+#   - /k8s/burrito/platform-access-key-id + -secret-access-key  (core's `burrito-platform` user)
+#   - /k8s/burrito/stage-access-key-id    + -secret-access-key  (stage-1's `burrito` user)
+#   - /k8s/burrito/prod-access-key-id     + -secret-access-key  (prod-1's `burrito` user)
 
 # ============================================================================
 # Plan-time data sources
@@ -148,7 +174,7 @@ data "aws_ssm_parameter" "cloudflare_api_token" {
 # endpoint as a Function binding (cloudflare-pages-guessr.tf). Third consumer of
 # this one value, after Grafana's contact point and tripbot's !report — rotating
 # it means re-applying everything that reads it, which is what the
-# alert-delivery-failure rule in stage-1/grafana-alerts.tf already says.
+# alert-delivery-failure rule in platform/grafana-alerts.tf already says.
 #
 # Literal name for the reason the block comment above gives: this parameter is a
 # managed mirror entry, and a data source pointing at the mirror resource defers
@@ -159,6 +185,10 @@ data "aws_ssm_parameter" "discord_alerts_webhook" {
 
 data "aws_ssm_parameter" "guessr_admin_emails" {
   name = aws_ssm_parameter.guessr_admin_emails.name
+}
+
+data "aws_ssm_parameter" "internal_admin_emails" {
+  name = aws_ssm_parameter.internal_admin_emails.name
 }
 
 # ============================================================================

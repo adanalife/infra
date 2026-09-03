@@ -18,12 +18,12 @@ Scope (minipc only — development is on the k3d cluster, with its own Argo):
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
   * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
     install) — the bootstrap floor.
-  * **traefik** + **external-dns** — host-coupled: traefik's ingressEndpoint.ip and
-    external-dns's --default-targets are the node's discovered InternalIP, written to
-    gitignored values.local.yml at bootstrap (not git-declarable; prod's differs from
-    the committed lan_ip). external-dns also carries --force-default-targets in that
-    same gitignored arg list. Argo-rendering them from committed values would force
-    the wrong target / drop the flag on adoption, so they stay task-installed.
+  * **traefik** + **external-dns** — host-coupled via development only. prod-1 and
+    stage-1 commit their target (the node's location-independent alias) in
+    k8s/traefik/values.prod-1.yml and k8s/external-dns/<env>/config.yml, alongside
+    --force-default-targets. development is the env whose target is the host's own
+    public IP, written per-machine to a gitignored values.local.yml, so the pair
+    stays task-installed.
 
 The kustomize-only platform bits (local-path-provisioner, intel-gpu/xpu, ESO
 cluster-store, cert-manager ClusterIssuers) are out of scope here too — a later
@@ -69,6 +69,7 @@ class ArgoPlatform(Construct):
     def __init__(self, scope: Construct, id: str = "argo-platform"):
         super().__init__(scope, id)
         self._project()
+        self._oci_registries()
 
         # Cluster-scoped releases (one install for the whole minipc), skipping the
         # bootstrap floor (cilium / argo-cd, argo=False).
@@ -84,6 +85,39 @@ class ArgoPlatform(Construct):
             for comp in env_components(load_env(env_name)):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+
+    def _oci_registries(self):
+        # Anonymous HTTP(S) chart repos need no Argo registration, but an OCI
+        # registry (scheme-less in REPOS) must be registered with enableOCI so
+        # the repo-server pulls charts from it as Helm OCI refs. Public
+        # registries, so the Secrets carry no credentials — one per OCI
+        # registry the component table references.
+        for registry in sorted({url for url in REPOS.values() if "://" not in url}):
+            # Slug the full registry path, not just the host — two registries
+            # on one host must not collide on the Secret name.
+            slug = registry.replace("/", "-").replace(".", "-")
+            secret = cdk8s.ApiObject(
+                self,
+                f"oci-registry-{slug}",
+                api_version="v1",
+                kind="Secret",
+                metadata={
+                    "name": f"argocd-repo-oci-{slug}",
+                    "namespace": ARGO_NS,
+                    "labels": {"argocd.argoproj.io/secret-type": "repository"},
+                },
+            )
+            secret.add_json_patch(
+                cdk8s.JsonPatch.add(
+                    "/stringData",
+                    {
+                        "name": f"oci-{slug}",
+                        "type": "helm",
+                        "url": registry,
+                        "enableOCI": "true",
+                    },
+                )
+            )
 
     def _project(self):
         proj = cdk8s.ApiObject(
@@ -131,6 +165,23 @@ class ArgoPlatform(Construct):
             "targetRevision": TARGET_REVISION,
             "ref": "values",
         }
+        sources = [chart_source, values_source]
+
+        if comp.release == "tailscale-operator":
+            # The ingress ProxyGroup is a custom resource of a CRD the operator
+            # chart ships, so it rides the operator's own Application as a third,
+            # raw-manifest source: Argo applies CRDs ahead of custom resources
+            # within one sync, and syncing the operator syncs its proxy fleet with
+            # it. `include` scopes the directory to the manifest, leaving the
+            # chart's values.yml (fed to the chart source above) out of it.
+            sources.append(
+                {
+                    "repoURL": REPO_URL,
+                    "targetRevision": TARGET_REVISION,
+                    "path": "k8s/tailscale-operator",
+                    "directory": {"include": "proxygroup.yml"},
+                }
+            )
 
         app = cdk8s.ApiObject(
             self,
@@ -144,7 +195,7 @@ class ArgoPlatform(Construct):
                 "/spec",
                 {
                     "project": PROJECT,
-                    "sources": [chart_source, values_source],
+                    "sources": sources,
                     "destination": {"server": IN_CLUSTER, "namespace": dest_ns},
                     "syncPolicy": {
                         # MONITOR-ONLY: manual sync. CreateNamespace so Argo owns the

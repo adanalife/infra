@@ -33,3 +33,6 @@ backups/
 # hand-edited per host.
 k8s/**/values.local.yml
 k8s/**/*.local.yaml
+
+# Wrangler's local account/state cache
+.wrangler/

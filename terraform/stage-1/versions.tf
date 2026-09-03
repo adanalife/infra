@@ -22,10 +22,6 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 7.0"
     }
-    grafana = {
-      source  = "grafana/grafana"
-      version = "~> 4.35"
-    }
   }
 
   backend "s3" {
