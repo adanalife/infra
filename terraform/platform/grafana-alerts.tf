@@ -2633,11 +2633,14 @@ resource "grafana_rule_group" "relay_health" {
   // feed (>100 matched lines per 5m); a chronic 0.2% loss produces ~1.
   //
   // Zero is the baseline this asserts. The hop is pod-to-pod on one node over
-  // RTSP-interleaved TCP, which cannot drop packets — the read side has
-  // measured exactly 0 lost across 13.5M packets since obs#106, and the
-  // publish side joined it in playout#139. A nonzero rate means something put
-  // the transport back on UDP: a playout image predating that fix, or a sink
-  // rebuilt without protocols=tcp.
+  // RTSP-interleaved TCP, which cannot drop packets. Two measurements attest
+  // the read hop: rtsp_sessions_outbound_rtp_packets_reported_lost{state="read"}
+  // sits at 0 against the 17.9M and 40.3M packets the relays had sent
+  // (2026-08-21), and obs's own "RTP: missed" evidence — the signal obs#106 was
+  // judged on — is clean. The publish side joined the TCP transport in
+  // playout#139. A nonzero rate means something put the transport back on UDP:
+  // a playout image predating that fix, or a sink rebuilt without
+  // protocols=tcp.
   //
   // 100 per 15m rather than >0 so a session teardown mid-window can't page.
   // The regime a viewer reported on 2026-08-20 ran ~1400 per 15m (0.22% of
