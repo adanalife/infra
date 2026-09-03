@@ -186,7 +186,7 @@
     {
       "id": 40,
       "type": "row",
-      "title": "Background audio (Twitch · SomaFM → Car Hum fallback)",
+      "title": "Background audio (SomaFM → Car Hum fallback)",
       "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
       "collapsed": false
     },
@@ -194,7 +194,7 @@
       "id": 41,
       "type": "stat",
       "title": "Background audio",
-      "description": "1 when the Twitch music bed (Groove Salad Classic) is playing, 0 when its OBS media state is ended/stopped/errored. Twitch-only (tripbot), not platform-labeled.",
+      "description": "1 when the music bed (Groove Salad Classic) is playing, 0 when its OBS media state is ended/stopped/errored.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
       "targets": [
@@ -310,7 +310,7 @@
       "id": 45,
       "type": "timeseries",
       "title": "Background audio level (peak dBFS)",
-      "description": "Peak output level of the Twitch background bed, floored at -60. Sustained ≈ -60 is dead air; recorded only while the volume meter is fresh, so gaps mean the meter subscription dropped (not silence).",
+      "description": "Peak output level of the background bed, floored at -60. Sustained ≈ -60 is dead air; recorded only while the volume meter is fresh, so gaps mean the meter subscription dropped (not silence).",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
       "targets": [
