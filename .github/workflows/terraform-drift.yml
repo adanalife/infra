@@ -2,8 +2,8 @@ name: terraform-drift
 
 on:
   schedule:
-    # every Monday morning
-    - cron:  "0 8 * * 1"
+    # every morning
+    - cron:  "0 8 * * *"
   pull_request:
     paths:
       - '.github/workflows/terraform-drift.yml'
