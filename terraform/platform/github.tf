@@ -42,6 +42,7 @@ locals {
     "video-pipeline",
     "guessr",
     "flare",
+    "tempomat",
   ])
 }
 
