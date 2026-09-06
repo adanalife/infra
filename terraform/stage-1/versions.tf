@@ -20,7 +20,7 @@ terraform {
     # See google.tf; KEEP-IN-SYNC with prod-1's google provider block.
     google = {
       source  = "hashicorp/google"
-      version = "~> 7.0"
+      version = "~> 8.0"
     }
   }
 
