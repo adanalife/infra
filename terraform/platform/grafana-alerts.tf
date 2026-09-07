@@ -4345,3 +4345,71 @@ resource "grafana_rule_group" "error_rate" {
     }
   }
 }
+
+// Console access requests. The console admits a Twitch login only once it's in
+// the principals table or the owner granted it a tier from the settings page;
+// anything else is refused with the reason logged, and an unlisted login is
+// queued for approval rather than turned away. The push notification the
+// console sends on a first knock is the fast path — this rule is the durable
+// one: it keeps saying so while the login is still waiting, and it catches a
+// login the owner already denied coming back.
+resource "grafana_rule_group" "console_access" {
+  name             = "console-access"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Prod: console refused a Twitch login"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "A Twitch login the console doesn't admit knocked on prod: {{ $labels.reason }}"
+      description = "console.audit logged `refused <method> <path>: {{ $labels.reason }}` on prod-1. A login that is waiting is a request for access — grant it a tier (or turn it away) from the console's settings page, and this resolves once the refusals stop. A login that isn't on the list is one the owner already denied coming back, which is worth a look rather than an action. The refusal that carries no login — a device behind the sidecar that hasn't logged in yet — is deliberately not matched here: a logged-out browser polls it hundreds of times a day."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot-console"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant"
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (reason) (count_over_time({namespace=\"prod-1\", container=\"tripbot-console\"} |= \"refused\" | json | logger=\"console.audit\" | pattern `<_>refused <_> <_>: <reason>\"<_>` | reason =~ \"twitch:.+\" [10m]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
