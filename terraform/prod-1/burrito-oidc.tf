@@ -20,8 +20,8 @@
 #
 # Only the LAN redirect URI is registered. Burrito's config takes a single
 # redirectUrl, the tailnet path is the degraded one, and naming the tailnet
-# domain here would put it in a public repo — the vault docs write it as
-# <tailnet> for that reason. Adding it later is a redirect_uris entry sourced
+# domain here would put it in a public repo — it is written as <tailnet>
+# everywhere for that reason. Adding it later is a redirect_uris entry sourced
 # from SSM, not a redesign.
 
 locals {
