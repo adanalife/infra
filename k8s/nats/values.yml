@@ -25,10 +25,11 @@ config:
     # runs its own NATS release in its own namespace, so each gets an isolated
     # JetStream store for free.
     #
-    # CAVEAT: on the mini-PC (Talos) this PVC is local-path, which `talosctl
-    # upgrade` WIPES even with --preserve (see vault talosctl-upgrade-ephemeral
-    # -wipe memory). Acceptable here — the data is best-effort recent history
-    # (last ~500 chat lines / ~200 video changes), rebuilt live after any wipe.
+    # CAVEAT: on the mini-PC (Talos) this PVC is local-path, which lives on the
+    # ephemeral partition — `talosctl upgrade` wipes it even with --preserve,
+    # which only covers etcd and machine config. Acceptable here: the data is
+    # best-effort recent history (last ~500 chat lines / ~200 video changes),
+    # rebuilt live after any wipe.
     fileStore:
       enabled: true
       pvc:

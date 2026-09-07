@@ -805,7 +805,7 @@ resource "grafana_rule_group" "ups_health" {
 
     annotations = {
       summary     = "ups-monitor has been unable to reach the NUT server on the Synology for 20 minutes"
-      description = "The reader in the `ups` namespace polls the Synology's NUT server every 30s and has been logging `ups.status=UNREACHABLE` rather than a real status. While this holds, the mini-PC has no view of mains power or battery charge, and the armed stage-2 shutdown cannot fire — so a power cut ends in an unclean stop of both prod and stage Postgres instead of an ordered shutdown. The streams themselves are unaffected: nothing in the live path touches the NAS. Check the Synology first — ping it, then DSM/SSH; both previous occurrences (2026-08-23, 2026-09-03) had it wholly unreachable rather than the NUT daemon alone, and a power-button safe-shutdown plus power-on recovered the second. `kubectl -n ups logs deploy/ups-monitor` shows the poll results, and the same lines in Loki answer whether it has been flapping or is simply down. Runbook: the ups-nut page in the infra vault docs."
+      description = "The reader in the `ups` namespace polls the Synology's NUT server every 30s and has been logging `ups.status=UNREACHABLE` rather than a real status. While this holds, the mini-PC has no view of mains power or battery charge, and the armed stage-2 shutdown cannot fire — so a power cut ends in an unclean stop of both prod and stage Postgres instead of an ordered shutdown. The streams themselves are unaffected: nothing in the live path touches the NAS. Check the Synology first — ping it, then DSM/SSH; both previous occurrences (2026-08-23, 2026-09-03) had it wholly unreachable rather than the NUT daemon alone, and a power-button safe-shutdown plus power-on recovered the second. `kubectl -n ups logs deploy/ups-monitor` shows the poll results, and the same lines in Loki answer whether it has been flapping or is simply down."
     }
     labels = {
       severity = "warning"
@@ -2409,7 +2409,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "{{ $labels.service_platform }} background audio has not been playing for 5m"
-      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m on {{ $labels.service_platform }} — that platform's music bed is silent and the audio-fallback watchdog has NOT restored audio via a local bed. Viewers hear dead air. Check the obs-{{ $labels.service_platform }} pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart that obs deploy. See vault tripbot/obs/gotchas.md."
+      description = "obs_background_audio_playing{deployment_environment=\"prod-1\"} has been 0 for 5m on {{ $labels.service_platform }} — that platform's music bed is silent and the audio-fallback watchdog has NOT restored audio via a local bed. Viewers hear dead air. Check the obs-{{ $labels.service_platform }} pod / OBS WebSocket and the watchdog logs (audio watchdog: ...). Manual recovery: in noVNC, point the source's local file at /opt/tripbot/assets/carhum/car-hum-idle.flac, or restart that obs deploy."
     }
     labels = {
       severity = "critical"
@@ -2472,7 +2472,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "{{ $labels.service_platform }} background audio has been on the fallback bed for 20m"
-      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back. See vault tripbot/obs/gotchas.md."
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back."
     }
     labels = {
       severity = "warning"
@@ -2548,7 +2548,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Album background-audio bed is on air with an empty play order"
-      description = "tripbot_background_audio_bed{bed=\"album\"} is 1 while tripbot_background_audio_album_tracks is 0 — the album bed is selected but no tracks are queued, so the stream falls silent when the current track ends and OBS reports nothing wrong. Usual cause: tripbot came up while OBS was already on the album bed and never built a play order. Recovery: re-pick the bed in the console (that path rescans the share), or !audio album from chat as an admin. If the share itself is the problem, check the obs-music PVC is Bound. See vault tripbot/monitoring.md and obs/gotchas.md."
+      description = "tripbot_background_audio_bed{bed=\"album\"} is 1 while tripbot_background_audio_album_tracks is 0 — the album bed is selected but no tracks are queued, so the stream falls silent when the current track ends and OBS reports nothing wrong. Usual cause: tripbot came up while OBS was already on the album bed and never built a play order. Recovery: re-pick the bed in the console (that path rescans the share), or !audio album from chat as an admin. If the share itself is the problem, check the obs-music PVC is Bound."
     }
     labels = {
       severity = "critical"
