@@ -55,12 +55,9 @@ def test_pod_template_carries_the_config_digest(env_name):
     assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])
 
 
-def test_hls_is_stage_only():
-    # The muxer repackages the passthrough H.264 for a native client; prod stays
-    # RTSP-only until stage has proven it, so the env gate has to hold.
-    stage = _synth("stage-1")
-    prod = _synth("prod-1")
-
+def test_hls_is_minipc_only():
+    # The muxer repackages the passthrough H.264 for a native client; the minipc
+    # envs serve it, the test envs stay RTSP-only, so the env gate has to hold.
     def _config(objs):
         return next(o for o in objs if o["kind"] == "ConfigMap")["data"]["mediamtx.yml"]
 
@@ -68,7 +65,12 @@ def test_hls_is_stage_only():
         svc = next(o for o in objs if o["kind"] == "Service")
         return {p["name"] for p in svc["spec"]["ports"]}
 
-    assert "hls: yes" in _config(stage) and "hlsAddress: :8888" in _config(stage)
-    assert "hls" in _svc_ports(stage)
-    assert "hls: no" in _config(prod)
-    assert "hls" not in _svc_ports(prod)
+    for env_name in ("stage-1", "prod-1"):
+        objs = _synth(env_name)
+        assert "hls: yes" in _config(objs) and "hlsAddress: :8888" in _config(objs)
+        assert "hls" in _svc_ports(objs)
+
+    for env_name in ("development", "local"):
+        objs = _synth(env_name)
+        assert "hls: no" in _config(objs)
+        assert "hls" not in _svc_ports(objs)

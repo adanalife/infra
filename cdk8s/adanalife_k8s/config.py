@@ -168,6 +168,9 @@ ENVS: dict[str, EnvConfig] = {
         # at replicas:0 until a console scale-up, so this list only governs the
         # infra-authored relay fan-out.
         platforms=SUPPORTED_PLATFORMS,
+        # The native app's raw-feed player reads the relay's LL-HLS muxer; it
+        # only repackages the passthrough H.264, so it costs no iGPU encode slot.
+        mediamtx_hls=True,
     ),
     "stage-1": EnvConfig(
         name="stage-1",
@@ -191,7 +194,7 @@ ENVS: dict[str, EnvConfig] = {
         # Full supported set → one mediamtx relay per platform on stage too
         # (the gateway/obs/playout Applications self-discover from their repos).
         platforms=SUPPORTED_PLATFORMS,
-        # Stage serves LL-HLS first; prod follows once a client has exercised it.
+        # Same LL-HLS muxer as prod, so the native app has a stage feed to point at.
         mediamtx_hls=True,
     ),
     "development": EnvConfig(
