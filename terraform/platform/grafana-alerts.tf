@@ -4181,6 +4181,89 @@ resource "grafana_rule_group" "ci_health" {
       })
     }
   }
+
+  // Visibility canary for the rule above. That rule is no_data_state = OK and
+  // keys on `assigned > 0`, so a listener that has stopped reporting at all
+  // makes it quiet rather than loud — the 2026-08-23 stall was exactly that
+  // shape, where the broken component *was* the listener and a listener not
+  // accepting jobs reports no queue. absent() turns lost visibility into a page
+  // instead of leaving it indistinguishable from an idle CI.
+  //
+  // no_data_state = OK is correct: while the series is present, absent() returns
+  // nothing, which Grafana reads as no-data for ref A — that is the healthy case.
+  // exec_err = Alerting because a datasource error is also a loss of visibility.
+  //
+  // 10m against the measured baseline (Grafana Cloud, the 7 days to 2026-09-07):
+  // the longest contiguous absence in any 15-minute window was 1 minute, and a
+  // day holds at most 6 such gaps, none adjacent — isolated scrape misses. 10m
+  // therefore clears both ordinary scrape jitter and a listener rollout by an
+  // order of magnitude, while keeping the blind window well inside the ~9h this
+  // rule exists to shorten.
+  //
+  // Ungrouped on purpose, unlike the queue rule's `by (job)`: absent() cannot be
+  // grouped, so this fires when the listener series is gone entirely. One scale
+  // set emits it today (job="arc-amd64"). A second one would need its own rule
+  // to avoid being masked — the same constraint the per-platform stream canaries
+  // carry, and the reason those are generated one per platform.
+  //
+  // One shape neither rule can see: a GitHub-side dispatch failure, where runs
+  // sit queued with zero jobs created. Our side reads honestly — assigned is 0,
+  // the series is present — so both stay false. That signal only exists on
+  // GitHub's side, which is why githubstatus.com is the first check when jobs
+  // queue fleet-wide and the runner metrics look healthy.
+  rule {
+    name           = "CI listener metrics absent (lost visibility)"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "No gha_assigned_jobs from the ARC listener for 10m — the CI queue rule is blind"
+      description = "gha_assigned_jobs has been absent for 10m, so nothing can tell a stuck CI queue from an idle one and the *CI queued with nothing running* rule cannot fire. This is a lost-visibility page, not a stuck-queue page. Check the listener is up and scraped — `kubectl --context admin@adanalife-minipc -n arc-runners get pods -l app.kubernetes.io/component=runner-scale-set-listener` and its logs; then the metrics path, since the series reaches Grafana Cloud through the k8s-monitoring scrape and an allowlist that has dropped series before. A listener that is merely refusing work still reports, so an absent series means the exporter or the scrape is gone rather than CI being idle."
+      link        = local.ci_runners_panel_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "ci"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "absent(gha_assigned_jobs)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 // Generic error-rate backstop for the prod components that have no watchdog
