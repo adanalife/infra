@@ -1090,7 +1090,7 @@ resource "grafana_rule_group" "alerting_self" {
 
     annotations = {
       summary     = "Grafana is failing to deliver alert notifications to a contact point"
-      description = "grafanacloud_instance_alertmanager_notifications_failed_per_second is above zero — alert pushes to one or more contact points are failing, so firings are silently not reaching their channel. Most likely a stale webhook URL. For discord-alerts, the URL lives in SM k8s/tripbot/discord-alerts-webhook (mirrored stage+prod); rotate it and re-run terraform apply so the contact point picks up the new value, then re-test. This rule is delivered via the independent ntfy path so it survives a dead Discord webhook."
+      description = "grafanacloud_instance_alertmanager_notifications_failed_per_second is above zero — alert pushes to one or more contact points are failing, so firings are silently not reaching their channel. Most likely a stale webhook URL. The discord-alerts contact point reads SSM /platform/discord-alerts-webhook in the core account — not the /k8s/tripbot/discord-alerts-webhook copies in stage-1/prod-1, which only feed ESO consumers. Rotate the core parameter, then run `task tf:platform:apply` so the contact point picks up the new value, and re-test. This rule is delivered via the independent ntfy path so it survives a dead Discord webhook."
     }
     labels = {
       severity = "critical"
