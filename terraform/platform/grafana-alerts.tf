@@ -770,6 +770,91 @@ resource "grafana_rule_group" "host_lifecycle" {
   }
 }
 
+# UPS health — the Synology is the NUT *server* and the mini-PC only a client,
+# so the whole cluster's power protection depends on a box that is not the one
+# running the workloads. When the Synology goes away, `ups-monitor` keeps
+# running and keeps polling; it just gets nothing back, and the stage-2
+# automatic shutdown that has been armed since 2026-07-06 has no input to act
+# on. A mains event during that window takes prod and stage Postgres down
+# uncleanly instead of shutting them down in order.
+#
+# This has now happened twice with no alert of any kind: ~10 h on 2026-08-23
+# and 29.5 h from 2026-09-03 18:48Z, the second found by hand only because an
+# NFS mount failed. Both recovered on their own, which is exactly why they need
+# an alert — a fault that heals itself before anyone looks is indistinguishable
+# from one that never happened, and the UPS was blind for both windows.
+#
+# ponytail: this watches reachability only, which is the cheap half. Alerting
+# on the NAS's `eth3` link-state transitions (34,260 of them, the suspected
+# cause) needs a log feed off the NAS itself and is still an open question in
+# the infra TODO.
+resource "grafana_rule_group" "ups_health" {
+  name             = "ups-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  // no_data (no lines at all) is the ups-monitor Deployment being down, not the
+  // Synology — a different fault with a different fix, so it is not this rule's
+  // job to claim it.
+  rule {
+    name           = "UPS: the NUT server is unreachable"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "ups-monitor has been unable to reach the NUT server on the Synology for 20 minutes"
+      description = "The reader in the `ups` namespace polls the Synology's NUT server every 30s and has been logging `ups.status=UNREACHABLE` rather than a real status. While this holds, the mini-PC has no view of mains power or battery charge, and the armed stage-2 shutdown cannot fire — so a power cut ends in an unclean stop of both prod and stage Postgres instead of an ordered shutdown. The streams themselves are unaffected: nothing in the live path touches the NAS. Check the Synology first — ping it, then DSM/SSH; both previous occurrences (2026-08-23, 2026-09-03) had it wholly unreachable rather than the NUT daemon alone, and a power-button safe-shutdown plus power-on recovered the second. `kubectl -n ups logs deploy/ups-monitor` shows the poll results, and the same lines in Loki answer whether it has been flapping or is simply down. Runbook: the ups-nut page in the infra vault docs."
+    }
+    labels = {
+      severity = "warning"
+      service  = "ups"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      query_type     = "instant" // Grafana reflects the model's queryType back; see the T5 rule
+      // Backtick raw string: a double-quoted LogQL string would process escapes.
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(count_over_time({namespace=\"ups\", container=\"ups-monitor\"} |= `ups.status=UNREACHABLE` [10m]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      // >10 of the ~20 polls in the window, so a single missed poll or a brief
+      // link flap stays quiet; combined with for=10m the page lands ~20 min in.
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [10] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // Metrics-budget alert — fires when Grafana Cloud's tenant-side count of
 // active series climbs toward the free-tier hard cap (15000). Routes to the
 // shared discord-alerts contact point.
