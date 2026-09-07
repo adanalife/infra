@@ -99,6 +99,10 @@ class EnvConfig:
     # Size of the node-local corpus PVC. The regenerated _opt/clips corpus is
     # ~630 GB; this leaves headroom without crowding the other local-path PVCs.
     dashcam_local_size: str = "700Gi"
+    # Serve the relay's stream over LL-HLS as well as RTSP (adds the muxer's
+    # :8888 listener to the container and the Service). Off by default; it's how
+    # a native client reads the raw pre-OBS dashcam feed without an iGPU slot.
+    mediamtx_hls: bool = False
     # Platforms this env runs a per-platform mediamtx relay for. Set from
     # SUPPORTED_PLATFORMS on the minipc envs; twitch-only on the test envs.
     platforms: tuple[str, ...] = ("twitch",)
@@ -187,6 +191,8 @@ ENVS: dict[str, EnvConfig] = {
         # Full supported set → one mediamtx relay per platform on stage too
         # (the gateway/obs/playout Applications self-discover from their repos).
         platforms=SUPPORTED_PLATFORMS,
+        # Stage serves LL-HLS first; prod follows once a client has exercised it.
+        mediamtx_hls=True,
     ),
     "development": EnvConfig(
         name="development",

@@ -53,3 +53,22 @@ def test_pod_template_carries_the_config_digest(env_name):
     deploy = next(o for o in objs if o["kind"] == "Deployment")
     annotations = deploy["spec"]["template"]["metadata"]["annotations"]
     assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])
+
+
+def test_hls_is_stage_only():
+    # The muxer repackages the passthrough H.264 for a native client; prod stays
+    # RTSP-only until stage has proven it, so the env gate has to hold.
+    stage = _synth("stage-1")
+    prod = _synth("prod-1")
+
+    def _config(objs):
+        return next(o for o in objs if o["kind"] == "ConfigMap")["data"]["mediamtx.yml"]
+
+    def _svc_ports(objs):
+        svc = next(o for o in objs if o["kind"] == "Service")
+        return {p["name"] for p in svc["spec"]["ports"]}
+
+    assert "hls: yes" in _config(stage) and "hlsAddress: :8888" in _config(stage)
+    assert "hls" in _svc_ports(stage)
+    assert "hls: no" in _config(prod)
+    assert "hls" not in _svc_ports(prod)

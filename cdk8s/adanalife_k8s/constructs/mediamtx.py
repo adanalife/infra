@@ -14,10 +14,15 @@ Emits, for one platform, into the env's app namespace:
   * Deployment mediamtx-{platform} — at most one replica, Recreate (a relay
     handles one live stream; never run two side by side during a rollout).
     Births parked at replicas:0, activated by a console scale-up.
-  * Service mediamtx-{platform} — rtsp/TCP + rtp/rtcp UDP + metrics.
+  * Service mediamtx-{platform} — rtsp/TCP + rtp/rtcp UDP + metrics, plus
+    hls/TCP on the envs whose EnvConfig sets mediamtx_hls.
 
 Publishers/readers address it as rtsp://mediamtx-{platform}:8554/dashcam
 (cross-namespace: rtsp://mediamtx-{platform}.{ns}.svc.cluster.local:8554/dashcam).
+Where HLS is on, the same stream is also readable at
+http://mediamtx-{platform}:8888/dashcam/index.m3u8 — the overlay-less feed as
+playout publishes it, repackaged (playout runs ENCODER=passthrough, so the HLS
+muxer only segments the existing H.264; it never transcodes).
 """
 
 from __future__ import annotations
@@ -45,20 +50,28 @@ IMAGE = "ghcr.io/adanalife/mirror/mediamtx:1.19.2"
 RTSP_PORT = load_contract().port("mediamtx_rtsp")
 RTP_PORT = 8000
 RTCP_PORT = 8001
+HLS_PORT = 8888
 METRICS_PORT = 9998
 
 # RTSP on both TCP and UDP transports (the MediaMTX default) + Prometheus
-# metrics; every other protocol off. The single explicit `dashcam` path keeps
-# the namespace closed — a typo'd publish target errors instead of silently
-# creating a path nothing reads. Default path config: any publisher, any reader
-# (in-cluster only; the Service is ClusterIP).
-_CONFIG = f"""\
+# metrics; HLS where the env asks for it, every other protocol off. The single
+# explicit `dashcam` path keeps the namespace closed — a typo'd publish target
+# errors instead of silently creating a path nothing reads. Default path config:
+# any publisher, any reader (in-cluster only; the Service is ClusterIP).
+
+
+def _config(hls: bool) -> str:
+    # Everything about the HLS muxer beyond the switch and the address is left
+    # at MediaMTX's defaults: the low-latency variant, no always-remux (so the
+    # muxer only exists while someone reads), and the 60s idle close.
+    hls_block = f"hls: yes\nhlsAddress: :{HLS_PORT}" if hls else "hls: no"
+    return f"""\
 rtsp: yes
 rtspAddress: :{RTSP_PORT}
 rtpAddress: :{RTP_PORT}
 rtcpAddress: :{RTCP_PORT}
 rtmp: no
-hls: no
+{hls_block}
 webrtc: no
 srt: no
 metrics: yes
@@ -105,7 +118,7 @@ class Mediamtx(Construct):
         labels = meta_labels(name)
         sel = selector(name)
 
-        config = {"mediamtx.yml": _CONFIG}
+        config = {"mediamtx.yml": _config(env.mediamtx_hls)}
         k8s.KubeConfigMap(
             self,
             f"{platform}-config",
@@ -127,6 +140,11 @@ class Mediamtx(Construct):
                     name="rtcp", container_port=RTCP_PORT, protocol="UDP"
                 ),
                 k8s.ContainerPort(name="metrics", container_port=METRICS_PORT),
+                *(
+                    [k8s.ContainerPort(name="hls", container_port=HLS_PORT)]
+                    if env.mediamtx_hls
+                    else []
+                ),
             ],
             readiness_probe=k8s.Probe(
                 tcp_socket=k8s.TcpSocketAction(
@@ -135,6 +153,9 @@ class Mediamtx(Construct):
                 initial_delay_seconds=5,
                 period_seconds=5,
             ),
+            # The HLS muxer holds its segments in RAM, not on disk: the default
+            # 7 x 1s window over a ~6-12 Mbps stream is a few MB, well inside this
+            # limit.
             resources=k8s.ResourceRequirements(
                 requests={
                     "cpu": k8s.Quantity.from_string("50m"),
@@ -248,6 +269,17 @@ class Mediamtx(Construct):
                         name="metrics",
                         port=METRICS_PORT,
                         target_port=k8s.IntOrString.from_string("metrics"),
+                    ),
+                    *(
+                        [
+                            k8s.ServicePort(
+                                name="hls",
+                                port=HLS_PORT,
+                                target_port=k8s.IntOrString.from_string("hls"),
+                            )
+                        ]
+                        if env.mediamtx_hls
+                        else []
                     ),
                 ],
             ),
