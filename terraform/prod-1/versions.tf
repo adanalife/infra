@@ -20,7 +20,7 @@ terraform {
     # See google.tf; KEEP-IN-SYNC with stage-1's google provider block.
     google = {
       source  = "hashicorp/google"
-      version = "~> 7.0"
+      version = "~> 8.0"
     }
     # Manages the tailnet ACL + the K8s operator's OAuth client + the node join
     # key (prod-1 only — the tailnet is global; see tailscale.tf).
