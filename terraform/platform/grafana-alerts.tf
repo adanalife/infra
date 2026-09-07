@@ -3491,9 +3491,13 @@ resource "grafana_rule_group" "batch_health" {
       }
       datasource_uid = data.grafana_data_source.loki.uid
       query_type     = "instant" // Grafana reflects the model's queryType back; see the T5 rule
+      // The line filters are backtick raw strings: a double-quoted LogQL string
+      // processes escapes, so `\[` in one is an invalid char escape and the whole
+      // rule fails to parse at evaluation time — which surfaces as DatasourceError,
+      // not as a plan or apply failure.
       model = jsonencode({
         refId         = "A"
-        expr          = "sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ \"\\[[0-9]+/[0-9]+\\]\" [12h])) unless sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ \"\\[[0-9]+/[0-9]+\\]\" [30m])) unless sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ \"^(coords|embed|transcode) summary\" [12h]))"
+        expr          = "sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ `\\[[0-9]+/[0-9]+\\]` [12h])) unless sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ `\\[[0-9]+/[0-9]+\\]` [30m])) unless sum by (instance) (count_over_time({namespace=\"stage-1\", container=~\"coords|embed|transcode\"} |~ `^(coords|embed|transcode) summary` [12h]))"
         queryType     = "instant"
         instant       = true
         intervalMs    = 60000
