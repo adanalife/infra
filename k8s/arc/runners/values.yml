@@ -78,8 +78,9 @@ listenerTemplate:
 # burst; removing the Docker daemon from this pool (see above) is what stopped
 # those. Leader-election flaps continue — every lease holder (kube-scheduler,
 # kube-controller-manager, cilium-operator, cnpg, the alloy operator) exiting
-# together when an etcd fsync stalls past the 5s deadline, a few times a day by restart
-# count, one of them in the same second as a CI burst on 2026-09-07. Concurrency multiplies the
+# together when an etcd fsync stalls past the 5s deadline. Each round exits ~7 of them
+# at once; quiet days run a few rounds, 2026-09-07 ran nine in one hour,
+# and one landed in the same second as a CI burst. Concurrency multiplies the
 # write burst behind that, which is why the step is 1 → 2 and not wider.
 #
 # It is NOT a memory cap — the node was never short of memory. Measured against
