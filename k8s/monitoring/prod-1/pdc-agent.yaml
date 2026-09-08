@@ -1,0 +1,88 @@
+# Grafana Cloud Private Data Source Connect agent. Opens an outbound SSH
+# tunnel to the Grafana Cloud stack so a cloud datasource can reach a
+# Service that is only routable in here — VictoriaMetrics
+# (victoria-metrics.monitoring.svc:8428), which holds every app and
+# infra series at full fidelity. Nothing is exposed inbound; the agent
+# dials out, and the cloud side names this network on the datasource.
+#
+# Upstream manifest: grafana/pdc-agent production/kubernetes/, trimmed
+# to what this cluster needs (one replica; the 1 CPU / 1 Gi upstream
+# request is sized for hundreds of queries a second, not one dashboard
+# viewer). Credentials come from Parameter Store via the ExternalSecret
+# below — the same JSON-keys shape as grafana-cloud-otlp.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-pdc-agent
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-parameterstore-cluster
+    kind: ClusterSecretStore
+  target:
+    name: grafana-pdc-agent
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: /k8s/grafana-pdc-agent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-pdc-agent
+  labels:
+    app.kubernetes.io/name: grafana-pdc-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana-pdc-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grafana-pdc-agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 30000
+        runAsGroup: 30000
+        fsGroup: 30000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pdc-agent
+          image: grafana/pdc-agent:v0.0.64
+          args:
+            - -cluster
+            - $(CLUSTER)
+            - -token
+            - $(TOKEN)
+            - -gcloud-hosted-grafana-id
+            - $(HOSTED_GRAFANA_ID)
+          env:
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-pdc-agent
+                  key: token
+            - name: CLUSTER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-pdc-agent
+                  key: cluster
+            - name: HOSTED_GRAFANA_ID
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-pdc-agent
+                  key: hosted-grafana-id
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
