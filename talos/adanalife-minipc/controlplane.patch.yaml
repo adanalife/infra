@@ -100,6 +100,27 @@ machine:
 
 cluster:
   allowSchedulingOnControlPlanes: true
+  # etcd serves /metrics on its client port by default, which on this cluster
+  # means mTLS on 2379 — scrapeable only by something holding the etcd client
+  # PKI, which nothing in the cluster does. `listen-metrics-urls` moves the
+  # metrics (and /health) handler onto a second, plaintext listener that needs
+  # no client certificate, so Alloy can scrape it as an ordinary target. This
+  # is the only way to see etcd's fsync latency: nothing else reports it, and
+  # etcd stalling past the 5s lease deadline is the standing suspect behind the
+  # lockstep controller restarts (the `control-plane-health` alert group).
+  #
+  # 2381 carries no read or write API and no cluster data — the client (2379)
+  # and peer (2380) listeners keep their mTLS untouched. It is reachable from
+  # the LAN and the tailnet, which is the cost: a reader learns the cluster's
+  # health and size, not its contents.
+  #
+  # NOT creation-time. Patching this on the running node restarts etcd, and on
+  # a single-node control plane the API server is unavailable for those few
+  # seconds — the same lockstep restart this exists to explain. Nothing in the
+  # stream path depends on the control plane, so running pods keep serving.
+  etcd:
+    extraArgs:
+      listen-metrics-urls: http://0.0.0.0:2381
   # Cilium owns the dataplane — Talos installs no CNI and no kube-proxy.
   network:
     cni:
