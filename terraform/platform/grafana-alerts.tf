@@ -3956,39 +3956,42 @@ resource "grafana_rule_group" "control_plane_health" {
   folder_uid       = grafana_folder.tripbot.uid
   interval_seconds = local.alert_eval_interval_seconds
 
-  // Tier one: churn that persists. Warning → Discord.
+  // Tier one: how often the lockstep bounce happens. Warning → Discord.
   //
-  // Measured over the 3 days to 2026-08-24 at 15-minute resolution, counting
-  // distinct platform containers with more than one restart in the trailing
-  // hour. The series is 0 most of the time and bursty otherwise:
-  //   isolated burst      7-10, four consecutive samples then back to 0
-  //   sustained stretch   7-16 held for ~8.5h (08-24 ~03:00-11:30Z)
-  //   08-23 storm         44 for an hour, decaying through 25 to 19
-  // Threshold 4 clears the quiet baseline (0, occasionally 2) while every real
-  // burst scores 7 or more.
+  // The lease holders on this node — kube-scheduler, kube-controller-manager,
+  // cilium-operator, cnpg's manager and its barman-cloud plugin,
+  // alloy-operator, burrito-controllers — all self-terminate when they lose
+  // their lease, so a single etcd fsync stall past the 5s lease deadline exits
+  // all of them together. One such round scores ~7 restarts, and rounds are
+  // the unit worth counting.
   //
-  // `for` is the load-bearing number here, not the threshold. Because the
-  // query looks back an hour, ONE churn event keeps the count above 4 for a
-  // full hour as the window slides past it — so a short `for` pages on every
-  // isolated blip, and there were 15-20 of those in three days. `for = 2h`
-  // requires the churn to still be happening after the first event has aged
-  // out of the window, which is the difference between "a controller bounced"
-  // and "the control plane is flapping". The 8.5h stretch and the storm both
-  // clear it; a lone blip does not.
+  // Counting *distinct containers* cannot discriminate here. Measured over the
+  // 14 days to 2026-09-07, the number of containers with more than one restart
+  // in the trailing hour reads 6-8 almost continuously: the flapping is
+  // chronic, not episodic, so a breadth threshold is saturated and the rule
+  // that used one sat in `pending` through 24h of it without ever firing.
+  // What varies is the rate. Sampled hourly over the same 14 days, a quiet
+  // hour is 0, an ordinary round is 7, and the bad hours read 15, 21, 22, 23
+  // and 65. Above 20 is three rounds inside one hour — about four firings a
+  // fortnight, all on days the node was genuinely struggling.
   //
-  // A node reboot restarts much of this set at once and would trip the
-  // threshold, but not for two hours, so it stays with its own rule in
-  // host-lifecycle rather than double-paging here.
+  // `for = 15m` only asks the burst to still be visible an evaluation window
+  // later; it needs no longer, because the query looks back an hour and a real
+  // burst holds the value up for the rest of that hour anyway.
+  //
+  // A node reboot restarts far more than this set at once and trips the
+  // threshold too, but it has its own rule in host-lifecycle — check whether
+  // "minipc rebooted" is firing before chasing this one.
   rule {
     name           = "k8s: platform controllers restarting in lockstep"
-    for            = "2h"
+    for            = "15m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "More than 4 platform containers have restarted in the last hour — apiserver is likely dropping out"
-      description = "Several unrelated platform controllers restarted inside the same hour. When cnpg, cilium-operator, alloy-operator and burrito-controllers bounce together they are not each broken — they are leader-elected, and they all self-terminate when they lose their lease, so simultaneous exits mean the API server became unreachable. Check whether `kube-apiserver`, `kube-scheduler` or `kube-controller-manager` are in the set (`kubectl --context admin@adanalife-minipc get pods -n kube-system`): if the static control-plane pods restarted too, the fault is below the controllers. Then look at etcd — `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today service etcd status` and its fsync latency, since a single-node control plane wedges on slow disk. Distinguish from a node reboot by the sibling \"minipc rebooted\" alert: if that is also firing, this is expected fallout and resolves itself. If it is not, the box stayed up and the control plane flapped on its own, which is the case worth chasing."
+      summary     = "Over 20 platform container restarts in the last hour — the control plane is losing its leases repeatedly"
+      description = "The leader-elected platform controllers exit when they lose their lease, so they bounce together whenever the API server or etcd stalls; this rule fires when that has happened three or more times inside an hour. Confirm the shape first — `kubectl --context admin@adanalife-minipc get pods -A --sort-by=.status.startTime` should show cnpg, cilium-operator, alloy-operator, burrito-controllers and the static control-plane pods restarting at the same timestamps. If instead one pod is crashlooping on its own, this is the wrong rule and that pod's logs are the answer. Then check whether the node bounced (the sibling \"minipc rebooted\" alert): if it did, this is fallout and resolves itself. If it did not, the suspect is etcd fsync latency on a single-node control plane — **etcd exposes no metrics on this node**, so Grafana cannot answer it and `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today service etcd status` plus `dmesg` are the only reads available. Heavy disk writers are the usual trigger: CI on the ARC pool writes through the T5, and stalls have landed in the same second as a CI burst."
       link        = local.control_plane_restarts_link
     }
     labels = {
@@ -4005,7 +4008,7 @@ resource "grafana_rule_group" "control_plane_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "count(max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h])) > 1)"
+        expr          = "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"kube-system|cnpg-system|monitoring|burrito-system|argocd|external-secrets|tailscale\"}[1h]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -4024,7 +4027,7 @@ resource "grafana_rule_group" "control_plane_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [4] }
+          evaluator = { type = "gt", params = [20] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
