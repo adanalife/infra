@@ -143,6 +143,17 @@ destinations:
     #                         repository and job_name (~170 series), and the
     #                         two duration histograms add a `le` dimension on
     #                         top of that (~7800).
+    #   etcd_disk_wal_fsync_duration_seconds_bucket /
+    #   etcd_disk_backend_commit_duration_seconds_bucket /
+    #   etcd_server_leader_changes_seen_total  — the two write-latency
+    #                         histograms and the leader-change counter, for the
+    #                         control-plane-health rules. A single-node control
+    #                         plane wedges when these stall past the 5s lease
+    #                         deadline, and every other signal of that is a
+    #                         downstream symptom. The buckets carry a `le`
+    #                         dimension, so ~35 series for one node against a
+    #                         15000 cap; the rest of etcd's ~200 families stay
+    #                         local-VM-only.
     #   up                  — every scrape target's own health, for the
     #                         scrape-health alert. This is the family that
     #                         tells "the condition an alert watches is true"
@@ -255,7 +266,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|etcd_disk_wal_fsync_duration_seconds_bucket|etcd_disk_backend_commit_duration_seconds_bucket|etcd_server_leader_changes_seen_total|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
@@ -518,6 +529,54 @@ telemetryServices:
 collectors:
   alloy-metrics:
     presets: [clustered, statefulset]
+    # etcd's plaintext metrics listener on the control-plane node. The chart
+    # has no etcd feature, and etcd is a Talos host service rather than a pod,
+    # so there is nothing to annotate for autodiscovery — it takes a scrape of
+    # its own. Node discovery rather than a hardcoded address: the node's
+    # address is its tailnet IP, which is not a thing to pin in a values file.
+    #
+    # Depends on `cluster.etcd.extraArgs.listen-metrics-urls` in the Talos
+    # machine config (talos/adanalife-minipc/controlplane.patch.yaml). Without
+    # it nothing listens on 2381 and this target reads `up = 0`, which the
+    # scrape-health rule pages on after 15m — so apply the machine config
+    # BEFORE syncing this chart, not after.
+    #
+    # Control-plane nodes only. etcd runs nowhere else, and a worker in the
+    # target set would be a permanently-down target rather than a finding.
+    extraConfig: |-
+      discovery.kubernetes "etcd_nodes" {
+        role = "node"
+      }
+
+      discovery.relabel "etcd" {
+        targets = discovery.kubernetes.etcd_nodes.targets
+
+        rule {
+          // The label's VALUE is empty on a control-plane node, so presence is
+          // what has to be tested — matching the value would match every node.
+          source_labels = ["__meta_kubernetes_node_labelpresent_node_role_kubernetes_io_control_plane"]
+          regex         = "true"
+          action        = "keep"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+          target_label  = "__address__"
+          replacement   = "$1:2381"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          target_label  = "instance"
+        }
+      }
+
+      prometheus.scrape "etcd" {
+        targets    = discovery.relabel.etcd.output
+        job_name   = "etcd"
+        forward_to = [
+          prometheus.remote_write.localmetrics.receiver,
+          prometheus.remote_write.metrics.receiver,
+        ]
+      }
   alloy-logs:
     # `clustered` lets replicas partition pods between themselves so
     # podLogsViaKubernetesApi doesn't N-multiply kube-API log fetches.
