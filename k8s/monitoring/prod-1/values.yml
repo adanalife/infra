@@ -53,14 +53,22 @@ destinations:
       create: false
       name: grafana-cloud-metrics-write
       namespace: monitoring
+    # OTLP-sourced series only: promote resource attributes to labels, so the
+    # alert rules' `service_platform` / `deployment_environment` selectors
+    # keep matching. Mimir's own OTLP gateway did this promotion for the
+    # pods' direct pushes; the remote_write path has to be told. Scraped
+    # series are untouched.
+    openTelemetryConversion:
+      resourceToTelemetryConversion: true
     # Cloud allowlist. This destination's remote_write feeds Grafana
     # Cloud's capped free tier (15K active-series hard cap); localMetrics
     # (VictoriaMetrics) receives the full scrape unfiltered, so anything
     # dropped here stays queryable there. App metrics arriving over OTLP
-    # (tripbot/obs/playout/onscreens/console) bypass this remote_write
-    # pipeline entirely — applicationObservability below forwards them to
-    # the cloud OTLP gateway unfiltered — so the cloud holds all of those
-    # regardless of these rules.
+    # (tripbot/obs/playout/onscreens/console) come through this same
+    # pipeline — applicationObservability below lists this destination —
+    # so the keep-list is the one gate on what reaches the cloud, for
+    # scraped and pushed series alike. Dashboards read VictoriaMetrics
+    # over PDC; only what an alert rule evaluates needs to be here.
     #
     # The keep rule is an allowlist: it ships only the scraped series that
     # cloud alerts and dashboards depend on, and drops every other scraped
@@ -137,6 +145,23 @@ destinations:
     #                         cluster-wide (3 of them stage-dropped) plus the
     #                         integrations' own, against 2802 active series of
     #                         a 15000 cap measured 2026-09-02.
+    #   The OTLP-pushed app families, exactly the ones an alert rule reads
+    #   (grep terraform/platform/grafana-alerts.tf before touching this):
+    #   console_platform_component_up  — the stream-health gate signal.
+    #   go_goroutine_count, go_memory_used_bytes  — the go-runtime group.
+    #   obs_*  (nine gauges)  — stream-health: streaming_active, the
+    #                         skipped/total frame counters, congestion,
+    #                         reconnecting, background-audio state.
+    #   playout_nats_connected, playout_pipeline_running_time_ms  — relay-health.
+    #   tripbot_*  (nine)   — channel_live, gateway_up, twitch_connected,
+    #                         eventsub_subscriptions, the token expiry, the
+    #                         OBS recovery/silent-disconnect counters, the
+    #                         background-audio bed/tracks gauges.
+    #                         Everything else the apps push (HTTP/DB
+    #                         histograms, command durations, chat counters —
+    #                         ~3K series) is VM-only, where the dashboards
+    #                         read it. Adding a rule against a pushed metric
+    #                         means adding its name here, same as scraped.
     # The rest of what's scraped is local-VM-only: the other node_*
     # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
     # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
@@ -215,7 +240,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up|console_platform_component_up|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
@@ -248,13 +273,9 @@ destinations:
       name: grafana-cloud-metrics-write
       namespace: monitoring
 
-  # Grafana Cloud's OTLP gateway — the same endpoint and credential the app
-  # pods used to push to directly, now fed by alloy-receiver. Carries all
-  # three signals so the cloud sees exactly what it did before the receiver
-  # existed: Mimir keeps the app metrics the dashboards and alerts read,
-  # Loki the app logs, Tempo the spans. The receiver is the one place the
-  # cloud credential lives; the app pods carry only the receiver's Service
-  # address. The pod-side secret is JSON in OTEL env-var shape, so the
+  # Grafana Cloud's OTLP gateway, fed by alloy-receiver: app logs to Loki
+  # and spans to Tempo. The receiver is the one place the cloud credential
+  # lives; the app pods carry only the receiver's Service address. The pod-side secret is JSON in OTEL env-var shape, so the
   # ExternalSecret re-templates it into the two keys read here. (The chart
   # lowercases destination names when it labels Alloy components, hence
   # `secret.cloudotlp` below against a `cloudOtlp` destination.)
@@ -268,8 +289,12 @@ destinations:
       create: false
       name: grafana-cloud-otlp
       namespace: monitoring
+    # Logs and traces only. App metrics reach the cloud through the
+    # `metrics` destination above and its keep-list; sending them here too
+    # would land every pushed series in Mimir unfiltered (that was ~75% of
+    # the tenant's active series) and double up the allowlisted ones.
     metrics:
-      enabled: true
+      enabled: false
     logs:
       enabled: true
     traces:
@@ -278,15 +303,17 @@ destinations:
 # OTLP in from the app pods. Every app that exports OTLP points
 # OTEL_EXPORTER_OTLP_ENDPOINT at this collector's Service
 # (http://k8s-monitoring-alloy-receiver.monitoring.svc:4318) instead of
-# at Grafana Cloud. Metrics fan out to VictoriaMetrics (so the console's
-# cluster PromQL source holds every app series, stage-1 included) and to
-# the cloud gateway; logs and traces go to the cloud gateway only — there
-# is no in-cluster log or trace store.
+# at Grafana Cloud. Metrics fan out to VictoriaMetrics in full (the
+# dashboards and the console's cluster PromQL source read there, stage-1
+# included) and to the cloud Mimir tenant through the keep-list (only what
+# the alert rules evaluate); logs and traces go to the cloud gateway —
+# there is no in-cluster log or trace store.
 applicationObservability:
   enabled: true
   collector: alloy-receiver
   destinations:
     - localMetrics
+    - metrics
     - cloudOtlp
   receivers:
     otlp:
