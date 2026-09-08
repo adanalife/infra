@@ -67,40 +67,50 @@ listenerTemplate:
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
 # showing arc-amd64 online is a true health signal.
 #
-# maxRunners is held at 1 because CI activity correlates with the node dying
-# and nobody knows why yet. Six node deaths on 2026-08-23 each landed minutes
-# after a CI burst, so the pool runs one job at a time until the mechanism is
-# identified — a throughput cost accepted deliberately, against a node whose
-# failure takes both prod streams and every co-tenant with it.
+# maxRunners: 2 lets exactly two jobs run at once. ARC allocates one ephemeral
+# runner per assigned job and never more, so there is no queue-depth threshold
+# to configure: the second pod comes up only while a second job is actually
+# assigned, and goes away when it finishes. minRunners is the floor of that
+# same number, so the steady state is still one warm pod.
+#
+# The pool stays this narrow because CI activity correlates with the node
+# misbehaving. Six node deaths on 2026-08-23 each landed minutes after a CI
+# burst; removing the Docker daemon from this pool (see above) is what stopped
+# those. Leader-election flaps continue — every lease holder (kube-scheduler,
+# kube-controller-manager, cilium-operator, cnpg, the alloy operator) exiting
+# together when an etcd fsync stalls past the 5s deadline, a few times a day by restart
+# count, one of them in the same second as a CI burst on 2026-09-07. Concurrency multiplies the
+# write burst behind that, which is why the step is 1 → 2 and not wider.
 #
 # It is NOT a memory cap — the node was never short of memory. Measured against
-# the in-cluster VictoriaMetrics across those crash windows: MemAvailable never fell below ~15.8Gi of ~30.5Gi, load15 peaked at 4
-# of 20 CPUs, the USB-attached T5 wrote 0.05 MiB/s, and every arc-runners pod
-# together peaked at 487Mi. Scheduler commitment ran high while consumption
-# stayed low, so the requests were inflated relative to reality rather than the
-# node being exhausted. Reason from the metrics, not from the request totals —
-# and query the in-cluster VictoriaMetrics, since Grafana Cloud takes an
-# allowlist and holds none of these series.
+# the in-cluster VictoriaMetrics across those crash windows: MemAvailable never
+# fell below ~15.8Gi of ~30.5Gi, load15 peaked at 4 of 20 CPUs, the
+# USB-attached T5 wrote 0.05 MiB/s, and every arc-runners pod together peaked
+# at 487Mi. Scheduler commitment ran high while consumption stayed low, so the
+# requests were inflated relative to reality rather than the node being
+# exhausted. Reason from the metrics, not from the request totals — and query
+# the in-cluster VictoriaMetrics, since Grafana Cloud takes an allowlist and
+# holds none of these series.
 #
 # A runner pod is the runner container below and nothing else. Anything it does
 # not declare falls back to the arc-runners LimitRange in
-# cdk8s/adanalife_k8s/constructs/arc.py.
+# cdk8s/adanalife_k8s/constructs/arc.py. Two of them at the limits below can
+# claim 8 CPUs and 12Gi against a 20-CPU / 30.5Gi node.
 #
 # ci-low priority decides who the kubelet evicts once memory is already tight;
 # it does not stop a burst from exhausting the node in the first place. Honest
 # requests remain worth keeping so the scheduler queues a runner it cannot place
-# rather than overpacking the node — that is hygiene, not the fix for the
-# crashes.
+# rather than overpacking the node — that is hygiene, not a fix for the crashes.
 #
-# Widening the pool waits on knowing what kills the node. The kernel log is the
-# outstanding evidence: Talos does not persist dmesg across reboot, so six
+# Widening further waits on knowing what stalls etcd. The kernel log is the
+# outstanding evidence: Talos does not persist dmesg across reboot, so the node
 # deaths produced none.
 #
 # There is no GitHub-hosted fallback job routing — if the minipc is down,
 # checks queue until it returns (none are required checks; the free plan can't
 # protect private repos, so merges never block).
 minRunners: 1
-maxRunners: 1
+maxRunners: 2
 
 template:
   spec:
@@ -214,13 +224,23 @@ template:
       # path on the disk etcd fsyncs to; a user-supplied volume of this name
       # replaces that default. The runner container mounts it above.
       #
-      # The tradeoff: an emptyDir is recreated per pod, so each ephemeral runner
-      # starts from a clean workspace. A hostPath persists across jobs. That is
-      # safe at maxRunners: 1 (no concurrent writers) and actions/checkout runs
-      # `git clean -ffdx` by default, so the checkout itself is still clean —
-      # but _temp and _actions now carry over between jobs. Revert this volume
-      # alone if a job starts failing on state it did not create.
+      # A generic ephemeral volume rather than a hostPath: local-path
+      # provisions on /var/mnt/data (the T5), which is the property that
+      # matters, and each runner pod gets its own PV, so concurrent runners
+      # can't share a workspace path. Delete reclaim means the volume goes with
+      # the pod, matching the ephemeral-runner model — every job starts clean,
+      # and nothing here is worth keeping (the warm caches above are separate
+      # and deliberately shared).
+      #
+      # The size request is nominal: local-path is hostPath-backed and enforces
+      # no quota, so this bounds nothing. Job workspaces share the T5's free
+      # space with everything else on it.
       - name: work
-        hostPath:
-          path: /var/mnt/data/arc-work
-          type: DirectoryOrCreate
+        ephemeral:
+          volumeClaimTemplate:
+            spec:
+              accessModes: [ReadWriteOnce]
+              storageClassName: local-path
+              resources:
+                requests:
+                  storage: 20Gi
