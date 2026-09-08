@@ -5,6 +5,9 @@
 # terraform/platform/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
+#   - alloy-receiver → OTLP in from the app pods (tripbot, onscreens,
+#     playout, console, gateway), fanned out to VictoriaMetrics and to
+#     the Grafana Cloud OTLP gateway
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
 #   - kubelet + cAdvisor scrape (built into clusterMetrics)
 #
@@ -14,10 +17,13 @@
 # gets its own ns labeled `privileged`. This chart's workloads all stay
 # under baseline.
 #
-# Credentials come from the grafana-cloud-metrics-write Secret in this
-# namespace, materialized by the ExternalSecret in external-secret.yaml.
+# Credentials come from the grafana-cloud-metrics-write and grafana-cloud-otlp
+# Secrets in this namespace, materialized by the ExternalSecrets in
+# external-secret.yaml.
 #
 # Deltas from development/values.yml:
+#   - applicationObservability + the alloy-receiver collector exist only
+#     here: no app pod exports OTLP in development (OTEL_SDK_DISABLED).
 #   - cluster.name — labels the physical cluster (adanalife-minipc) in
 #     Grafana Cloud dashboard filters. stage-1 and prod-1 co-tenant this
 #     one mini-PC cluster and are separated by the `namespace` label
@@ -50,10 +56,11 @@ destinations:
     # Cloud allowlist. This destination's remote_write feeds Grafana
     # Cloud's capped free tier (15K active-series hard cap); localMetrics
     # (VictoriaMetrics) receives the full scrape unfiltered, so anything
-    # dropped here stays queryable there. OTLP-push app metrics
-    # (tripbot/obs/playout/onscreens) bypass this pipeline entirely — they
-    # push straight to the cloud OTLP endpoint — so the cloud holds all of
-    # those regardless of these rules.
+    # dropped here stays queryable there. App metrics arriving over OTLP
+    # (tripbot/obs/playout/onscreens/console) bypass this remote_write
+    # pipeline entirely — applicationObservability below forwards them to
+    # the cloud OTLP gateway unfiltered — so the cloud holds all of those
+    # regardless of these rules.
     #
     # The keep rule is an allowlist: it ships only the scraped series that
     # cloud alerts and dashboards depend on, and drops every other scraped
@@ -219,6 +226,15 @@ destinations:
     # collectors scrape, including the stage-1 and launch-day-trim
     # series the cloud destination drops.
     url: http://victoria-metrics.monitoring.svc.cluster.local:8428/api/v1/write
+    # For the app metrics that arrive over OTLP (applicationObservability
+    # below): promote every resource attribute to a label, so
+    # deployment_environment / service_platform / service_name are
+    # selectable in PromQL the way they are in Grafana Cloud. Without this
+    # the OTLP→Prometheus conversion parks them on target_info only, and a
+    # stage-1 series is indistinguishable from prod-1 in VM. Scraped series
+    # are untouched.
+    openTelemetryConversion:
+      resourceToTelemetryConversion: true
 
   logs:
     type: loki
@@ -231,6 +247,56 @@ destinations:
       create: false
       name: grafana-cloud-metrics-write
       namespace: monitoring
+
+  # Grafana Cloud's OTLP gateway — the same endpoint and credential the app
+  # pods used to push to directly, now fed by alloy-receiver. Carries all
+  # three signals so the cloud sees exactly what it did before the receiver
+  # existed: Mimir keeps the app metrics the dashboards and alerts read,
+  # Loki the app logs, Tempo the spans. The receiver is the one place the
+  # cloud credential lives; the app pods carry only the receiver's Service
+  # address. The pod-side secret is JSON in OTEL env-var shape, so the
+  # ExternalSecret re-templates it into the two keys read here. (The chart
+  # lowercases destination names when it labels Alloy components, hence
+  # `secret.cloudotlp` below against a `cloudOtlp` destination.)
+  cloudOtlp:
+    type: otlp
+    protocol: http
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.cloudotlp.data["OTLP_ENDPOINT"])
+    extraHeadersFrom:
+      Authorization: convert.nonsensitive(remote.kubernetes.secret.cloudotlp.data["OTLP_AUTHORIZATION"])
+    secret:
+      create: false
+      name: grafana-cloud-otlp
+      namespace: monitoring
+    metrics:
+      enabled: true
+    logs:
+      enabled: true
+    traces:
+      enabled: true
+
+# OTLP in from the app pods. Every app that exports OTLP points
+# OTEL_EXPORTER_OTLP_ENDPOINT at this collector's Service
+# (http://k8s-monitoring-alloy-receiver.monitoring.svc:4318) instead of
+# at Grafana Cloud. Metrics fan out to VictoriaMetrics (so the console's
+# cluster PromQL source holds every app series, stage-1 included) and to
+# the cloud gateway; logs and traces go to the cloud gateway only — there
+# is no in-cluster log or trace store.
+applicationObservability:
+  enabled: true
+  collector: alloy-receiver
+  destinations:
+    - localMetrics
+    - cloudOtlp
+  receivers:
+    otlp:
+      http:
+        enabled: true
+  connectors:
+    # Host-info metrics for Grafana Cloud's application-observability
+    # product; nothing here reads them and they would spend cloud series.
+    grafanaCloudMetrics:
+      enabled: false
 
 clusterMetrics:
   enabled: true
@@ -417,6 +483,11 @@ collectors:
     presets: [clustered, daemonset]
   alloy-singleton:
     presets: [singleton]
+  # OTLP in from the app pods (applicationObservability). A plain
+  # Deployment: it holds no scrape state, so it needs neither the
+  # clustered nor the statefulset preset the scrapers use.
+  alloy-receiver:
+    presets: [deployment]
 
 # `collectorCommon.alloy` passes through to the underlying grafana/alloy
 # subchart, which uses two distinct securityContext keys (the doubled
