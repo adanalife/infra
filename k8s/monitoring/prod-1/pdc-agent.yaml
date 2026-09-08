@@ -86,3 +86,12 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          # The agent generates its SSH keypair + signed certificate under
+          # $HOME/.ssh at startup; with a read-only root that is the one
+          # path it needs writable. Ephemeral is fine — it re-keys on boot.
+          volumeMounts:
+            - name: ssh
+              mountPath: /home/pdc/.ssh
+      volumes:
+        - name: ssh
+          emptyDir: {}
