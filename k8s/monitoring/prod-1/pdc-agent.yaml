@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pdc-agent
-          image: grafana/pdc-agent:v0.0.64
+          image: grafana/pdc-agent:0.0.64
           args:
             - -cluster
             - $(CLUSTER)
@@ -86,3 +86,12 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          # The agent generates its SSH keypair + signed certificate under
+          # $HOME/.ssh at startup; with a read-only root that is the one
+          # path it needs writable. Ephemeral is fine — it re-keys on boot.
+          volumeMounts:
+            - name: ssh
+              mountPath: /home/pdc/.ssh
+      volumes:
+        - name: ssh
+          emptyDir: {}
