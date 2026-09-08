@@ -78,7 +78,7 @@ resource "grafana_folder" "lab" {
 # Grafana's own ${variable:format} query interpolation in panel exprs
 # keeps working untouched.
 #
-#   __DS_PROMETHEUS__  →  prometheus DS uid
+#   __DS_PROMETHEUS__  →  the VictoriaMetrics DS uid (see below)
 #   __DS_LOKI__        →  loki DS uid
 #   __DS_TEMPO__       →  tempo DS uid
 locals {
@@ -117,7 +117,17 @@ locals {
     "node-exporter-full",      # grafana.com/dashboards/1860
   ])
   dashboard_substitutions = {
-    "__DS_PROMETHEUS__" = data.grafana_data_source.prometheus.uid
+    # Dashboards read the in-cluster VictoriaMetrics over PDC
+    # (grafana-victoria-metrics.tf), not the cloud Mimir tenant: VM holds
+    # every scraped and every OTLP-pushed series at full fidelity, stage-1
+    # included, with no active-series cap, so a panel there costs the cloud
+    # nothing and never goes blank because a family fell off the keep-list.
+    # The alert rules keep evaluating against grafanacloud-prom (see
+    # grafana-alerts.tf) — a rule pointed at a store that lives on the
+    # minipc reads NoData exactly when the minipc is the problem. Flip this
+    # one line back to data.grafana_data_source.prometheus.uid to return
+    # every dashboard to Mimir.
+    "__DS_PROMETHEUS__" = grafana_data_source.victoria_metrics.uid
     "__DS_LOKI__"       = data.grafana_data_source.loki.uid
     "__DS_TEMPO__"      = data.grafana_data_source.tempo.uid
   }
