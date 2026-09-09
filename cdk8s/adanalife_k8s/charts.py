@@ -25,6 +25,7 @@ from adanalife_k8s.constructs.dashcam import (
 )
 from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.music import (
+    emit_music_index_rbac,
     emit_music_local_pvc,
     emit_music_localize_job,
     emit_music_pv,
@@ -209,6 +210,7 @@ class MusicLocalizeChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
+        emit_music_index_rbac(self, env)
         emit_music_localize_job(self, env)
 
 

@@ -125,15 +125,17 @@ tasks:
   # volume that keeps a NAS outage out of the stream path. Run after staging new
   # albums with tripbot's bin/stage-streambeats, and after a T5 wipe. Re-runnable:
   # files already present are skipped.
-  # Watch: kubectl -n <env> logs -f job/music-localize
+  # Watch the copy: kubectl -n <env> logs -f job/music-localize -c localize
+  # (-c is needed — the copy is the initContainer; the container proper is the
+  # kubectl step that publishes the album index the copy renders.)
   k8s:stage:music-localize:
-    desc: copy the stage-1 music share NFS -> node-local PVC (the one-shot localize Job)
+    desc: copy the stage-1 music share NFS -> node-local PVC and publish the album index ConfigMap (the one-shot localize Job)
     cmds:
       - task: k8s:_music-localize:apply
         vars: { ENV: stage-1 }
 
   k8s:prod:music-localize:
-    desc: copy the prod-1 music share NFS -> node-local PVC (the one-shot localize Job)
+    desc: copy the prod-1 music share NFS -> node-local PVC and publish the album index ConfigMap (the one-shot localize Job)
     cmds:
       - task: k8s:_music-localize:apply
         vars: { ENV: prod-1 }
@@ -249,10 +251,13 @@ tasks:
         f="$out/{{.ENV}}-music-localize.k8s.yaml"
         test -f "$f" || { echo "no music localize Job for {{.ENV}} — only nfs envs render one"; exit 1; }
         # Jobs are largely immutable, so clear any prior run before re-applying.
+        # Only the Job — the ServiceAccount/Role/RoleBinding beside it in the same
+        # file re-apply in place, and deleting them would revoke the credential
+        # mid-run on a re-apply while one is going.
         kubectl -n {{.ENV}} delete job music-localize --ignore-not-found
         echo "Applying {{.ENV}} music localize Job (NFS -> node-local PVC, outside Argo)"
         kubectl apply -f "$f"
-        echo "Watch: kubectl -n {{.ENV}} logs -f job/music-localize"
+        echo "Watch: kubectl -n {{.ENV}} logs -f job/music-localize -c localize"
 
   # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
   # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.
