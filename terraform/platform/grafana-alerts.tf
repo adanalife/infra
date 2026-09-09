@@ -272,10 +272,12 @@ resource "grafana_notification_policy" "root" {
     repeat_interval = "1h"
   }
 
-  // Muted-but-kept alerts (labelled mute=true). The active-series-cap warning
-  // fires continuously (two deployments share the free-tier budget) and
-  // there's no action to take, so it's silenced via the always-on mute timing
-  // while the rule is kept (still visible/firing in the Alerting UI).
+  // Muted-but-kept alerts (labelled mute=true): the two frame-skip early
+  // warnings. Routine iGPU contention on the shared single-node minipc fires
+  // them continuously with no per-firing action to take, so they're silenced
+  // via the always-on mute timing while the rules are kept (still visible and
+  // firing in the Alerting UI, and still the place to look when the sustained
+  // escalation above them does page).
   // continue=false so it never falls through to the Discord default receiver.
   policy {
     matcher {
@@ -1334,9 +1336,22 @@ resource "grafana_rule_group" "stream_health" {
   // low-stakes and must not page). Motivating incident: the 2026-06-15 overnight
   // video-pipeline transcode starved the shared iGPU for ~10h (6-9 skipped
   // frames/s), the render warning flapped the whole time, and no durable alert
-  // ever fired. Threshold 2/s on the 1h average is ~20x the warning's 0.1/s
-  // instantaneous threshold and sits well clear of the ~0 baseline when the
-  // iGPU isn't contended.
+  // ever fired.
+  //
+  // Watches render-thread and output-thread skips together, taking whichever is
+  // worse: they are the same viewer symptom (the encoder or the compositor
+  // can't keep real time) and either one alone sustained for an hour is
+  // unwatchable. The two are combined through a throwaway `thread` label the
+  // outer max immediately drops — rate() strips __name__, so without it the two
+  // families arrive as one vector holding duplicate labelsets and the query
+  // errors rather than returning a maximum.
+  //
+  // Threshold 1/s on the 1h average — at 60fps, ~1.7% of frames dropped every
+  // second for an hour, plainly visible. It is set from the data rather than
+  // eyeballed: across 14 days the worst hourly average either family reached
+  // was 0.24/s, so 1/s is 4x clear of the noisy baseline and still 6-9x below
+  // the motivating incident. The 2/s it replaced was above anything the system
+  // has ever produced short of that incident, and could not fire.
   rule {
     name           = "OBS: stream unwatchable (sustained heavy frame-skip)"
     for            = "10m"
@@ -1346,7 +1361,7 @@ resource "grafana_rule_group" "stream_health" {
 
     annotations = {
       summary     = "Prod stream has been dropping frames heavily for ~1h+ (unwatchable)"
-      description = "The 1h-average OBS render-thread skipped-frame rate on prod-1 is above 2/s — the stream has been visibly stuttering for an extended period, not a transient burst. Almost always iGPU contention from a co-tenant workload (a video-pipeline transcode/calibrate job, stage VLC/OBS) or sustained host CPU pressure. Check `kubectl get pods -A | grep -E 'transcode|calibrate|pipeline'` and intel_gpu_top on the minipc; stop the offending job to restore real-time encode."
+      description = "The 1h-average OBS skipped-frame rate on prod-1 is above 1/s on the render thread, the output thread, or both — at 60fps that is at least ~1.7% of frames gone every second for an hour, so the stream has been visibly stuttering for an extended period rather than in a transient burst. Almost always iGPU contention from a co-tenant workload (a video-pipeline transcode/calibrate job, stage VLC/OBS) or sustained host CPU pressure. Check `kubectl get pods -A | grep -E 'transcode|calibrate|pipeline'` and intel_gpu_top on the minipc; stop the offending job to restore real-time encode. The two muted early-warning rules show which thread is skipping and since when."
     }
     labels = {
       severity = "critical"
@@ -1362,7 +1377,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform) (avg_over_time(rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m])) ${local.obs_mode_gate}"
+        expr          = "max by (service_platform) (label_replace(avg_over_time(rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]), \"thread\", \"render\", \"\", \"\") or label_replace(avg_over_time(rate(obs_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]), \"thread\", \"output\", \"\", \"\")) ${local.obs_mode_gate}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1381,7 +1396,7 @@ resource "grafana_rule_group" "stream_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [2] }
+          evaluator = { type = "gt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
