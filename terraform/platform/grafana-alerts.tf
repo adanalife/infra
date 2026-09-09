@@ -3049,19 +3049,23 @@ resource "grafana_rule_group" "gate_health" {
 }
 
 # Gateway health — the per-platform API gateway sits on tripbot's critical path
-# (every Helix / Data-API call routes through it). Two complementary prod-scoped
-# liveness signals: the consumer-side reachability gauge tripbot emits (catches
-# "the bot can't reach the gateway") and an absent() canary on the gateway's own
-# scraped liveness gauge (catches "the gateway process is gone"). Both critical.
+# (every Helix / Data-API call routes through it). Three complementary
+# prod-scoped liveness signals, all critical: the consumer-side reachability
+# gauge tripbot emits, split per platform (catches "one bot instance can't reach
+# its gateway"), an absent() canary on the gateway's own scraped liveness gauge
+# (catches "the gateway process is gone"), and the inbound-chat poll rate
+# (catches "the gateway is alive and has stopped listening").
 #
-# The two warnings after them watch things the gateway can get wrong while
-# perfectly alive: withholding errors from Sentry once its hourly cap is hit,
+# The warnings watch things the gateway can get wrong while perfectly alive:
+# withholding errors from Sentry once its hourly cap is hit,
 # and holding metadata that disagrees with what the operator saved. Both are
 # quiet failures — the first looks like a healthy silence, the second like a
 # successful save.
 #
-# All four scope to prod with namespace, the label the annotation scrape
-# attaches — the gateway's metrics arrive that way, not over OTLP. The scrape
+# The gateway-side rules scope to prod with namespace, the label the annotation
+# scrape attaches — the gateway's metrics arrive that way, not over OTLP. The
+# consumer-side reachability rule is the exception: tripbot ships over OTLP, so
+# it scopes with deployment_environment and splits on service_platform. The scrape
 # is fresh enough to alert on: measured across the six prod gateways,
 # time() - timestamp(platform_gateway_up) sits at 14-54s. The 20min-1h
 # staleness worth avoiding belongs to KSM series, not to allowlisted pod
@@ -3086,8 +3090,8 @@ resource "grafana_rule_group" "gateway_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "tripbot can't reach the platform-gateway"
-      description = "tripbot_gateway_up has been 0 for 5m on prod-1 — tripbot's gateway calls are failing at the transport layer (connection refused, timeout, DNS), so Helix/Data-API-backed features (live status, audience, chat send) are degraded. Check the gateway pods (crashloop? OOM? all replicas down?), the in-namespace Service, and any NetworkPolicy. Distinct from the gateway-side absent canary, which fires when the gateway stops reporting entirely."
+      summary     = "tripbot-{{ $labels.service_platform }} can't reach its platform-gateway"
+      description = "tripbot_gateway_up has been 0 for 5m on prod-1's {{ $labels.service_platform }} instance — that instance's gateway calls are failing at the transport layer (connection refused, timeout, DNS), so its Helix/Data-API-backed features (live status, audience, chat send) are degraded. Check the gateway pod for that platform (crashloop? OOM? all replicas down?), the in-namespace Service, and any NetworkPolicy. One platform alerting alone points at that pair; every platform alerting at once points at something shared. Distinct from the gateway-side absent canary, which fires when the gateway stops reporting entirely."
     }
     labels = {
       severity = "critical"
@@ -3103,7 +3107,7 @@ resource "grafana_rule_group" "gateway_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max(tripbot_gateway_up{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        expr          = "min by (service_platform) (tripbot_gateway_up{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -3350,6 +3354,77 @@ resource "grafana_rule_group" "gateway_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // A read-only platform that never polls is chat-dead in a way nothing else
+  // notices: the pod is up, platform_gateway_up reads 1, the console's card is
+  // green, and no message ever arrives. Prod tiktok shipped exactly that once,
+  // on a missing <PLATFORM>_API_URL, and the only witness was someone asking
+  // why the bot had stopped answering.
+  //
+  // Keyed off the poll itself rather than off inbound message volume, which is
+  // legitimately zero for hours on a slow-tv stream. The poll is not: measured
+  // over 7 days, gateway-twitch's inbound_chat rate sits flat at 0.1/s and
+  // never dips, off-stream nights included, so anything at zero is a defect.
+  //
+  // No job filter, deliberately: the series exists only for a gateway that
+  // polls, so gateway-youtube — whose inbound poll is off behind the Data API
+  // quota question — contributes nothing rather than needing an exclusion that
+  // would have to be removed by hand the day inbound is turned on.
+  //
+  // no_data is OK for the same reason: a gateway that has stopped reporting at
+  // all is "No platform_gateway_up from prod-1" above, not this.
+  rule {
+    name           = "Gateway: inbound chat poll has stopped"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.job }} has not polled for inbound chat in 10m"
+      description = "platform_gateway_requests_total{op=\"inbound_chat\"} has been flat for 10m on {{ $labels.job }} — the gateway is alive and answering, but it has stopped asking the platform for messages, so chat is silently one-way: tripbot can still send, and nothing a viewer types will ever reach a command handler. The usual cause is configuration rather than a crash — a missing or wrong <PLATFORM>_API_URL leaves the poll loop with nowhere to go. Check the pod's env and its logs for the poll loop exiting (`kubectl -n prod-1 logs deploy/{{ $labels.job }}`). Sending still works, so the console and the platform both look healthy from outside."
+    }
+    labels = {
+      severity = "critical"
+      service  = "gateway"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (job) (rate(platform_gateway_requests_total{namespace=\"prod-1\", op=\"inbound_chat\"}[10m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [0.001] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
