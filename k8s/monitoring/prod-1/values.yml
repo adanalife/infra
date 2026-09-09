@@ -148,6 +148,10 @@ destinations:
     #   The OTLP-pushed app families, exactly the ones an alert rule reads
     #   (grep terraform/platform/grafana-alerts.tf before touching this):
     #   console_platform_component_up  — the stream-health gate signal.
+    #   console_terraform_plan_age_seconds  — burrito-health's plan-staleness
+    #                         rule. The console's number rather than Burrito's,
+    #                         which is why it is the one that still moves when
+    #                         Burrito is what died. Four series, one per layer.
     #   go_goroutine_count, go_memory_used_bytes  — the go-runtime group.
     #   obs_*  (nine gauges)  — stream-health: streaming_active, the
     #                         skipped/total frame counters, congestion,
@@ -240,7 +244,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up|console_platform_component_up|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
