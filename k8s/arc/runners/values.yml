@@ -10,10 +10,15 @@
 # the org's default runner group excludes public repos (fork-PR code must never
 # reach this pool).
 #
+# The pool runs a fleet-owned runner image, ghcr.io/adanalife/arc-runner, built
+# from infra's images/arc-runner/ — upstream's actions-runner plus the tools
+# these workflows would otherwise apt-install on every ephemeral job.
+#
 # THERE IS NO DOCKER DAEMON HERE, deliberately — no `containerMode`, so no dind
 # sidecar. Every container build in the fleet (dev-image, release, image-smoke)
 # runs on GitHub-hosted runners instead, and a `docker` step added to an
-# arc-amd64 job will fail with a missing socket rather than work.
+# arc-amd64 job will fail rather than work — the runner image ships no client
+# either, so it fails at the binary rather than at the socket.
 #
 # The reason is that this node also serves both production streams, and running
 # a Docker daemon on it is the one workload class every node self-reboot has had
@@ -119,11 +124,12 @@ template:
     # eviction just fails the check — rerun it.
     priorityClassName: ci-low
     # hostPath dirs are created root-owned; hand them to the runner user
-    # (uid 1001, group docker/123 — see the image Dockerfile) before the
+    # (uid 1001, group docker/123 — see images/arc-runner/Dockerfile) before the
     # runner starts. Non-recursive: children are created by 1001 afterward.
     initContainers:
       - name: chown-caches
-        image: ghcr.io/actions/actions-runner:latest
+        image: ghcr.io/adanalife/arc-runner:latest
+        imagePullPolicy: Always
         command:
           - sudo
           - chown
@@ -143,7 +149,14 @@ template:
             mountPath: /cache/work
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:latest
+        # Our own build of ghcr.io/actions/actions-runner (infra
+        # images/arc-runner/) — the upstream image plus the tools the fleet's
+        # workflows otherwise apt-install on every job, gh above all. Rebuilt
+        # weekly, so `Always` is what makes a rebuild actually reach the pods;
+        # the manifest check it adds per job is a round-trip against a
+        # registry the node already talks to.
+        image: ghcr.io/adanalife/arc-runner:latest
+        imagePullPolicy: Always
         command: ["/home/runner/run.sh"]
         env:
           # Point the setup actions (setup-python, setup-uv, setup-go, …) at
