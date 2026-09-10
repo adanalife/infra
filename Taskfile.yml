@@ -1021,38 +1021,42 @@ tasks:
   # tasks below (bootstrap-secrets / platform:up / apply) target the live
   # Talos cluster; there is no k8s:prod:cluster:*.
 
-  # Build the dev app images locally, tag them :dev-local, and import them into
-  # the k3d dev cluster's image store. APP=tripbot|obs|onscreens builds just
+  # Build the dev app images locally as :dev-local and import them into the k3d
+  # dev cluster's image store. APP=tripbot|obs|onscreens builds just
   # one; omit for all three. The committed manifests still pin CI's :main so a
   # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
   # only for iterating on a LOCAL build.
   k8s:dev:images:build:
-    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
-    dir: '{{.SIBLINGS}}/tripbot'
+    desc: "build local app images as :dev-local and import them into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
     cmds:
-      # --project-directory + --env-file mirror bin/devenv so build contexts
-      # resolve relative to the tripbot repo root and ${VAR} substitutions in
-      # the compose file pick up env.docker. On arm64 (Apple Silicon) layer
-      # docker-compose.arm64.yml so OBS builds from Dockerfile.arm64 (compiles
-      # OBS + CEF from source — without it browser_source silently breaks at
-      # scene load). First arm64 OBS build is ~30min for the CEF compile; cached
-      # thereafter. Locally-built images are single-platform, so k3d image
-      # import works cleanly (unlike multi-arch registry pulls).
+      # Each app is built straight from its own Dockerfile in its own sibling
+      # checkout — tripbot and onscreens-server out of the tripbot repo, OBS out
+      # of the obs repo. The image repo in the table has to match the one the
+      # committed manifests pin, or k8s:dev:deploy's initContainer override
+      # can't recognize the containers sharing the app's image.
+      # Locally-built images are single-platform, so k3d image import works
+      # cleanly (unlike multi-arch registry pulls).
       - |
         set -e
         target="{{.APP}}"
-        # app : compose-service : image-repo
-        all="tripbot:tripbot:adanalife/tripbot \
-             obs:obs:adanalife/obs \
-             onscreens:onscreens-server:adanalife/onscreens-server"
-        args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
-        case "$(uname -m)" in arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;; esac
+        # On arm64 (Apple Silicon) OBS builds from Dockerfile.arm64, which
+        # starts FROM the pre-baked ghcr.io/adanalife/obs-cef-base image: the
+        # OBS PPA publishes CEF-bundled packages for amd64 only, and Ubuntu's
+        # universe build strips CEF, so browser_source fails at scene load. The
+        # CEF compile lives in that base image and is pulled, not rebuilt here.
+        obs_dockerfile=Dockerfile
+        case "$(uname -m)" in arm64|aarch64) obs_dockerfile=Dockerfile.arm64 ;; esac
+        # app : build context : dockerfile (relative to the context) : image repo
+        all="tripbot:{{.SIBLINGS}}/tripbot:infra/docker/tripbot/Dockerfile:adanalife/tripbot \
+             obs:{{.SIBLINGS}}/obs:$obs_dockerfile:ghcr.io/adanalife/obs \
+             onscreens:{{.SIBLINGS}}/tripbot:infra/docker/onscreens-server/Dockerfile:adanalife/onscreens-server"
         for row in $all; do
-          app=${row%%:*}; rest=${row#*:}; svc=${rest%%:*}; repo=${rest#*:}
+          app=${row%%:*}; rest=${row#*:}
+          ctx=${rest%%:*}; rest=${rest#*:}
+          dockerfile=${rest%%:*}; repo=${rest#*:}
           { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
-          echo "==> build $repo  (compose service: $svc)"
-          docker compose $args build "$svc"
-          docker tag "$repo:latest" "$repo:dev-local"
+          echo "==> build $repo:dev-local  ($ctx/$dockerfile)"
+          docker build -f "$ctx/$dockerfile" -t "$repo:dev-local" "$ctx"
           k3d image import "$repo:dev-local" --cluster=adanalife-dev
         done
 
@@ -1078,7 +1082,7 @@ tasks:
         # app : deployment : container : image-repo  (dev platform suffix = twitch;
         # obs's container is named `obs`, the others `<app>-twitch`)
         all="tripbot:tripbot-twitch:tripbot-twitch:adanalife/tripbot \
-             obs:obs-twitch:obs:adanalife/obs \
+             obs:obs-twitch:obs:ghcr.io/adanalife/obs \
              onscreens:onscreens-twitch:onscreens-twitch:adanalife/onscreens-server"
         for row in $all; do
           app=${row%%:*}; r=${row#*:}; dep=${r%%:*}; r=${r#*:}; ctr=${r%%:*}; repo=${r#*:}
