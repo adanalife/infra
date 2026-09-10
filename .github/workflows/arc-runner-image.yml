@@ -1,0 +1,55 @@
+# Builds the image the arc-amd64 self-hosted pool runs on (images/arc-runner/).
+#
+# The weekly rebuild is what keeps `:latest` current: the Dockerfile pins no
+# versions, so upstream's runner releases, apt security updates and new gh
+# versions arrive by rebuilding rather than by a bump PR here.
+name: arc-runner-image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/arc-runner/**
+      - .github/workflows/arc-runner-image.yml
+  schedule:
+    # Mondays 06:00 UTC, before the week's CI load.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: arc-runner-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    # GitHub-hosted, and it has to be: the arc-amd64 pool this image is FOR has
+    # no Docker daemon, deliberately (k8s/arc/runners/values.yml explains why).
+    # A self-hosted build here would also be a chicken-and-egg on the first run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v7
+        with:
+          context: images/arc-runner
+          # The pool is the amd64 minipc and nothing else.
+          platforms: linux/amd64
+          tags: ghcr.io/adanalife/arc-runner:latest
+          push: true
+          cache-from: type=registry,ref=ghcr.io/adanalife/arc-runner:buildcache
+          cache-to: type=registry,ref=ghcr.io/adanalife/arc-runner:buildcache,mode=max
