@@ -1,0 +1,14 @@
+# Host toolchain for the k3d dev cluster. These are the exact versions the
+# dev-cluster cold start in README.md is verified against, so a revival starts
+# from a known baseline rather than whatever brew last upgraded.
+#
+# Terraform is deliberately absent: the tf:* tasks resolve their own version,
+# and pinning one here would silently override them.
+#
+# cdk8s/ has its own .mise.toml (python, node, helm 3.x, kubeconform) that wins
+# inside that directory — synth stays on helm 3 on purpose.
+[tools]
+k3d = "5.9.0"
+helm = "4.2.4"
+kubectl = "1.37.0"
+argocd = "3.5.2"
