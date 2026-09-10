@@ -1008,6 +1008,77 @@ resource "grafana_rule_group" "scrape_health" {
       })
     }
   }
+
+  // The OTLP receiver every app pushes through. Same "nobody could look at the
+  // thing" shape as the rule above, one layer up: tripbot, onscreens, playout,
+  // the console and the gateway all export to k8s-monitoring-alloy-receiver, so
+  // if it is down all five go quiet at once in VictoriaMetrics and in the cloud,
+  // and the SDKs give up retrying long before it comes back. Without this rule
+  // that reads exactly like every app stopping at the same moment.
+  //
+  // kube-state-metrics' Deployment gauge rather than the receiver's own health:
+  // the Alloy pods publish no metrics anywhere (no otelcol_* family exists in
+  // either store, and nothing scrapes them), so there is no `up` series to read.
+  // The gauge reaches the cloud only because the keep-regex in
+  // k8s/monitoring/prod-1/values.yml names it.
+  //
+  // Threshold is < 1, not < 2: the Deployment runs two replicas, and one of them
+  // restarting is a self-healing blip the surviving replica absorbs. This fires
+  // only when nothing is accepting OTLP. no_data is Alerting because absence of
+  // the gauge means kube-state-metrics is gone too, which is a wider blindness
+  // than the one being watched for.
+  rule {
+    name           = "Monitoring: the OTLP receiver has no running pod"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "alloy-receiver is down — every app's telemetry is being dropped"
+      description = "k8s-monitoring-alloy-receiver has had zero available replicas for 5m. It is the single OTLP endpoint tripbot, onscreens, playout, tripbot-console and platform-gateway export to, so all five are currently emitting nothing to VictoriaMetrics or to Grafana Cloud, and the OTEL SDKs drop what they cannot deliver rather than buffering it — the gap will be permanent. Every alert reading a pushed series (obs_*, tripbot_*, playout_*, console_*) is blind until this clears; treat their no-data verdicts as unknown, not healthy. Check the receiver pods in the monitoring namespace, then the alloy-operator that manages them. No data fires this rule too: the gauge is kube-state-metrics', so its absence means the cluster metrics pipeline is down as well."
+    }
+    labels = {
+      severity = "critical"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max(kube_deployment_status_replicas_available{namespace=\"monitoring\", deployment=\"k8s-monitoring-alloy-receiver\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 // Alerts that watch the alerting pipeline itself — the gap the 2026-06-15
