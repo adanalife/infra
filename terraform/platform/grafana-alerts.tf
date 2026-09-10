@@ -165,8 +165,18 @@ resource "grafana_contact_point" "discord_alerts" {
 // a dead Discord webhook (the 2026-06-15 failure) can't black-hole the page —
 // this transport shares no failure domain with Discord. Receives severity=
 // critical firings (escalation) + the notification-delivery-failure alert.
-// Message formatting is the default Grafana webhook JSON; prettifying
-// via ntfy X-Title/X-Priority headers is a tracked follow-up.
+//
+// `payload` replaces the whole request body, which is what makes this readable:
+// posted to a topic URL, ntfy renders the body verbatim as the message, so
+// Grafana's default webhook JSON arrived as a wall of escaped braces. The
+// template is the Discord one minus the `link` annotation — ntfy has no masked
+// markdown, so a link would arrive as a wrapped URL and cost more than it buys.
+//
+// `headers` are static strings (Grafana does not template them), so the rule
+// name can't ride in `X-Title` the way it does in the Discord title — it leads
+// the body instead. Priority is fixed at urgent because this route only ever
+// carries criticals; that also means a *resolved* critical arrives just as
+// loudly, which is the trade for one contact point rather than two.
 resource "grafana_contact_point" "ntfy_critical" {
   name = "ntfy-critical"
 
@@ -174,6 +184,22 @@ resource "grafana_contact_point" "ntfy_critical" {
     url                     = data.aws_ssm_parameter.ntfy_critical_webhook.value
     http_method             = "POST"
     disable_resolve_message = false
+
+    headers = {
+      "Content-Type" = "text/plain"
+      "X-Title"      = "A Dana Life — critical"
+      "X-Priority"   = "urgent"
+      "X-Tags"       = "rotating_light"
+    }
+
+    payload {
+      template = <<-EOT
+        {{ .GroupLabels.alertname }}
+        {{ range .Alerts.Firing }}🔴 {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
+        {{ end }}{{ range .Alerts.Resolved }}✅ {{ .Annotations.summary }}{{ with .Labels.service_platform }} — {{ . }}{{ end }}
+        {{ end }}
+      EOT
+    }
   }
 }
 
