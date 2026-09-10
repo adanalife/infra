@@ -80,6 +80,17 @@ destinations:
     #                         the relay-health alerts.
     #   kube_pod_{info,start_time,container_status_restarts_total}  — the
     #                         per-service pod-health rows on service-health-*.
+    #   kube_deployment_status_replicas_available  — scrape-health's
+    #                         alloy-receiver rule. The receiver publishes no
+    #                         metrics of its own (no otelcol_* family reaches
+    #                         either store, and nothing scrapes the Alloy pods),
+    #                         so kube-state-metrics' view of its Deployment is
+    #                         the only signal that separates "the receiver is
+    #                         down" from "all five apps went quiet at once".
+    #                         Whole family rather than one deployment: 67 series
+    #                         outside stage-1, against 2802 active of a 15000
+    #                         cap, and scoping it would need a second relabel
+    #                         rule since this one keys on __name__.
     #   xpum_*              — the igpu-performance dashboard. ~9 series for
     #                         the shared-encoder contention view; the iGPU is
     #                         the scarcest resource on the minipc, so this one
@@ -244,7 +255,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
@@ -517,8 +528,18 @@ collectors:
   # OTLP in from the app pods (applicationObservability). A plain
   # Deployment: it holds no scrape state, so it needs neither the
   # clustered nor the statefulset preset the scrapers use.
+  #
+  # Two replicas because every app's telemetry funnels through this one
+  # collector — tripbot, onscreens, playout, the console and the gateway
+  # all export here, and the SDKs only retry briefly, so a receiver
+  # outage is permanent data loss for all five at once rather than a
+  # delayed backfill. Statelessness is what makes the second replica free:
+  # the Service round-robins, and neither replica needs to know about the
+  # other. Both land on the one minipc node, so this covers a crash, an
+  # OOM kill and a rollout, not the node itself.
   alloy-receiver:
     presets: [deployment]
+    replicas: 2
 
 # `collectorCommon.alloy` passes through to the underlying grafana/alloy
 # subchart, which uses two distinct securityContext keys (the doubled
