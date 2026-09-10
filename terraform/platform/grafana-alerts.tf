@@ -4356,6 +4356,83 @@ resource "grafana_rule_group" "ci_health" {
       })
     }
   }
+
+  // Runner-pool saturation: more work accepted than there are runners to run
+  // it. The scale set is capped at maxRunners = 2, so a third assigned job
+  // waits for a slot with nothing wrong anywhere — the console's runner panel
+  // paints this amber, and until now nothing said it out loud at 3am.
+  //
+  // `gha_max_runners` would be the natural right-hand side, but it does not
+  // reach Grafana Cloud (the k8s-monitoring keep-list carries assigned/running
+  // jobs and registered/busy runners only, and the rules evaluate against the
+  // cloud). `gha_registered_runners` stands in for it: ARC registers a runner
+  // per slot it is willing to fill, so at the cap registered *is* max, and
+  // assigned-above-registered is the queue standing outside a full pool.
+  //
+  // 15m against the measured baseline (Grafana Cloud, the 14 days to
+  // 2026-09-09): the condition is true for 1903 of 20160 minutes — ordinary
+  // scale-up, where a job is assigned a few minutes before its ephemeral
+  // runner registers — but held continuously for 15 minutes in only one
+  // episode, 9 minutes long past the threshold. So the `for` is what separates
+  // a pool that is filling from a pool that is full, and this fires about once
+  // a fortnight.
+  //
+  // Aggregated `by (job)` for the same reason as the queue rule above: a second
+  // scale set gets its own verdict rather than being averaged into a busy
+  // sibling's.
+  rule {
+    name           = "CI runner pool saturated"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "More CI jobs assigned than the runner pool has runners, for 15m — jobs are waiting on capacity"
+      description = "gha_assigned_jobs has exceeded gha_registered_runners on {{ $labels.job }} for 15 minutes: the scale set is full and work is queueing behind it. Nothing is broken — this is the pool doing its job at its ceiling — so the question is whether the ceiling is right. `kubectl --context admin@adanalife-minipc -n arc-runners get pods` shows the runners that are up against `maxRunners` in k8s/arc/runners/values.yml, and the runner panel shows how long the backlog has been standing. Raising maxRunners costs mini-PC CPU that the stream shares, so prefer waiting out a burst (a fleet-wide dependency bump, several PRs pushed together) over widening the pool for it. If assigned is high with *no* runner running, read the *CI queued with nothing running* alert instead — that one is a fault, this one is a queue."
+      link        = local.ci_runners_panel_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "ci"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (job) (gha_assigned_jobs) > sum by (job) (gha_registered_runners)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 // Generic error-rate backstop for the prod components that have no watchdog
