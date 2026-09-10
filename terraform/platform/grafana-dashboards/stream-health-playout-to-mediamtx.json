@@ -123,21 +123,6 @@
       }
     },
     {
-      "id": 99,
-      "type": "text",
-      "title": "About this dashboard",
-      "gridPos": {
-        "x": 0,
-        "y": 57,
-        "w": 24,
-        "h": 4
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "The dashcam publish path: **playout** (GStreamer/Rust) encodes one gapless H.264 stream and publishes it into the per-platform **MediaMTX** relay, which OBS reads.\n\n- **Playout row** \u2014 `playout_*` OTLP-push metrics, filtered by `service_platform=$platform` and `deployment_environment=$deployment_environment`. Push arrives from **both stage-1 and prod-1**.\n- **MediaMTX row** \u2014 annotation-scraped from the relay pods (`pod=~\"mediamtx-$platform.*\"`); the `$deployment_environment` variable does **not** apply. Only **prod-1** ships (stage-1 is dropped at the Alloy layer), so these panels stay empty for stage.\n\nOnly `playout-youtube` exists pre-cutover \u2014 `twitch` panels populate once the twitch playout is live."
-      }
-    },
-    {
       "id": 100,
       "type": "row",
       "title": "Playout (publisher)",
@@ -1229,6 +1214,260 @@
           }
         },
         "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "HLS viewers",
+      "gridPos": {
+        "x": 0,
+        "y": 57,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(hls_sessions{path=\"dashcam\", pod=~\"mediamtx-$platform.*\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "HLS outbound bitrate",
+      "gridPos": {
+        "x": 6,
+        "y": 57,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "8 * sum(rate(hls_muxers_outbound_bytes{pod=~\"mediamtx-$platform.*\"}[$__rate_interval]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "HLS frames discarded / min",
+      "gridPos": {
+        "x": 12,
+        "y": 57,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hls_muxers_outbound_frames_discarded{pod=~\"mediamtx-$platform.*\"}[$__rate_interval])) * 60"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "HLS muxers warm",
+      "gridPos": {
+        "x": 18,
+        "y": 57,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(hls_muxers{pod=~\"mediamtx-$platform.*\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "HLS viewers by platform",
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (platform) (label_replace(hls_sessions{path=\"dashcam\", pod=~\"mediamtx-$platform.*\"}, \"platform\", \"$1\", \"pod\", \"mediamtx-([a-z]+)-.*\"))",
+          "legendFormat": "{{platform}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "HLS outbound bitrate by platform",
+      "gridPos": {
+        "x": 12,
+        "y": 61,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__DS_PROMETHEUS__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "8 * sum by (platform) (label_replace(rate(hls_muxers_outbound_bytes{pod=~\"mediamtx-$platform.*\"}[$__rate_interval]), \"platform\", \"$1\", \"pod\", \"mediamtx-([a-z]+)-.*\"))",
+          "legendFormat": "{{platform}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 99,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "The dashcam publish path: **playout** (GStreamer/Rust) encodes one gapless H.264 stream and publishes it into the per-platform **MediaMTX** relay, which OBS reads.\n\n- **Playout row** \u2014 `playout_*` OTLP-push metrics, filtered by `service_platform=$platform` and `deployment_environment=$deployment_environment`. Push arrives from **both stage-1 and prod-1**.\n- **MediaMTX row** \u2014 annotation-scraped from the relay pods (`pod=~\"mediamtx-$platform.*\"`); the `$deployment_environment` variable does **not** apply. Only **prod-1** ships (stage-1 is dropped at the Alloy layer), so these panels stay empty for stage.\n- **HLS panels** \u2014 `hls_*` from the same scrape: the raw feed pulled through the console (tempomat's player). A session is one viewer; the muxer is warm only while someone is pulling, and discarded frames mean a reader can't keep up.\n\nOnly `playout-youtube` exists pre-cutover \u2014 `twitch` panels populate once the twitch playout is live."
       }
     }
   ]
