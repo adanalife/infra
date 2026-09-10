@@ -436,6 +436,31 @@
       }
     },
     {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Upstream fan-outs vs polls",
+      "description": "What the short read memo saves. Every poll of /api/state or a dashboard partial wants the same k8s / OBS / flags fan-out; the memo collapses the ones landing inside one tick onto a single upstream call, and counts that call as a miss. Polls climb with every extra client (a phone, a laptop, the native app, each rendering several partials) — the miss lines should not. The two converging means the memo has stopped paying, usually because the TTL (MEMO_TTL_S) no longer covers a tick.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 43, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (read, deployment_environment) (rate(console_upstream_calls_total{deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "upstream {{read}} [{{deployment_environment}}]" },
+        { "refId": "B", "expr": "sum by (deployment_environment) (rate(console_http_requests_total{deployment_environment=~\"$deployment_environment\", http_route=~\"/api/state|/partials/.*\"}[5m]))", "legendFormat": "polls [{{deployment_environment}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps", "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": "polls.*" }, "properties": [{ "id": "custom.fillOpacity", "value": 0 }, { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }] }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
       "id": 402,
       "type": "row",
       "title": "Tempomat sidecar (Iroh transport to the phone)",
@@ -592,7 +617,7 @@
       "gridPos": { "x": 0, "y": 96, "w": 24, "h": 5 },
       "options": {
         "mode": "markdown",
-        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **Recent traces** carries one server span per console request with the calls to tripbot and the gateways nested underneath (tripbot-console#389, 2026-09-02). Health probes and the SSE stream are left out on purpose. Before that the console exported no spans at all — a TraceQL search for `{ resource.service.name = \"tripbot-console\" }` over 7 days returned nothing, checked 2026-08-31 — so an empty table on an older console image is the unwired state, not a broken service.\n\nThe **Running version** tile reads `service.version`, which the console sets on its meter provider from the image's `APP_VERSION`. A stage instance shows `main-<sha>` rather than a release number, because that is the tag it runs.\n\nThe request-duration panel is labelled seconds because the data is seconds. Its quantiles read as interpolation artifacts (`q * 5`) while the SDK's default bucket boundaries — spaced for milliseconds — put every seconds-valued observation into a single bucket.\n\nThe **Dependencies** row reads `console_nats_messages_total` and `console_k8s_api_calls_total`, added in tripbot-console#360 — both panels are empty on an environment still running an earlier release.\n\nThe **Tempomat sidecar** row is the only part of this dashboard that is scraped rather than pushed. Alloy discovers the sidecar container by pod annotation, so those series carry `namespace` and no `deployment_environment` — the panels filter on `namespace` instead, which holds the same `stage-1` / `prod-1` values. They are empty until the pod runs a sidecar image that serves `/metrics`, and until the console's cdk8s pins that tag."
+        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **Recent traces** carries one server span per console request with the calls to tripbot and the gateways nested underneath (tripbot-console#389, 2026-09-02). Health probes and the SSE stream are left out on purpose. Before that the console exported no spans at all — a TraceQL search for `{ resource.service.name = \"tripbot-console\" }` over 7 days returned nothing, checked 2026-08-31 — so an empty table on an older console image is the unwired state, not a broken service.\n\nThe **Running version** tile reads `service.version`, which the console sets on its meter provider from the image's `APP_VERSION`. A stage instance shows `main-<sha>` rather than a release number, because that is the tag it runs.\n\nThe request-duration panel is labelled seconds because the data is seconds. Its quantiles read as interpolation artifacts (`q * 5`) while the SDK's default bucket boundaries — spaced for milliseconds — put every seconds-valued observation into a single bucket.\n\nThe **Dependencies** row reads `console_nats_messages_total` and `console_k8s_api_calls_total`, added in tripbot-console#360 — both panels are empty on an environment still running an earlier release. **Upstream fan-outs vs polls** reads `console_upstream_calls_total`, added in tripbot-console#457, and is empty the same way.\n\nThe **Tempomat sidecar** row is the only part of this dashboard that is scraped rather than pushed. Alloy discovers the sidecar container by pod annotation, so those series carry `namespace` and no `deployment_environment` — the panels filter on `namespace` instead, which holds the same `stage-1` / `prod-1` values. They are empty until the pod runs a sidecar image that serves `/metrics`, and until the console's cdk8s pins that tag."
       }
     }
   ]
