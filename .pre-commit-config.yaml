@@ -118,6 +118,21 @@ repos:
         # The CRD bundles are vendored upstream and talk about HashiCorp Vault.
         exclude: ^(\.pre-commit-config\.yaml|cdk8s/crds/)
 
+  # The self-hosted ARC runner image ships curl and jq but no `gh`, so a step
+  # shelling out to it exits 127. Such steps usually sit behind `if: failure()`
+  # or a `schedule:`, which never fire on a green repo — the breakage stays
+  # invisible for weeks. The check is a content grep, not a YAML parse:
+  # `runs-on` can be a matrix expression, so any workflow mentioning `arc-`
+  # counts, and a mixed-runner file uses the `# gh-on-arc: ok` marker.
+  - repo: local
+    hooks:
+      - id: no-gh-on-arc
+        name: no gh calls in ARC-pool workflows
+        language: script
+        entry: scripts/no-gh-on-arc.py
+        files: ^\.github/workflows/.*\.ya?ml$
+        stages: [pre-commit]
+
   # Conventional Commits — enforce `type(scope): summary` on commit messages so
   # history stays machine-parseable: it underpins release automation and gives
   # every contributor/agent the same commit grammar without re-explaining it.
