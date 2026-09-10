@@ -436,12 +436,139 @@
       }
     },
     {
+      "id": 402,
+      "type": "row",
+      "title": "Tempomat sidecar (Iroh transport to the phone)",
+      "gridPos": { "x": 0, "y": 51, "w": 24, "h": 1 }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Paths to phones: direct vs relayed",
+      "description": "Whether hole punching is working. A direct path is peer-to-peer; a relayed one rides n0's public relay servers, which costs latency and puts a third party in the stream console's path. Relayed spikes when a phone is behind a carrier NAT that will not punch. Both count paths established, not paths currently open.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 52, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(iroh_socket_paths_direct_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "direct [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (rate(iroh_socket_paths_relay_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "relay [{{namespace}}]" },
+        { "refId": "C", "expr": "sum by (namespace) (rate(iroh_socket_paths_custom_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "custom [{{namespace}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Sidecar traffic",
+      "description": "What the tunnel carried, as the sidecar counts it. Connections are Iroh connections from a phone; requests are the HTTP calls proxied to the console over their streams. Failed connections are ones that never became a served connection — a handshake that died, not a request the console refused.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 52, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(tempomat_sidecar_requests_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "requests [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (rate(tempomat_sidecar_connections_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "connections [{{namespace}}]" },
+        { "refId": "C", "expr": "sum by (namespace) (rate(tempomat_sidecar_connections_failed_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "connections failed [{{namespace}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Connections and hole punches",
+      "description": "Iroh's own view of the same tunnel: connections that completed a handshake, connections that ended, and how often hole punching was attempted. Attempts far above opened connections means the punch keeps failing and the relay is carrying the traffic.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 60, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(iroh_socket_num_conns_opened_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "opened [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (rate(iroh_socket_num_conns_closed_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "closed [{{namespace}}]" },
+        { "refId": "C", "expr": "sum by (namespace) (rate(iroh_socket_holepunch_attempts_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "holepunch attempts [{{namespace}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Relay trouble and net reports",
+      "description": "Why a path ended up relayed, or why the relay itself is unhappy. Failed counts every dial attempt, so an unreachable relay climbs on each retry. Rate-limited counts affected connections, once each. A home change is the endpoint picking a different relay — steady churn means the network keeps moving under it. Net reports are the STUN-style probes that decide all of the above.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 60, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(iroh_socket_relay_conns_failed_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "relay conns failed [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (rate(iroh_socket_relay_conns_ratelimited_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "relay conns rate-limited [{{namespace}}]" },
+        { "refId": "C", "expr": "sum by (namespace) (rate(iroh_socket_relay_home_change_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "home relay changed [{{namespace}}]" },
+        { "refId": "D", "expr": "sum by (namespace) (rate(iroh_net_report_reports_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "net reports [{{namespace}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Bytes sent by transport",
+      "description": "The same direct-versus-relayed question in bytes rather than paths: how much of what the console sends the phone actually leaves over IPv4 or IPv6, and how much goes through an n0 relay. Relay bytes are the ones a third party carries.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 68, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(iroh_socket_send_ipv4_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "IPv4 [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (rate(iroh_socket_send_ipv6_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "IPv6 [{{namespace}}]" },
+        { "refId": "C", "expr": "sum by (namespace) (rate(iroh_socket_send_relay_total{namespace=~\"$deployment_environment\"}[5m]))", "legendFormat": "relay [{{namespace}}]" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
       "id": 700,
       "type": "table",
       "title": "Recent traces (tripbot-console)",
       "description": "Most recent traces for this service. The deployment_environment column disambiguates rows when the env selector is set to All.",
       "datasource": { "type": "tempo", "uid": "__DS_TEMPO__" },
-      "gridPos": { "x": 0, "y": 51, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 76, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"tripbot-console\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)", "limit": 20 }
       ]
@@ -452,7 +579,7 @@
       "title": "Recent errors & warnings",
       "description": "Error and warning lines from the console, newest first. Severity comes from the detected_level label (lowercase values), not severity_text.",
       "datasource": { "type": "loki", "uid": "__DS_LOKI__" },
-      "gridPos": { "x": 0, "y": 61, "w": 24, "h": 10 },
+      "gridPos": { "x": 0, "y": 86, "w": 24, "h": 10 },
       "targets": [
         { "refId": "A", "expr": "{service_name=\"tripbot-console\", deployment_environment=~\"$deployment_environment\"} | detected_level =~ \"error|warn\"" }
       ],
@@ -462,10 +589,10 @@
       "id": 99,
       "type": "text",
       "title": "About this dashboard",
-      "gridPos": { "x": 0, "y": 71, "w": 24, "h": 5 },
+      "gridPos": { "x": 0, "y": 96, "w": 24, "h": 5 },
       "options": {
         "mode": "markdown",
-        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **Recent traces** carries one server span per console request with the calls to tripbot and the gateways nested underneath (tripbot-console#389, 2026-09-02). Health probes and the SSE stream are left out on purpose. Before that the console exported no spans at all — a TraceQL search for `{ resource.service.name = \"tripbot-console\" }` over 7 days returned nothing, checked 2026-08-31 — so an empty table on an older console image is the unwired state, not a broken service.\n\nThe **Running version** tile reads `service.version`, which the console sets on its meter provider from the image's `APP_VERSION`. A stage instance shows `main-<sha>` rather than a release number, because that is the tag it runs.\n\nThe request-duration panel is labelled seconds because the data is seconds. Its quantiles read as interpolation artifacts (`q * 5`) while the SDK's default bucket boundaries — spaced for milliseconds — put every seconds-valued observation into a single bucket.\n\nThe **Dependencies** row reads `console_nats_messages_total` and `console_k8s_api_calls_total`, added in tripbot-console#360 — both panels are empty on an environment still running an earlier release."
+        "content": "Health overview for the **tripbot-console** binary — the admin live console.\n\nTwo things read differently here than on the sibling service-health pages:\n\n- **No platform selector.** The console runs as a single Deployment rather than one instance per platform, so there is nothing to split by. The `service_platform` label on `console_platform_component_up` names the platform each *reported component* belongs to, not the instance doing the reporting.\n- **Recent traces** carries one server span per console request with the calls to tripbot and the gateways nested underneath (tripbot-console#389, 2026-09-02). Health probes and the SSE stream are left out on purpose. Before that the console exported no spans at all — a TraceQL search for `{ resource.service.name = \"tripbot-console\" }` over 7 days returned nothing, checked 2026-08-31 — so an empty table on an older console image is the unwired state, not a broken service.\n\nThe **Running version** tile reads `service.version`, which the console sets on its meter provider from the image's `APP_VERSION`. A stage instance shows `main-<sha>` rather than a release number, because that is the tag it runs.\n\nThe request-duration panel is labelled seconds because the data is seconds. Its quantiles read as interpolation artifacts (`q * 5`) while the SDK's default bucket boundaries — spaced for milliseconds — put every seconds-valued observation into a single bucket.\n\nThe **Dependencies** row reads `console_nats_messages_total` and `console_k8s_api_calls_total`, added in tripbot-console#360 — both panels are empty on an environment still running an earlier release.\n\nThe **Tempomat sidecar** row is the only part of this dashboard that is scraped rather than pushed. Alloy discovers the sidecar container by pod annotation, so those series carry `namespace` and no `deployment_environment` — the panels filter on `namespace` instead, which holds the same `stage-1` / `prod-1` values. They are empty until the pod runs a sidecar image that serves `/metrics`, and until the console's cdk8s pins that tag."
       }
     }
   ]
