@@ -10,14 +10,11 @@
 # fixed `adanalife-dev` name + context is clearer and portable.)
 #
 # This is the only k3d config for development, and is what
-# `task k8s:dev:cluster:up` always uses. It declares no host bind-mounts:
-# k3d configs don't do variable substitution, so every host path is passed
-# by the task as a `--volume` CLI flag (k3d merges those with this config).
-# The task mounts the committed example video at `/host/dashcam`; pass
-# DASHCAM_NAS=<host path> to also bind-mount a real dashcam directory :ro
-# at `/host/nas-dashcam`, keeping the real footage path out of git. (Note:
-# the legacy development-nas overlay that consumed this mount is gone;
-# cdk8s dev doesn't read it yet.)
+# `task k8s:dev:cluster:up` always uses. The cluster has no host bind-mounts:
+# nothing in dev reads video off the host, so the node filesystem stays
+# self-contained. Should a dev workload need a host path, k3d configs do no
+# variable substitution — pass it from the task as a `--volume` CLI flag,
+# which k3d merges with this config.
 #
 # Host ports 9080/9443 are bound to the cluster's load-balancer so that
 # *.dev.whereisdana.today URLs (managed by external-dns in development
