@@ -517,8 +517,18 @@ collectors:
   # OTLP in from the app pods (applicationObservability). A plain
   # Deployment: it holds no scrape state, so it needs neither the
   # clustered nor the statefulset preset the scrapers use.
+  #
+  # Two replicas because every app's telemetry funnels through this one
+  # collector — tripbot, onscreens, playout, the console and the gateway
+  # all export here, and the SDKs only retry briefly, so a receiver
+  # outage is permanent data loss for all five at once rather than a
+  # delayed backfill. Statelessness is what makes the second replica free:
+  # the Service round-robins, and neither replica needs to know about the
+  # other. Both land on the one minipc node, so this covers a crash, an
+  # OOM kill and a rollout, not the node itself.
   alloy-receiver:
     presets: [deployment]
+    replicas: 2
 
 # `collectorCommon.alloy` passes through to the underlying grafana/alloy
 # subchart, which uses two distinct securityContext keys (the doubled
