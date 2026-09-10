@@ -1119,7 +1119,7 @@ tasks:
       - 'echo "== pods (development) =="'
       - kubectl get pods -n development
       - 'echo "== running images =="'
-      - kubectl get deploy -n development -o custom-columns='DEPLOY:.metadata.name,IMAGE:.spec.template.spec.containers[0].image,POLICY:.spec.template.spec.containers[0].imagePullPolicy'
+      - kubectl get deploy -n development -o custom-columns='DEPLOY:.metadata.name,REPLICAS:.spec.replicas,READY:.status.readyReplicas,IMAGE:.spec.template.spec.containers[0].image,POLICY:.spec.template.spec.containers[0].imagePullPolicy'
       - 'echo "== Argo apps =="'
       - kubectl get applications -n argocd -o custom-columns='APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status' | grep -E 'APP|development-'
 
@@ -1665,8 +1665,13 @@ tasks:
   # gesture — it re-enables selfHeal on the app Applications (k8s:dev:deploy
   # pauses it to pin a local :dev-local image) and re-syncs them to the
   # committed manifest. Replaces clicking Sync in the UI.
+  #
+  # Replica count is runtime-owned — the console scales prod/stage and Argo
+  # ignores .spec.replicas, so the manifests commit `replicas: 0`. Dev has no
+  # console, so the sync scales the dev apps to 1 itself; without that every
+  # Argo app reads Synced/Healthy with zero app pods running.
   k8s:dev:sync:
-    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps); also reverts a k8s:dev:deploy local-image override back to CI :main"
+    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps), then scale the dev app Deployments to 1 (replica count is runtime-owned, and dev has no console); also reverts a k8s:dev:deploy local-image override back to CI :main"
     aliases: ["k8s:dev:argo:sync"]
     preconditions:
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
@@ -1703,6 +1708,17 @@ tasks:
             -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}' >/dev/null
         done
         argocd app sync $apps --core --timeout 300
+      # The three app Deployments (tripbot-twitch, onscreens-twitch,
+      # obs-twitch) are the only Deployments in the namespace — postgres is a
+      # StatefulSet — so `--all` needs no name list to keep in sync with the
+      # manifests. A rollout that doesn't settle is a warning, not a failure:
+      # obs has no arm64 image to pull, and the other two are still useful.
+      - |
+        kubectl -n development scale deploy --all --replicas=1
+        for dep in $(kubectl -n development get deploy -o name); do
+          kubectl -n development rollout status "$dep" --timeout=180s \
+            || echo "⚠️  $dep not ready after 180s — continuing (check: kubectl -n development describe $dep)"
+        done
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
