@@ -20,6 +20,8 @@ Prereqs: `brew install k3d kubectl helm argocd go-task/tap/go-task`, Colima/Dock
 running, `aws-vault` profiles for `adanalife-stage` (dev borrows the stage AWS
 account for ESO), and the **Keybase app running + logged in** (it pgp-decrypts the
 ESO bootstrap creds — `open -a Keybase` and wait ~10s if the daemon is down).
+`mise install` at the repo root pins k3d/kubectl/helm/argocd to the versions the
+cold start is verified against, if you'd rather not rely on what brew has.
 
 ```bash
 # Cold-start the whole env from nothing (creates the adanalife-dev cluster,
