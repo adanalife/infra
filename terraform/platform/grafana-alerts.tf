@@ -3883,11 +3883,10 @@ resource "grafana_rule_group" "pitr_health" {
 # layer that does complete its run. Both are warnings — no viewer sees this, and
 # a paused drift loop is a "fix it today" problem rather than a wake-up.
 #
-# The plan-staleness blind spot these two share (a layer Burrito stopped
-# scheduling at all, so nothing retries and nothing errors) needs the console's
-# console_terraform_plan_age_seconds, which is not in Grafana Cloud yet: the
-# deployed tripbot-console 0.46.0 predates that metric. Adding a third rule is a
-# console release away.
+# The third rule closes the blind spot the first two share: a layer Burrito
+# stopped scheduling at all retries nothing and errors on nothing, so only the
+# age of the last completed plan moves. It is the console's number rather than
+# Burrito's, which is the point — it survives Burrito being the thing that died.
 #
 # burrito_runs_by_status reaches the cloud only because the keep-regex in
 # k8s/monitoring/prod-1/values.yml names it, same as
@@ -4498,6 +4497,73 @@ resource "grafana_rule_group" "console_access" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // Plan staleness. Burrito plans every layer hourly, so an age past three
+  // hours means a layer has missed three rounds — a controller that stopped
+  // scheduling, not a slow plan. Measured 2026-09-09 the four layers sit at
+  // 0.4-1.7h, so this has roughly 2x headroom over the normal cadence.
+  //
+  // This is the console's gauge, not Burrito's, and that is the point: it is
+  // the one signal that still moves when Burrito itself is what died. The
+  // label is `layer` (Burrito's own series use `layer_name` — they are
+  // different families, don't unify them).
+  //
+  // no_data is Alerting, unlike everything else in this group: the series comes
+  // from the console, so its disappearance means the console or Burrito is
+  // down, which is precisely the outage. Pinned to prod-1 so a future stage
+  // export cannot double-page.
+  rule {
+    name           = "Burrito: a layer's last plan has gone stale"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Burrito has not completed a plan for {{ $labels.layer }} in over 3h"
+      description = "console_terraform_plan_age_seconds for {{ $labels.layer }} has been above 3h for 15m — Burrito plans hourly, so that layer has missed at least three rounds and drift on it is now unreported. Nothing else in this group catches it: a layer that is never scheduled has nothing retrying and nothing erroring, and burrito_terraform_layer_status keeps serving the status of its last completed plan indefinitely. Check the burrito-controllers pods in the platform namespace, then the layer's Terraform resource for a stuck run. No data fires this rule too — the gauge comes from tripbot-console, so its absence means the console or the drift loop is down rather than that everything is fine."
+    }
+    labels = {
+      severity = "warning"
+      service  = "burrito"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (layer) (console_terraform_plan_age_seconds{deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [10800] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
