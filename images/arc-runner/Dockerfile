@@ -13,9 +13,11 @@
 # Six were fixed one at a time on 2026-09-06/07 by rewriting them as curl
 # against the REST API.
 #
-# NO DOCKER CLI, deliberately. This pool has no daemon (see the values.yml
-# header — a Docker daemon on this node is the one workload every self-reboot
-# had in common), and shipping the client invites a job to reach for it.
+# NOTHING DOCKER IS ADDED HERE, deliberately. The pool runs no daemon (see the
+# values.yml header — a Docker daemon on this node is the one workload every
+# self-reboot had in common). Upstream's image already carries the `docker`
+# client; with no socket to talk to it is inert, and that is the intended
+# state. Do not add dind, buildx, or a daemon to make it work.
 #
 # Adding a tool: it belongs here when it is version-agnostic — a compiler, a
 # system library, a CLI whose exact version no repo pins. Language toolchains
@@ -63,8 +65,11 @@ RUN install -d -m 0755 /etc/apt/keyrings \
 # Single static binaries, installed system-wide so the matching setup action
 # finds one already on PATH instead of downloading it. The actions stay in the
 # workflows — they still resolve versions and prime caches.
-RUN MISE_INSTALL_PATH=/usr/local/bin/mise curl -fsSL https://mise.run | sh \
- && UV_INSTALL_DIR=/usr/local/bin curl -LsSf https://astral.sh/uv/install.sh | sh \
+# The env var goes on the `sh` that consumes the script, not on the curl that
+# fetches it — a prefix on the left of the pipe lands in curl's environment
+# and the installer falls back to its default path.
+RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
+ && curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh \
  && curl -fsSL https://taskfile.dev/install.sh | sh -s -- -d -b /usr/local/bin \
  && gh --version && mise --version && uv --version && task --version
 
