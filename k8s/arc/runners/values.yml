@@ -17,8 +17,7 @@
 # THERE IS NO DOCKER DAEMON HERE, deliberately — no `containerMode`, so no dind
 # sidecar. Every container build in the fleet (dev-image, release, image-smoke)
 # runs on GitHub-hosted runners instead, and a `docker` step added to an
-# arc-amd64 job will fail rather than work — the runner image ships no client
-# either, so it fails at the binary rather than at the socket.
+# arc-amd64 job will fail with a missing socket rather than work.
 #
 # The reason is that this node also serves both production streams, and running
 # a Docker daemon on it is the one workload class every node self-reboot has had
