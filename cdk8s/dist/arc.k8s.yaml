@@ -42,6 +42,48 @@ spec:
   target:
     name: arc-github-app
 ---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: arc-workspace-reap
+  namespace: arc-runners
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          containers:
+            - command:
+                - sh
+                - -c
+                - find /var/mnt/data/arc-work -mindepth 1 -maxdepth 1 -type d -mmin +120 -print -exec rm -rf {} +
+              image: ghcr.io/adanalife/mirror/ubuntu:24.04
+              name: reap
+              resources:
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+              volumeMounts:
+                - mountPath: /var/mnt/data/arc-work
+                  name: work-root
+          priorityClassName: ci-low
+          restartPolicy: Never
+          volumes:
+            - hostPath:
+                path: /var/mnt/data/arc-work
+                type: DirectoryOrCreate
+              name: work-root
+      ttlSecondsAfterFinished: 86400
+  schedule: 17 * * * *
+  successfulJobsHistoryLimit: 1
+  timeZone: Etc/UTC
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

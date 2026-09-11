@@ -20,6 +20,7 @@ deploy unit (dist/arc.k8s.yaml), the same shape as the UPS monitor:
     scale set authenticates with. Platform components read the cluster-scoped
     `aws-parameterstore-cluster` store (per k8s-platform-stack), so no per-ns
     eso-aws-credentials bootstrap is needed.
+  * A CronJob reaping abandoned runner job workspaces off the T5.
   * A read-only Role + RoleBinding letting each env's tripbot-console read the
     scale sets, for its runner panel — the same shape as the console's Argo and
     Burrito grants, and here for the same reason (the namespace is infra's).
@@ -38,6 +39,13 @@ from adanalife_k8s.eso import external_secret
 
 SYSTEMS_NS = "arc-systems"
 RUNNERS_NS = "arc-runners"
+# Parent of the per-pod job workspaces (k8s/arc/runners/values.yml mounts this
+# hostPath with subPathExpr: $(POD_NAME)). On the T5, deliberately: /var is the
+# volume etcd fsyncs to and a CI write burst there stalls its lease.
+WORK_ROOT = "/var/mnt/data/arc-work"
+# Comfortably past the 30-minute timeout every fleet workflow sets, so the
+# reaper can never delete a workspace out from under a running job.
+WORK_REAP_AGE_MINUTES = 120
 
 # The consoles that read the runner pools (tripbot-console's runner panel): one
 # console per env, both on this cluster, both watching the same runner scale
@@ -54,6 +62,11 @@ GITHUB_APP_SM_KEY = "/k8s/arc/github-app"
 
 # Platform components read the cluster-scoped store, not a per-namespace one.
 CLUSTER_STORE = ("aws-parameterstore-cluster", "ClusterSecretStore")
+# The reaper needs `find` and `rm` and nothing else. Reusing the ubuntu mirror
+# the postgres backup already pulls keeps this to zero new mirrored packages
+# (each one costs two manual UI clicks, per the ghcr-base-image-mirrors ADR)
+# and the layers are already on the node.
+REAPER_IMAGE = "ghcr.io/adanalife/mirror/ubuntu:24.04"
 
 
 class Arc(Construct):
@@ -148,7 +161,102 @@ class Arc(Construct):
             extract=GITHUB_APP_SM_KEY,
         )
 
+        self._workspace_reaper()
         self._console_rbac()
+
+    def _workspace_reaper(self):
+        """Delete runner job workspaces whose pod is long gone.
+
+        Each runner pod gets its own subdirectory of WORK_ROOT via
+        `subPathExpr: $(POD_NAME)`. That buys first-pass scheduling -- a
+        generic ephemeral volume instead deadlocks the scheduler against the
+        ephemeral volume controller, costing a random 4-73s per job
+        (infra#1194/#1195) -- but a subPath directory outlives its pod, where
+        a Delete-reclaim PVC went with it. Verified on the node: the directory
+        was still there after the pod was deleted.
+
+        So the cleanup the PVC used to do has to be explicit. Age, not
+        pod-liveness, is the predicate: it needs no cluster access, and
+        WORK_REAP_AGE_MINUTES is four times the 30-minute timeout every fleet
+        workflow sets, so a live job's workspace cannot match.
+
+        `-mindepth 1` is load-bearing -- without it `find` matches WORK_ROOT
+        itself and deletes the mount point.
+        """
+        script = (
+            f"find {WORK_ROOT} -mindepth 1 -maxdepth 1 -type d "
+            f"-mmin +{WORK_REAP_AGE_MINUTES} -print -exec rm -rf {{}} +"
+        )
+        k8s.KubeCronJob(
+            self,
+            "workspace-reaper",
+            metadata=k8s.ObjectMeta(name="arc-workspace-reap", namespace=RUNNERS_NS),
+            spec=k8s.CronJobSpec(
+                schedule="17 * * * *",
+                time_zone="Etc/UTC",
+                # A second copy would race the first over the same paths.
+                concurrency_policy="Forbid",
+                successful_jobs_history_limit=1,
+                failed_jobs_history_limit=3,
+                job_template=k8s.JobTemplateSpec(
+                    spec=k8s.JobSpec(
+                        backoff_limit=1,
+                        ttl_seconds_after_finished=86400,
+                        template=k8s.PodTemplateSpec(
+                            spec=k8s.PodSpec(
+                                restart_policy="Never",
+                                # Runs as root (the image default): the
+                                # directories are kubelet-created and their
+                                # contents are written by uid 1001, so nothing
+                                # less can remove both.
+                                #
+                                # ci-low so the reaper is evicted before any
+                                # stage or prod workload — it is pure
+                                # housekeeping and the next hour's run catches
+                                # whatever this one missed.
+                                priority_class_name="ci-low",
+                                containers=[
+                                    k8s.Container(
+                                        name="reap",
+                                        image=REAPER_IMAGE,
+                                        command=["sh", "-c", script],
+                                        volume_mounts=[
+                                            k8s.VolumeMount(
+                                                name="work-root",
+                                                mount_path=WORK_ROOT,
+                                            )
+                                        ],
+                                        resources=k8s.ResourceRequirements(
+                                            requests={
+                                                "cpu": k8s.Quantity.from_string("10m"),
+                                                "memory": k8s.Quantity.from_string(
+                                                    "32Mi"
+                                                ),
+                                            },
+                                            limits={
+                                                "cpu": k8s.Quantity.from_string("200m"),
+                                                "memory": k8s.Quantity.from_string(
+                                                    "128Mi"
+                                                ),
+                                            },
+                                        ),
+                                    )
+                                ],
+                                volumes=[
+                                    k8s.Volume(
+                                        name="work-root",
+                                        host_path=k8s.HostPathVolumeSource(
+                                            path=WORK_ROOT,
+                                            type="DirectoryOrCreate",
+                                        ),
+                                    )
+                                ],
+                            )
+                        ),
+                    )
+                ),
+            ),
+        )
 
     def _console_rbac(self):
         """A Role + RoleBinding in the runners namespace letting each env's
