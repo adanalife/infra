@@ -6,6 +6,9 @@ singleton, manual sync). The two ARC Helm releases themselves are ordinary
 platform components covered by the platform-argo golden (helm_platform.py).
 """
 
+from pathlib import Path
+
+import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArcChart, ArgoCDChart
@@ -61,6 +64,31 @@ def test_arc_runners_namespace_is_privileged_for_dind():
         == "privileged"
     )
     assert "labels" not in ns["arc-systems"]["metadata"]
+
+
+def test_arc_work_storageclass_binds_immediately():
+    # The runner job workspace is a generic ephemeral volume, so its PVC is
+    # created with the pod. WaitForFirstConsumer deadlocks that against the
+    # scheduler -- the pod waits for a PVC that waits for the pod -- and the
+    # tie only breaks on scheduler backoff, costing a random 4-73s per job.
+    # One node means WaitForFirstConsumer defends against nothing, so this
+    # class must stay Immediate, and the values file must point at it.
+    objs = _synth(ArcChart)
+    sc = next(
+        o
+        for o in _by_kind(objs, "StorageClass")
+        if o["metadata"]["name"] == "local-path-immediate"
+    )
+    assert sc["volumeBindingMode"] == "Immediate"
+    assert sc["provisioner"] == "rancher.io/local-path"
+    assert sc["reclaimPolicy"] == "Delete"
+
+    values = yaml.safe_load(
+        (Path(__file__).parents[3] / "k8s/arc/runners/values.yml").read_text()
+    )
+    work = next(v for v in values["template"]["spec"]["volumes"] if v["name"] == "work")
+    claim = work["ephemeral"]["volumeClaimTemplate"]["spec"]
+    assert claim["storageClassName"] == sc["metadata"]["name"]
 
 
 def test_arc_runner_limitrange_bounds_containers():

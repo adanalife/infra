@@ -244,6 +244,13 @@ template:
       # and nothing here is worth keeping (the warm caches above are separate
       # and deliberately shared).
       #
+      # The class is local-path-immediate (infra's cdk8s constructs/arc.py),
+      # NOT the default local-path. A WaitForFirstConsumer class deadlocks the
+      # scheduler against the ephemeral volume controller — the pod waits for a
+      # PVC that waits for the pod — and Kubernetes only breaks the tie on
+      # scheduler backoff, costing a random 4–73s of unscheduled time per job.
+      # One node means WaitForFirstConsumer defends against nothing here.
+      #
       # The size request is nominal: local-path is hostPath-backed and enforces
       # no quota, so this bounds nothing. Job workspaces share the T5's free
       # space with everything else on it.
@@ -252,7 +259,7 @@ template:
           volumeClaimTemplate:
             spec:
               accessModes: [ReadWriteOnce]
-              storageClassName: local-path
+              storageClassName: local-path-immediate
               resources:
                 requests:
                   storage: 20Gi
