@@ -191,6 +191,13 @@ provisioning:
   grow: true
 filesystem:
   type: xfs
+# The global FilesystemTrimConfig below does not apply here. This disk is the
+# Samsung T5 behind the usb-storage UAS quirk — it already drops off the bus
+# under sustained write load, and discard traffic over that link is exactly the
+# class of I/O the quirk exists to avoid. The internal NVMe gets its trims; this
+# one does not.
+trim:
+  enabled: false
 ---
 apiVersion: v1alpha1
 kind: SecurityProfileConfig
@@ -210,3 +217,13 @@ kind: SecurityProfileConfig
 # Talos only emits this document for clusters generated on 1.14+; an upgraded
 # cluster stays non-isolated until it is applied, so this is opt-in either way.
 workloadIsolation: true
+---
+apiVersion: v1alpha1
+kind: FilesystemTrimConfig
+# Periodic fstrim of eligible volumes, so the Kingston NVMe keeps its write
+# performance as the EPHEMERAL partition churns. Talos hashes a stable schedule
+# per node and volume rather than trimming everything at once.
+#
+# Clusters generated on Talos 1.14+ ship this document by default; an upgraded
+# cluster has no trimming until it is applied. The T5 UserVolume opts out above.
+interval: 168h0m0s
