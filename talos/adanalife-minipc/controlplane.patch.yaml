@@ -44,8 +44,8 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    # Schematic = i915 + intel-ucode + tailscale extensions + the
-    # usb-storage.quirks=04e8:61f5:u kernel arg. There is no iSCSI in this
+    # Schematic = i915 + intel-ucode + tailscale extensions + two kernel args,
+    # usb-storage.quirks=04e8:61f5:u and netconsole (both below). There is no iSCSI in this
     # cluster — both StorageClasses are rancher.io/local-path — so
     # iscsi-tools is not in the schematic, which is also what lets
     # workloadIsolation below be safe (see the SecurityProfileConfig doc).
@@ -55,14 +55,28 @@ machine:
     #
     # The quirk forces the plain usb-storage driver (no UAS command queuing)
     # for the Samsung T5 (the /var/mnt/data UserVolume), which drops off the USB
-    # bus under
-    # sustained UAS write load — taking the XFS filesystem and both postgreses
-    # down with it. Slower sequential I/O, stable link. The config uses UKI
-    # (grubUseUKICmdline), so kernel args live in the factory schematic, not
-    # install.extraKernelArgs — regenerate via the curl block in the bootstrap
-    # runbook, and note image changes only land via `talosctl upgrade`, not
-    # apply-config alone.
-    image: factory.talos.dev/installer/eafbfa2e951912e9c87197edb11b5d47a46fe74d81fd6df57db9688b92168cf5:v1.14.0
+    # bus under sustained UAS write load — taking the XFS filesystem and both
+    # postgreses down with it. Slower sequential I/O, stable link.
+    #
+    # netconsole streams kernel messages straight from the kernel to the
+    # Synology over UDP, which is what makes it the one instrument that can
+    # record a panic: the NAS-side `talosctl dmesg --follow` capture and Talos's
+    # KmsgLogConfig both ship through userspace, so a hard panic or power cut
+    # leaves nothing behind — the observed shape of the 2026-08-23/24 crash run.
+    # The argument is
+    #   netconsole=<srcport>@<srcip>/<dev>,<dstport>@<dstip>/<dstmac>
+    # so it hardcodes what the rest of this config deliberately keeps in DNS:
+    # the node's LAN address, the NIC name, and the NAS's IP *and MAC* (the
+    # kernel has no ARP at panic time). A location move or a NAS NIC swap
+    # silently stops the capture without otherwise affecting the node — it is
+    # fire-and-forget UDP, so a dead target costs nothing. Re-mint the schematic
+    # when any of those three change.
+    #
+    # The config uses UKI (grubUseUKICmdline), so kernel args live in the
+    # factory schematic, not install.extraKernelArgs — regenerate via the curl
+    # block in the bootstrap runbook, and note image changes only land via
+    # `talosctl upgrade`, not apply-config alone.
+    image: factory.talos.dev/installer/99ced12c0e1eeb46c40e6a2e5a45abb701265bc0c808cb02ddbc0fbabf55ee39:v1.14.0
   network:
     interfaces:
       - interface: enp88s0
