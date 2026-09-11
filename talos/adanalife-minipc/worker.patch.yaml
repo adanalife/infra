@@ -24,7 +24,7 @@
 machine:
   install:
     disk: /dev/mmcblk0   # the SD card on the Pi 5 (NVMe would be /dev/nvme0n1)
-    image: factory.talos.dev/installer/a636242df247ad4aad2e36d1026d8d4727b716a3061749bd7b19651e548f65e4:v1.13.2
+    image: factory.talos.dev/installer/a636242df247ad4aad2e36d1026d8d4727b716a3061749bd7b19651e548f65e4:v1.14.0
   # NIC: omitted on purpose. With no interfaces block Talos DHCPs all NICs, so
   # the Pi 5's onboard ethernet (end0) comes up without us hard-coding the name.
   # KubeSpan parity with the controlplane (cluster.discovery is already on in the

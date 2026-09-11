@@ -55,7 +55,7 @@ machine:
     # install.extraKernelArgs — regenerate via the curl block in the bootstrap
     # runbook, and note image changes only land via `talosctl upgrade`, not
     # apply-config alone.
-    image: factory.talos.dev/installer/915463e793b97f79f7ea950f7b4e9d4a3ce9d674dd45e63ffe12f934d0b792c9:v1.13.2
+    image: factory.talos.dev/installer/915463e793b97f79f7ea950f7b4e9d4a3ce9d674dd45e63ffe12f934d0b792c9:v1.14.0
   network:
     interfaces:
       - interface: enp88s0
