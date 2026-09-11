@@ -33,8 +33,7 @@
 # `talosctl health` won't go fully green until the helm install lands — expected.
 #
 # Tailscale: the installer schematic bakes in the siderolabs/tailscale extension
-# (schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale; the GPU
-# extension is UNCHANGED, so the proven VAAPI path is untouched). Its config —
+# (schematic = i915 + intel-ucode + tailscale). Its config —
 # an ExtensionServiceConfig carrying the secret TS_AUTHKEY — is NOT in this
 # (committed, non-secret) patch: it lives in tailscale.patch.yaml (gitignored
 # plaintext) / tailscale.patch.sops.yaml (committed, SOPS-sealed), applied as an
@@ -45,17 +44,25 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    # Schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale extensions
-    # + the usb-storage.quirks=04e8:61f5:u kernel arg. The quirk forces the
-    # plain usb-storage driver (no UAS command queuing) for the Samsung T5
-    # (the /var/mnt/data UserVolume), which drops off the USB bus under
+    # Schematic = i915 + intel-ucode + tailscale extensions + the
+    # usb-storage.quirks=04e8:61f5:u kernel arg. There is no iSCSI in this
+    # cluster — both StorageClasses are rancher.io/local-path — so
+    # iscsi-tools is not in the schematic, which is also what lets
+    # workloadIsolation below be safe (see the SecurityProfileConfig doc).
+    # `siderolabs/i915` is the canonical name for the Intel GPU microcode +
+    # kernel modules; the Factory resolves the legacy `i915-ucode` spelling
+    # to the same extension, so the VAAPI path is byte-identical.
+    #
+    # The quirk forces the plain usb-storage driver (no UAS command queuing)
+    # for the Samsung T5 (the /var/mnt/data UserVolume), which drops off the USB
+    # bus under
     # sustained UAS write load — taking the XFS filesystem and both postgreses
     # down with it. Slower sequential I/O, stable link. The config uses UKI
     # (grubUseUKICmdline), so kernel args live in the factory schematic, not
     # install.extraKernelArgs — regenerate via the curl block in the bootstrap
     # runbook, and note image changes only land via `talosctl upgrade`, not
     # apply-config alone.
-    image: factory.talos.dev/installer/915463e793b97f79f7ea950f7b4e9d4a3ce9d674dd45e63ffe12f934d0b792c9:v1.13.2
+    image: factory.talos.dev/installer/eafbfa2e951912e9c87197edb11b5d47a46fe74d81fd6df57db9688b92168cf5:v1.14.0
   network:
     interfaces:
       - interface: enp88s0
@@ -184,3 +191,39 @@ provisioning:
   grow: true
 filesystem:
   type: xfs
+# The global FilesystemTrimConfig below does not apply here. This disk is the
+# Samsung T5 behind the usb-storage UAS quirk — it already drops off the bus
+# under sustained write load, and discard traffic over that link is exactly the
+# class of I/O the quirk exists to avoid. The internal NVMe gets its trims; this
+# one does not.
+trim:
+  enabled: false
+---
+apiVersion: v1alpha1
+kind: SecurityProfileConfig
+# Runs CRI containerd, the kubelet, and every pod in a dedicated PID + mount
+# namespace anchored by the sandboxd service, in its own least-privilege SELinux
+# domain. If sandboxd dies the kernel tears the namespace down and Talos rebuilds
+# it — relaunching CRI, the kubelet and the pods — without rebooting the node.
+# Logs: `talosctl logs sandboxd`.
+#
+# The one thing isolation breaks is the deprecated in-tree Kubernetes iSCSI
+# volume plugin: the kubelet can't reach the host iscsid across the sandbox PID
+# boundary. This cluster has no iSCSI at all (local-path is the only
+# provisioner), and iscsi-tools is not in the schematic. A future iSCSI need is
+# served by a CSI node plugin, which does its own attach/mount in a privileged
+# pod and is unaffected.
+#
+# Talos only emits this document for clusters generated on 1.14+; an upgraded
+# cluster stays non-isolated until it is applied, so this is opt-in either way.
+workloadIsolation: true
+---
+apiVersion: v1alpha1
+kind: FilesystemTrimConfig
+# Periodic fstrim of eligible volumes, so the Kingston NVMe keeps its write
+# performance as the EPHEMERAL partition churns. Talos hashes a stable schedule
+# per node and volume rather than trimming everything at once.
+#
+# Clusters generated on Talos 1.14+ ship this document by default; an upgraded
+# cluster has no trimming until it is applied. The T5 UserVolume opts out above.
+interval: 168h0m0s
