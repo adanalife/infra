@@ -20,6 +20,8 @@ deploy unit (dist/arc.k8s.yaml), the same shape as the UPS monitor:
     scale set authenticates with. Platform components read the cluster-scoped
     `aws-parameterstore-cluster` store (per k8s-platform-stack), so no per-ns
     eso-aws-credentials bootstrap is needed.
+  * An `Immediate`-binding StorageClass for the runner job workspaces, so a
+    runner pod is not held unscheduled waiting on its own ephemeral volume.
   * A read-only Role + RoleBinding letting each env's tripbot-console read the
     scale sets, for its runner panel — the same shape as the console's Argo and
     Burrito grants, and here for the same reason (the namespace is infra's).
@@ -38,6 +40,8 @@ from adanalife_k8s.eso import external_secret
 
 SYSTEMS_NS = "arc-systems"
 RUNNERS_NS = "arc-runners"
+# Named in k8s/arc/runners/values.yml's work volume; the two must agree.
+WORK_STORAGE_CLASS = "local-path-immediate"
 
 # The consoles that read the runner pools (tripbot-console's runner panel): one
 # console per env, both on this cluster, both watching the same runner scale
@@ -148,7 +152,42 @@ class Arc(Construct):
             extract=GITHUB_APP_SM_KEY,
         )
 
+        self._work_storage_class()
         self._console_rbac()
+
+    def _work_storage_class(self):
+        """Immediate-binding local-path class for the runner job workspaces.
+
+        Each runner pod declares its `_work` volume as a generic ephemeral
+        volume, so the PVC is created with the pod. Under the default
+        `local-path` class that deadlocks the scheduler against the ephemeral
+        volume controller: the scheduler will not place a pod whose PVC does
+        not exist yet, and a WaitForFirstConsumer PVC does not provision until
+        its pod is placed. Kubernetes breaks the tie on the scheduler's
+        exponential backoff, so the cost is a random 4-73s of unscheduled time
+        per job -- measured 2026-09-10, when 46 runner pods hit
+        `FailedScheduling: waiting for ephemeral volume controller to create
+        the persistentvolumeclaim` and the pool averaged 1.25 of its 2 slots
+        busy with 36 runs queued.
+
+        WaitForFirstConsumer exists to keep a volume from being provisioned on
+        the wrong node. There is one node, so it defends against nothing here
+        and only pays the backoff. Immediate provisions the PVC as soon as it
+        is created, and the pod schedules on the first pass.
+
+        Delete reclaim, matching the ephemeral-runner model: the workspace goes
+        with the pod. The warm caches worth keeping are separate hostPath
+        mounts (see k8s/arc/runners/values.yml).
+        """
+        k8s.KubeStorageClass(
+            self,
+            "work-storageclass",
+            metadata=k8s.ObjectMeta(name=WORK_STORAGE_CLASS),
+            provisioner="rancher.io/local-path",
+            reclaim_policy="Delete",
+            volume_binding_mode="Immediate",
+            allow_volume_expansion=False,
+        )
 
     def _console_rbac(self):
         """A Role + RoleBinding in the runners namespace letting each env's
