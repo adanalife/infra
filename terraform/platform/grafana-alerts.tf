@@ -4165,23 +4165,22 @@ resource "grafana_rule_group" "control_plane_health" {
   // downstream echo rather than a fault of its own.
   //
   // Threshold 500ms against a measured distribution. etcd's own ceiling for a
-  // healthy p99 is 10ms. Sampled 2026-09-11 minutes after a clean reboot with
-  // no CI running, this node read a p99 of 2.81s: 48.8% of fsyncs landed under
-  // 1ms, but 1.6% took between 2s and 4s — two to three multi-second stalls a
-  // minute. 500ms is fifty times the healthy ceiling and far under what the
-  // node actually does, so it separates a drive that is failing from an
-  // ordinary spike, and unlike a breadth threshold it is not already saturated.
+  // healthy p99 is 10ms. This node's quiet baseline is 20-30ms — elevated, but
+  // two orders of magnitude under the 2-3.5s it reads while the control plane
+  // re-converges after a boot. 500ms sits between the two: fifty times the
+  // healthy ceiling, so an ordinary spike does not reach it, and well under a
+  // real stall, so a failing drive still trips it.
   //
-  // `for = 10m` because the query rates over 5m: ten minutes asks the elevation
-  // to outlive a full window plus an evaluation, which a lone slow compaction
-  // or a backup burst does not.
+  // `for = 20m` is set by that boot window rather than by the query's 5m rate.
+  // etcd's first ten minutes back read a 2.0-3.5s p99 and then fall to 27ms, so
+  // a shorter `for` turns every reboot into a page. A drive that is genuinely
+  // failing stalls for hours, and the lockstep rule below catches the symptom
+  // in the meantime, so the extra ten minutes cost nothing that matters.
   //
-  // Firing continuously means the disk is the finding, not the symptom. A
-  // reboot does not clear it — that was tried on 2026-09-11 and the p99 above
-  // was measured after it.
+  // Firing continuously means the disk is the finding, not the symptom.
   rule {
     name           = "etcd: WAL fsync stalling past the lease deadline"
-    for            = "10m"
+    for            = "20m"
     condition      = "C"
     no_data_state  = "NoData"
     exec_err_state = "Error"
@@ -4268,7 +4267,7 @@ resource "grafana_rule_group" "control_plane_health" {
 
     annotations = {
       summary     = "Over 20 platform container restarts in the last hour — the control plane is losing its leases repeatedly"
-      description = "The leader-elected platform controllers exit when they lose their lease, so they bounce together whenever the API server or etcd stalls; this rule fires when that has happened three or more times inside an hour. Confirm the shape first — `kubectl --context admin@adanalife-minipc get pods -A --sort-by=.status.startTime` should show cnpg, cilium-operator, alloy-operator, burrito-controllers and the static control-plane pods restarting at the same timestamps. If instead one pod is crashlooping on its own, this is the wrong rule and that pod's logs are the answer. Then check whether the node bounced (the sibling \"minipc rebooted\" alert): if it did, this is fallout and resolves itself. If it did not, the suspect is etcd fsync latency on a single-node control plane, which the sibling `etcd: WAL fsync stalling past the lease deadline` rule now measures directly — read it first. Heavy disk writers are a known trigger: CI on the ARC pool writes through the T5. But a clean reboot on an otherwise idle node still measured a 2.81s p99 on 2026-09-11, so suspect the drive itself before whatever is writing to it."
+      description = "The leader-elected platform controllers exit when they lose their lease, so they bounce together whenever the API server or etcd stalls; this rule fires when that has happened three or more times inside an hour. Confirm the shape first — `kubectl --context admin@adanalife-minipc get pods -A --sort-by=.status.startTime` should show cnpg, cilium-operator, alloy-operator, burrito-controllers and the static control-plane pods restarting at the same timestamps. If instead one pod is crashlooping on its own, this is the wrong rule and that pod's logs are the answer. Then check whether the node bounced (the sibling \"minipc rebooted\" alert): if it did, this is fallout and resolves itself. If it did not, the suspect is etcd fsync latency on a single-node control plane, which the sibling `etcd: WAL fsync stalling past the lease deadline` rule now measures directly — read it first. Heavy disk writers are a known trigger: CI on the ARC pool writes through the T5. Discount a fsync reading taken just after a boot, though — etcd's first ten minutes back read a 2-3.5s p99 while the control plane re-converges, then settle to 27ms, so that number describes the re-convergence rather than the drive."
       link        = local.control_plane_restarts_link
     }
     labels = {
