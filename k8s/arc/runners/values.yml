@@ -71,20 +71,22 @@ listenerTemplate:
 # spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
 # showing arc-amd64 online is a true health signal.
 #
-# maxRunners: 2 lets exactly two jobs run at once. ARC allocates one ephemeral
-# runner per assigned job and never more, so there is no queue-depth threshold
-# to configure: the second pod comes up only while a second job is actually
-# assigned, and goes away when it finishes. minRunners is the floor of that
-# same number, so the steady state is still one warm pod.
+# maxRunners: 1 runs one job at a time; a second assigned job queues on
+# GitHub's side until the runner frees up. ARC allocates one ephemeral runner
+# per assigned job and never more, so there is no queue-depth threshold to
+# configure. minRunners is the floor of the same number, so the steady state
+# is one warm pod and the pool never grows.
 #
-# The pool stays this narrow because CI activity correlates with the node
+# The pool is this narrow because CI activity correlates with the node
 # misbehaving. Six node deaths on 2026-08-23 each landed minutes after a CI
 # burst; removing the Docker daemon from this pool (see above) is what stopped
 # those. Leader-election flaps continue — every lease holder (kube-scheduler,
 # kube-controller-manager, cilium-operator, cnpg, the alloy operator) exiting
-# together when an etcd fsync stalls past the 5s deadline, a few times a day by restart
-# count, one of them in the same second as a CI burst on 2026-09-07. Concurrency multiplies the
-# write burst behind that, which is why the step is 1 → 2 and not wider.
+# together when an etcd fsync stalls past the 5s deadline, a few times a day by
+# restart count, one of them in the same second as a CI burst on 2026-09-07.
+# etcd and the runners' image pulls and container writes share the one NVMe,
+# and concurrency multiplies the write burst behind the stall, so the pool
+# holds at one runner until etcd has its own volume (a cluster-rebuild change).
 #
 # It is NOT a memory cap — the node was never short of memory. Measured against
 # the in-cluster VictoriaMetrics across those crash windows: MemAvailable never
@@ -114,7 +116,7 @@ listenerTemplate:
 # checks queue until it returns (none are required checks; the free plan can't
 # protect private repos, so merges never block).
 minRunners: 1
-maxRunners: 2
+maxRunners: 1
 
 template:
   spec:
