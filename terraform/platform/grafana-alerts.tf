@@ -4165,23 +4165,22 @@ resource "grafana_rule_group" "control_plane_health" {
   // downstream echo rather than a fault of its own.
   //
   // Threshold 500ms against a measured distribution. etcd's own ceiling for a
-  // healthy p99 is 10ms. Sampled 2026-09-11 minutes after a clean reboot with
-  // no CI running, this node read a p99 of 2.81s: 48.8% of fsyncs landed under
-  // 1ms, but 1.6% took between 2s and 4s — two to three multi-second stalls a
-  // minute. 500ms is fifty times the healthy ceiling and far under what the
-  // node actually does, so it separates a drive that is failing from an
-  // ordinary spike, and unlike a breadth threshold it is not already saturated.
+  // healthy p99 is 10ms. This node's quiet baseline is 20-30ms — elevated, but
+  // two orders of magnitude under the 2-3.5s it reads while the control plane
+  // re-converges after a boot. 500ms sits between the two: fifty times the
+  // healthy ceiling, so an ordinary spike does not reach it, and well under a
+  // real stall, so a failing drive still trips it.
   //
-  // `for = 10m` because the query rates over 5m: ten minutes asks the elevation
-  // to outlive a full window plus an evaluation, which a lone slow compaction
-  // or a backup burst does not.
+  // `for = 20m` is set by that boot window rather than by the query's 5m rate.
+  // etcd's first ten minutes back read a 2.0-3.5s p99 and then fall to 27ms, so
+  // a shorter `for` turns every reboot into a page. A drive that is genuinely
+  // failing stalls for hours, and the lockstep rule below catches the symptom
+  // in the meantime, so the extra ten minutes cost nothing that matters.
   //
-  // Firing continuously means the disk is the finding, not the symptom. A
-  // reboot does not clear it — that was tried on 2026-09-11 and the p99 above
-  // was measured after it.
+  // Firing continuously means the disk is the finding, not the symptom.
   rule {
     name           = "etcd: WAL fsync stalling past the lease deadline"
-    for            = "10m"
+    for            = "20m"
     condition      = "C"
     no_data_state  = "NoData"
     exec_err_state = "Error"
