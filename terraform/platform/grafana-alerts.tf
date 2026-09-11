@@ -84,6 +84,11 @@ locals {
   // you see which ones, which is the first thing you want to know.
   control_plane_restarts_link = "[restarts](${local.grafana_url}/explore?left=%7B%22queries%22:%5B%7B%22expr%22:%22max%20by%20(namespace,%20pod,%20container)%20(increase(kube_pod_container_status_restarts_total%7Bnamespace%3D~%5C%22kube-system%7Ccnpg-system%7Cmonitoring%7Cburrito-system%7Cargocd%7Cexternal-secrets%7Ctailscale%5C%22%7D%5B1h%5D))%22%7D%5D%7D)"
 
+  // etcd's WAL fsync p99 — the disk latency the control-plane-health rules are
+  // downstream of. The alert says the fsyncs are slow; this is where you see
+  // the shape of the tail and whether it lines up with a CI burst.
+  etcd_fsync_link = "[fsync](${local.grafana_url}/explore?left=%7B%22queries%22%3A%5B%7B%22expr%22%3A%22sum%28increase%28etcd_disk_wal_fsync_duration_seconds_bucket%7Ble%3D%5C%22%2BInf%5C%22%7D%5B1h%5D%29%29%20-%20sum%28increase%28etcd_disk_wal_fsync_duration_seconds_bucket%7Ble%3D%5C%221.024%5C%22%7D%5B1h%5D%29%29%22%7D%5D%7D)"
+
   // The CI runners row on platform-services, which plots the queue depth and
   // the runner pool against node reboots. The alert says CI is stuck; this is
   // where you see whether the box bounced underneath it.
@@ -4151,6 +4156,92 @@ resource "grafana_rule_group" "control_plane_health" {
   folder_uid       = grafana_folder.tripbot.uid
   interval_seconds = local.alert_eval_interval_seconds
 
+  // Tier zero: the cause. Warning → Discord.
+  //
+  // The two rules below count controllers bouncing; this one names why. etcd
+  // fsyncs its write-ahead log before acknowledging a write, and that fsync
+  // blocks the raft loop — so a slow disk stops etcd answering at all, the
+  // lease holders miss their 5s deadline, and the lockstep round below is the
+  // downstream echo rather than a fault of its own.
+  //
+  // Counted, not quantiled. The stalls that cost etcd its lease are a thin
+  // fraction of fsyncs — roughly 0.4% of them — so they sit above the 99th
+  // percentile and a p99 threshold cannot see them at all. Measured on this
+  // node 2026-09-11: p99 27ms and median 3ms while fsyncs were crossing a full
+  // second 8-22 times every fifteen minutes, and kube-scheduler lost its lease
+  // on a 5s timeout 18 seconds after taking it. A p99 rule reads `normal`
+  // through exactly that, which is a false negative and worse than no rule.
+  //
+  // So the condition counts fsyncs slower than 1.024s per hour — `le="1.024"`
+  // is a real bucket boundary in etcd's histogram, and subtracting it from
+  // `+Inf` is the count above it. Both sides need their own `sum()`: without
+  // it the two series carry different `le` labels and the subtraction matches
+  // nothing and returns empty. Unlike a quantile this does not move with
+  // request volume, so it means the same thing under CI load and at idle.
+  //
+  // Threshold 10/hr. A drive meeting etcd's 10ms healthy ceiling produces
+  // essentially none of these, so the bar only has to clear the occasional
+  // blip; this node reads 62/hr. One consequence worth knowing: a reboot's
+  // re-convergence churn keeps the hourly count elevated for an hour after it,
+  // so a fresh boot does trip this. That is left alone deliberately — the
+  // drive trips it anyway, and suppressing it would reintroduce the blindness
+  // this rule exists to fix.
+  //
+  // Firing continuously means the disk is the finding, not the symptom.
+  rule {
+    name           = "etcd: WAL fsync stalling past the lease deadline"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "NoData"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "etcd WAL fsyncs crossing 1s more than 10 times an hour — the disk is stalling the control plane"
+      description = "etcd cannot acknowledge a write until its WAL fsync returns, and that fsync blocks the raft loop, so this latency is what the leader-elected controllers experience as an unresponsive API server. Past ~5s it guarantees a lost lease; well below that it already produces the 5s request timeouts behind the sibling `k8s: platform controllers restarting in lockstep` rule. Read the count via the fsync link, not a quantile — these stalls are ~0.4% of fsyncs, so p99 and the median both stay healthy right through them and tell you nothing. Compare against the median (a few ms even while stalling): a flat median with a fat over-1s count is a drive that stalls intermittently rather than one that is uniformly slow. Then check whether CI is running (`kubectl --context admin@adanalife-minipc -n arc-runners get pods`), since the ARC pool is the heaviest writer on the box, and the node's I/O pressure with `talosctl -n minipc.whereisdana.today read /proc/pressure/io` — a high `full` average means every task is blocked on the disk, not just etcd. no_data means the scrape is gone rather than the disk being healthy: etcd serves these on a plaintext listener that only exists while `cluster.etcd.extraArgs.listen-metrics-urls` is in the machine config, and that setting only takes effect on an etcd restart, which in practice means a node reboot."
+      link        = local.etcd_fsync_link
+    }
+    labels = {
+      severity = "warning"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(increase(etcd_disk_wal_fsync_duration_seconds_bucket{le=\"+Inf\"}[1h])) - sum(increase(etcd_disk_wal_fsync_duration_seconds_bucket{le=\"1.024\"}[1h]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [10] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Tier one: how often the lockstep bounce happens. Warning → Discord.
   //
   // The lease holders on this node — kube-scheduler, kube-controller-manager,
@@ -4186,7 +4277,7 @@ resource "grafana_rule_group" "control_plane_health" {
 
     annotations = {
       summary     = "Over 20 platform container restarts in the last hour — the control plane is losing its leases repeatedly"
-      description = "The leader-elected platform controllers exit when they lose their lease, so they bounce together whenever the API server or etcd stalls; this rule fires when that has happened three or more times inside an hour. Confirm the shape first — `kubectl --context admin@adanalife-minipc get pods -A --sort-by=.status.startTime` should show cnpg, cilium-operator, alloy-operator, burrito-controllers and the static control-plane pods restarting at the same timestamps. If instead one pod is crashlooping on its own, this is the wrong rule and that pod's logs are the answer. Then check whether the node bounced (the sibling \"minipc rebooted\" alert): if it did, this is fallout and resolves itself. If it did not, the suspect is etcd fsync latency on a single-node control plane — **etcd exposes no metrics on this node**, so Grafana cannot answer it and `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today service etcd status` plus `dmesg` are the only reads available. Heavy disk writers are the usual trigger: CI on the ARC pool writes through the T5, and stalls have landed in the same second as a CI burst."
+      description = "The leader-elected platform controllers exit when they lose their lease, so they bounce together whenever the API server or etcd stalls; this rule fires when that has happened three or more times inside an hour. Confirm the shape first — `kubectl --context admin@adanalife-minipc get pods -A --sort-by=.status.startTime` should show cnpg, cilium-operator, alloy-operator, burrito-controllers and the static control-plane pods restarting at the same timestamps. If instead one pod is crashlooping on its own, this is the wrong rule and that pod's logs are the answer. Then check whether the node bounced (the sibling \"minipc rebooted\" alert): if it did, this is fallout and resolves itself. If it did not, the suspect is etcd fsync latency on a single-node control plane, which the sibling `etcd: WAL fsync stalling past the lease deadline` rule now measures directly — read it first. Heavy disk writers are a known trigger: CI on the ARC pool writes through the T5. Discount a fsync reading taken just after a boot, though — etcd's first ten minutes back read a 2-3.5s p99 while the control plane re-converges, then settle to 27ms, so that number describes the re-convergence rather than the drive."
       link        = local.control_plane_restarts_link
     }
     labels = {
