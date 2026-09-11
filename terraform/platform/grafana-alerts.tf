@@ -87,7 +87,7 @@ locals {
   // etcd's WAL fsync p99 — the disk latency the control-plane-health rules are
   // downstream of. The alert says the fsyncs are slow; this is where you see
   // the shape of the tail and whether it lines up with a CI burst.
-  etcd_fsync_link = "[fsync](${local.grafana_url}/explore?left=%7B%22queries%22:%5B%7B%22expr%22:%22histogram_quantile(0.99,%20sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket%5B5m%5D))%20by%20(le))%22%7D%5D%7D)"
+  etcd_fsync_link = "[fsync](${local.grafana_url}/explore?left=%7B%22queries%22%3A%5B%7B%22expr%22%3A%22sum%28increase%28etcd_disk_wal_fsync_duration_seconds_bucket%7Ble%3D%5C%22%2BInf%5C%22%7D%5B1h%5D%29%29%20-%20sum%28increase%28etcd_disk_wal_fsync_duration_seconds_bucket%7Ble%3D%5C%221.024%5C%22%7D%5B1h%5D%29%29%22%7D%5D%7D)"
 
   // The CI runners row on platform-services, which plots the queue depth and
   // the runner pool against node reboots. The alert says CI is stuck; this is
@@ -4164,30 +4164,40 @@ resource "grafana_rule_group" "control_plane_health" {
   // lease holders miss their 5s deadline, and the lockstep round below is the
   // downstream echo rather than a fault of its own.
   //
-  // Threshold 500ms against a measured distribution. etcd's own ceiling for a
-  // healthy p99 is 10ms. This node's quiet baseline is 20-30ms — elevated, but
-  // two orders of magnitude under the 2-3.5s it reads while the control plane
-  // re-converges after a boot. 500ms sits between the two: fifty times the
-  // healthy ceiling, so an ordinary spike does not reach it, and well under a
-  // real stall, so a failing drive still trips it.
+  // Counted, not quantiled. The stalls that cost etcd its lease are a thin
+  // fraction of fsyncs — roughly 0.4% of them — so they sit above the 99th
+  // percentile and a p99 threshold cannot see them at all. Measured on this
+  // node 2026-09-11: p99 27ms and median 3ms while fsyncs were crossing a full
+  // second 8-22 times every fifteen minutes, and kube-scheduler lost its lease
+  // on a 5s timeout 18 seconds after taking it. A p99 rule reads `normal`
+  // through exactly that, which is a false negative and worse than no rule.
   //
-  // `for = 20m` is set by that boot window rather than by the query's 5m rate.
-  // etcd's first ten minutes back read a 2.0-3.5s p99 and then fall to 27ms, so
-  // a shorter `for` turns every reboot into a page. A drive that is genuinely
-  // failing stalls for hours, and the lockstep rule below catches the symptom
-  // in the meantime, so the extra ten minutes cost nothing that matters.
+  // So the condition counts fsyncs slower than 1.024s per hour — `le="1.024"`
+  // is a real bucket boundary in etcd's histogram, and subtracting it from
+  // `+Inf` is the count above it. Both sides need their own `sum()`: without
+  // it the two series carry different `le` labels and the subtraction matches
+  // nothing and returns empty. Unlike a quantile this does not move with
+  // request volume, so it means the same thing under CI load and at idle.
+  //
+  // Threshold 10/hr. A drive meeting etcd's 10ms healthy ceiling produces
+  // essentially none of these, so the bar only has to clear the occasional
+  // blip; this node reads 62/hr. One consequence worth knowing: a reboot's
+  // re-convergence churn keeps the hourly count elevated for an hour after it,
+  // so a fresh boot does trip this. That is left alone deliberately — the
+  // drive trips it anyway, and suppressing it would reintroduce the blindness
+  // this rule exists to fix.
   //
   // Firing continuously means the disk is the finding, not the symptom.
   rule {
     name           = "etcd: WAL fsync stalling past the lease deadline"
-    for            = "20m"
+    for            = "10m"
     condition      = "C"
     no_data_state  = "NoData"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "etcd WAL fsync p99 over 500ms — the disk is stalling the control plane"
-      description = "etcd cannot acknowledge a write until its WAL fsync returns, and that fsync blocks the raft loop, so this latency is what the leader-elected controllers experience as an unresponsive API server. Past ~5s it guarantees a lost lease; well below that it already produces the 5s request timeouts behind the sibling `k8s: platform controllers restarting in lockstep` rule. Check the tail shape first via the fsync link — a p99 dragged up by a thin 2-4s tail while the median stays under 1ms is the signature of a drive that stalls rather than one that is uniformly slow. Then check whether CI is running (`kubectl --context admin@adanalife-minipc -n arc-runners get pods`), since the ARC pool is the heaviest writer on the box, and the node's I/O pressure with `talosctl -n minipc.whereisdana.today read /proc/pressure/io` — a high `full` average means every task is blocked on the disk, not just etcd. no_data means the scrape is gone rather than the disk being healthy: etcd serves these on a plaintext listener that only exists while `cluster.etcd.extraArgs.listen-metrics-urls` is in the machine config, and that setting only takes effect on an etcd restart, which in practice means a node reboot."
+      summary     = "etcd WAL fsyncs crossing 1s more than 10 times an hour — the disk is stalling the control plane"
+      description = "etcd cannot acknowledge a write until its WAL fsync returns, and that fsync blocks the raft loop, so this latency is what the leader-elected controllers experience as an unresponsive API server. Past ~5s it guarantees a lost lease; well below that it already produces the 5s request timeouts behind the sibling `k8s: platform controllers restarting in lockstep` rule. Read the count via the fsync link, not a quantile — these stalls are ~0.4% of fsyncs, so p99 and the median both stay healthy right through them and tell you nothing. Compare against the median (a few ms even while stalling): a flat median with a fat over-1s count is a drive that stalls intermittently rather than one that is uniformly slow. Then check whether CI is running (`kubectl --context admin@adanalife-minipc -n arc-runners get pods`), since the ARC pool is the heaviest writer on the box, and the node's I/O pressure with `talosctl -n minipc.whereisdana.today read /proc/pressure/io` — a high `full` average means every task is blocked on the disk, not just etcd. no_data means the scrape is gone rather than the disk being healthy: etcd serves these on a plaintext listener that only exists while `cluster.etcd.extraArgs.listen-metrics-urls` is in the machine config, and that setting only takes effect on an etcd restart, which in practice means a node reboot."
       link        = local.etcd_fsync_link
     }
     labels = {
@@ -4198,13 +4208,13 @@ resource "grafana_rule_group" "control_plane_health" {
     data {
       ref_id = "A"
       relative_time_range {
-        from = 600
+        from = 3600
         to   = 0
       }
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) by (le))"
+        expr          = "sum(increase(etcd_disk_wal_fsync_duration_seconds_bucket{le=\"+Inf\"}[1h])) - sum(increase(etcd_disk_wal_fsync_duration_seconds_bucket{le=\"1.024\"}[1h]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -4223,7 +4233,7 @@ resource "grafana_rule_group" "control_plane_health" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [0.5] }
+          evaluator = { type = "gt", params = [10] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
