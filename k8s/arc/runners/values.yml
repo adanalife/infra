@@ -129,6 +129,14 @@ template:
       - name: chown-caches
         image: ghcr.io/adanalife/arc-runner:latest
         imagePullPolicy: Always
+        # subPathExpr below interpolates this; the kubelet creates the
+        # per-pod workspace directory root-owned, and this container is the
+        # only chance to hand it to uid 1001 before the runner starts.
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
         command:
           - sudo
           - chown
@@ -146,6 +154,7 @@ template:
             mountPath: /cache/toolcache
           - name: work
             mountPath: /cache/work
+            subPathExpr: $(POD_NAME)
     containers:
       - name: runner
         # Our own build of ghcr.io/actions/actions-runner (infra
@@ -163,6 +172,12 @@ template:
           # not once per job. GitHub-hosted runners use this same path.
           - name: RUNNER_TOOL_CACHE
             value: /opt/hostedtoolcache
+          # Names this pod's own subdirectory of the shared workspace root
+          # (subPathExpr on the work mount below).
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
         # Warm caches shared across runner pods via hostPath — a single-node
         # cluster, so every pod sees the same disk. Ephemeral runners
         # otherwise re-download every toolchain and package on every job,
@@ -201,6 +216,7 @@ template:
           # on /var, the disk this whole block exists to keep jobs off.
           - name: work
             mountPath: /home/runner/_work
+            subPathExpr: $(POD_NAME)
         # 4-CPU limit makes a self-hosted job as fast as a GitHub-hosted
         # ubuntu-latest (4 vCPU) while capping what a hot job can take from
         # the streams.
@@ -236,23 +252,31 @@ template:
       # path on the disk etcd fsyncs to; a user-supplied volume of this name
       # replaces that default. The runner container mounts it above.
       #
-      # A generic ephemeral volume rather than a hostPath: local-path
-      # provisions on /var/mnt/data (the T5), which is the property that
-      # matters, and each runner pod gets its own PV, so concurrent runners
-      # can't share a workspace path. Delete reclaim means the volume goes with
-      # the pod, matching the ephemeral-runner model — every job starts clean,
-      # and nothing here is worth keeping (the warm caches above are separate
-      # and deliberately shared).
+      # A plain hostPath carved per pod by `subPathExpr: $(POD_NAME)` on both
+      # mounts above, NOT a generic ephemeral volume. Each pod still gets a
+      # private directory — which is what makes maxRunners > 1 safe, since two
+      # runners must never share a _work path — but no PVC is involved.
       #
-      # The size request is nominal: local-path is hostPath-backed and enforces
-      # no quota, so this bounds nothing. Job workspaces share the T5's free
-      # space with everything else on it.
+      # A PVC is what the ephemeral-volume version cost us: the scheduler will
+      # not place a pod whose PVC does not exist yet, and local-path is
+      # necessarily WaitForFirstConsumer (it learns the node FROM the scheduled
+      # pod, and fails outright on Immediate — measured, infra#1194/#1195), so
+      # the PVC will not provision until the pod is placed. Kubernetes breaks
+      # the tie on scheduler backoff: 46 runner pods hit `FailedScheduling:
+      # waiting for ephemeral volume controller to create the
+      # persistentvolumeclaim`, and placement took a random 4-73s per job while
+      # the pool averaged 1.25 of its 2 slots busy. With a hostPath the pod
+      # schedules on the first pass — measured at 1s.
+      #
+      # The tradeoff is cleanup: a subPath directory outlives its pod, where a
+      # Delete-reclaim PVC went with it. The arc-workspace-reap CronJob
+      # (infra's cdk8s constructs/arc.py) removes directories older than the
+      # job timeout. Nothing here is worth keeping — every job starts clean,
+      # and the warm caches above are separate and deliberately shared.
+      #
+      # No size bound, same as before: local-path enforced no quota either, so
+      # job workspaces have always shared the T5's free space.
       - name: work
-        ephemeral:
-          volumeClaimTemplate:
-            spec:
-              accessModes: [ReadWriteOnce]
-              storageClassName: local-path
-              resources:
-                requests:
-                  storage: 20Gi
+        hostPath:
+          path: /var/mnt/data/arc-work
+          type: DirectoryOrCreate
