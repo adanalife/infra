@@ -2463,14 +2463,16 @@ tasks:
         msg: "plaintext Talos PKI not present in talos/adanalife-minipc — nothing to encrypt"
     cmds:
       # Sources the KMS key ARN from terraform output (key must already be
-      # applied via `task tf:prod:apply`). --input-type binary treats each
+      # applied via `task tf:prod:apply`). terraform runs under mise from the
+      # layer dir so its .terraform-version pin resolves; the repo root has no
+      # pin, and a bare `terraform` here lands on an unversioned tfenv shim. --input-type binary treats each
       # file as one opaque blob, sidestepping the multi-doc-YAML limitation.
       # tailscale.patch.yaml is optional (only exists once tailscale is wired) —
       # skip it if absent.
       - |
         aws-vault exec adanalife-prod -- bash -c '
           set -euo pipefail
-          kms=$(terraform -chdir=../../terraform/prod-1 output -raw sops_talos_kms_key_arn)
+          kms=$(mise exec --cd ../../terraform/prod-1 -- terraform output -raw sops_talos_kms_key_arn)
           for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml" "tailscale.patch.yaml:tailscale.patch.sops.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
             [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
