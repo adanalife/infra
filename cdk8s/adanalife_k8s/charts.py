@@ -227,6 +227,20 @@ class UpsMonitorChart(Chart):
         UpsMonitor(self)
 
 
+class T5WatchdogChart(Chart):
+    """The T5 watchdog — a cluster-singleton (one minipc, one T5) in its own
+    `node-watchdog` namespace. Env-agnostic, so it's authored once and synthed to
+    dist/t5-watchdog.k8s.yaml, delivered by a dedicated minipc-only Argo
+    Application (see constructs/argocd.py — gated off the k3d dev instance, which
+    has no Talos node to reboot). See constructs/t5_watchdog.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        from adanalife_k8s.constructs.t5_watchdog import T5Watchdog
+
+        T5Watchdog(self)
+
+
 class ArcChart(Chart):
     """The ARC (self-hosted GHA runner) supporting unit — namespaces + runner
     LimitRange + GitHub App ExternalSecret, a cluster-singleton in the same

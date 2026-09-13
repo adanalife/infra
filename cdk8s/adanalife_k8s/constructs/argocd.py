@@ -245,6 +245,7 @@ class ArgoCD(Construct):
         lan_tls: bool = True,
         notifications_secret: bool = True,
         ups_monitor: bool = True,
+        t5_watchdog: bool = True,
         arc: bool = True,
     ):
         super().__init__(scope, id)
@@ -308,13 +309,14 @@ class ArgoCD(Construct):
             # project).
             namespaces=_project_namespaces(self.envs)
             + (["ups"] if ups_monitor else [])
+            + (["node-watchdog"] if t5_watchdog else [])
             + (["arc-systems", "arc-runners"] if arc else []),
             # + Namespace when a singleton rides this project: its Namespace
             # objects (owned by the unit, or via CreateNamespace=true) are
             # gated by this clusterResourceWhitelist, so a sync fails without
             # the entry.
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
-            + ([NAMESPACE_KIND] if (ups_monitor or arc) else []),
+            + ([NAMESPACE_KIND] if (ups_monitor or t5_watchdog or arc) else []),
         )
         if self.console_envs:
             self._app_project(
@@ -504,6 +506,24 @@ class ArgoCD(Construct):
                 app_name_tmpl="ups-monitor",
                 include_tmpl="ups-monitor.k8s.yaml",
                 dest_ns_tmpl="ups",
+                prune_disabled=False,
+                create_namespace=True,
+            )
+        # The T5 watchdog — the same cluster-singleton shape as the UPS monitor
+        # and, like it, minipc-only (the k3d dev Argo passes t5_watchdog=False:
+        # no Talos node there to probe or reboot). MANUAL sync is deliberate for
+        # the same reason — a unit whose one action is rebooting the node that
+        # runs prod should land when a human says so, not on merge.
+        # CreateNamespace=true so Argo owns the `node-watchdog` namespace.
+        if t5_watchdog:
+            self._application_set(
+                id="appset-t5-watchdog",
+                name="t5-watchdog",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="t5-watchdog",
+                include_tmpl="t5-watchdog.k8s.yaml",
+                dest_ns_tmpl="node-watchdog",
                 prune_disabled=False,
                 create_namespace=True,
             )
