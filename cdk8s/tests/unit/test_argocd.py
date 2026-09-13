@@ -21,6 +21,7 @@ _DEV = dict(
     lan_tls=False,
     ups_monitor=False,  # dev can't reach the Synology NUT server
     arc=False,  # no runner host on the dev cluster
+    kmsg=False,  # k3d has no Talos API; there is no kernel log to read
 )
 
 

@@ -27,6 +27,7 @@ _DEV = dict(
     lan_tls=False,
     ups_monitor=False,
     arc=False,
+    kmsg=False,
 )
 
 
