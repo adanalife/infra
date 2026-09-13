@@ -538,7 +538,7 @@ resource "grafana_rule_group" "host_storage" {
 
     annotations = {
       summary     = "kernel reported a USB disconnect or an xfs shutdown on the minipc"
-      description = "The minipc's kernel log carried `USB disconnect`, `log I/O error` or `Filesystem has been shut down` — the Samsung T5 leaving the USB bus, which takes prod+stage Postgres, playout's corpus, VictoriaMetrics and the ARC work dir with it. Recovery is a reboot, and only a reboot: Talos does not re-bind a UserVolume whose device node changed, so the drive re-enumerates as sdb and nothing remounts it. `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today reboot` (this does NOT wipe the UserVolume; xfs replays its log on the way up). Full chain, including why the box was idle when it dropped: vault incidents 2026-09-13."
+      description = "The minipc's kernel log carried `USB disconnect`, `log I/O error` or `Filesystem has been shut down` — the Samsung T5 leaving the USB bus, which takes prod+stage Postgres, playout's corpus, VictoriaMetrics and the ARC work dir with it. Recovery is a reboot, and only a reboot: Talos does not re-bind a UserVolume whose device node changed, so the drive re-enumerates as sdb and nothing remounts it. `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today reboot` (this does NOT wipe the UserVolume; xfs replays its log on the way up). Note the drop does not need load to happen — on 2026-09-13 the box was idle, with no CI running and the disk near-quiet."
     }
     labels = {
       severity = "critical"
