@@ -22,6 +22,7 @@ from adanalife_k8s.charts import (
     ArgoCDChart,
     BurritoChart,
     DashcamLocalizeChart,
+    KmsgChart,
     NfsPVChart,
     DataChart,
     MediamtxChart,
@@ -106,6 +107,7 @@ if not only:
         lan_tls=False,
         ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
         arc=False,  # no runner host on the dev cluster; runners are minipc-only
+        kmsg=False,  # k3d has no Talos API; there is no kernel log to read
     )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
@@ -125,6 +127,11 @@ if not only:
     # Application. The two ARC Helm charts are platform components
     # (helm_platform.py). See constructs/arc.py.
     ArcChart(app, "arc")
+    # Kernel-log shipper — cluster-singleton in the `kmsg` namespace,
+    # env-agnostic. Streams the node's dmesg to stdout, where alloy-logs picks it
+    # up for Loki. Minipc-only (the k3d dev Argo has no Talos API to read). See
+    # constructs/kmsg.py.
+    KmsgChart(app, "kmsg")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

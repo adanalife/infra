@@ -31,6 +31,7 @@ from adanalife_k8s.constructs.music import (
     emit_music_pv,
     emit_music_pvc,
 )
+from adanalife_k8s.constructs.kmsg import KmsgShipper
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
@@ -225,6 +226,20 @@ class UpsMonitorChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         UpsMonitor(self)
+
+
+class KmsgChart(Chart):
+    """The kernel-log shipper — a cluster-singleton (one minipc) in its own
+    `kmsg` namespace, in the same shape as the UPS monitor. Env-agnostic, so
+    it's authored once and synthed to dist/kmsg.k8s.yaml, delivered by a
+    dedicated minipc-only Argo Application (see constructs/argocd.py — gated off
+    the k3d dev instance, which has no Talos API to read). See
+    constructs/kmsg.py for why it reads the API rather than setting
+    KmsgLogConfig."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        KmsgShipper(self)
 
 
 class ArcChart(Chart):

@@ -520,6 +520,71 @@ resource "grafana_rule_group" "host_storage" {
     }
   }
 
+  // The same fault read at the kernel, one layer upstream of the rule above.
+  // That one keys on application pods logging "input/output error", which makes
+  // it a fallout detector: it cannot distinguish a T5 drop from an NFS hiccup,
+  // and it goes NoData the moment the affected pods stop logging at all — both
+  // true on 2026-09-13. These three strings come from the kernel itself and say
+  // exactly which failure happened. Sourced from the `kmsg` pod's stdout (see
+  // cdk8s constructs/kmsg.py), which streams `talosctl dmesg --follow --tail`.
+  // Keep BOTH rules: this one is precise, the other still fires if the shipper
+  // is the thing that is down.
+  rule {
+    name           = "minipc kernel: storage device lost"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "kernel reported a USB disconnect or an xfs shutdown on the minipc"
+      description = "The minipc's kernel log carried `USB disconnect`, `log I/O error` or `Filesystem has been shut down` — the Samsung T5 leaving the USB bus, which takes prod+stage Postgres, playout's corpus, VictoriaMetrics and the ARC work dir with it. Recovery is a reboot, and only a reboot: Talos does not re-bind a UserVolume whose device node changed, so the drive re-enumerates as sdb and nothing remounts it. `talosctl -e minipc.whereisdana.today -n minipc.whereisdana.today reboot` (this does NOT wipe the UserVolume; xfs replays its log on the way up). Note the drop does not need load to happen — on 2026-09-13 the box was idle, with no CI running and the disk near-quiet."
+    }
+    labels = {
+      severity = "critical"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.loki.uid
+      # queryType set for the same reason as the rule above — Grafana reflects
+      # it back at refresh, and leaving it unset reads as permanent drift.
+      query_type = "instant"
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(count_over_time({cluster=\"adanalife-minipc\", namespace=\"kmsg\"} |~ \"USB disconnect|log I/O error|Filesystem has been shut down\" [5m]))"
+        queryType     = "instant"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Capacity, the other way the T5 takes prod down. The I/O-fault rule above
   // catches the disk vanishing; these catch it filling, which has no log
   // signature at all until writes start failing. Two tiers off one ratio
