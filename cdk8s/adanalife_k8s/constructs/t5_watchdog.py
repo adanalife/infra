@@ -128,13 +128,17 @@ def talos(*args, timeout):
 
 
 def entries(stdout):
-    # `talosctl list` prints a NODE/NAME header, then one line per dirent
-    # including `.` for the directory itself. A live UserVolume always holds the
-    # local-path PV directories, so a listing with nothing but `.` means the
-    # mount is gone — the shape the 2026-09-13 re-enumeration produced, which
-    # reads as success to a returncode-only check.
-    lines = [ln for ln in stdout.splitlines() if ln.strip()][1:]
-    return [ln for ln in lines if ln.split()[-1] not in (".", "..")]
+    # One line per dirent, including `.` for the directory itself. A live
+    # UserVolume always holds the local-path PV directories, so a listing with
+    # nothing but `.` means the mount is gone — the shape the 2026-09-13
+    # re-enumeration produced, which reads as success to a returncode-only check.
+    #
+    # Filter by content, never by position: `talosctl list` prints the NODE/NAME
+    # header only when asked for more than one node, and this probe asks for one.
+    # Dropping a fixed first line would undercount a headerless listing by one,
+    # and at one entry that reads as an empty mount — i.e. it reboots prod.
+    lines = (ln.strip() for ln in stdout.splitlines() if ln.strip())
+    return [ln for ln in lines if ln.split()[-1] not in (".", "..", "NAME")]
 
 
 def probe():
@@ -181,11 +185,20 @@ def selftest():
     assert not may_reboot(CONFIRM, GRACE - 1, False), "fires inside the startup grace"
     assert not may_reboot(CONFIRM, GRACE + 1, True), "fires twice after latching"
     assert may_reboot(CONFIRM, GRACE + 1, False), "never fires"
-    # A healthy listing has a header and real dirents; a dead mount has neither.
+    # The real single-node shape: no header, `.` first, then the dirents.
+    assert entries(".\\narc-work\\nlocal-path-provisioner\\n") == [
+        "arc-work",
+        "local-path-provisioner",
+    ]
+    # A single real entry must not be eaten as a header — that reads as an empty
+    # mount and reboots prod.
+    assert entries(".\\nlocal-path-provisioner\\n") == ["local-path-provisioner"]
+    # The multi-node shape, header and all, in case --nodes ever grows.
     assert entries("NODE   NAME\\n1.2.3.4   .\\n1.2.3.4   pvc-abc\\n") == [
         "1.2.3.4   pvc-abc"
     ]
-    assert entries("NODE   NAME\\n1.2.3.4   .\\n") == []
+    # A dead mount: the directory itself and nothing under it.
+    assert entries(".\\n") == []
     assert entries("") == []
     print("selftest ok", flush=True)
 
