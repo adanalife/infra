@@ -28,6 +28,7 @@ _DEV = dict(
     ups_monitor=False,
     t5_watchdog=False,
     arc=False,
+    kmsg=False,
 )
 
 

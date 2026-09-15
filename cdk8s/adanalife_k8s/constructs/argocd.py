@@ -247,6 +247,7 @@ class ArgoCD(Construct):
         ups_monitor: bool = True,
         t5_watchdog: bool = True,
         arc: bool = True,
+        kmsg: bool = True,
     ):
         super().__init__(scope, id)
         self.envs = envs
@@ -304,19 +305,20 @@ class ArgoCD(Construct):
             name=INFRA_PROJECT,
             description="shared cluster infrastructure (postgres data + supporting), from the infra repo",
             source_repos=[REPO_URL],
-            # + the minipc singletons' namespaces (the UPS monitor + ARC
-            # Applications below ride the infra project — same repo, same
-            # project).
+            # + the minipc singletons' namespaces (the UPS monitor, T5
+            # watchdog, ARC and kmsg Applications below ride the infra project
+            # — same repo, same project).
             namespaces=_project_namespaces(self.envs)
             + (["ups"] if ups_monitor else [])
             + (["node-watchdog"] if t5_watchdog else [])
-            + (["arc-systems", "arc-runners"] if arc else []),
+            + (["arc-systems", "arc-runners"] if arc else [])
+            + (["kmsg"] if kmsg else []),
             # + Namespace when a singleton rides this project: its Namespace
             # objects (owned by the unit, or via CreateNamespace=true) are
             # gated by this clusterResourceWhitelist, so a sync fails without
             # the entry.
             cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
-            + ([NAMESPACE_KIND] if (ups_monitor or t5_watchdog or arc) else []),
+            + ([NAMESPACE_KIND] if (ups_monitor or t5_watchdog or arc or kmsg) else []),
         )
         if self.console_envs:
             self._app_project(
@@ -506,6 +508,23 @@ class ArgoCD(Construct):
                 app_name_tmpl="ups-monitor",
                 include_tmpl="ups-monitor.k8s.yaml",
                 dest_ns_tmpl="ups",
+                prune_disabled=False,
+                create_namespace=True,
+            )
+        # The kernel-log shipper — a cluster-SINGLETON in the same shape as the
+        # UPS monitor, minipc-only (the k3d dev Argo passes kmsg=False; that
+        # cluster has no Talos API to read). Autosynced, unlike the UPS monitor:
+        # this pod only ever reads, so there's no arming step that must be a hand
+        # sync. CreateNamespace=true so Argo owns the `kmsg` namespace.
+        if kmsg:
+            self._application_set(
+                id="appset-kmsg",
+                name="kmsg",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="kmsg",
+                include_tmpl="kmsg.k8s.yaml",
+                dest_ns_tmpl="kmsg",
                 prune_disabled=False,
                 create_namespace=True,
             )
