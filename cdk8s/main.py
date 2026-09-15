@@ -29,6 +29,7 @@ from adanalife_k8s.charts import (
     MusicLocalizeChart,
     PlatformArgoChart,
     SupportingChart,
+    T5WatchdogChart,
     UpsMonitorChart,
 )
 from adanalife_k8s.config import ENVS, load_env
@@ -106,6 +107,7 @@ if not only:
         lan_host=f"argocd.{load_env('development').dns_base}",
         lan_tls=False,
         ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
+        t5_watchdog=False,  # no Talos node on the k3d dev cluster to probe or reboot
         arc=False,  # no runner host on the dev cluster; runners are minipc-only
         kmsg=False,  # k3d has no Talos API; there is no kernel log to read
     )
@@ -122,6 +124,9 @@ if not only:
     # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
     # NUT server). See constructs/ups_monitor.py.
     UpsMonitorChart(app, "ups-monitor")
+    # The T5 watchdog — same singleton shape, reboots the node when the
+    # /var/mnt/data UserVolume stops answering. See constructs/t5_watchdog.py.
+    T5WatchdogChart(app, "t5-watchdog")
     # ARC supporting unit (namespaces + runner LimitRange + GitHub App
     # ExternalSecret) — cluster-singleton, delivered by a minipc-only Argo
     # Application. The two ARC Helm charts are platform components

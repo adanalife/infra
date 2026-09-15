@@ -33,6 +33,7 @@ from adanalife_k8s.constructs.music import (
 )
 from adanalife_k8s.constructs.kmsg import KmsgShipper
 from adanalife_k8s.constructs.postgres import Postgres
+from adanalife_k8s.constructs.t5_watchdog import T5Watchdog
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
 from adanalife_k8s.priority import emit_priority_classes
@@ -240,6 +241,18 @@ class KmsgChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         KmsgShipper(self)
+
+
+class T5WatchdogChart(Chart):
+    """The T5 watchdog — a cluster-singleton (one minipc, one T5) in its own
+    `node-watchdog` namespace. Env-agnostic, so it's authored once and synthed to
+    dist/t5-watchdog.k8s.yaml, delivered by a dedicated minipc-only Argo
+    Application (see constructs/argocd.py — gated off the k3d dev instance, which
+    has no Talos node to reboot). See constructs/t5_watchdog.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        T5Watchdog(self)
 
 
 class ArcChart(Chart):
