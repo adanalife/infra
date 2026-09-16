@@ -612,8 +612,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (job, deployment_environment) (rate(tripbot_cron_runs_total{deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
-          "legendFormat": "{{job}} [{{deployment_environment}}]"
+          "expr": "sum by (cron_job, deployment_environment) (rate(tripbot_cron_runs_total{deployment_environment=~\"$deployment_environment\"}[5m])) * 60",
+          "legendFormat": "{{cron_job}} [{{deployment_environment}}]"
         }
       ],
       "fieldConfig": {
@@ -655,8 +655,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (job, le, deployment_environment) (rate(tripbot_cron_duration_seconds_bucket{deployment_environment=~\"$deployment_environment\"}[10m])))",
-          "legendFormat": "{{job}} [{{deployment_environment}}]"
+          "expr": "histogram_quantile(0.95, sum by (cron_job, le, deployment_environment) (rate(tripbot_cron_duration_seconds_bucket{deployment_environment=~\"$deployment_environment\"}[10m])))",
+          "legendFormat": "{{cron_job}} [{{deployment_environment}}]"
         }
       ],
       "fieldConfig": {
