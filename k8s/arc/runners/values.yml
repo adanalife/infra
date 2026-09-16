@@ -95,8 +95,9 @@ listenerTemplate:
 # configure.
 #
 # The pool is narrow because CI activity correlates with the node misbehaving.
-# Six node deaths on 2026-08-23 each landed minutes after a CI burst; removing
-# the Docker daemon from this pool (see above) is what stopped those.
+# Eleven node deaths on 2026-08-23 (thirteen across the 23rd and 24th) each
+# landed minutes after a CI burst; removing the Docker daemon from this pool
+# (see above) is what stopped those.
 # Leader-election flaps continue — every lease holder (kube-scheduler,
 # kube-controller-manager, cilium-operator, cnpg, the alloy operator) exiting
 # together when an etcd fsync stalls past the 5s deadline — but those stalls
