@@ -29,9 +29,31 @@ spec:
     env:
       - name: AWS_REGION
         value: us-east-1
+      - name: TF_PLUGIN_CACHE_DIR
+        value: /var/mnt/data/burrito-plugin-cache
     envFrom:
       - secretRef:
           name: burrito-aws-core
+    initContainers:
+      - name: chown-plugin-cache
+        image: ghcr.io/adanalife/mirror/ubuntu:24.04
+        command:
+          - chown
+          - 65532:65532
+          - /var/mnt/data/burrito-plugin-cache
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+          - name: plugin-cache
+            mountPath: /var/mnt/data/burrito-plugin-cache
+    volumes:
+      - name: plugin-cache
+        hostPath:
+          path: /var/mnt/data/burrito-plugin-cache
+          type: DirectoryOrCreate
+    volumeMounts:
+      - name: plugin-cache
+        mountPath: /var/mnt/data/burrito-plugin-cache
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -74,9 +96,31 @@ spec:
     env:
       - name: AWS_REGION
         value: us-east-1
+      - name: TF_PLUGIN_CACHE_DIR
+        value: /var/mnt/data/burrito-plugin-cache
     envFrom:
       - secretRef:
           name: burrito-aws-platform
+    initContainers:
+      - name: chown-plugin-cache
+        image: ghcr.io/adanalife/mirror/ubuntu:24.04
+        command:
+          - chown
+          - 65532:65532
+          - /var/mnt/data/burrito-plugin-cache
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+          - name: plugin-cache
+            mountPath: /var/mnt/data/burrito-plugin-cache
+    volumes:
+      - name: plugin-cache
+        hostPath:
+          path: /var/mnt/data/burrito-plugin-cache
+          type: DirectoryOrCreate
+    volumeMounts:
+      - name: plugin-cache
+        mountPath: /var/mnt/data/burrito-plugin-cache
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -119,6 +163,8 @@ spec:
     env:
       - name: AWS_REGION
         value: us-east-1
+      - name: TF_PLUGIN_CACHE_DIR
+        value: /var/mnt/data/burrito-plugin-cache
       - name: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/gcp/credential-config.json
       - name: TF_VAR_gcp_impersonate
@@ -126,7 +172,23 @@ spec:
     envFrom:
       - secretRef:
           name: burrito-aws-stage-apply
+    initContainers:
+      - name: chown-plugin-cache
+        image: ghcr.io/adanalife/mirror/ubuntu:24.04
+        command:
+          - chown
+          - 65532:65532
+          - /var/mnt/data/burrito-plugin-cache
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+          - name: plugin-cache
+            mountPath: /var/mnt/data/burrito-plugin-cache
     volumes:
+      - name: plugin-cache
+        hostPath:
+          path: /var/mnt/data/burrito-plugin-cache
+          type: DirectoryOrCreate
       - name: gcp-token
         projected:
           sources:
@@ -138,6 +200,8 @@ spec:
         configMap:
           name: burrito-gcp-stage-1
     volumeMounts:
+      - name: plugin-cache
+        mountPath: /var/mnt/data/burrito-plugin-cache
       - name: gcp-token
         mountPath: /var/run/secrets/gcp
         readOnly: true
@@ -207,6 +271,8 @@ spec:
     env:
       - name: AWS_REGION
         value: us-east-1
+      - name: TF_PLUGIN_CACHE_DIR
+        value: /var/mnt/data/burrito-plugin-cache
       - name: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/gcp/credential-config.json
       - name: TF_VAR_gcp_impersonate
@@ -214,7 +280,23 @@ spec:
     envFrom:
       - secretRef:
           name: burrito-aws-prod-apply
+    initContainers:
+      - name: chown-plugin-cache
+        image: ghcr.io/adanalife/mirror/ubuntu:24.04
+        command:
+          - chown
+          - 65532:65532
+          - /var/mnt/data/burrito-plugin-cache
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+          - name: plugin-cache
+            mountPath: /var/mnt/data/burrito-plugin-cache
     volumes:
+      - name: plugin-cache
+        hostPath:
+          path: /var/mnt/data/burrito-plugin-cache
+          type: DirectoryOrCreate
       - name: gcp-token
         projected:
           sources:
@@ -226,6 +308,8 @@ spec:
         configMap:
           name: burrito-gcp-prod-1
     volumeMounts:
+      - name: plugin-cache
+        mountPath: /var/mnt/data/burrito-plugin-cache
       - name: gcp-token
         mountPath: /var/run/secrets/gcp
         readOnly: true
