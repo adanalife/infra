@@ -64,7 +64,7 @@ GITHUB_APP_SM_KEY = "/k8s/arc/github-app"
 CLUSTER_STORE = ("aws-parameterstore-cluster", "ClusterSecretStore")
 # The reaper needs `find` and `rm` and nothing else. Reusing the ubuntu mirror
 # the postgres backup already pulls keeps this to zero new mirrored packages
-# (each one costs two manual UI clicks, per the ghcr-base-image-mirrors ADR)
+# (each one costs two manual UI clicks to set up)
 # and the layers are already on the node.
 REAPER_IMAGE = "ghcr.io/adanalife/mirror/ubuntu:24.04"
 

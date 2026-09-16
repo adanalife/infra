@@ -32,10 +32,10 @@ Together those bound the worst case to one reboot per STARTUP_GRACE.
 credential is the `t5-watchdog-talosconfig` Secret, delivered by the
 ExternalSecret emitted here from SSM `/k8s/ups/talosconfig` — the same
 `os:operator` talosconfig the UPS monitor holds (the narrowest Talos role that
-permits reboot; no config-write/admin). Sharing it is deliberate and temporary:
-the scope is identical, and minting a second one is tracked rather than done. To
-stand down: flip `DRY_RUN` to "true" (log-only) — the optional Secret mount and
-the manual-sync Argo Application remain as the other two gates.
+permits reboot; no config-write/admin). Sharing it is deliberate: the scope is
+identical. To stand down: flip `DRY_RUN` to "true" (log-only) — the optional
+Secret mount and the manual-sync Argo Application remain as the other two
+gates.
 
 The script self-checks: `python3 /app/t5probe.py --selftest` asserts the trigger
 boundaries without touching the node, and is what the unit test runs.

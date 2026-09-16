@@ -885,8 +885,7 @@ resource "grafana_rule_group" "host_lifecycle" {
 #
 # ponytail: this watches reachability only, which is the cheap half. Alerting
 # on the NAS's `eth3` link-state transitions (34,260 of them, the suspected
-# cause) needs a log feed off the NAS itself and is still an open question in
-# the infra TODO.
+# cause) needs a log feed off the NAS itself and is still an open question.
 resource "grafana_rule_group" "ups_health" {
   name             = "ups-health"
   folder_uid       = grafana_folder.tripbot.uid
