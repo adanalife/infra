@@ -67,26 +67,45 @@ listenerTemplate:
     containers:
       - name: listener
 
-# minRunners: 1 keeps one warm runner ALWAYS registered — no cold-start pod
-# spin-up on the common path, and `gh api orgs/adanalife/actions/runners`
-# showing arc-amd64 online is a true health signal.
+# minRunners: 0 keeps NO warm runner registered: the pool idles empty, and
+# every assigned job gets a freshly registered ephemeral runner. The runner
+# image (~930 MB) is already cached on the node, so that cold start costs
+# seconds.
 #
-# maxRunners: 1 runs one job at a time; a second assigned job queues on
-# GitHub's side until the runner frees up. ARC allocates one ephemeral runner
-# per assigned job and never more, so there is no queue-depth threshold to
-# configure. minRunners is the floor of the same number, so the steady state
-# is one warm pod and the pool never grows.
+# A warm runner is a long-lived session, and a long-lived session is what goes
+# stale invisibly. When GitHub's broker starts answering an idle runner's
+# long-poll with HTTP 500, the runner retries under the same session ID and
+# keeps refreshing its token every ~50 minutes as if healthy — so the pod stays
+# Running with zero restarts, ARC sees nothing to replace, and GitHub reports
+# the scale set as having no registered runners at all. Assigned jobs then
+# queue behind a runner that will never take them: 13 hours of that on
+# 2026-09-13 (gha_assigned_jobs=1, gha_registered_runners=0, runner pod
+# Running), cleared only by rebooting the node, and twice more the day before.
+# A runner created per job cannot rot this way.
 #
-# The pool is this narrow because CI activity correlates with the node
-# misbehaving. Six node deaths on 2026-08-23 each landed minutes after a CI
-# burst; removing the Docker daemon from this pool (see above) is what stopped
-# those. Leader-election flaps continue — every lease holder (kube-scheduler,
+# The health signal moves with the floor. An empty pool is the idle steady
+# state, so `gh api orgs/adanalife/actions/runners` showing nothing online is
+# normal and proves nothing either way. The *CI queued with nothing running*
+# alert — gha_assigned_jobs > 0 with gha_running_jobs == 0 — is what says the
+# pool is broken.
+#
+# maxRunners: 2 runs two jobs at a time; a third assigned job queues on
+# GitHub's side until a slot frees. ARC allocates one ephemeral runner per
+# assigned job and never more, so there is no queue-depth threshold to
+# configure.
+#
+# The pool is narrow because CI activity correlates with the node misbehaving.
+# Eleven node deaths on 2026-08-23 (thirteen across the 23rd and 24th) each
+# landed minutes after a CI burst; removing the Docker daemon from this pool
+# (see above) is what stopped those.
+# Leader-election flaps continue — every lease holder (kube-scheduler,
 # kube-controller-manager, cilium-operator, cnpg, the alloy operator) exiting
-# together when an etcd fsync stalls past the 5s deadline, a few times a day by
-# restart count, one of them in the same second as a CI burst on 2026-09-07.
-# etcd and the runners' image pulls and container writes share the one NVMe,
-# and concurrency multiplies the write burst behind the stall, so the pool
-# holds at one runner until etcd has its own volume (a cluster-rebuild change).
+# together when an etcd fsync stalls past the 5s deadline — but those stalls
+# track a Burrito retry storm rather than CI, and two runners is the width the
+# per-pod workspace below was measured against (1.88 of 2 slots delivered).
+# Going wider waits on etcd having its own volume, a cluster-rebuild change,
+# since etcd and the runners' image pulls share the one NVMe and concurrency
+# multiplies the write burst behind a stall.
 #
 # It is NOT a memory cap — the node was never short of memory. Measured against
 # the in-cluster VictoriaMetrics across those crash windows: MemAvailable never
@@ -108,15 +127,14 @@ listenerTemplate:
 # requests remain worth keeping so the scheduler queues a runner it cannot place
 # rather than overpacking the node — that is hygiene, not a fix for the crashes.
 #
-# Widening further waits on knowing what stalls etcd. The kernel log is the
-# outstanding evidence: Talos does not persist dmesg across reboot, so the node
-# deaths produced none.
+# The kernel log is the outstanding evidence for the node deaths: Talos does
+# not persist dmesg across reboot, so they produced none.
 #
 # There is no GitHub-hosted fallback job routing — if the minipc is down,
 # checks queue until it returns (none are required checks; the free plan can't
 # protect private repos, so merges never block).
-minRunners: 1
-maxRunners: 1
+minRunners: 0
+maxRunners: 2
 
 template:
   spec:
