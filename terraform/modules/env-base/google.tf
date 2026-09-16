@@ -109,8 +109,8 @@ resource "google_project_service" "apis" {
 # own ServiceAccount issuer becomes an OIDC provider here — the runner pod
 # projects a ServiceAccount token and trades it for a short-lived SA token.
 #
-# The cluster's issuer is a LAN address, so Google can't fetch its discovery
-# document; jwks_json hands Google the signing keys directly, which is exactly
+# The cluster's issuer resolves only on the LAN, so Google can't fetch its
+# discovery document; jwks_json hands Google the signing keys directly, which is exactly
 # what that field exists for. The JWKs are public verification material (the
 # cluster serves them unauthenticated) — committing them leaks nothing. They
 # change only if the control plane's ServiceAccount signing key is regenerated,
@@ -118,7 +118,10 @@ resource "google_project_service" "apis" {
 #   kubectl get --raw /openid/v1/jwks | python3 -m json.tool > minipc-jwks.json
 locals {
   # `kubectl get --raw /.well-known/openid-configuration | jq -r .issuer`
-  minipc_issuer_uri = "https://192.168.1.200:6443"
+  # The issuer is the Talos machine config's cluster.controlPlane.endpoint, so
+  # it moves whenever that does; a mismatch shows up as every Burrito plan pod
+  # dying on `invalid_grant: The issuer in ID Token ... does not match`.
+  minipc_issuer_uri = "https://minipc.whereisdana.today:6443"
   # Short, project-number-free audience so the token projection in
   # cdk8s/adanalife_k8s/constructs/burrito.py stays readable.
   # KEEP-IN-SYNC with GCP_TOKEN_AUDIENCE there.
