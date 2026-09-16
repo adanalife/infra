@@ -1,17 +1,18 @@
 resource "aws_s3_bucket" "dashcam_videos" {
   bucket = "${local.account_name}-dashcam-videos"
-  acl    = "private"
-
-  server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"
-      }
-    }
-  }
 
   tags = {
     Name = "${local.account_name}-dashcam-videos"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "dashcam_videos" {
+  bucket = aws_s3_bucket.dashcam_videos.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
   }
 }
 
@@ -40,80 +41,89 @@ resource "aws_s3_bucket_public_access_block" "dashcam_videos" {
 # an empty S3 bucket that serves as a redirect
 resource "aws_s3_bucket" "primary_naked_redirect" {
   bucket = var.domain
-  acl    = "private"
-
-  #TODO: use aws_s3_bucket_website_configuration instead
-  website {
-    error_document = "error.html"
-    index_document = "index.html"
-
-    routing_rules = <<EOF
-[{
-    "Redirect": {
-        "Protocol": "https",
-        "HostName": "www.dana.lol",
-        "HttpRedirectCode": "301"
-    }
-}]
-EOF
-  }
 
   tags = {
     Name = var.domain
   }
 }
 
+resource "aws_s3_bucket_website_configuration" "primary_naked_redirect" {
+  bucket = aws_s3_bucket.primary_naked_redirect.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
+  }
+
+  routing_rule {
+    redirect {
+      protocol           = "https"
+      host_name          = "www.dana.lol"
+      http_redirect_code = "301"
+    }
+  }
+}
+
 # an empty S3 bucket that serves as a redirect
 resource "aws_s3_bucket" "secondary_naked_redirect" {
   bucket = var.secondary_domain
-  acl    = "private"
-
-  #TODO: use aws_s3_bucket_website_configuration instead
-  website {
-    error_document = "error.html"
-    index_document = "index.html"
-
-    routing_rules = <<EOF
-[{
-    "Redirect": {
-        "Protocol": "https",
-        "HostName": "www.twitch.tv",
-        "ReplaceKeyPrefixWith": "ADanaLife_",
-        "HttpRedirectCode": "301"
-    }
-}]
-EOF
-  }
 
   tags = {
     Name = var.secondary_domain
   }
 }
 
+resource "aws_s3_bucket_website_configuration" "secondary_naked_redirect" {
+  bucket = aws_s3_bucket.secondary_naked_redirect.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
+  }
+
+  routing_rule {
+    redirect {
+      protocol                = "https"
+      host_name               = "www.twitch.tv"
+      replace_key_prefix_with = "ADanaLife_"
+      http_redirect_code      = "301"
+    }
+  }
+}
+
 # an empty S3 bucket that serves as a redirect
 resource "aws_s3_bucket" "status_redirect" {
   bucket = var.status_domain
-  acl    = "private"
-
-  #TODO: use aws_s3_bucket_website_configuration instead
-  website {
-    error_document = "error.html"
-    index_document = "index.html"
-
-    routing_rules = <<EOF
-[{
-    "Redirect": {
-        "Protocol": "https",
-        "HostName": "stats.uptimerobot.com",
-        "ReplaceKeyWith": "${var.uptimerobot_path}",
-        "HttpRedirectCode": "301"
-    }
-}]
-EOF
-  }
 
   tags = {
     Name = var.status_domain
+  }
+}
+
+resource "aws_s3_bucket_website_configuration" "status_redirect" {
+  bucket = aws_s3_bucket.status_redirect.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
+  }
+
+  routing_rule {
+    redirect {
+      protocol           = "https"
+      host_name          = "stats.uptimerobot.com"
+      replace_key_with   = var.uptimerobot_path
+      http_redirect_code = "301"
+    }
   }
 }
 
