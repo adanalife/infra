@@ -105,6 +105,23 @@ DATASTORE_SECRET = "burrito-datastore-s3"
 DATASTORE_SECRET_SM_KEY = "/k8s/burrito/datastore-s3-credentials"
 DATASTORE_SECRET_KEYS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION")
 
+# Shared provider plugin cache, on the T5 UserVolume rather than the node's
+# internal NVMe. /var is the Talos EPHEMERAL partition etcd fsyncs its
+# write-ahead log to, and a sustained write burst there stalls etcd past its
+# lease deadline, which restarts every leader-election client in the cluster
+# at once. Every heavy write path on this node is kept off it for that reason
+# — the ARC runner caches and job workspaces are the same move
+# (k8s/arc/runners/values.yml, constructs/arc.py).
+PLUGIN_CACHE_DIR = "/var/mnt/data/burrito-plugin-cache"
+PLUGIN_CACHE_VOLUME = "plugin-cache"
+# The runner image's own user: ghcr.io/padok-team/burrito declares
+# `USER 65532:65532` and the runner pod sets no securityContext, so that is
+# who has to own the cache directory.
+RUNNER_UID = 65532
+# Root-capable image for the chown init container — the runner image cannot
+# chown its own mount. Same mirror the ARC workspace reaper runs.
+CHOWN_IMAGE = "ghcr.io/adanalife/mirror/ubuntu:24.04"
+
 GCP_TOKEN_AUDIENCE = "adanalife-burrito"
 GCP_TOKEN_DIR = "/var/run/secrets/gcp"
 GCP_CONFIG_DIR = "/etc/gcp"
@@ -243,10 +260,63 @@ class Burrito(Construct):
         )
 
     def _runner_spec(self, layer: Layer) -> dict:
+        # Every run begins with `terraform init`. Without a cache that means
+        # re-downloading the aws, google, cloudflare, tailscale and random
+        # providers — most of a gigabyte — onto the pod's container
+        # filesystem, once per plan, per layer, every hour. TF_PLUGIN_CACHE_DIR
+        # points that at a directory on the T5 shared by every runner pod, so
+        # a provider version is fetched once and linked thereafter.
+        #
+        # Terraform's docs say the plugin cache directory "is not guaranteed
+        # to be concurrency safe" and that behaviour under simultaneous `init`
+        # calls is undefined. Safe here because the controller runs one runner
+        # pod at a time cluster-wide (maxConcurrentRunnerPods in
+        # k8s/burrito/values.yml), so no two layers ever init together —
+        # raising that number means revisiting this.
+        #
+        # TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE is deliberately
+        # absent. It exists for repos that do not keep .terraform.lock.hcl in
+        # version control; every layer here commits one carrying `h1:` hashes,
+        # which is exactly what lets terraform install from the cache and
+        # still record a complete lock entry. `init -upgrade` is unaffected:
+        # a version not in the cache is downloaded into it and reused next
+        # run.
+        cache_mount = {"name": PLUGIN_CACHE_VOLUME, "mountPath": PLUGIN_CACHE_DIR}
         spec = {
             "serviceAccountName": RUNNER_SA,
-            "env": [{"name": "AWS_REGION", "value": AWS_REGION}],
+            "env": [
+                {"name": "AWS_REGION", "value": AWS_REGION},
+                {"name": "TF_PLUGIN_CACHE_DIR", "value": PLUGIN_CACHE_DIR},
+            ],
             "envFrom": [{"secretRef": {"name": layer.secret_name}}],
+            # The kubelet creates a hostPath directory root-owned, and the
+            # runner runs as an unprivileged uid that cannot then write to it.
+            # Hand it over before the runner starts. Non-recursive: everything
+            # inside is created by the runner afterward. Same shape as the ARC
+            # runners' chown-caches init container.
+            "initContainers": [
+                {
+                    "name": "chown-plugin-cache",
+                    "image": CHOWN_IMAGE,
+                    "command": [
+                        "chown",
+                        f"{RUNNER_UID}:{RUNNER_UID}",
+                        PLUGIN_CACHE_DIR,
+                    ],
+                    "securityContext": {"runAsUser": 0},
+                    "volumeMounts": [cache_mount],
+                }
+            ],
+            "volumes": [
+                {
+                    "name": PLUGIN_CACHE_VOLUME,
+                    "hostPath": {
+                        "path": PLUGIN_CACHE_DIR,
+                        "type": "DirectoryOrCreate",
+                    },
+                }
+            ],
+            "volumeMounts": [cache_mount],
         }
         if not layer.gcp_project:
             return spec
@@ -263,7 +333,7 @@ class Burrito(Construct):
             },
             {"name": "TF_VAR_gcp_impersonate", "value": "false"},
         ]
-        spec["volumes"] = [
+        spec["volumes"] += [
             {
                 "name": "gcp-token",
                 "projected": {
@@ -283,7 +353,7 @@ class Burrito(Construct):
                 "configMap": {"name": self._config_map_name(layer)},
             },
         ]
-        spec["volumeMounts"] = [
+        spec["volumeMounts"] += [
             {"name": "gcp-token", "mountPath": GCP_TOKEN_DIR, "readOnly": True},
             {
                 "name": "gcp-credential-config",
