@@ -187,9 +187,9 @@ ENVS: dict[str, EnvConfig] = {
         music_pv_name="obs-music-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
         # same as prod, but keeps its own PV name (PVs bind 1:1).
-        # Stage rehearses DB-in-its-own-namespace: postgres + its SecretStore land
-        # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
-        # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
+        # postgres + its SecretStore land in stage-1-data, so a
+        # `kubectl delete ns stage-1` can't take the DB. Same isolation as prod-1;
+        # development and local co-locate the DB in the app namespace.
         data_namespace="stage-1-data",
         # Full supported set → one mediamtx relay per platform on stage too
         # (the gateway/obs/playout Applications self-discover from their repos).
