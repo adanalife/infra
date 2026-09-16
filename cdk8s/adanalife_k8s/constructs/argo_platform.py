@@ -12,7 +12,7 @@ committed + golden-gated like the app units).
 Scope (minipc only — development is on the k3d cluster, with its own Argo):
   * cluster-scoped releases (ESO, cert-manager, node-exporter, victoria-metrics,
     k8s-monitoring, tailscale-operator) — installed once; values from prod-1
-    (stage rides prod's cluster-scoped platform, per stage-prod-cotenancy).
+    (stage rides prod's cluster-scoped platform).
   * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
 
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
