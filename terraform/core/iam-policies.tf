@@ -99,10 +99,14 @@ data "aws_iam_policy_document" "bucket_policy" {
     for_each = local.accounts
 
     content {
-      # allow access to the statefile for the given account
-      sid       = "put-state-${local.accounts[statement.key].name}"
-      resources = ["arn:aws:s3:::${var.state_bucket}/${local.accounts[statement.key].name}.tfstate"]
-      actions   = ["s3:PutObject"]
+      # allow access to the statefiles for the given account: the env root and
+      # its -data root (the irreplaceable resources split into their own state)
+      sid = "put-state-${local.accounts[statement.key].name}"
+      resources = [
+        for suffix in ["", "-data"] :
+        "arn:aws:s3:::${var.state_bucket}/${local.accounts[statement.key].name}${suffix}.tfstate"
+      ]
+      actions = ["s3:PutObject"]
 
       principals {
         type = "AWS"
