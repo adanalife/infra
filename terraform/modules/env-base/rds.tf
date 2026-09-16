@@ -3,35 +3,6 @@ resource "random_password" "tripbot_db" {
   special = false
 }
 
-resource "aws_db_instance" "tripbot" {
-  # only create on stage for now
-  # count = var.environment == "stage" ? 1 : 0
-  # disable the db
-  count = 0
-
-  engine         = "postgres"
-  engine_version = "13"
-  instance_class = "db.t3.micro"
-
-  identifier = "tripbot-db"
-  db_name    = "tripbot"
-  username   = "tripbot"
-  password   = random_password.tripbot_db.result
-
-  allocated_storage = 20
-  storage_type      = "gp2" # general purpose SSD
-  # storage_encrypted = true
-
-  # enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
-
-  publicly_accessible    = true
-  vpc_security_group_ids = [aws_security_group.allow_postgres.id]
-  #db_subnet_group_name   = module.vpc.database_subnet_group
-
-  backup_retention_period   = 30
-  final_snapshot_identifier = "tripbot-db-final-snapshot"
-}
-
 resource "aws_security_group" "allow_postgres" {
   name        = "allow-postgres"
   description = "This group allows Postgres connections"

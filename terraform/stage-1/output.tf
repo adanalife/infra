@@ -30,11 +30,6 @@ output "secondary_route53_zone_id" {
   value = module.env_base.secondary_zone_id
 }
 
-output "rds_tripbot_db_address" {
-  value     = module.env_base.tripbot_db_address
-  sensitive = true
-}
-
 output "external_dns_access_key" {
   value     = module.env_base.external_dns_access_key_id
   sensitive = true
