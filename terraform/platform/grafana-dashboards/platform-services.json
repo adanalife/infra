@@ -489,11 +489,11 @@
       "id": 501,
       "type": "stat",
       "title": "Layers in sync",
-      "description": "Terraform layers burrito last reconciled cleanly. Four layers exist (core, platform, prod-1, stage-1), so anything below 4 means at least one layer has a plan burrito could not call clean. Counts the one-hot status series rather than reading a single gauge, so a layer that disappears from the scrape drops out of this count instead of silently reading as healthy.",
+      "description": "Share of the terraform layers burrito tracks that it last reconciled cleanly. 100% means every layer burrito currently reports is in sync; anything less means at least one has a plan burrito could not call clean — the \"Layers needing attention\" panel beside this one counts them, and the table names them. Both halves of the ratio are derived from the one-hot status series, so a layer added or retired is picked up on the next scrape, and a layer that disappears entirely drops out of the denominator instead of silently reading as healthy.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 50, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "count(burrito_terraform_layer_status{cluster=~\"$cluster\", status=\"success\"} == 1)" }
+        { "refId": "A", "expr": "100 * (count(burrito_terraform_layer_status{cluster=~\"$cluster\", status=\"success\"} == 1) or vector(0)) / count(burrito_terraform_layer_status{cluster=~\"$cluster\"} == 1)" }
       ],
       "options": {
         "colorMode": "background", "graphMode": "none",
@@ -501,12 +501,15 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
           "noValue": "0",
           "thresholds": { "mode": "absolute", "steps": [
             { "color": "red", "value": null },
             { "color": "orange", "value": 1 },
-            { "color": "green", "value": 4 }
+            { "color": "green", "value": 100 }
           ]}
         },
         "overrides": []
