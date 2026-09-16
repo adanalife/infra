@@ -24,12 +24,6 @@ output "secondary_zone_name_servers" {
   value = aws_route53_zone.secondary_subdomain_zone.name_servers
 }
 
-output "tripbot_db_address" {
-  # hack to allow for empty values
-  value     = join("", aws_db_instance.tripbot.*.address)
-  sensitive = true
-}
-
 output "external_dns_access_key_id" {
   value     = aws_iam_access_key.external_dns.id
   sensitive = true
