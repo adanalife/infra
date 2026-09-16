@@ -148,6 +148,31 @@ cluster:
   # explicitly so the dependency is visible.
   discovery:
     enabled: true
+  # Reap terminated pods once more than 50 exist, oldest first. The upstream
+  # default is 12500, which on a one-node cluster means never — so every
+  # Failed pod ever produced stays visible in `kubectl get pods -A` forever.
+  #
+  # That clutter is not cosmetic: on 2026-08-28 eighteen stale obs
+  # `UnexpectedAdmissionError` pods were read as the i915 plugin flapping
+  # *right then*, and shaped a live incident's recovery. Only the newest such
+  # pod carries any signal (does it predate kube-apiserver's startedAt), and
+  # the newest is exactly what a count-based GC keeps.
+  #
+  # Succeeded pods are already bounded by each CronJob's history limits; Failed
+  # ones are bounded by nothing and are removed by hand today. 82 terminated
+  # pods were live when this was written, the oldest three days back.
+  #
+  # The threshold is a count, not an age, so a burst of short-lived pods
+  # shortens the retained window — a Burrito plan storm produces ~17/h. That is
+  # the accepted cost: diagnostic value decays with age anyway, and the
+  # alternative on offer is keeping everything forever.
+  #
+  # NOT creation-time. Patching this on the running node restarts
+  # kube-controller-manager only; the API server, etcd and every running pod
+  # are untouched, so nothing in the stream path notices.
+  controllerManager:
+    extraArgs:
+      terminated-pod-gc-threshold: "50"
   # kube-apiserver serving-cert SANs for Tailscale-native kubectl + the LAN-DNS
   # pointer (see machine.certSANs above). Lets
   # `server: https://adanalife-minipc.tail020deb.ts.net:6443` verify TLS from any
