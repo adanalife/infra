@@ -25,6 +25,11 @@ resource "cloudflare_r2_bucket" "guessr_clips" {
 
   # Same continent as the players and as the Pages projects that read it.
   location = "WNAM"
+
+  lifecycle {
+    # A keep-forever clip store; the objects are not re-uploaded on recreate.
+    prevent_destroy = true
+  }
 }
 
 # Deliberately one bucket for all three tiers, where the answers are one D1 per

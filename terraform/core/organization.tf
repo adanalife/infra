@@ -13,6 +13,9 @@ resource "aws_organizations_account" "account" {
 
   lifecycle {
     ignore_changes = [role_name]
+
+    # Closing an org account is irreversible; every resource in it goes with it.
+    prevent_destroy = true
   }
 
   depends_on = [aws_organizations_organization.org]

@@ -4,6 +4,11 @@ resource "aws_s3_bucket" "dashcam_videos" {
   tags = {
     Name = "${local.account_name}-dashcam-videos"
   }
+
+  lifecycle {
+    # Holds the unversioned dashcam corpus; a destroy takes the footage with it.
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "dashcam_videos" {
@@ -132,5 +137,10 @@ resource "aws_glacier_vault" "dashcam" {
 
   tags = {
     Name = "Dashcam"
+  }
+
+  lifecycle {
+    # Holds the archived dashcam corpus; a destroy takes the footage with it.
+    prevent_destroy = true
   }
 }

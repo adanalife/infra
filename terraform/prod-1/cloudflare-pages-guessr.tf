@@ -123,6 +123,9 @@ resource "cloudflare_d1_database" "guessr_answers" {
   # stage-1's (where the plan-time replacement was first observed).
   lifecycle {
     ignore_changes = [primary_location_hint]
+
+    # Holds `plays`, the one table nothing can regenerate.
+    prevent_destroy = true
   }
 }
 

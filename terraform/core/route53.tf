@@ -1,11 +1,21 @@
 # manage the dana.lol domain
 resource "aws_route53_zone" "primary" {
   name = var.domain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; the registrar delegation is set by hand.
+    prevent_destroy = true
+  }
 }
 
 # manage the whereisdana.today domain
 resource "aws_route53_zone" "secondary" {
   name = var.secondary_domain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; the registrar delegation is set by hand.
+    prevent_destroy = true
+  }
 }
 
 # use the prod nameservers so prod can manage its own routes
