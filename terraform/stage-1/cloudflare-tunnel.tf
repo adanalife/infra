@@ -22,6 +22,11 @@ resource "cloudflare_zone" "stage_1" {
   }
   name = "whalecore.com"
   type = "full"
+
+  lifecycle {
+    # Recreating the zone assigns new Cloudflare nameservers; the registrar points at them by hand.
+    prevent_destroy = true
+  }
 }
 
 # Allowlisted CIDRs for the Access policy below. Sourced from

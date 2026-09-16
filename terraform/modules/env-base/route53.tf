@@ -1,9 +1,19 @@
 resource "aws_route53_zone" "primary_subdomain_zone" {
   name = var.primary_subdomain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; core's tfvars carry the delegated NS set by hand.
+    prevent_destroy = true
+  }
 }
 
 resource "aws_route53_zone" "secondary_subdomain_zone" {
   name = var.secondary_subdomain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; core's tfvars carry the delegated NS set by hand.
+    prevent_destroy = true
+  }
 }
 
 # resource aws_route53_record example {
