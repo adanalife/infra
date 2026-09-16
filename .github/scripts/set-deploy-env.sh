@@ -23,6 +23,13 @@ case "$1" in
     AWS_ACCESS_KEY_ID="${CI_PROD_AWS_ACCESS_KEY_ID}"
     AWS_SECRET_ACCESS_KEY="${CI_PROD_AWS_SECRET_ACCESS_KEY}"
     ;;
+  terraform/prod-1-data)
+    # Same account and credentials as prod-1; a separate state file only, so
+    # the irreplaceable resources can sit behind their own Burrito layer.
+    DEPLOY_ENV=prod
+    AWS_ACCESS_KEY_ID="${CI_PROD_AWS_ACCESS_KEY_ID}"
+    AWS_SECRET_ACCESS_KEY="${CI_PROD_AWS_SECRET_ACCESS_KEY}"
+    ;;
   terraform/stage-1)
     DEPLOY_ENV=stage
     AWS_ACCESS_KEY_ID="${CI_STAGE_AWS_ACCESS_KEY_ID}"
