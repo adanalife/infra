@@ -4910,3 +4910,79 @@ resource "grafana_rule_group" "console_access" {
     }
   }
 }
+
+// Synthetic Monitoring. The checks themselves are in
+// grafana-synthetic-monitoring.tf; this is what makes one of them page.
+//
+// Grouped on its own rather than folded into a service group because the
+// signal is black-box: probe_success says a public endpoint answered wrong
+// from outside the cluster, which is a different claim from any of the
+// in-cluster rules above and points at Cloudflare or a binding rather than a
+// pod.
+resource "grafana_rule_group" "synthetic_health" {
+  name             = "synthetic-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name = "guessr: the admin login is broken"
+    for  = "10m"
+    // The series is one terraform-managed check reporting every ten minutes,
+    // so it stopping is itself the failure this rule exists to catch — a
+    // check that quietly stops checking reports green through an outage the
+    // same way the paused UptimeRobot monitors did.
+    condition      = "C"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr.dana.lol/admin/ has stopped answering 403"
+      description = "The guessr-admin probe expects 403 — the JWT middleware refusing an anonymous request, which is the custom domain's resting state. Anything else means the gate moved: 503 is the middleware finding no Access application to check a login against, which locks Dana out as surely as it locks out a stranger, and a 2xx is the admin surface answering a stranger. The two values behind it, ACCESS_TEAM_DOMAIN and ACCESS_AUD, are Pages bindings typed in by hand on the guessr project — terraform cannot write deployment_configs — so a rollback or a dashboard edit is the usual cause. Read the answer with `curl -si https://guessr.dana.lol/admin/`; guessr's smoke.sh carries the same case block with the full reasoning."
+    }
+    labels = {
+      severity = "warning"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 1800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // min_over_time rather than a bare instant read: the check runs every
+        // ten minutes and Prometheus goes stale after five, so an instant
+        // query reads no-data for half of every interval. The window latches a
+        // single bad probe for 30m, which is the right shape for a
+        // configuration value that does not flap.
+        expr          = "min by (job) (min_over_time(probe_success{job=\"guessr-admin\"}[30m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
