@@ -13,18 +13,23 @@
 # grafanacloud-prom on purpose: a rule evaluated against a store that lives
 # on the minipc reads NoData exactly when the minipc is the problem.
 #
-# The network id is the PDC network's access-policy id. It is not readable
-# with the stack-level token this provider authenticates with (that needs a
-# cloud access policy with accesspolicies:read), so it was taken from the
-# datasource the UI created with the network selected
-# (jsonData.secureSocksProxyUsername) and pinned here.
+locals {
+  # The PDC network's access-policy id, shared by every datasource that reaches
+  # into the cluster. It is not readable with the stack-level token this
+  # provider authenticates with (that needs a cloud access policy with
+  # accesspolicies:read), so it was taken from the datasource the UI created
+  # with the network selected (jsonData.secureSocksProxyUsername) and pinned
+  # here.
+  pdc_network_id = "c49a325a-0190-4ee7-9463-b4899956a1e8"
+}
+
 resource "grafana_data_source" "victoria_metrics" {
   type = "prometheus"
   name = "VictoriaMetrics"
   uid  = "victoria-metrics"
   url  = "http://victoria-metrics.monitoring.svc.cluster.local:8428"
 
-  private_data_source_connect_network_id = "c49a325a-0190-4ee7-9463-b4899956a1e8"
+  private_data_source_connect_network_id = local.pdc_network_id
 
   json_data_encoded = jsonencode({
     # VM speaks the Prometheus HTTP API; "Prometheus" (not "Mimir") keeps
