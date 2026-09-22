@@ -81,3 +81,26 @@ output "pages_project_name" {
   description = "Cloudflare Pages project name (used by wrangler)"
   value       = module.pages.project_name
 }
+
+# whalecore.com: authoritative DNS lives here, not Route53. Point the
+# registrar's nameservers at `terraform output stage_1_zone_name_servers`.
+# It carries the www.whalecore.com Pages custom domain above and the post@
+# Email Routing inbox (cloudflare-post-inbox.tf). A fresh root domain rather than a subzone of
+# whereisdana.today because Cloudflare Free only creates zones for roots.
+resource "cloudflare_zone" "stage_1" {
+  account = {
+    id = var.cloudflare_account_id
+  }
+  name = "whalecore.com"
+  type = "full"
+
+  lifecycle {
+    # Recreating the zone assigns new Cloudflare nameservers; the registrar points at them by hand.
+    prevent_destroy = true
+  }
+}
+
+output "stage_1_zone_name_servers" {
+  value       = cloudflare_zone.stage_1.name_servers
+  description = "Update whalecore.com NS at the registrar to these"
+}
