@@ -46,10 +46,6 @@ variable "primary_acm_cert_alternative_names" {
   default = []
 }
 
-# Cloudflare-related variables live in cloudflare-pages.tf so that
-# prod-1 (which symlinks this file) doesn't see them as required
-# inputs without having any cloudflare resources to use them on.
-
 # GCP project this environment manages (tripbot-stage / tripbot-prod). Per-env
 # value in terraform.tfvars; google.tf is otherwise identical across envs.
 variable "gcp_project" {

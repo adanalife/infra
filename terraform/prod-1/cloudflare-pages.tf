@@ -20,10 +20,7 @@ variable "project_name" {
   description = "Cloudflare Pages project name"
 }
 
-# Token sourced from AWS Secrets Manager — see secrets.tf for the
-# bootstrap flow. Lives here (not providers.tf) so prod-1 doesn't
-# inherit a hanging cloudflare provider via the symlinked providers.tf
-# from stage-1 (which intentionally omits it).
+# Token read from SSM Parameter Store — see secrets.tf for the bootstrap flow.
 provider "cloudflare" {
   api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
