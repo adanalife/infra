@@ -35,11 +35,6 @@ variable "secondary_domain" {
   description = "The domain name used for secondary DNS"
 }
 
-variable "external_dns_role" {
-  type    = string
-  default = "ExternalDNSRole"
-}
-
 
 variable "static_site_public_dir" {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"
@@ -77,5 +72,4 @@ locals {
   full_account_name   = "${local.org_name}-${var.environment}-${var.label}"
   primary_subdomain   = "${var.environment}.${var.primary_domain}"
   secondary_subdomain = "${var.environment}.${var.secondary_domain}"
-  primary_static_site = "static.${local.primary_subdomain}"
 }
