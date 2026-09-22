@@ -29,7 +29,6 @@
 #   1. `task tf:stage:apply` — parameters apply; cloudflare_* resources fail
 #      on the placeholder token (expected).
 #   2. Seed /stage-1/cloudflare-api-token, plus any other plan-time values.
-#      `task stage:allowlist:add-current-ip` populates the allowlist.
 #   3. `task tf:stage:apply` again — the provider auths cleanly.
 
 # ============================================================================
@@ -103,29 +102,13 @@ resource "aws_ssm_parameter" "mirror" {
   }
 }
 
-# JSON array of CIDR strings, e.g. ["69.222.113.215/32"]. Edited interactively
-# via `task stage:allowlist:add-current-ip`. Consumed by the Cloudflare Access
-# policy on tripbot — see cloudflare-tunnel.tf. Separate from the map so the
-# placeholder is a valid (empty) allowlist — jsondecode works pre-seed.
-resource "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
-  name        = "/stage-1/allowlist-cidrs"
-  description = "Allowlisted CIDRs for Cloudflare Access on tripbot.whalecore.com. JSON array of CIDR strings."
-  type        = "SecureString"
-  value       = "[]"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
 # JSON array of email addresses, e.g. ["you@example.com"]. Whoever may open
 # guessr's /admin/ — the Access policy in cloudflare-pages-guessr.tf includes
 # one rule per address, and Access mails a one-time PIN to it. Here rather than
 # in the terraform because this repo is public and these are personal addresses.
 #
-# Same shape as the allowlist above, and the same reason for being outside the
-# map: the placeholder has to be valid JSON that jsondecode can read pre-seed.
-# Unlike the allowlist, the empty placeholder is NOT a usable value — a policy
+# Outside the map because the placeholder has to be valid JSON that jsondecode
+# can read pre-seed. The empty placeholder is NOT a usable value — a policy
 # with no rules is rejected — so the policy carries a precondition that says so.
 resource "aws_ssm_parameter" "guessr_admin_emails" {
   name        = "/stage-1/guessr-admin-emails"
@@ -205,10 +188,6 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 
 data "aws_ssm_parameter" "cloudflare_api_token" {
   name = "/stage-1/cloudflare-api-token"
-}
-
-data "aws_ssm_parameter" "stage_1_allowlist_cidrs" {
-  name = aws_ssm_parameter.stage_1_allowlist_cidrs.name
 }
 
 data "aws_ssm_parameter" "guessr_admin_emails" {
