@@ -9,7 +9,8 @@
 #
 # controlplane.patch.yaml (the non-secret machine config patch) is committed
 # separately. controlplane.patched.yaml is derived (controlplane.yaml + that
-# patch) so it's gitignored too — regenerate via the runbook Phase 4 step.
+# patch) so it's gitignored too — regenerate by re-applying the patch to
+# controlplane.yaml.
 controlplane.yaml
 worker.yaml
 controlplane.patched.yaml

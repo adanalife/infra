@@ -1,6 +1,6 @@
 """Postgres — the tripbot StatefulSet (pgvector/pg16) + headless Service.
 
-Reproduces k8s/apps/postgres/base + overlays. The StatefulSet is the
+The StatefulSet is the
 *fidelity-critical* object here: on prod-1 it owns a 50Gi `local-path-retain`
 PVC holding years of irreplaceable data (chat history since 2019, miles,
 events). This construct is applied via SSA to ADOPT the live prod StatefulSet,
@@ -38,10 +38,17 @@ from adanalife_k8s.naming import meta_labels, selector
 NAME = "postgres"
 SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
 PORT = 5432
+METRICS_PORT = 9187  # CNPG's exporter, scraped by alloy in the monitoring ns
 
-# SM container shapes (terraform-owned). See base/external-secret.yaml.
-_CREDS_SM = "k8s/postgres/credentials"
-_BACKUP_SM = "k8s/postgres/backup-s3-credentials"
+# Where the backup CronJob's two containers hand the dump off to each other.
+_DUMP_DIR = "/backup"
+# nonroot in the distroless convention — the upload image has no postgres user.
+_NONROOT_UID = 65532
+
+# SSM parameter paths (terraform-owned values; the SM names with a leading
+# slash since the SM → SSM migration). See base/external-secret.yaml.
+_CREDS_SM = "/k8s/postgres/credentials"
+_BACKUP_SM = "/k8s/postgres/backup-s3-credentials"
 
 # Placeholder DB creds for the laptop `local` overlay (gitignored secret.env in
 # Kustomize). Match tripbot/infra/docker/env.docker and the local render.
@@ -51,23 +58,28 @@ _LOCAL_SECRET = {
     "POSTGRES_DB": "tripbot_docker",
 }
 
-# The backup CronJob's dump-and-upload script — reproduced verbatim from
-# overlays/prod-1/backup-cronjob.yaml so the rendered args block matches.
-_BACKUP_SCRIPT = """\
+# The backup CronJob's dump and upload scripts. frame_embeddings data is
+# excluded: the vectors are derived + reproducible (re-runnable batch embed,
+# dedicated dump via `task tripbot:stage:db:backup:vectors`) and would bloat
+# every tiered dump by GBs. The table definition still ships (schema, not
+# data), so a restore leaves an empty table for migrations/seed to fill.
+_DUMP_SCRIPT = """\
 set -euo pipefail
-apk add --no-cache aws-cli
-TS=$(date -u +%Y%m%d-%H%M%SZ)
-HOUR=$(date -u +%H)
-DOW=$(date -u +%u)   # 1=Mon ... 7=Sun
-DUMP=/tmp/dump.pgcustom
-
 echo "Dumping ${POSTGRES_DB}"
 PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \\
   --format=custom \\
-  --host=postgres \\
   --username="$POSTGRES_USER" \\
+  --exclude-table-data=frame_embeddings \\
   "$POSTGRES_DB" \\
   > "$DUMP"
+echo "Dumped $(wc -c < "$DUMP") bytes"
+"""
+
+_UPLOAD_SCRIPT = """\
+set -euo pipefail
+TS=$(date -u +%Y%m%d-%H%M%SZ)
+HOUR=$(date -u +%H)
+DOW=$(date -u +%u)   # 1=Mon ... 7=Sun
 
 echo "Uploading hourly/${TS}.dump"
 aws s3 cp --no-progress "$DUMP" "s3://${S3_BUCKET}/hourly/${TS}.dump"
@@ -82,7 +94,6 @@ if [ "$HOUR" = "04" ] && [ "$DOW" = "7" ]; then
   aws s3 cp --no-progress "$DUMP" "s3://${S3_BUCKET}/weekly/${TS}.dump"
 fi
 
-rm -f "$DUMP"
 echo "OK"
 """
 
@@ -90,7 +101,10 @@ echo "OK"
 class Postgres(Construct):
     def __init__(self, scope: Construct, *, env: EnvConfig):
         super().__init__(scope, NAME)
-        ns = env.namespace or None
+        # postgres lives in the data namespace — the app namespace by default
+        # (parity), or an isolated one (env.data_namespace). The backup CronJob
+        # rides along here, so its PGHOST stays a same-namespace lookup.
+        ns = env.data_ns or None
         labels = meta_labels(NAME)
         sel = selector(NAME)
 
@@ -130,15 +144,37 @@ class Postgres(Construct):
         # --- container ---
         container = k8s.Container(
             name=NAME,
-            image="pgvector/pgvector:pg16",
-            security_context=k8s.SecurityContext(allow_privilege_escalation=False),
+            # GHCR mirror, not Docker Hub — a cold dev (k3d) bringup pulled this
+            # node-side from Hub in ~10min under the account-wide rate limit
+            # (stage/prod cache it once so they never feel it; ephemeral dev eats
+            # it every bringup). The mirror is the weekly-refreshed copy from the
+            # ghcr-base-image-mirrors decision; GHCR isn't rate-limited.
+            image="ghcr.io/adanalife/mirror/pgvector:pg16",
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+            ),
             ports=[k8s.ContainerPort(name="postgres", container_port=PORT)],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))
             ],
+            # PGDATA points one level below the mount so initdb owns its own
+            # directory: the local-path volume root arrives 0777 root:root and
+            # non-root postgres (uid 999) can't chmod it, but it can mkdir a
+            # subdir there, own it, and lock it down. A subPath mount can't do
+            # this — kubelet creates subPath dirs root:root 0755.
+            env=[k8s.EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata")],
             # pg_isready answers protocol-level — catches "up but not serving".
+            # Run it through a shell so the role name comes from the container's
+            # runtime environment. kubelet's own $(VAR) substitution in a probe
+            # command only resolves *static* `env:` entries (literal `value:`) —
+            # never envFrom/valueFrom — and POSTGRES_USER arrives via envFrom on
+            # postgres-secret, so a bare $(POSTGRES_USER) reaches pg_isready as a
+            # literal and postgres logs a FATAL role lookup for it every period.
             liveness_probe=k8s.Probe(
-                exec=k8s.ExecAction(command=["pg_isready", "-U", "$(POSTGRES_USER)"]),
+                exec=k8s.ExecAction(
+                    command=["sh", "-c", 'exec pg_isready -U "$POSTGRES_USER"']
+                ),
                 initial_delay_seconds=10,
                 period_seconds=30,
                 timeout_seconds=5,
@@ -156,13 +192,18 @@ class Postgres(Construct):
                     "cpu": k8s.Quantity.from_string("100m"),
                     "memory": k8s.Quantity.from_string("256Mi"),
                 },
-                limits={"memory": k8s.Quantity.from_string("1Gi")},
+                # 1Gi was too low: the bulk HNSW index build on a
+                # frame_embeddings restore OOM-killed prod at 1Gi and lost the
+                # PVC (2026-06-15). The seed:vectors task now forces a bounded
+                # on-disk build so it fits, but give headroom on the SSD-backed
+                # minipc so a faster in-memory build is an option and steady
+                # state has breathing room.
+                limits={"memory": k8s.Quantity.from_string("2Gi")},
             ),
             volume_mounts=[
                 k8s.VolumeMount(
                     name="postgres-data",
                     mount_path="/var/lib/postgresql/data",
-                    sub_path="pgdata",
                 )
             ],
         )
@@ -189,10 +230,20 @@ class Postgres(Construct):
                 template=k8s.PodTemplateSpec(
                     metadata=k8s.ObjectMeta(labels=sel),
                     spec=k8s.PodSpec(
-                        # seccomp + no-privesc; caps.drop[ALL] + runAsNonRoot
-                        # deferred (entrypoint chowns PGDATA as root on first boot).
+                        # PSA `restricted`: non-root (uid/gid 999 = postgres in
+                        # the pgvector/pg16 Debian image — NOT 70, that's Alpine),
+                        # seccomp RuntimeDefault, no-privesc + caps drop[ALL] on
+                        # the container. Note fsGroup does NOT apply to
+                        # hostPath-type volumes (which local-path provisions) —
+                        # write access comes from the PGDATA-below-the-mount
+                        # arrangement on the container, not from ownership of the
+                        # volume root.
                         security_context=k8s.PodSecurityContext(
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault")
+                            run_as_non_root=True,
+                            run_as_user=999,
+                            run_as_group=999,
+                            fs_group=999,
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
                         ),
                         containers=[container],
                     ),
@@ -227,7 +278,98 @@ class Postgres(Construct):
         if env.postgres_backup:
             self._storage_class()
             self._backup_external_secret(ns)
-            self._backup_cronjob(ns)
+            self._backup_cronjob(ns, cnpg=env.cnpg)
+
+        # --- data-namespace ingress guard (isolated envs only). NetworkPolicy
+        #     is allowlist-only, so "stage can't reach prod's DB" is expressed
+        #     as default-deny ingress on every pod in the data namespace,
+        #     allowing only same-namespace traffic (the backup CronJob), the
+        #     env's OWN app namespace on the postgres port, the operator on the
+        #     status port, and the monitoring namespace on the metrics port.
+        #     Cilium enforces it. Anything that needs to reach this namespace
+        #     needs a rule here — a missing one fails as silence, not an error.
+        #     Co-located envs skip it: a default-deny in the shared app
+        #     namespace would black-hole every other workload there. Kubelet
+        #     probes and `kubectl port-forward` arrive from the host, which
+        #     Cilium allows regardless of policy.
+        if env.data_isolated:
+            k8s.KubeNetworkPolicy(
+                self,
+                "ingress-policy",
+                metadata=k8s.ObjectMeta(
+                    name=f"{NAME}-ingress", namespace=ns, labels=labels
+                ),
+                spec=k8s.NetworkPolicySpec(
+                    pod_selector=k8s.LabelSelector(),
+                    policy_types=["Ingress"],
+                    ingress=[
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(pod_selector=k8s.LabelSelector())
+                            ]
+                        ),
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": env.namespace
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(PORT),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                        # The CloudNativePG operator polls each instance's
+                        # status API; without this the Cluster never reports
+                        # Ready ("Instance Status Extraction Error").
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": "cnpg-system"
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(8000),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                        # Alloy scrapes the CNPG exporter from the monitoring
+                        # namespace. Without this the scrape is dropped, every
+                        # cnpg_* series is absent, and the two pitr-health
+                        # alerts fire on NoData while the database is healthy —
+                        # which is indistinguishable from a real WAL stall.
+                        k8s.NetworkPolicyIngressRule(
+                            from_=[
+                                k8s.NetworkPolicyPeer(
+                                    namespace_selector=k8s.LabelSelector(
+                                        match_labels={
+                                            "kubernetes.io/metadata.name": "monitoring"
+                                        }
+                                    )
+                                )
+                            ],
+                            ports=[
+                                k8s.NetworkPolicyPort(
+                                    port=k8s.IntOrString.from_number(METRICS_PORT),
+                                    protocol="TCP",
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+            )
 
     # ---- helpers ----
     def _storage_class(self):
@@ -288,7 +430,7 @@ class Postgres(Construct):
                 {
                     "refreshInterval": "1h",
                     "secretStoreRef": {
-                        "name": "aws-secretsmanager",
+                        "name": "aws-parameterstore",
                         "kind": "SecretStore",
                     },
                     "target": {
@@ -303,14 +445,63 @@ class Postgres(Construct):
             )
         )
 
-    def _backup_cronjob(self, ns):
-        backup = k8s.Container(
-            name="backup",
-            image="postgres:16-alpine",  # PG16 pg_dump, matches the server image
+    def _backup_cronjob(self, ns, *, cnpg):
+        # Split in two so the whole pod can satisfy PSA `restricted`: pg_dump
+        # and the aws CLI live in different images, and installing one into the
+        # other at runtime would need root. The dump lands on a shared
+        # emptyDir, group-owned via fsGroup so both non-root uids can write it.
+        dump_mount = k8s.VolumeMount(name="dump", mount_path=_DUMP_DIR)
+        dump_env = k8s.EnvVar(name="DUMP", value=f"{_DUMP_DIR}/dump.pgcustom")
+        # The client major must be >= the server's: a 16 pg_dump refuses an
+        # 18 server outright. PGHOST picks the server the same way — the CNPG
+        # Cluster's rw Service, or the legacy StatefulSet's Service.
+        dump = k8s.Container(
+            name="dump",
+            image="postgres:18-alpine" if cnpg else "postgres:16-alpine",
             command=["/bin/sh", "-c"],
-            args=[_BACKUP_SCRIPT],
+            args=[_DUMP_SCRIPT],
+            # uid 70 = postgres in the Alpine images (999 is the Debian ones).
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+                run_as_non_root=True,
+                run_as_user=70,
+            ),
+            env=[
+                k8s.EnvVar(name="PGHOST", value="pg-rw" if cnpg else "postgres"),
+                dump_env,
+            ],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME)),
+            ],
+            resources=k8s.ResourceRequirements(
+                requests={
+                    "cpu": k8s.Quantity.from_string("100m"),
+                    "memory": k8s.Quantity.from_string("128Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("512Mi")},
+            ),
+            volume_mounts=[dump_mount],
+        )
+        upload = k8s.Container(
+            name="upload",
+            # ECR Public, not Docker Hub: an hourly pull has no rate-limit
+            # headroom to spare. No floating major tag is published there.
+            image="public.ecr.aws/aws-cli/aws-cli:2.36.38",
+            command=["/bin/sh", "-c"],
+            args=[_UPLOAD_SCRIPT],
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+                run_as_non_root=True,
+                run_as_user=_NONROOT_UID,
+            ),
+            env=[
+                dump_env,
+                # The CLI probes $HOME for a config file; /root isn't ours.
+                k8s.EnvVar(name="HOME", value="/tmp"),
+            ],
+            env_from=[
                 k8s.EnvFromSource(
                     secret_ref=k8s.SecretEnvSource(name="postgres-backup-s3")
                 ),
@@ -322,6 +513,7 @@ class Postgres(Construct):
                 },
                 limits={"memory": k8s.Quantity.from_string("512Mi")},
             ),
+            volume_mounts=[dump_mount],
         )
         k8s.KubeCronJob(
             self,
@@ -340,7 +532,23 @@ class Postgres(Construct):
                         ttl_seconds_after_finished=604800,
                         template=k8s.PodTemplateSpec(
                             spec=k8s.PodSpec(
-                                restart_policy="Never", containers=[backup]
+                                restart_policy="Never",
+                                security_context=k8s.PodSecurityContext(
+                                    run_as_non_root=True,
+                                    fs_group=_NONROOT_UID,
+                                    seccomp_profile=k8s.SeccompProfile(
+                                        type="RuntimeDefault"
+                                    ),
+                                ),
+                                # Ordered: the dump has to exist before the upload.
+                                init_containers=[dump],
+                                containers=[upload],
+                                volumes=[
+                                    k8s.Volume(
+                                        name="dump",
+                                        empty_dir=k8s.EmptyDirVolumeSource(),
+                                    )
+                                ],
                             )
                         ),
                     )

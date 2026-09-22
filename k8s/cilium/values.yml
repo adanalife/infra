@@ -23,6 +23,16 @@ kubeProxyReplacement: true
 k8sServiceHost: localhost
 k8sServicePort: 7445
 
+# Service translation happens at the tc/veth layer, not in the pod's
+# connect() syscall. The node's InternalIP is its tailnet 100.x address, so
+# socket-level LB rewrites in-pod service dials to a 100.64.0.0/10
+# destination — which any pod running its own tailscaled (the operator's
+# ProxyGroup proxies) routes into its own TUN instead of the veth,
+# timing out. Tailscale's k8s docs require this setting on Cilium
+# kube-proxy-replacement clusters.
+socketLB:
+  hostNamespaceOnly: true
+
 securityContext:
   capabilities:
     ciliumAgent:
@@ -56,9 +66,11 @@ hubble:
   ui:
     enabled: true
     # Internal-IP Ingress at hubble.prod.whereisdana.today — external-dns
-    # publishes the Route53 record at the mini-PC LAN IP (192.168.1.200),
-    # so the host resolves anywhere but is only reachable on the home
-    # network. cert-manager issues via DNS-01, independent of inbound
+    # publishes it as a CNAME onto minipc.whereisdana.today, which is itself a
+    # CNAME onto whichever location is active and resolves to that node's LAN
+    # address. So the host resolves anywhere but is only reachable on the home
+    # network, and a physical move is a pointer flip in terraform/core rather
+    # than a re-publish here. cert-manager issues via DNS-01, independent of inbound
     # reachability. Same shape as the vlc/obs/tripbot app Ingresses.
     #
     # Cilium is only installed on the minipc (Talos has no CNI; dev/k3d

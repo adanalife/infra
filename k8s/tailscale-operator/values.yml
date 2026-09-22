@@ -10,7 +10,7 @@
 
 # API server proxy — lets kubectl reach kube-apiserver by the operator's tailnet
 # name (tailscale-operator.<tailnet>.ts.net), which is stable and collision-proof
-# (a 100.x/CGNAT name, unlike the 192.168.1.200 LAN IP). Supersedes the
+# (a 100.x/CGNAT name, unlike the node's RFC1918 LAN address). Supersedes the
 # cert-SAN + per-wipe-IP-churn workaround on ~/.kube/adanalife-minipc-ts.
 #
 # mode "true" (auth mode): the proxy maps your tailnet identity to a Kubernetes
@@ -19,8 +19,7 @@
 # system:masters (cluster-admin) when reaching tag:k8s-operator. So no client
 # cert: `tailscale configure kubeconfig tailscale-operator` + kubectl works from
 # any tailnet device, gated by that ACL grant. (noauth was tried first but
-# pairs the proxy with a bearer token the apiserver rejects → 401.) See
-# vault/infra/kube-contexts.md.
+# pairs the proxy with a bearer token the apiserver rejects → 401.)
 apiServerProxyConfig:
   mode: "true"
 

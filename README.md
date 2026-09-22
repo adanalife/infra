@@ -1,115 +1,106 @@
 # infra
 
+Infrastructure-as-code for [A Dana Life](https://dana.lol): terraform for the
+cloud accounts (AWS, GCP, Cloudflare, Tailscale, GitHub), cdk8s + Argo CD for
+the Kubernetes platform and supporting manifests (app manifests live in each
+app's own repo), and a Taskfile that ties the workflows together.
 
-## running kubernetes locally (development / bees)
+## running kubernetes locally (development)
 
-Dev app stack (postgres + tripbot + vlc-server + obs + onscreens-server) on a
-local k3d cluster ("bees"). The manifests are authored in cdk8s
-(`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`.
-dev is **not** Argo-managed, so it deploys with a direct `kubectl apply` via
-`task cdk8s:dev:apply`. The k3d cluster config is at `k8s/k3d-config.bees.yaml`.
+Dev app stack (postgres + tripbot + obs + onscreens-server) on a
+local k3d cluster (`adanalife-dev`). The infra manifests are authored in cdk8s
+(`cdk8s/adanalife_k8s/`) and synthesized to `cdk8s/dist/development-*.k8s.yaml`;
+the tripbot app manifests live in the tripbot repo (obs manifests in the obs
+repo) and are delivered by dev's own in-cluster Argo CD. The k3d cluster config is at `k8s/k3d-config.yaml`.
 
 > prod-1/stage-1 app workloads are delivered by Argo CD from `cdk8s/dist/`
 > instead — see `gitops/README.md`.
 
+Prereqs: `brew install k3d kubectl helm argocd go-task/tap/go-task`, Colima/Docker
+running, `aws-vault` profiles for `adanalife-stage` (dev borrows the stage AWS
+account for ESO), and the **Keybase app running + logged in** (it pgp-decrypts the
+ESO bootstrap creds — `open -a Keybase` and wait ~10s if the daemon is down).
+`mise install` at the repo root pins k3d/kubectl/helm/argocd to the versions the
+cold start is verified against, if you'd rather not rely on what brew has.
+
 ```bash
-brew install k3d kubectl
+# Cold-start the whole env from nothing (creates the adanalife-dev cluster,
+# installs the platform stack + Argo CD, then Argo-syncs the apps in order):
+task k8s:dev:up
 
-# 1. Bring up the cluster and seed the ESO bootstrap Secret
-task k8s:dev:cluster:up
-task k8s:dev:bootstrap-secrets
+# Iterate on a LOCAL build — builds the image, imports it as :dev-local, and
+# pins the live Deployment to it (pauses Argo selfHeal so it sticks). APP=<app>
+# for one of tripbot|obs|onscreens; omit for all three:
+task k8s:dev:deploy APP=tripbot
 
-# 2. Build & import images, then deploy the synthesized manifests
-task k8s:import-images   # builds via tripbot/infra/docker/docker-compose.yml
-task cdk8s:dev:apply     # data (postgres + SecretStore), then apps
+# Revert to CI's :main image (re-enables selfHeal + re-syncs):
+task k8s:dev:sync
 
-# 3. Verify
-kubectl get pods                              # all four Running
-kubectl port-forward svc/tripbot 8080:80 &    # ad-hoc HTTP to tripbot
-curl http://localhost:8080/health/live
-# VNC (optional): kubectl port-forward svc/obs 5902:5902 → vnc://localhost:5902
-#                 kubectl port-forward svc/vlc-server 5903:5903 → vnc://localhost:5903
-# RTSP (optional): kubectl port-forward svc/vlc-server 8554:8554 → rtsp://localhost:8554/dashcam
+# At a glance: pods, the image tag each app runs, and Argo app health:
+task k8s:dev:status
 
-# 4. Tear down
-task k8s:dev:cluster:down
+# Tear down:
+task k8s:dev:down
 ```
 
-The k3d cluster has no host-port bindings (see `k8s/k3d-config.bees.yaml`)
+A fresh cluster cold-starts on CI's `adanalife/*:main` images from the
+registry (so `k8s:dev:up` just works); `k8s:dev:deploy` is only for running a
+local build. While you're iterating on `:dev-local`, Argo shows the app
+`OutOfSync` — that's expected; `k8s:dev:sync` clears it.
+
+Ad-hoc access (no host-port bindings on the dev cluster — everything is
+`kubectl port-forward`):
+
+```bash
+kubectl port-forward -n development svc/tripbot-twitch 8080:8080 &
+curl http://localhost:8080/health/live
+# VNC:  kubectl port-forward -n development svc/obs-twitch 5902:5902  → vnc://localhost:5902
+```
+
+The k3d cluster has no host-port bindings (see `k8s/k3d-config.yaml`)
 — anything you want to reach from the laptop goes through
-`kubectl port-forward`. Off-LAN access to the mini-PC envs is via Tailscale
-(see `vault/decisions/tailscale-access-model`); the dev k3d cluster is
-local-only.
+`kubectl port-forward`. Off-LAN access to the mini-PC envs is via Tailscale;
+the dev k3d cluster is local-only.
 
 The bundled traefik handles the tripbot Ingress in-cluster; the bundled
-servicelb (klipper-lb) fulfills the VNC/RTSP LoadBalancer services declared
-by the app manifests. Both are k3s-only — on EKS the same Ingress works
-against prod traefik unchanged, and LoadBalancer services are fulfilled by
-AWS ELB.
+servicelb (klipper-lb) fulfills the VNC LoadBalancer services declared
+by the app manifests. Both are k3s-only — stage-1/prod-1 co-tenant a bare-metal
+Talos cluster on a mini-PC with no LoadBalancer controller; traefik there runs
+on hostNetwork, binding the node's LAN IP :80/:443.
 
+## diagnosing minipc reboots
 
-
-### set up prometheus
-
-```bash
-g cl https://github.com/coreos/kube-prometheus
-g co release-0.4 # because we were on k8s v1.17
-k8s create -f manifests/setup -f manifests # might need to run multiple times
-```
-
-
-### set up aws-vault
+The single-node Talos cluster leaves no record of its own restarts — nothing
+survives to mark the node NotReady, and `node_*` metrics are allowlisted to the
+in-cluster VictoriaMetrics rather than Grafana Cloud. `scripts/arc-crash-correlate.py`
+builds the census from `node_boot_time_seconds` and intersects it with the
+self-hosted (ARC) runner jobs that were on the box at each death, ending in a
+per-(repo, workflow, job) table of runs vs. runs-with-a-death:
 
 ```bash
-cat ~/.aws/config
-
-[profile adanalife-core]
-region=us-east-1
-source_profile=adanalife
-
-[profile adanalife-stage]
-region=us-east-1
-source_profile=adanalife
-role_arn=arn:aws:iam::413585268653:role/AdminUser
-
-[profile adanalife-stage-developer]
-region=us-east-1
-source_profile=adanalife
-role_arn=arn:aws:iam::413585268653:role/DeveloperUser
-
-[profile adanalife-prod]
-region=us-east-1
-source_profile=adanalife
-role_arn=arn:aws:iam::704461573429:role/AdminUser
-
-[profile adanalife-prod-developer]
-region=us-east-1
-source_profile=adanalife
-role_arn=arn:aws:iam::704461573429:role/DeveloperUser
+task arc:crash-correlate -- --since 2026-08-22
 ```
 
+The task port-forwards VictoriaMetrics for the duration; flags after `--` reach
+the script (`--label`, `--vm-url`, `--window`, `--refresh` to bust the job
+cache). Both traps it walks around — a scrape gap is not a reboot, and the plain
+`/jobs` endpoint hides every attempt but the latest — are written up in the
+script's docstring.
+
+## the month-end leaderboard post
+
+On the 1st, `scripts/monthly-leaderboards.py` renders the Discord post for the
+month that just ended — miles, state guesses and the guessr board as one message
+to paste:
 
 ```bash
-cat ~/.bash_profile.local
-
-alias aws-dana-core="aws-vault exec adanalife-core --no-session"
-alias aws-dana-stage="aws-vault exec adanalife-stage --no-session"
-alias aws-dana-stage-developer="aws-vault exec adanalife-stage-developer --no-session"
-alias aws-dana-prod="aws-vault exec adanalife-prod --no-session"
-alias aws-dana-prod-developer="aws-vault exec adanalife-prod-developer --no-session"
-# alias aws-dana-core-root="aws-vault exec adanalife-root --no-session"
-
-alias login-dana-core="aws-vault login adanalife-core"
-alias login-dana-stage="aws-vault login adanalife-stage"
-alias login-dana-stage-developer="aws-vault login adanalife-stage-developer --duration=12h"
-alias login-dana-prod="aws-vault login adanalife-prod"
-alias login-dana-prod-developer="aws-vault login adanalife-prod-developer --duration=12h"
-# alias login-dana-root="aws-vault login adanalife-root"
-
-alias tf-dana-core="cd ~/danalol/infra/terraform/core && aws-dana-core"
-alias tf-dana-stage="cd ~/danalol/infra/terraform/stage-1 && aws-dana-stage"
-alias tf-dana-prod="cd ~/danalol/infra/terraform/prod-1 && aws-dana-prod"
-
-alias k8s-dana-stage="aws-dana-stage -- kubectl"
-alias helm-dana-stage="aws-dana-stage -- helm"
+task tripbot:prod:leaderboards            # last month
+task tripbot:prod:leaderboards -- --month 2026-08
 ```
+
+Three boards from two places. Miles and state guesses are tripbot's, read out of
+`scoreboard_snapshots` in prod Postgres — the cluster has no inbound path, so the
+read goes through `kubectl exec` into the CNPG primary. The guessr board is a
+public JSON read from the game's own API, the same fetch the onscreen overlay
+does. Both are read-only, and the snapshot rows only exist once a month has
+rolled over, which is what makes the 1st the day to run it.

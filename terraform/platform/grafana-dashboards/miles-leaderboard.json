@@ -1,0 +1,102 @@
+{
+  "uid": "miles-leaderboard",
+  "title": "15 — Miles Leaderboard",
+  "description": "All-time miles per viewer, read from tripbot's GET /api/stats/community over the tripbot-api Infinity datasource. The numbers are `users.miles` — the same authoritative column the onscreen leaderboard reads, with bots and opted-out accounts excluded — not the events-derived audit sum that cmd/backfill-miles computes. Top ten only: that is what the endpoint returns.",
+  "tags": [
+    "tripbot",
+    "product",
+    "leaderboard"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "All-time miles — top ten",
+      "description": "Ordered by miles, ties broken by username, which is the endpoint's own ordering. A viewer earns miles for watch time, so this ranks the longest-serving regulars rather than the loudest ones.",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "tripbot-api"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "miles"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "lengthmi"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "tripbot-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/stats/community",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "top_miles",
+          "columns": [
+            {
+              "selector": "username",
+              "text": "viewer",
+              "type": "string"
+            },
+            {
+              "selector": "platform",
+              "text": "platform",
+              "type": "string"
+            },
+            {
+              "selector": "miles",
+              "text": "miles",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

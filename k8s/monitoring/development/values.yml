@@ -1,6 +1,6 @@
 # Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
-# in-cluster collectors that fill the dashboards landed in
-# terraform/development/grafana-dashboards/:
+# in-cluster collectors that fill the dashboards defined in
+# terraform/platform/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
@@ -18,11 +18,11 @@
 # expression, so rotating the SM value + force-syncing the ExternalSecret
 # is enough to pick up new tokens without redeploying the chart.
 
-# Names the physical cluster (the k3d box on Dana's laptop). The host is
-# technically dmerrick-bees, but the monitoring label uses the adanalife-
-# prefixed form for consistency with adanalife-minipc.
+# Cluster label for the local development env. Env-based and
+# machine-independent (any laptop running `task k8s:dev:cluster:up`), the
+# adanalife- prefix matching adanalife-minipc.
 cluster:
-  name: adanalife-bees
+  name: adanalife-dev
 
 destinations:
   metrics:
@@ -105,6 +105,25 @@ clusterMetrics:
       excludeMetrics:
         - kube_pod_status_reason
         - kube_deployment_status_condition
+        # ReplicaSet metrics: zero dashboard/alert references; workload
+        # state is charted via kube_deployment_*.
+        - kube_replicaset_created
+        - kube_replicaset_metadata_generation
+        - kube_replicaset_owner
+        - kube_replicaset_spec_replicas
+        - kube_replicaset_status_fully_labeled_replicas
+        - kube_replicaset_status_observed_generation
+        - kube_replicaset_status_ready_replicas
+        - kube_replicaset_status_replicas
+        - kube_replicaset_status_terminating_replicas
+        # Per-secret resource-version gauge, unreferenced (kube_secret_info,
+        # which the global view uses, stays).
+        - kube_secret_metadata_resource_version
+        # Neither is referenced by any dashboard or alert (~270 series
+        # combined): completion_time is a per-finished-pod timestamp,
+        # restart_policy is a static per-pod constant.
+        - kube_pod_completion_time
+        - kube_pod_restart_policy
     # Drop pod UID — changes on every pod rebuild and creates a fresh series
     # set each rollout. Dashboards query by pod name, not uid.
     extraMetricProcessingRules: |-
@@ -216,14 +235,9 @@ annotationAutodiscovery:
       regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
       action = "drop"
     }
-    rule {
-      // No-op in development (no Intel iGPU here) — kept to stay in sync
-      // with prod-1/values.yml. See that file for the v1.3.6 duplicate-
-      // emission rationale.
-      source_labels = ["__name__"]
-      regex = "xpum_per_engine_ratio|xpum_frequency_mhz"
-      action = "drop"
-    }
+    // No xpum_* drop rule, matching prod-1/values.yml — see that file for why
+    // the duplicate-emission warning is preferable to losing the metrics.
+    // Moot in development regardless: no Intel iGPU on the dev cluster.
 
 # kube-state-metrics is off by default in v4.x; deploying it here, then
 # clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's
@@ -246,8 +260,13 @@ telemetryServices:
 # Alloy collector deployments. Defaults are fine for a single-node k3d;
 # revisit on a real multi-node cluster.
 collectors:
+  # dev ships only logs + cluster events — every metrics feature above
+  # (clusterMetrics / hostMetrics / annotationAutodiscovery) is disabled, so
+  # alloy-metrics has no consumer. Chart >=4.x validation rejects an enabled
+  # collector with no enabled feature using it, so turn it off explicitly. Flip
+  # back to `presets: [clustered, statefulset]` if dev metrics are re-enabled.
   alloy-metrics:
-    presets: [clustered, statefulset]
+    enabled: false
   alloy-logs:
     # `clustered` lets replicas partition pods between themselves so
     # podLogsViaKubernetesApi doesn't N-multiply kube-API log fetches.
@@ -291,6 +310,21 @@ collectorCommon:
         extra:
           - name: tmp-alloy
             mountPath: /tmp/alloy
+    # The operator injects a config-reloader sidecar next to alloy; it takes
+    # its own securityContext, so the container-level block above doesn't
+    # cover it and restricted PSA flags it separately. Same posture as alloy,
+    # minus the cap `add: []` wipe — the reloader has no chart-side default
+    # capability set to undo.
+    configReloader:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 4242
+        seccompProfile:
+          type: RuntimeDefault
     controller:
       volumes:
         extra:

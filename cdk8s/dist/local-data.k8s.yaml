@@ -29,16 +29,19 @@ spec:
         app: postgres
     spec:
       containers:
-        - envFrom:
+        - env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          envFrom:
             - secretRef:
                 name: postgres-secret
-          image: pgvector/pgvector:pg16
+          image: ghcr.io/adanalife/mirror/pgvector:pg16
           livenessProbe:
             exec:
               command:
-                - pg_isready
-                - -U
-                - $(POSTGRES_USER)
+                - sh
+                - -c
+                - exec pg_isready -U "$POSTGRES_USER"
             failureThreshold: 3
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -54,17 +57,23 @@ spec:
               port: postgres
           resources:
             limits:
-              memory: 1Gi
+              memory: 2Gi
             requests:
               cpu: 100m
               memory: 256Mi
           securityContext:
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - mountPath: /var/lib/postgresql/data
               name: postgres-data
-              subPath: pgdata
       securityContext:
+        fsGroup: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 999
         seccompProfile:
           type: RuntimeDefault
   volumeClaimTemplates:

@@ -1,4 +1,4 @@
-"""Platform Helm layer (Phase 3): the in-cluster platform stack wrapped in
+"""Platform Helm layer: the in-cluster platform stack wrapped in
 `cdk8s.Helm`, which renders each chart via `helm template` at synth time.
 
 Replaces the imperative `helm upgrade --install` sequence in `k8s:<env>:platform:up`
@@ -8,15 +8,15 @@ is a tooling change, not a values rewrite.
 
 Two deploy units (mirrors the legacy split):
   * `PlatformChart(cluster)`  — the cluster-scoped platform (cilium, ESO, traefik,
-    cert-manager, node-exporter, k8s-monitoring, tailscale-operator).
+    cert-manager, node-exporter, victoria-metrics, k8s-monitoring,
+    tailscale-operator).
   * `PlatformEnvChart(env)`   — the per-env-platform pieces that live in the
     `<env>-platform` namespace (external-dns, NATS), with the LAN IP injected
     from `EnvConfig` (replacing the gitignored `values.local.yml`).
 
-Version pins captured 2026-06-02 from the chart repos (the plan calls for pinning
-the several charts that were deploying at floating latest). Bump deliberately per
-[[use-latest-stable-when-adding]]; re-capture from a live `helm list -A` before a
-cutover to confirm they match what's deployed.
+Version pins captured 2026-06-02 from the chart repos. Bump deliberately;
+re-capture from a live `helm list -A` before a cutover to confirm they match
+what's deployed.
 
 The kustomize-only platform bits (local-path-provisioner, intel-gpu-plugin,
 intel-xpu-manager, the ESO cluster-store, cert-manager ClusterIssuers) are NOT
@@ -47,29 +47,58 @@ REPOS = {
     "grafana": "https://grafana.github.io/helm-charts",
     "prometheus-community": "https://prometheus-community.github.io/helm-charts",
     "cilium": "https://helm.cilium.io",
+    "metrics-server": "https://kubernetes-sigs.github.io/metrics-server/",
     "nats": "https://nats-io.github.io/k8s/helm/charts/",
     "tailscale": "https://pkgs.tailscale.com/helmcharts",
     "argo": "https://argoproj.github.io/argo-helm",
+    "cloudnative-pg": "https://cloudnative-pg.github.io/charts",
+    "victoria-metrics": "https://victoriametrics.github.io/helm-charts/",
+    # OCI registry — no scheme, the form Argo's repoURL wants. emit() detects
+    # the missing scheme and passes helm the full oci:// chart ref instead.
+    "burrito": "ghcr.io/padok-team/charts",
+    "actions-runner": "ghcr.io/actions/actions-runner-controller-charts",
 }
 
-# --- Version pins (captured 2026-06-02 from the repos above, and CONFIRMED
-# against the live minipc: cert-manager v1.20.2, traefik 40.2.0,
-# external-secrets 2.5.0, nats 2.14.0, external-dns 1.21.1,
-# prometheus-node-exporter 4.55.0 (via helm.sh/chart labels) and
-# k8s-monitoring 4.1.3 (via `helm list`) all match what's pinned here. cilium /
-# tailscale-operator don't surface the umbrella chart label, but their live
-# subcharts/values are consistent with these.) ---
+# --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
+# so adoption is pin == deployed (no up/down-grade on first sync). The
+# legacy platform tasks install ESO / cert-manager / node-exporter /
+# k8s-monitoring WITHOUT --version (floating latest), so they drift up over time;
+# re-capture before each adoption pass. Deltas since the 2026-06-02 capture:
+# external-secrets 2.5.0 -> 2.6.0, k8s-monitoring 4.1.3 -> 4.1.4 (both floated up).
+# All others match live: cert-manager v1.20.2, node-exporter 4.55.0, nats 2.14.0,
+# tailscale-operator 1.98.3, argo-cd 9.5.17 (+ the excluded traefik 40.2.0 /
+# external-dns 1.21.1 / cilium 1.19.4). ---
 VERSIONS = {
-    "external-secrets": "2.5.0",
+    "external-secrets": "2.6.0",
     "traefik": "40.2.0",
     "external-dns": "1.21.1",
     "cert-manager": "v1.20.2",
-    "k8s-monitoring": "4.1.3",
+    "k8s-monitoring": "4.1.4",
     "prometheus-node-exporter": "4.55.0",
     "cilium": "1.19.4",
+    "metrics-server": "3.13.1",  # app v0.8.1 — Talos-only (k3s bundles its own)
     "nats": "2.14.0",  # already pinned in the legacy task
-    "tailscale-operator": "1.98.3",  # already pinned in the legacy task
+    "tailscale-operator": "1.98.3",  # kubectl over the tailnet + tailnet Ingress
     "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
+    # CNPG — operator v1.30.0 + the barman-cloud CNPG-I plugin v0.13.0 (WAL
+    # archiving / PITR to S3). Verified latest stable at add time (2026-07-10).
+    "cloudnative-pg": "0.29.0",
+    "plugin-barman-cloud": "0.7.0",
+    # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
+    # live minipc release.
+    "victoria-metrics-single": "0.42.0",
+    # Argo Workflows app v4.1.2 — the batch engine for spare-compute work.
+    # Latest stable at add time (2026-08-22).
+    "argo-workflows": "2.0.2",
+    # Burrito v0.13.0 — terraform GitOps controller (plan/drift-detect trial).
+    # Latest stable at add time (2026-08-19); pre-1.0, so minors can break —
+    # read the release notes before bumping.
+    "burrito": "0.13.0",
+    # ARC — self-hosted GHA runners for the private repos' CI + release
+    # workflows. Latest stable at re-add time (2026-08-22); same pin the
+    # retired rpi5 stack ran.
+    "arc-controller": "0.14.2",
+    "arc-runner-set": "0.14.2",
 }
 
 
@@ -84,16 +113,28 @@ class HelmComponent:
     namespace: str
     value_files: tuple[str, ...] = ()  # -f paths under K8S
     values: dict = field(default_factory=dict)  # extra inline overrides (e.g. LAN IP)
+    # Argo-manageable? False for the bootstrap floor Argo can't own — cilium (the
+    # CNI Argo itself rides on) and argo-cd (managing its own install). Those stay
+    # task-installed; the Argo-native platform layer (argo_platform.py) skips them.
+    argo: bool = True
 
     def emit(self, scope: Construct) -> Helm:
         flags = ["--namespace", self.namespace]
         for vf in self.value_files:
             flags += ["-f", f"{K8S}/{vf}"]
+        repo = REPOS[self.repo_key]
+        if "://" not in repo:
+            # OCI registry (scheme-less in REPOS, matching Argo's repoURL
+            # format). helm can't take an OCI registry via --repo — it wants
+            # the full oci:// chart ref as the chart argument.
+            chart, repo = f"oci://{repo}/{self.chart}", None
+        else:
+            chart = self.chart
         return Helm(
             scope,
             self.release,
-            chart=self.chart,
-            repo=REPOS[self.repo_key],
+            chart=chart,
+            repo=repo,
             version=VERSIONS[self.version_key],
             release_name=self.release,
             namespace=self.namespace,
@@ -102,17 +143,327 @@ class HelmComponent:
         )
 
 
-class PlatformChart(Chart):
-    """Cluster-scoped platform stack for one cluster (`minipc` | `bees`).
+def cluster_components(
+    cluster: str, env: EnvConfig, skip_monitoring: bool = False
+) -> list[HelmComponent]:
+    """The cluster-scoped platform Helm releases for one cluster, in install
+    order. Shared source of truth for both delivery paths: PlatformChart renders
+    them via cdk8s.Helm; argo_platform emits an Argo Application per
+    Argo-manageable one. Excludes the per-env charts (external-dns, NATS — see
+    `env_components`) and the kustomize-only bits (local-path-provisioner,
+    intel-gpu/xpu, ESO cluster-store, cert-manager app-issuers)."""
+    minipc = cluster == "minipc"
+    components: list[HelmComponent] = []
+    if minipc:
+        # Cilium first — CNI + kube-proxy replacement; nothing schedules until
+        # it's up (Talos installs neither). Bootstrap floor: Argo can't own the
+        # CNI it rides on, so argo=False.
+        components.append(
+            HelmComponent(
+                "cilium",
+                "cilium",
+                "cilium",
+                "cilium",
+                "kube-system",
+                value_files=("cilium/values.yml",),
+                argo=False,
+            )
+        )
+        # metrics-server — backs `kubectl top` + the HPA metrics API. Talos
+        # doesn't bundle it (k3s does, so the k3d dev cluster already has it);
+        # minipc-only. --kubelet-insecure-tls in values.yml works around Talos's
+        # self-signed kubelet serving certs. Cleanly Argo-manageable (no
+        # host-coupled values), unlike the bootstrap-floor charts above.
+        components.append(
+            HelmComponent(
+                "metrics-server",
+                "metrics-server",
+                "metrics-server",
+                "metrics-server",
+                "kube-system",
+                value_files=("metrics-server/values.yml",),
+            )
+        )
 
-    Excludes the per-env-platform charts (external-dns, NATS) — those vary by
-    env namespace and live in PlatformEnvChart. Also excludes the kustomize-only
-    components, which stay `kubectl apply -k`:
-      * local-path-provisioner  (k8s/local-path-provisioner/<env>)
-      * intel-gpu-plugin / intel-xpu-manager  (k8s/intel-*/<env>) — minipc
-      * ESO cluster-store  (k8s/external-secrets/cluster-store)
-      * cert-manager app-issuers  (emitted per-env by AppsChart already)
-    """
+    components.append(
+        HelmComponent(
+            "external-secrets",
+            "external-secrets",
+            "external-secrets",
+            "external-secrets",
+            "external-secrets",
+            value_files=("external-secrets/values.yml",),
+        )
+    )
+
+    if minipc:
+        components.append(
+            HelmComponent(
+                "tailscale-operator",
+                "tailscale",
+                "tailscale-operator",
+                "tailscale-operator",
+                "tailscale",
+                value_files=("tailscale-operator/values.yml",),
+            )
+        )
+
+    # Argo CD — the GitOps controller itself, on every cluster that runs an Argo
+    # (minipc + the k3d dev cluster; local doesn't). k3d layers values.k3d.yml over
+    # the base to swap the tailnet domain / managed-namespace for development.
+    # Bootstrap floor (Argo managing its own install is a footgun), so argo=False;
+    # stays task-installed.
+    if cluster in ("minipc", "k3d"):
+        argo_values = ["argo-cd/values.yml"]
+        if cluster == "k3d":
+            argo_values.append("argo-cd/values.k3d.yml")
+        components.append(
+            HelmComponent(
+                "argocd",
+                "argo",
+                "argo-cd",
+                "argo-cd",
+                "argocd",
+                value_files=tuple(argo_values),
+                argo=False,
+            )
+        )
+
+    # Burrito — terraform GitOps controller ("Argo CD for terraform"), a
+    # plan/drift-detect TRIAL: no layer enables remediationStrategy.autoApply
+    # and the runner credential is read-only, so applies stay Dana-driven per
+    # the write-side preference. Mock (in-memory) datastore — plan artifacts
+    # don't survive a datastore restart; a real S3 bucket is the promotion
+    # step if the trial sticks. Cleanly Argo-manageable (no host-coupled
+    # values). The CRs it reconciles (TerraformRepository/TerraformLayer) live
+    # in dist/burrito.k8s.yaml — see constructs/burrito.py.
+    if minipc:
+        components.append(
+            HelmComponent(
+                "burrito",
+                "burrito",
+                "burrito",
+                "burrito",
+                "burrito-system",
+                value_files=("burrito/values.yml",),
+            )
+        )
+
+    # Argo Workflows — the batch/DAG engine for the spare-compute passes that are
+    # hand-applied one-shot Jobs today (video-pipeline's embed/coords/auto-trim).
+    # Runs one workflow at a time at the most-preemptible priority, so a queue of
+    # them yields to the stream. Cleanly Argo-manageable (no host-coupled values).
+    # The CRs it runs are Workflows, submitted by hand or by the video-pipeline
+    # repo — nothing in this repo declares one.
+    if minipc:
+        components.append(
+            HelmComponent(
+                "argo-workflows",
+                "argo",
+                "argo-workflows",
+                "argo-workflows",
+                "argo-workflows",
+                value_files=("argo-workflows/values.yml",),
+            )
+        )
+
+    # ARC (Actions Runner Controller) — self-hosted GitHub Actions runners for
+    # the private repos (free-plan minutes are metered there). Two OCI charts:
+    # the reconciler in arc-systems, plus one amd64 runner scale set registered
+    # at the ORG level so a single pool serves every private repo
+    # (runs-on: arc-amd64). The supporting namespaces / LimitRange /
+    # GitHub App ExternalSecret are the ArcChart singleton (constructs/arc.py).
+    if minipc:
+        components.append(
+            HelmComponent(
+                "arc-controller",
+                "actions-runner",
+                "gha-runner-scale-set-controller",
+                "arc-controller",
+                "arc-systems",
+                value_files=("arc/controller/values.yml",),
+            )
+        )
+        components.append(
+            HelmComponent(
+                "arc-amd64",
+                "actions-runner",
+                "gha-runner-scale-set",
+                "arc-runner-set",
+                "arc-runners",
+                value_files=("arc/runners/values.yml",),
+            )
+        )
+
+    # traefik on the mini-PC runs hostNetwork and stamps the LAN IP into
+    # Ingress status (replaces values.local.yml's ingressEndpoint.ip).
+    #
+    # NOT Argo-manageable (argo=False), and what installs on the minipc is
+    # k8s/traefik/values.prod-1.yml — which stamps ingressEndpoint.hostname with
+    # the location-independent alias, not an address. env.lan_ip below is the
+    # render's stale approximation of that and reaches no cluster. development is
+    # the env that genuinely can't be git-declared: its target is the host's own
+    # public IP, per-machine. Same class as cilium/argo-cd.
+    traefik_files = ["traefik/values.yml"]
+    traefik_values: dict = {}
+    if minipc:
+        traefik_files.append("traefik/values.prod-1.yml")
+        traefik_values = {
+            "providers": {"kubernetesIngress": {"ingressEndpoint": {"ip": env.lan_ip}}}
+        }
+    components.append(
+        HelmComponent(
+            "traefik",
+            "traefik",
+            "traefik",
+            "traefik",
+            "kube-system",
+            value_files=tuple(traefik_files),
+            values=traefik_values,
+            argo=False,
+        )
+    )
+
+    components.append(
+        HelmComponent(
+            "cert-manager",
+            "jetstack",
+            "cert-manager",
+            "cert-manager",
+            "kube-system",
+            value_files=(f"cert-manager/{env.name}/config.yml",),
+        )
+    )
+
+    # CloudNativePG — Postgres operator, backing the stage-1/prod-1 `pg`
+    # clusters (PITR via WAL archiving to S3). The barman-cloud CNPG-I plugin
+    # handles the S3 side; it needs cert-manager (webhook certs), so both sit
+    # after it in install order.
+    components.append(
+        HelmComponent(
+            "cnpg",
+            "cloudnative-pg",
+            "cloudnative-pg",
+            "cloudnative-pg",
+            "cnpg-system",
+            value_files=("cloudnative-pg/values.yml",),
+        )
+    )
+    components.append(
+        HelmComponent(
+            "plugin-barman-cloud",
+            "cloudnative-pg",
+            "plugin-barman-cloud",
+            "plugin-barman-cloud",
+            "cnpg-system",
+            value_files=("plugin-barman-cloud/values.yml",),
+        )
+    )
+
+    components.append(
+        HelmComponent(
+            "node-exporter",
+            "prometheus-community",
+            "prometheus-node-exporter",
+            "prometheus-node-exporter",
+            "monitoring-host",
+            value_files=("monitoring/node-exporter/values.yml",),
+        )
+    )
+
+    # VictoriaMetrics — the local, full-fidelity metrics store that
+    # k8s-monitoring's localMetrics destination writes to (the Grafana Cloud
+    # destination gets the series-cap-trimmed subset). minipc only: dev ships
+    # logs + events, no local TSDB. Before k8s-monitoring so a fresh cluster
+    # has the destination up before alloy's first write (alloy retries, so
+    # this is politeness, not a hard dependency).
+    if minipc:
+        components.append(
+            HelmComponent(
+                "victoria-metrics",
+                "victoria-metrics",
+                "victoria-metrics-single",
+                "victoria-metrics-single",
+                "monitoring",
+                value_files=("monitoring/victoria-metrics/values.yml",),
+            )
+        )
+
+    # k8s-monitoring 4.1.4 is confirmed live on the minipc (prod renders + the
+    # pin matches `helm list`). But dev's values.yml was authored for the k3d dev
+    # cluster's OLDER deployed chart and trips the chart's collector-validation
+    # under 4.1.3. Until that cluster's live version is captured (it's on a
+    # separate box) and pinned, dev monitoring is skipped here rather than guessed
+    # — it stays on the legacy `task k8s:dev:platform:up` helm install. prod/stage
+    # are unaffected.
+    if not skip_monitoring:
+        components.append(
+            HelmComponent(
+                "k8s-monitoring",
+                "grafana",
+                "k8s-monitoring",
+                "k8s-monitoring",
+                "monitoring",
+                value_files=(f"monitoring/{env.name}/values.yml",),
+            )
+        )
+
+    return components
+
+
+def env_components(env: EnvConfig) -> list[HelmComponent]:
+    """The per-env-platform Helm releases (external-dns + NATS) for one env,
+    landing in its `<env>-platform` namespace. Shared by PlatformEnvChart (cdk8s.Helm)
+    and argo_platform (one Argo Application each)."""
+    platform_ns = f"{env.name}-platform"
+    # dev keeps external-dns in kube-system (legacy); minipc envs use the
+    # env-platform namespace so the app namespace stays pod-clean.
+    edns_ns = platform_ns if env.cluster == "minipc" else "kube-system"
+    # Stage's external-dns release is named external-dns-stage (cluster-scoped
+    # RBAC can't collide with prod's external-dns on the shared cluster).
+    edns_release = "external-dns-stage" if env.name == "stage-1" else "external-dns"
+    return [
+        HelmComponent(
+            edns_release,
+            "external-dns",
+            "external-dns",
+            "external-dns",
+            edns_ns,
+            value_files=(f"external-dns/{env.name}/config.yml",),
+            # prod-1 and stage-1 commit their own `extraArgs`
+            # (--default-targets=<node alias> + --force-default-targets) in
+            # k8s/external-dns/<env>/config.yml, and that is what
+            # `task k8s:<env>:platform:up` installs. The value rendered here from
+            # env.lan_ip approximates it and reaches no cluster. external-dns
+            # stays task-installed (argo=False) alongside traefik and
+            # cilium/argo-cd because development's target is the host's own
+            # public IP, written per-machine to a gitignored values.local.yml.
+            values={"extraArgs": [f"--default-targets={env.lan_ip}"]},
+            argo=False,
+        ),
+        # The release name is what the chart names the Service, so it is the
+        # `services.nats` every consumer dials (tripbot, playout and the console
+        # each build nats://<name>.<env>-platform.svc.cluster.local from the
+        # contract). Deliberately a literal rather than a contract read: renaming
+        # a Helm release is an uninstall/install, so this name must move on its
+        # own schedule and not because a JSON key changed under it.
+        HelmComponent(
+            "nats",
+            "nats",
+            "nats",
+            "nats",
+            platform_ns,
+            value_files=("nats/values.yml", f"nats/{env.name}/values.yml"),
+        ),
+    ]
+
+
+class PlatformChart(Chart):
+    """Cluster-scoped platform stack for one cluster (`minipc` | `k3d`),
+    rendered via cdk8s.Helm (opt-in CDK8S_PLATFORM synth). The component table
+    lives in `cluster_components`; this just renders it. The Argo-native delivery
+    path (argo_platform.py) reads the SAME table. Excludes the per-env charts
+    (external-dns, NATS → PlatformEnvChart) and the kustomize-only components."""
 
     def __init__(
         self,
@@ -124,161 +475,18 @@ class PlatformChart(Chart):
         skip_monitoring: bool = False,
     ):
         super().__init__(scope, id)
-        minipc = cluster == "minipc"
-
-        components: list[HelmComponent] = []
-        if minipc:
-            # Cilium first — CNI + kube-proxy replacement; nothing schedules
-            # until it's up (Talos installs neither).
-            components.append(
-                HelmComponent(
-                    "cilium",
-                    "cilium",
-                    "cilium",
-                    "cilium",
-                    "kube-system",
-                    value_files=("cilium/values.yml",),
-                )
-            )
-
-        components.append(
-            HelmComponent(
-                "external-secrets",
-                "external-secrets",
-                "external-secrets",
-                "external-secrets",
-                "external-secrets",
-                value_files=("external-secrets/values.yml",),
-            )
-        )
-
-        if minipc:
-            components.append(
-                HelmComponent(
-                    "tailscale-operator",
-                    "tailscale",
-                    "tailscale-operator",
-                    "tailscale-operator",
-                    "tailscale",
-                    value_files=("tailscale-operator/values.yml",),
-                )
-            )
-            # Argo CD — the GitOps controller that reconciles the committed
-            # cdk8s/dist app manifests. Installing it here makes nothing happen on
-            # its own: it only watches + reports drift; the ApplicationSets are
-            # manual-sync, so no workload changes until you sync. See gitops/README.md.
-            components.append(
-                HelmComponent(
-                    "argocd",
-                    "argo",
-                    "argo-cd",
-                    "argo-cd",
-                    "argocd",
-                    value_files=("argo-cd/values.yml",),
-                )
-            )
-
-        # traefik on the mini-PC runs hostNetwork and stamps the LAN IP into
-        # Ingress status (replaces values.local.yml's ingressEndpoint.ip).
-        traefik_files = ["traefik/values.yml"]
-        traefik_values: dict = {}
-        if minipc:
-            traefik_files.append("traefik/values.prod-1.yml")
-            traefik_values = {
-                "providers": {
-                    "kubernetesIngress": {"ingressEndpoint": {"ip": env.lan_ip}}
-                }
-            }
-        components.append(
-            HelmComponent(
-                "traefik",
-                "traefik",
-                "traefik",
-                "traefik",
-                "kube-system",
-                value_files=tuple(traefik_files),
-                values=traefik_values,
-            )
-        )
-
-        components.append(
-            HelmComponent(
-                "cert-manager",
-                "jetstack",
-                "cert-manager",
-                "cert-manager",
-                "kube-system",
-                value_files=(f"cert-manager/{env.name}/config.yml",),
-            )
-        )
-
-        components.append(
-            HelmComponent(
-                "node-exporter",
-                "prometheus-community",
-                "prometheus-node-exporter",
-                "prometheus-node-exporter",
-                "monitoring-host",
-                value_files=("monitoring/node-exporter/values.yml",),
-            )
-        )
-
-        # k8s-monitoring 4.1.3 is confirmed live on the minipc (prod renders + the
-        # pin matches `helm list`). But dev's values.yml was authored for the
-        # bees cluster's OLDER deployed chart and trips the chart's
-        # collector-validation under 4.1.3. Until that cluster's live version is
-        # captured (it's on a separate box) and pinned, dev monitoring is skipped
-        # here rather than guessed — it stays on the legacy
-        # `task k8s:dev:platform:up` helm install. prod/stage are unaffected.
-        if not skip_monitoring:
-            components.append(
-                HelmComponent(
-                    "k8s-monitoring",
-                    "grafana",
-                    "k8s-monitoring",
-                    "k8s-monitoring",
-                    "monitoring",
-                    value_files=(f"monitoring/{env.name}/values.yml",),
-                )
-            )
-
-        for comp in components:
+        for comp in cluster_components(cluster, env, skip_monitoring):
             comp.emit(self)
 
 
 class PlatformEnvChart(Chart):
     """Per-env-platform charts in the `<env>-platform` namespace: external-dns
-    (publishes the env's Route53 zone to the LAN IP) and NATS (the pubsub bus).
-    Separate from PlatformChart so stage + prod can co-tenant one cluster with
-    isolated platform namespaces."""
+    (publishes the env's Route53 zone to the LAN IP) and NATS (the pubsub bus),
+    rendered via cdk8s.Helm. Component table in `env_components`. Separate from
+    PlatformChart so stage + prod can co-tenant one cluster with isolated platform
+    namespaces."""
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id)
-        platform_ns = f"{env.name}-platform"
-        # dev keeps external-dns in kube-system (legacy); minipc envs use the
-        # env-platform namespace so the app namespace stays pod-clean.
-        edns_ns = platform_ns if env.cluster == "minipc" else "kube-system"
-        # Stage's external-dns release is named external-dns-stage (cluster-scoped
-        # RBAC can't collide with prod's external-dns on the shared cluster).
-        edns_release = "external-dns-stage" if env.name == "stage-1" else "external-dns"
-
-        HelmComponent(
-            edns_release,
-            "external-dns",
-            "external-dns",
-            "external-dns",
-            edns_ns,
-            value_files=(f"external-dns/{env.name}/config.yml",),
-            # LAN IP as the default record target (replaces values.local.yml's
-            # --default-targets), injected from config instead of a gitignored file.
-            values={"extraArgs": [f"--default-targets={env.lan_ip}"]},
-        ).emit(self)
-
-        HelmComponent(
-            "nats",
-            "nats",
-            "nats",
-            "nats",
-            platform_ns,
-            value_files=("nats/values.yml", f"nats/{env.name}/values.yml"),
-        ).emit(self)
+        for comp in env_components(env):
+            comp.emit(self)

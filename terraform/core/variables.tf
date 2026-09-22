@@ -69,6 +69,16 @@ variable "secondary_stage_nameservers" {
   default = []
 }
 
+# Which entry in local.minipc_location_ips (minipc-dns.tf) /
+# local.nas_location_ips (nas-dns.tf) the minipc.whereisdana.today and
+# nas.whereisdana.today pointers currently resolve to. The two boxes always
+# move together, so one toggle drives both. Change this + apply when the gear
+# moves to a different physical network.
+variable "minipc_active_location" {
+  type    = string
+  default = "tallman-local"
+}
+
 # dev.whereisdana.today nameservers — obtained from terraform/stage-1's
 # dev_route53_name_servers output after that zone is applied. Empty default
 # leaves the delegation record uncreated (see route53.tf).

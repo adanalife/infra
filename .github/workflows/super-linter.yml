@@ -1,26 +1,42 @@
 ---
-name: Super Linter
+name: super-linter
 
+# pre-commit covers the per-PR lint surface (same hooks run locally and in
+# pre-commit.yml); super-linter is the belt-and-braces full-codebase sweep,
+# so it runs weekly + on demand instead of on every PR.
 on:
-  pull_request:
+  schedule:
+    - cron: '13 9 * * 1' # Mondays 09:13 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # super-linter reports each linter as its own commit status (MULTI_STATUS is
+  # on by default). Without statuses: write every one of those POSTs 403s — a
+  # WARN that doesn't fail the run, so the per-linter reporting silently
+  # no-ops and the only record is the step log.
+  statuses: write
 
 jobs:
   build:
     name: Run Linters
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       # fetch-depth: 0 is required by super-linter v6+: it diffs against
-      # the default branch (master) to figure out which files changed,
-      # which means master has to be present in the local checkout.
-      - uses: actions/checkout@v6
+      # the default branch (main) to figure out which files changed,
+      # which means main has to be present in the local checkout.
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: run-linters
-        uses: super-linter/super-linter@v8
+        uses: super-linter/super-linter@v8.7.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEFAULT_BRANCH: master
+          DEFAULT_BRANCH: main
+          # weekly sweep lints everything, not just a PR diff
+          VALIDATE_ALL_CODEBASE: true
           # don't post a "Super-linter summary" comment on every PR run
           # (the Actions step summary tab still gets the same content)
           ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false

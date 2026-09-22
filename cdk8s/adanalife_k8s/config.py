@@ -10,56 +10,128 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+# The fleet-wide supported-platform set, owned by platform-gateway (its Go
+# adapter registry is the source of truth) and synced into this repo's
+# platforms.json via `task platforms:sync`. Drives the per-platform mediamtx
+# relay fan-out + every env's `platforms` (validated a subset below). The
+# gateway/obs/playout Applications self-discover from their own repos' indexes,
+# not from this file. Never hand-edit platforms.json — add an adapter in the
+# gateway + re-sync.
+_PLATFORMS_FILE = Path(__file__).resolve().parents[2] / "platforms.json"
+
+
+def _load_supported_platforms() -> tuple[str, ...]:
+    import json
+
+    with _PLATFORMS_FILE.open() as f:
+        return tuple(json.load(f)["platforms"])
+
+
+SUPPORTED_PLATFORMS = _load_supported_platforms()
 
 
 @dataclass(frozen=True)
 class EnvConfig:
     name: str  # prod-1 | stage-1 | development | local
     namespace: str
-    cluster: str  # minipc | bees | local
-    aws_account: str  # adanalife-prod | adanalife-stage | "" (local)
-    image_tag: str  # latest | develop
+    cluster: str  # minipc | k3d | local
     dns_base: str  # prod.whereisdana.today | stage... | dev...  ("" for local)
-    nats_url: str
-    sentry_env: str  # SENTRY_ENVIRONMENT (prod-1 | stage-1 | development)
-    binary_env: str = "development"  # ENV= the Go config validator accepts: production|staging|development
-    deployment_env: str = (
-        "development"  # OTEL deployment.environment + telemetry env id
-    )
     secret_source: str = "eso"  # eso | local
-    gpu: bool = False  # request gpu.intel.com/i915
-    obs_encoder: str = "obs_x264"  # ffmpeg_vaapi_tex on GPU envs
-    obs_quality: str = "low"  # low | high
     dashcam_mode: str = "hostpath"  # nfs | hostpath
     tailscale: bool = False  # emit the tailscale Ingress
-    otel: bool = False  # OTEL_SDK_DISABLED=false when True
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
+    # Emit the CNPG `pg` cluster (PITR via barman-cloud → S3) alongside the
+    # legacy StatefulSet. Stage-1 first; prod-1 flips on after the stage PITR
+    # restore drill passes. dev/local keep the legacy StatefulSet only.
+    cnpg: bool = False
+    # "" → postgres co-locates in the app namespace (default, byte-identical
+    # render). Set to an isolated namespace (e.g. "stage-1-data") to move the DB
+    # StatefulSet + its ESO SecretStore out of the app namespace, so deleting the
+    # app namespace can't drop the database. Apps reach it cross-namespace via the
+    # postgres_host FQDN. The dashcam PVC does NOT move (vlc mounts it; PVCs are
+    # namespace-local) — it shifts to SupportingChart in the app namespace.
+    data_namespace: str = ""
     external_dns_role_arn: str = (
         ""  # cert-manager DNS-01 Route53 role (per AWS account)
     )
-    lan_ip: str = (
-        "192.168.1.200"  # mini-PC node IP external-dns/traefik target (platform Helm)
-    )
+    # Approximates the external-dns/traefik target for the platform-Helm render
+    # only. Both components are task-installed from committed k8s/** values that
+    # carry the node's DNS alias instead, so nothing reads this value into a
+    # cluster — and it still holds the address of a network the mini-PC has left.
+    lan_ip: str = "192.168.1.200"
     nfs_server: str = ""  # dashcam NFS export (nfs mode); from $NFS_SERVER at synth
-    nfs_path: str = ""  # dashcam NFS path; from $NFS_PATH at synth
+    nfs_path: str = ""  # dashcam NFS path; from the $nfs_path_env var at synth
+    # Which env var supplies this env's dashcam path. Both nfs envs now read the
+    # shared $NFS_PATH, which points at the canonical regenerated _opt/clips
+    # corpus (smaller, +faststart, fixes the corrupt airing clips). The override
+    # mechanism stays generic — it let stage stream _opt while prod stayed on the
+    # airing _all export during the regen — but no env diverges today. Falls back
+    # to $NFS_PATH when an override is unset, so the golden render is unchanged.
+    nfs_path_env: str = "NFS_PATH"
     nfs_pv_name: str = (
         "vlc-dashcam-nfs"  # PVs bind 1:1 — stage needs its own (vlc-dashcam-nfs-stage)
     )
-    # Streaming platforms present in this env (obs instances). twitch everywhere;
-    # youtube currently stage-only while the bot side is built out.
+    # --- background-music share -------------------------------------------------
+    # A second, much smaller export on the same NAS holding the album beds OBS
+    # plays as background audio (see the obs repo's OBS_BACKGROUND_AUDIO). It gets
+    # its own PV rather than a subPath off the dashcam one because the dashcam PV
+    # points at the clips corpus itself, not the share root — and mixing music
+    # into the corpus directory would put it in the localize Job's path. Rendered
+    # on the same envs as the dashcam PV (dashcam_mode == "nfs").
+    music_nfs_path: str = ""  # from $MUSIC_NFS_PATH at synth
+    music_pv_name: str = "obs-music-nfs"  # stage needs its own (PVs bind 1:1)
+    # --- node-local dashcam corpus (the NFS<->local serving toggle) -------------
+    # When True, a node-local `vlc-dashcam-local` PVC (local-path, on the minipc)
+    # is emitted beside the NFS PVC, and the one-shot copy Job (DashcamLocalizeChart)
+    # is rendered. It's the durable corpus *cache* — vlc can serve the stream off
+    # local NVMe instead of the NAS. The cache persists across the mount flip, so
+    # toggling vlc back to NFS never discards it; the NFS PVC always stays defined
+    # as the instant fallback while the local copy is (re)populated. Which source
+    # vlc actually mounts is the tripbot repo's `dashcam_source` flag — this flag
+    # only governs whether the local PVC + copy Job exist. Off by default (golden
+    # render unchanged). To adopt local serving on an env: flip this on, apply, run
+    # `task k8s:<env>:dashcam-localize`, then point vlc at it (dashcam_source=local).
+    dashcam_local_enabled: bool = False
+    # Size of the node-local corpus PVC. The regenerated _opt/clips corpus is
+    # ~630 GB; this leaves headroom without crowding the other local-path PVCs.
+    dashcam_local_size: str = "700Gi"
+    # Serve the relay's stream over LL-HLS as well as RTSP (adds the muxer's
+    # :8888 listener to the container and the Service). Off by default; it's how
+    # a native client reads the raw pre-OBS dashcam feed without an iGPU slot.
+    mediamtx_hls: bool = False
+    # Platforms this env runs a per-platform mediamtx relay for. Set from
+    # SUPPORTED_PLATFORMS on the minipc envs; twitch-only on the test envs.
     platforms: tuple[str, ...] = ("twitch",)
-
-    @property
-    def otel_disabled(self) -> str:
-        """OTEL_SDK_DISABLED literal — disabled everywhere OTEL isn't on."""
-        return "false" if self.otel else "true"
 
     @property
     def tls(self) -> bool:
         """Whether app ingresses get cert-manager TLS (minipc envs only)."""
         return self.cluster == "minipc"
+
+    @property
+    def data_ns(self) -> str:
+        """Namespace the stateful data unit (postgres + its SecretStore) lands in:
+        the app namespace by default, or the isolated one when data_namespace set."""
+        return self.data_namespace or self.namespace
+
+    @property
+    def data_isolated(self) -> bool:
+        """True when postgres lives in its own namespace, split from the app ns."""
+        return bool(self.data_namespace) and self.data_namespace != self.namespace
+
+    @property
+    def postgres_host(self) -> str:
+        """DATABASE_HOST apps connect to: the bare Service name when co-located
+        (parity), the cross-namespace FQDN when the DB is isolated."""
+        return (
+            f"postgres.{self.data_namespace}.svc.cluster.local"
+            if self.data_isolated
+            else "postgres"
+        )
 
 
 # Stage and dev share the adanalife-stage account → same ExternalDNSRole ARN.
@@ -67,76 +139,71 @@ _STAGE_ROLE = "arn:aws:iam::413585268653:role/ExternalDNSRole"
 _PROD_ROLE = "arn:aws:iam::704461573429:role/ExternalDNSRole"
 
 
-# Per-env table. Mirrors the Kustomize overlays; the source of truth once those
-# overlays are retired. Values cross-checked against k8s/apps/*/overlays/<env>.
+# Per-env table — the source of truth for env-varying config.
 ENVS: dict[str, EnvConfig] = {
     "prod-1": EnvConfig(
         name="prod-1",
         namespace="prod-1",
         cluster="minipc",
-        aws_account="adanalife-prod",
-        image_tag="latest",
+        dashcam_local_enabled=True,  # serve the corpus off the minipc's local NVMe
         dns_base="prod.whereisdana.today",
-        nats_url="nats://nats.prod-1-platform.svc.cluster.local:4222",
-        sentry_env="prod-1",
-        binary_env="production",
-        deployment_env="prod-1",
-        gpu=True,
-        obs_encoder="ffmpeg_vaapi_tex",
-        obs_quality="high",
         dashcam_mode="nfs",
         tailscale=True,
-        otel=True,
         postgres_size="50Gi",
         postgres_storage_class="local-path-retain",
         postgres_backup=True,
         external_dns_role_arn=_PROD_ROLE,
+        # Streams the shared $NFS_PATH — now the canonical regenerated _opt/clips
+        # corpus, cut over from the airing _all export once the regen completed.
         nfs_pv_name="vlc-dashcam-nfs",
-        platforms=("twitch",),
+        # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
+        # take years of irreplaceable data.
+        data_namespace="prod-1-data",
+        # CloudNativePG cluster `pg` alongside the legacy StatefulSet. Syncing
+        # prod-1-data with this set runs the one-shot import from `postgres`.
+        cnpg=True,
+        # The full supported set gets a per-platform mediamtx relay here; a new
+        # platform gets one automatically on the next sync. The gateway/obs/
+        # playout workloads self-discover from their own repos' indexes and park
+        # at replicas:0 until a console scale-up, so this list only governs the
+        # infra-authored relay fan-out.
+        platforms=SUPPORTED_PLATFORMS,
+        # The native app's raw-feed player reads the relay's LL-HLS muxer; it
+        # only repackages the passthrough H.264, so it costs no iGPU encode slot.
+        mediamtx_hls=True,
     ),
     "stage-1": EnvConfig(
         name="stage-1",
         namespace="stage-1",
         cluster="minipc",
-        aws_account="adanalife-stage",
-        image_tag="develop",
         dns_base="stage.whereisdana.today",
-        nats_url="nats://nats.stage-1-platform.svc.cluster.local:4222",
-        sentry_env="stage-1",
-        binary_env="staging",
-        deployment_env="stage-1",
-        gpu=True,
-        obs_encoder="ffmpeg_vaapi_tex",
-        obs_quality="low",
         dashcam_mode="nfs",
         tailscale=True,
-        otel=False,
         postgres_size="10Gi",
         postgres_storage_class="local-path",
+        cnpg=True,
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
-        # YouTube OBS is deferred until we're closer to testing the YouTube
-        # streaming path — keeps the manifests/diffs tidy meanwhile. The
-        # ObsInstance factory still supports it (tested directly); re-enable by
-        # restoring: platforms=("twitch", "youtube").
-        platforms=("twitch",),
+        music_pv_name="obs-music-nfs-stage",
+        # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
+        # same as prod, but keeps its own PV name (PVs bind 1:1).
+        # postgres + its SecretStore land in stage-1-data, so a
+        # `kubectl delete ns stage-1` can't take the DB. Same isolation as prod-1;
+        # development and local co-locate the DB in the app namespace.
+        data_namespace="stage-1-data",
+        # Full supported set → one mediamtx relay per platform on stage too
+        # (the gateway/obs/playout Applications self-discover from their repos).
+        platforms=SUPPORTED_PLATFORMS,
+        # Same LL-HLS muxer as prod, so the native app has a stage feed to point at.
+        mediamtx_hls=True,
     ),
     "development": EnvConfig(
         name="development",
         namespace="development",
-        cluster="bees",
-        aws_account="adanalife-stage",
-        image_tag="develop",
+        cluster="k3d",
         dns_base="dev.whereisdana.today",
-        nats_url="nats://nats.development-platform.svc.cluster.local:4222",
-        sentry_env="development",
-        binary_env="staging",
-        deployment_env="development",
-        gpu=False,
-        obs_quality="low",
         dashcam_mode="hostpath",
         tailscale=False,
-        otel=False,
         external_dns_role_arn=_STAGE_ROLE,
         platforms=("twitch",),
     ),
@@ -144,22 +211,23 @@ ENVS: dict[str, EnvConfig] = {
         name="local",
         namespace="default",
         cluster="local",
-        aws_account="",
-        image_tag="latest",
         dns_base="",
-        nats_url="",
-        sentry_env="development",
-        binary_env="staging",
-        deployment_env="development",
         secret_source="local",
-        gpu=False,
-        obs_quality="low",
         dashcam_mode="hostpath",
         tailscale=False,
-        otel=False,
         platforms=("twitch",),
     ),
 }
+
+
+# Guard: an env can only list platforms the gateway has an adapter for.
+for _name, _env in ENVS.items():
+    _unknown = tuple(p for p in _env.platforms if p not in SUPPORTED_PLATFORMS)
+    if _unknown:
+        raise ValueError(
+            f"{_name}: platforms {_unknown} not in SUPPORTED_PLATFORMS "
+            f"{SUPPORTED_PLATFORMS} — add an adapter in platform-gateway + run `task platforms:sync`"
+        )
 
 
 def load_env(name: str) -> EnvConfig:
@@ -167,15 +235,24 @@ def load_env(name: str) -> EnvConfig:
         env = ENVS[name]
     except KeyError:
         raise SystemExit(f"unknown env {name!r}; known: {', '.join(ENVS)}")
+    from dataclasses import replace
+
     # NFS coordinates are deployment-host-specific (gitignored in Kustomize as
     # dashcam-nfs.local.yaml); thread them in from the environment at synth so
     # they never get committed. Placeholders match the legacy .example render.
     if env.dashcam_mode == "nfs":
-        from dataclasses import replace
-
+        # Each env reads its own path var, falling back to the shared $NFS_PATH
+        # (now the canonical regenerated _opt/clips corpus) — so an unset override
+        # renders identically to before (and the committed golden keeps the
+        # placeholder). No env overrides today; the mechanism stays for the next
+        # time one env needs to run ahead of another on a fresh corpus.
+        nfs_path = os.environ.get(env.nfs_path_env) or os.environ.get(
+            "NFS_PATH", "<export path>"
+        )
         env = replace(
             env,
             nfs_server=os.environ.get("NFS_SERVER", "<NFS server address>"),
-            nfs_path=os.environ.get("NFS_PATH", "<export path>"),
+            nfs_path=nfs_path,
+            music_nfs_path=os.environ.get("MUSIC_NFS_PATH", "<music export path>"),
         )
     return env

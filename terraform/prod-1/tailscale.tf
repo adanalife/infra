@@ -6,11 +6,11 @@
 # entity — one ACL, one operator — so it's managed once, here in prod-1, the
 # workspace that owns the adanalife-minipc cluster. stage-1 has no tailscale.tf.
 #
-# Credential flow mirrors the cloudflare provider (see secrets.tf +
-# vault/decisions/secrets-manager-for-tf-providers.md): the provider's own
-# bootstrap credential lives in an SM container, populated out-of-band;
-# everything else (the operator OAuth client, the node auth key) is TF-owned
-# and written back into SM for ESO / the machine-config patch to consume.
+# Credential flow mirrors the cloudflare provider (see secrets.tf): the
+# provider's own bootstrap credential lives in an SSM parameter, populated
+# out-of-band; everything else (the operator OAuth client, the node auth key)
+# is TF-owned and written back into SSM for ESO / the machine-config patch to
+# consume.
 #
 # ── Bootstrap credential = a user API access token (NOT an OAuth client) ─────
 # An OAuth client can't be the provider credential here: the admin console
@@ -19,43 +19,41 @@
 # API access token acts with your admin identity, so it can write the ACL,
 # create the operator OAuth client (any tag), and mint the node key with no tag
 # gymnastics. ⚠️ Tailscale API tokens expire (90 days) — when it lapses,
-# regenerate + re-`put-secret-value` (the provider can't auth until you do).
+# regenerate + re-`put-parameter` (the provider can't auth until you do).
 # Future hardening: revisit an OAuth-client provider cred once the tag model is
 # proven, to escape the 90-day token treadmill.
 #
 # ── Two-phase first apply ────────────────────────────────────────────────────
-#   1. Create just the bootstrap container (provider can't auth yet):
-#        task tf:prod:apply -- -target=aws_secretsmanager_secret.tailscale_api_key \
-#                               -target=aws_secretsmanager_secret_version.tailscale_api_key
+#   1. Create just the bootstrap parameter (provider can't auth yet):
+#        task tf:prod:apply -- -target=aws_ssm_parameter.tailscale_api_key
 #   2. Generate a Tailscale API access token (admin console → Settings → Keys →
 #      Generate access token) and store it:
-#        aws-vault exec adanalife-prod -- aws secretsmanager put-secret-value \
-#          --secret-id prod-1/tailscale-api-key --secret-string '<tskey-api-...>'
+#        aws-vault exec adanalife-prod -- aws ssm put-parameter \
+#          --name /prod-1/tailscale-api-key --type SecureString \
+#          --overwrite --value '<tskey-api-...>'
 #   3. Full apply — the provider authenticates and the ACL + operator client +
 #      node key all land:
 #        task tf:prod:apply
 
-# --- Provider bootstrap credential (SM, out-of-band populated) ---------------
+# --- Provider bootstrap credential (SSM, out-of-band populated) --------------
 
-resource "aws_secretsmanager_secret" "tailscale_api_key" {
-  name        = "prod-1/tailscale-api-key"
+resource "aws_ssm_parameter" "tailscale_api_key" {
+  name        = "/prod-1/tailscale-api-key"
   description = "Tailscale API access token for the tailscale Terraform provider."
-}
+  type        = "SecureString"
+  value       = jsonencode({ placeholder = "set via aws ssm put-parameter" })
 
-resource "aws_secretsmanager_secret_version" "tailscale_api_key" {
-  secret_id     = aws_secretsmanager_secret.tailscale_api_key.id
-  secret_string = "placeholder — set via aws secretsmanager put-secret-value"
   lifecycle {
-    ignore_changes = [secret_string]
+    ignore_changes = [value]
   }
 }
 
-data "aws_secretsmanager_secret_version" "tailscale_api_key" {
-  secret_id = aws_secretsmanager_secret.tailscale_api_key.id
+data "aws_ssm_parameter" "tailscale_api_key" {
+  name = aws_ssm_parameter.tailscale_api_key.name
 }
 
 provider "tailscale" {
-  api_key = data.aws_secretsmanager_secret_version.tailscale_api_key.secret_string
+  api_key = data.aws_ssm_parameter.tailscale_api_key.value
   # tailnet omitted → defaults to the tailnet owning the credential.
 }
 
@@ -65,8 +63,7 @@ resource "tailscale_acl" "this" {
   # This resource was never `terraform import`ed, so the provider would
   # otherwise refuse to manage a non-empty policy. Setting this true declares
   # THIS file the single source of truth — edits made in the admin console are
-  # reverted on the next apply. (Codifies the policy per the "codify the
-  # Tailscale ACL as code" item in vault/infra/TODO.md.)
+  # reverted on the next apply.
   overwrite_existing_content = true
 
   acl = <<-EOT
@@ -86,6 +83,10 @@ resource "tailscale_acl" "this" {
           //     apiserver-proxy + per-Service proxy devices it creates with
           //     tag:k8s (the canonical operator pattern owns tag:k8s by
           //     tag:k8s-operator; we keep admin too so the node still works).
+          //     This ownership also covers the Tailscale Services the operator
+          //     mints for HA ingress: they carry the operator's proxy tags
+          //     (proxyConfig.defaultTags = tag:k8s), so no separate tag is
+          //     needed for them.
           "tag:k8s":          ["autogroup:admin", "tag:k8s-operator"],
 
           // Identity of the Tailscale Kubernetes operator and its OAuth client.
@@ -98,11 +99,24 @@ resource "tailscale_acl" "this" {
       // cluster node, so it survives every wipe/re-register with no manual
       // clicks. Operator proxies wear tag:k8s too but advertise no routes, so
       // this only ever matches the subnet-router node itself.
+      // This must match TS_ROUTES in talos/adanalife-minipc/tailscale.patch.sops.yaml
+      // — the node's current-location LAN subnet (Maine/tallman). On a move,
+      // update both to the new subnet (Texas/shadyglen was 192.168.1.0/24).
       "autoApprovers": {
           "routes": {
-              "192.168.1.0/24": ["tag:k8s"],
+              "192.168.40.0/24": ["tag:k8s"],
           },
           "exitNode": ["tag:k8s"],
+
+          // Auto-approve the Tailscale Services advertised by the shared HA
+          // ingress fleet. The operator mints one Service per Ingress
+          // annotated `tailscale.com/proxy-group: ingress-proxies`, tagged
+          // tag:k8s; the ProxyGroup replicas that front it are tag:k8s too.
+          // Keyed by the Service's tag rather than its name, so each opted-in
+          // Ingress is approved without a per-Service admin-console click.
+          "services": {
+              "tag:k8s": ["tag:k8s"],
+          },
       },
 
       // Grants govern access. Default allow-all — fine for a single-user
@@ -151,26 +165,29 @@ resource "tailscale_acl" "this" {
 # ACL so tag:k8s-operator exists before the client tries to claim it.
 resource "tailscale_oauth_client" "operator" {
   description = "Tailscale K8s operator adanalife-minipc"
-  # devices:core (register proxy devices) + auth_keys (mint their join keys).
-  # The tags below satisfy the "auth_keys scope needs a tag" requirement.
-  # If a newer operator feature needs the `services` scope, add it here.
-  scopes = ["devices:core", "auth_keys"]
+  # devices:core (register proxy devices) + auth_keys (mint their join keys) +
+  # services (create and own a Tailscale Service per HA-ingress Ingress, which
+  # is how one ProxyGroup fleet fronts many Ingresses). The tags below satisfy
+  # the "auth_keys scope needs a tag" requirement.
+  scopes = ["devices:core", "auth_keys", "services"]
   tags   = ["tag:k8s-operator"]
 
   depends_on = [tailscale_acl.this]
+
+  lifecycle {
+    # Recreating the client mints a new secret; the operator cannot reach the tailnet until it is redeployed.
+    prevent_destroy = true
+  }
 }
 
-# Operator creds → SM (TF owns the value). ESO materializes these into the
+# Operator creds → SSM (TF owns the value). ESO materializes these into the
 # `operator-oauth` Secret in the `tailscale` namespace (keys client_id /
 # client_secret) for the helm chart to consume.
-resource "aws_secretsmanager_secret" "tailscale_operator_oauth" {
-  name        = "k8s/tailscale/operator-oauth"
+resource "aws_ssm_parameter" "tailscale_operator_oauth" {
+  name        = "/k8s/tailscale/operator-oauth"
   description = "Tailscale K8s operator OAuth client credentials. Consumed by the operator via ESO."
-}
-
-resource "aws_secretsmanager_secret_version" "tailscale_operator_oauth" {
-  secret_id = aws_secretsmanager_secret.tailscale_operator_oauth.id
-  secret_string = jsonencode({
+  type        = "SecureString"
+  value = jsonencode({
     client_id     = tailscale_oauth_client.operator.id
     client_secret = tailscale_oauth_client.operator.key
   })
@@ -182,14 +199,13 @@ resource "aws_secretsmanager_secret_version" "tailscale_operator_oauth" {
 # (re)install.
 #
 # ⚠️ The node reads this from its SOPS-sealed machine config
-#    (talos/adanalife-minipc/tailscale.patch.yaml → ExtensionServiceConfig
+#    (talos/adanalife-minipc/tailscale.patch.sops.yaml → ExtensionServiceConfig
 #    TS_AUTHKEY), NOT via ESO — k8s/ESO don't exist yet at node-join time. So
 #    after TF mints or rotates this key you must re-seal the new value into
 #    that patch (`task talos:minipc:secrets:encrypt`) and commit.
 # ⚠️ Auth keys expire (90 days max). The key must be valid AT wipe time, so
 #    before a post-expiry wipe run `terraform apply -replace=tailscale_tailnet_key.node`
-#    to mint a fresh one, then re-seal. (This is the treadmill we accepted when
-#    migrating the hand-made key into TF — see vault/infra/TODO.md.)
+#    to mint a fresh one, then re-seal.
 resource "tailscale_tailnet_key" "node" {
   reusable      = true
   ephemeral     = false
@@ -199,61 +215,20 @@ resource "tailscale_tailnet_key" "node" {
   description   = "adanalife-minipc Talos node join key"
 
   depends_on = [tailscale_acl.this]
+
+  lifecycle {
+    # The key is sealed into a committed SOPS machine-config patch; a new one strands the node until it is wiped and rejoined.
+    prevent_destroy = true
+  }
 }
 
-resource "aws_secretsmanager_secret" "tailscale_node_authkey" {
-  name        = "prod-1/tailscale-node-authkey"
+resource "aws_ssm_parameter" "tailscale_node_authkey" {
+  name        = "/prod-1/tailscale-node-authkey"
   description = "Reusable tag:k8s auth key for the adanalife-minipc Talos node. Re-sealed into the SOPS machine-config patch (not consumed via ESO)."
+  type        = "SecureString"
+  value       = tailscale_tailnet_key.node.key
 }
 
-resource "aws_secretsmanager_secret_version" "tailscale_node_authkey" {
-  secret_id     = aws_secretsmanager_secret.tailscale_node_authkey.id
-  secret_string = tailscale_tailnet_key.node.key
-}
-
-# --- CI lifecycle grants -----------------------------------------------------
-
-# Kept here (not in secrets.tf) so the KEEP-IN-SYNC secrets.tf doesn't diverge
-# from stage-1 — tailscale is prod-1-only. Same shape as the per-secret grants
-# in secrets.tf: read on the bootstrap container (the provider data-sources it
-# during plan), full lifecycle + PutSecretValue on the two TF-owned containers.
-locals {
-  tailscale_secret_arns = [
-    "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-api-key-*",
-    "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:k8s/tailscale/operator-oauth-*",
-    "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:prod-1/tailscale-node-authkey-*",
-  ]
-}
-
-data "aws_iam_policy_document" "ci_terraform_tailscale_secrets" {
-  # terraform PLAN refreshes ALL THREE secret_version resources, which reads
-  # their values — so CI needs GetSecretValue on every tailscale container, not
-  # just the bootstrap one the provider data-sources.
-  statement {
-    sid       = "Read"
-    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret", "secretsmanager:ListSecretVersionIds"]
-    resources = local.tailscale_secret_arns
-  }
-  statement {
-    sid = "Manage"
-    actions = [
-      "secretsmanager:CreateSecret",
-      "secretsmanager:DeleteSecret",
-      "secretsmanager:TagResource",
-      "secretsmanager:UntagResource",
-      "secretsmanager:UpdateSecret",
-      "secretsmanager:PutSecretValue",
-    ]
-    resources = local.tailscale_secret_arns
-  }
-}
-
-# Inline policy (not a managed policy + attachment): CITerraformRole is already
-# at AWS's managed PoliciesPerRole=10 quota, and inline policies don't count
-# against it. (If the other per-secret managed policies in secrets.tf keep
-# growing, they'll want the same treatment / consolidation.)
-resource "aws_iam_role_policy" "ci_terraform_tailscale_secrets" {
-  name   = "AllowCITerraformManageProd1TailscaleSecrets"
-  role   = aws_iam_role.ci_terraform.id
-  policy = data.aws_iam_policy_document.ci_terraform_tailscale_secrets.json
-}
+# CI read/lifecycle on all three parameters rides the account-wide SSM
+# statements in secrets.tf's ci_terraform_secrets_read — no per-file grant
+# needed (the SM-era inline policy this file carried is gone with SM).

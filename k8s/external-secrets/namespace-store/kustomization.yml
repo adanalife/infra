@@ -6,4 +6,4 @@ kind: Kustomization
 # field. The eso-aws-credentials Secret the store references is seeded
 # in-namespace by `task k8s:<env>:bootstrap-secrets`.
 resources:
-  - secret-store.yml
+  - parameter-store.yml

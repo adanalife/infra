@@ -1,0 +1,286 @@
+"""MediaMTX — the RTSP relay between the playout publisher and OBS.
+
+The playout server (the adanalife/playout repo) publishes the dashcam stream
+into MediaMTX over RTSP; OBS pulls from MediaMTX. The relay decouples the
+OBS-facing RTSP endpoint from the publisher's lifecycle — a playout restart
+doesn't invalidate the endpoint OBS is reading — and adds TCP transport for
+off-cluster viewers. One instance per platform, deliberately: it keeps the
+per-stream blast-radius isolation the fleet already uses (playout-{platform},
+obs-{platform}), so a relay restart only ever touches one platform's stream.
+
+Emits, for one platform, into the env's app namespace:
+  * ConfigMap mediamtx-{platform}-config — mediamtx.yml (RTSP + metrics only;
+    every other protocol disabled) with a single explicit `dashcam` path.
+  * Deployment mediamtx-{platform} — at most one replica, Recreate (a relay
+    handles one live stream; never run two side by side during a rollout).
+    Births parked at replicas:0, activated by a console scale-up.
+  * Service mediamtx-{platform} — rtsp/TCP + rtp/rtcp UDP + metrics, plus
+    hls/TCP on the envs whose EnvConfig sets mediamtx_hls.
+
+Publishers/readers address it as rtsp://mediamtx-{platform}:8554/dashcam
+(cross-namespace: rtsp://mediamtx-{platform}.{ns}.svc.cluster.local:8554/dashcam).
+Where HLS is on, the same stream is also readable at
+http://mediamtx-{platform}:8888/dashcam/index.m3u8 — the overlay-less feed as
+playout publishes it, repackaged (playout runs ENCODER=passthrough, so the HLS
+muxer only segments the existing H.264; it never transcodes).
+"""
+
+from __future__ import annotations
+
+import imports.k8s as k8s
+from constructs import Construct
+
+from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.contract import load_contract
+from adanalife_k8s.naming import (
+    CONFIG_HASH_ANNOTATION,
+    config_hash,
+    meta_labels,
+    selector,
+)
+
+# GHCR mirror, not Docker Hub (the ghcr-base-image-mirrors decision) — the
+# mirror pair is registered in the playout repo's mirror-images workflow.
+IMAGE = "ghcr.io/adanalife/mirror/mediamtx:1.19.2"
+
+# The relay's name and RTSP port are contract vocabulary: playout dials them to
+# publish and obs dials them to read, both from their own synced copy of
+# contract.json. This construct is the producing side, so it reads the same keys
+# rather than restating them.
+RTSP_PORT = load_contract().port("mediamtx_rtsp")
+RTP_PORT = 8000
+RTCP_PORT = 8001
+HLS_PORT = 8888
+METRICS_PORT = 9998
+
+# RTSP on both TCP and UDP transports (the MediaMTX default) + Prometheus
+# metrics; HLS where the env asks for it, every other protocol off. The single
+# explicit `dashcam` path keeps the namespace closed — a typo'd publish target
+# errors instead of silently creating a path nothing reads. Default path config:
+# any publisher, any reader (in-cluster only; the Service is ClusterIP).
+
+
+def _config(hls: bool) -> str:
+    # Everything about the HLS muxer beyond the switch and the address is left
+    # at MediaMTX's defaults: the low-latency variant, no always-remux (so the
+    # muxer only exists while someone reads), and the 60s idle close.
+    hls_block = f"hls: yes\nhlsAddress: :{HLS_PORT}" if hls else "hls: no"
+    return f"""\
+rtsp: yes
+rtspAddress: :{RTSP_PORT}
+rtpAddress: :{RTP_PORT}
+rtcpAddress: :{RTCP_PORT}
+rtmp: no
+{hls_block}
+webrtc: no
+srt: no
+metrics: yes
+metricsAddress: :{METRICS_PORT}
+# MediaMTX's built-in default auth grants `metrics` only to localhost,
+# which 401s the in-cluster Alloy scraper (it hits the pod IP over the
+# pod network; only kubectl port-forward traffic arrives via loopback).
+# Defining authInternalUsers replaces the default list entirely, so the
+# default publish/read/playback grants are restated alongside metrics.
+# Everything stays cluster-internal — the Service is ClusterIP-only.
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: metrics
+paths:
+  dashcam:
+    # Reject a second publisher instead of kicking the current one
+    # (MediaMTX's default is to kick). During a playout rolling deploy the
+    # incoming pod waits for the path to free (probe-gated, so it never
+    # even connects while the path is held); this is the backstop that
+    # keeps any stray publish attempt from stealing the live stream.
+    overridePublisher: no
+"""
+
+
+class Mediamtx(Construct):
+    """One platform's RTSP relay in the env's app namespace — the endpoint
+    OBS pulls the dashcam stream from, fed by the playout publisher."""
+
+    def __init__(
+        self, scope: Construct, id: str = "mediamtx", *, env: EnvConfig, platform: str
+    ):
+        super().__init__(scope, id)
+        self._instance(env, platform)
+
+    def _instance(self, env: EnvConfig, platform: str):
+        name = load_contract().svc(f"mediamtx_{platform}")
+        ns = env.namespace or None
+        labels = meta_labels(name)
+        sel = selector(name)
+
+        config = {"mediamtx.yml": _config(env.mediamtx_hls)}
+        k8s.KubeConfigMap(
+            self,
+            f"{platform}-config",
+            metadata=k8s.ObjectMeta(name=f"{name}-config", namespace=ns, labels=labels),
+            data=config,
+        )
+
+        container = k8s.Container(
+            name=name,
+            image=IMAGE,
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+            ),
+            ports=[
+                k8s.ContainerPort(name="rtsp", container_port=RTSP_PORT),
+                k8s.ContainerPort(name="rtp", container_port=RTP_PORT, protocol="UDP"),
+                k8s.ContainerPort(
+                    name="rtcp", container_port=RTCP_PORT, protocol="UDP"
+                ),
+                k8s.ContainerPort(name="metrics", container_port=METRICS_PORT),
+                *(
+                    [k8s.ContainerPort(name="hls", container_port=HLS_PORT)]
+                    if env.mediamtx_hls
+                    else []
+                ),
+            ],
+            readiness_probe=k8s.Probe(
+                tcp_socket=k8s.TcpSocketAction(
+                    port=k8s.IntOrString.from_string("rtsp")
+                ),
+                initial_delay_seconds=5,
+                period_seconds=5,
+            ),
+            # The HLS muxer holds its segments in RAM, not on disk: the default
+            # 7 x 1s window over a ~6-12 Mbps stream is a few MB, well inside this
+            # limit.
+            resources=k8s.ResourceRequirements(
+                requests={
+                    "cpu": k8s.Quantity.from_string("50m"),
+                    "memory": k8s.Quantity.from_string("64Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("256Mi")},
+            ),
+            volume_mounts=[
+                # MediaMTX reads /mediamtx.yml by default; mount just the file.
+                k8s.VolumeMount(
+                    name="config",
+                    mount_path="/mediamtx.yml",
+                    sub_path="mediamtx.yml",
+                    read_only=True,
+                )
+            ],
+        )
+
+        k8s.KubeDeployment(
+            self,
+            f"{platform}-deployment",
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
+            spec=k8s.DeploymentSpec(
+                # Relays are declared parked in every env: a console/hand
+                # scale-up is what activates one, and Argo ignores
+                # .spec.replicas so the scale sticks.
+                replicas=0,
+                # One relay per stream — never run two side by side in a rollout.
+                strategy=k8s.DeploymentStrategy(type="Recreate"),
+                selector=k8s.LabelSelector(match_labels=sel),
+                template=k8s.PodTemplateSpec(
+                    # Scraped into Grafana Cloud via annotation-autodiscovery
+                    # (prod-1 only; stage-1 series are dropped at the Alloy
+                    # layer). Feeds the "Stream Health: playout ↔ MediaMTX"
+                    # dashboard.
+                    metadata=k8s.ObjectMeta(
+                        labels=sel,
+                        annotations={
+                            "prometheus.io/scrape": "true",
+                            "prometheus.io/port": str(METRICS_PORT),
+                            # The config is a subPath mount, which never updates
+                            # in place; the digest rolls the relay on sync so a
+                            # mediamtx.yml edit reaches the running process.
+                            CONFIG_HASH_ANNOTATION: config_hash(config),
+                        },
+                    ),
+                    spec=k8s.PodSpec(
+                        # Prod's relay is on the live-stream path (playout → OBS),
+                        # so it joins the prod-stream tier (value 1000): under node
+                        # pressure the scheduler preempts default-priority
+                        # co-tenants rather than a relay carrying a broadcast. Prod
+                        # only — stage relays stay default-priority (the
+                        # most-preemptible tier), by design. The PriorityClass is
+                        # delivered by the tripbot-identity unit.
+                        priority_class_name=(
+                            "prod-stream" if env.name == "prod-1" else None
+                        ),
+                        # The relay sits mid stream path between playout and
+                        # OBS, both amd64-pinned to the minipc; matching the arch
+                        # keeps all three on one node.
+                        node_selector={"kubernetes.io/arch": "amd64"},
+                        # The `restricted` PodSecurity profile requires
+                        # runAsNonRoot as a spec field, whatever USER the image
+                        # declares. MediaMTX is a static Go binary: every port
+                        # it opens is unprivileged, and its only file is the
+                        # read-only ConfigMap mount, so the uid is free.
+                        security_context=k8s.PodSecurityContext(
+                            run_as_non_root=True,
+                            run_as_user=65532,
+                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
+                        ),
+                        containers=[container],
+                        volumes=[
+                            k8s.Volume(
+                                name="config",
+                                config_map=k8s.ConfigMapVolumeSource(
+                                    name=f"{name}-config"
+                                ),
+                            )
+                        ],
+                    ),
+                ),
+            ),
+        )
+
+        k8s.KubeService(
+            self,
+            f"{platform}-service",
+            metadata=k8s.ObjectMeta(name=name, namespace=ns, labels=labels),
+            spec=k8s.ServiceSpec(
+                selector=sel,
+                ports=[
+                    k8s.ServicePort(
+                        name="rtsp",
+                        port=RTSP_PORT,
+                        target_port=k8s.IntOrString.from_string("rtsp"),
+                    ),
+                    k8s.ServicePort(
+                        name="rtp",
+                        port=RTP_PORT,
+                        protocol="UDP",
+                        target_port=k8s.IntOrString.from_string("rtp"),
+                    ),
+                    k8s.ServicePort(
+                        name="rtcp",
+                        port=RTCP_PORT,
+                        protocol="UDP",
+                        target_port=k8s.IntOrString.from_string("rtcp"),
+                    ),
+                    k8s.ServicePort(
+                        name="metrics",
+                        port=METRICS_PORT,
+                        target_port=k8s.IntOrString.from_string("metrics"),
+                    ),
+                    *(
+                        [
+                            k8s.ServicePort(
+                                name="hls",
+                                port=HLS_PORT,
+                                target_port=k8s.IntOrString.from_string("hls"),
+                            )
+                        ]
+                        if env.mediamtx_hls
+                        else []
+                    ),
+                ],
+            ),
+        )

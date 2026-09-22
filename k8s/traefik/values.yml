@@ -4,9 +4,9 @@
 # baked in) that the bundled HelmChartConfig dance can't easily reach.
 #
 # Workloads route through this via `ingressClassName: traefik` (set
-# on each app's Ingress, e.g. k8s/apps/tripbot/base/ingress.yaml).
-# The bundled Traefik lived in `kube-system` and was the default
-# IngressClass; this release matches both for drop-in compatibility.
+# on each app's Ingress). Installed into `kube-system` and registered
+# as the default IngressClass, matching the bundled Traefik it
+# replaces, so existing Ingresses need no change.
 
 deployment:
   # Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's
@@ -25,7 +25,7 @@ ingressClass:
   isDefaultClass: true
 
 # Expose the API + dashboard. --api.insecure=true means no auth on
-# the dashboard. On dev (bees/k3d) it's port-forward only:
+# the dashboard. On dev (k3d) it's port-forward only:
 # `kubectl port-forward deploy/traefik 8080:8080`. On prod (minipc) it's
 # reachable LAN-only at traefik.prod.whereisdana.today via a plain Ingress
 # (k8s/traefik/prod-1/dashboard-ingress.yaml) — a basic-auth middleware

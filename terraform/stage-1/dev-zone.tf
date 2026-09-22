@@ -1,5 +1,5 @@
 # dev.whereisdana.today — Route 53 zone for the "development" k3d cluster
-# (adanalife-bees). dev borrows the adanalife-stage AWS account (it has no
+# (adanalife-dev). dev borrows the adanalife-stage AWS account (it has no
 # account of its own yet), so its subdomain zone lives here in the stage-1
 # workspace rather than a dev-specific one.
 #
@@ -10,8 +10,7 @@
 # external-dns + cert-manager (DNS-01) for the dev cluster reach this zone
 # via the SHARED stage ExternalDNSUser / ExternalDNSRole, granted
 # ChangeResourceRecordSets on the dev zone below. A dedicated dev
-# external-dns principal is deferred — see vault/infra/TODO.md ("Give dev
-# its own external-dns IAM user + role").
+# external-dns principal is deferred.
 #
 # Two-phase apply (the zone's nameservers aren't known until first apply):
 #   1. apply this workspace  → creates the zone, prints dev_route53_name_servers
@@ -23,6 +22,11 @@ resource "aws_route53_zone" "dev_subdomain_zone" {
   # secondary_domain is whereisdana.today (primary_domain is dana.lol — the
   # tripbot/vlc/obs hosts live under *.dev.whereisdana.today, matching prod/stage).
   name = "dev.${var.secondary_domain}"
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; core's tfvars carry the delegated NS set by hand.
+    prevent_destroy = true
+  }
 }
 
 # Scope the SHARED external-dns principal's ChangeResourceRecordSets to the
@@ -54,13 +58,13 @@ EOF
 # external-dns (k8s) authenticates as the user via its access key.
 resource "aws_iam_user_policy_attachment" "external_dns_dev_zone" {
   policy_arn = aws_iam_policy.allow_external_dns_dev_zone.arn
-  user       = aws_iam_user.external_dns.name
+  user       = module.env_base.external_dns_user_name
 }
 
 # cert-manager's DNS-01 solver assumes the role.
 resource "aws_iam_role_policy_attachment" "external_dns_dev_zone" {
   policy_arn = aws_iam_policy.allow_external_dns_dev_zone.arn
-  role       = aws_iam_role.external_dns.name
+  role       = module.env_base.external_dns_role_name
 }
 
 output "dev_route53_name_servers" {

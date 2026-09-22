@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 """cdk8s entrypoint. Synthesizes the deploy units into dist/.
 
-Per env:  <env>-apps   — the umbrella app set (applied on every `task k8s:<env>:apply`)
-          <env>-jobs    — tripbot one-shot Jobs (applied via the auth/seed tasks)
-stage:    dashcam-cv    — the vector-fill batch workload (its own task)
+Per env:  <env>-supporting              — shared obs Secrets, cert-manager Issuers
+          <env>-data                    — postgres + dashcam PVC (stateful, never pruned)
+
+The tripbot app workloads (<env>-<component>-<platform>), one-shot Jobs, and
+identity Secrets (<env>-tripbot-identity) are authored in the tripbot repo's
+cdk8s now, and the dashcam-cv vector-fill workload in the video-pipeline repo's;
+Argo delivers both cross-repo (see constructs/argocd.py).
 
 Synth all envs by default; CDK8S_ENV=<name> narrows to one (handy for diffing a
-single env's output against the legacy Kustomize render during migration).
+single env's output).
 """
 
 import os
@@ -14,18 +18,25 @@ import os
 from cdk8s import App
 
 from adanalife_k8s.charts import (
-    AppsChart,
+    ArcChart,
     ArgoCDChart,
-    DashcamCVChart,
-    DashcamPVChart,
+    BurritoChart,
+    DashcamLocalizeChart,
+    KmsgChart,
+    NfsPVChart,
     DataChart,
-    JobsChart,
+    MediamtxChart,
+    MusicLocalizeChart,
+    PlatformArgoChart,
+    SupportingChart,
+    T5WatchdogChart,
+    UpsMonitorChart,
 )
 from adanalife_k8s.config import ENVS, load_env
 from adanalife_k8s.helm_platform import PlatformChart, PlatformEnvChart
 
 # outdir honors CDK8S_OUTDIR so a caller can synth to a throwaway dir without
-# touching the committed dist/ — used by `task k8s:<env>:dashcam-pv`, which synths
+# touching the committed dist/ — used by `task k8s:<env>:nfs-pv`, which synths
 # the PV with real (gitignored) NFS coords and applies it out of band.
 app = App(outdir=os.environ.get("CDK8S_OUTDIR", "dist"))
 
@@ -33,25 +44,99 @@ only = os.environ.get("CDK8S_ENV")
 targets = [only] if only else list(ENVS)
 for name in targets:
     env = load_env(name)
-    AppsChart(app, f"{name}-apps", env=env)
+    # Per-env namespace supporting resources (shared observability Secrets +
+    # cert-manager issuers), isolated from the app churn — its own deploy unit /
+    # Argo Application. The tripbot APP workloads, one-shot Jobs, and identity
+    # Secrets are authored in the tripbot repo now (Argo delivers them cross-repo).
+    SupportingChart(app, f"{name}-supporting", env=env)
     # Stateful resources (postgres + dashcam PV/PVC) as a separate deploy unit /
     # Argo Application — isolated from the app churn, synced before the apps.
     DataChart(app, f"{name}-data", env=env)
-    JobsChart(app, f"{name}-jobs", env=env)
+    # Per-platform MediaMTX RTSP relays (playout publishes in, OBS pulls out) —
+    # minipc envs only, matching where the playout repo deploys (see
+    # constructs/argocd.py PLAYOUT_REVISIONS). One deploy unit / Argo
+    # Application per (env, platform), like obs/playout (appset-mediamtx).
+    if env.cluster == "minipc":
+        for platform in env.platforms:
+            MediamtxChart(
+                app, f"{name}-mediamtx-{platform}", env=env, platform=platform
+            )
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
     # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
-    # don't glob it). Applied via `task k8s:<env>:dashcam-pv`. Committed dist
+    # don't glob it). Applied via `task k8s:<env>:nfs-pv`. Committed dist
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
-        DashcamPVChart(app, f"{name}-dashcam-pv", env=env)
-    # dashcam-cv is stage-only today (the only env running the vector fill).
-    if name == "stage-1":
-        DashcamCVChart(app, "dashcam-cv", env=env)
+        NfsPVChart(app, f"{name}-nfs-pv", env=env)
+        # The NFS->local music mirror Job — same shape (host-specific, outside
+        # Argo), its own dist/<env>-music-localize.k8s.yaml applied via
+        # `task k8s:<env>:music-localize`. Fills the obs-music-local claim the
+        # album bed plays from; re-run after staging new albums.
+        MusicLocalizeChart(app, f"{name}-music-localize", env=env)
+    # The NFS->local corpus copy Job (only when an env adopts local serving) — also
+    # host-specific + outside Argo, its own dist/<env>-dashcam-localize.k8s.yaml
+    # applied via `task k8s:<env>:dashcam-localize`. The matching vlc-dashcam-local
+    # PVC is emitted alongside the NFS PVC (DataChart/SupportingChart).
+    if env.dashcam_local_enabled:
+        DashcamLocalizeChart(app, f"{name}-dashcam-localize", env=env)
+    # The dashcam-cv vector-fill workload moved to the video-pipeline repo (it owns
+    # its own cdk8s/dist now); Argo delivers it cross-repo via the video-pipeline
+    # ApplicationSet (see constructs/argocd.py).
 
 # Argo CD GitOps config (env-agnostic, offline) — committed deploy unit applied
 # after the Argo install. Skipped when narrowed to a single env via CDK8S_ENV.
 if not only:
+    # minipc Argo — prod-1 + stage-1, tailscale UI.
     ArgoCDChart(app, "argocd")
+    # k3d (development) Argo — a SEPARATE in-cluster install managing only
+    # development (dev apps autosync since the env is throwaway). Each Argo targets
+    # its own cluster in-cluster, so there's no cross-cluster wiring. No tailnet UI
+    # (no tailscale-operator on the dev cluster); the UI rides a traefik Ingress at
+    # argocd.dev.whereisdana.today (no TLS), reached at :9080 via the k3d port-map.
+    # selfHeal off: dev autosync still deploys git changes, but a hand `kubectl
+    # edit` sticks (Argo shows OutOfSync rather than stomping it) — dev is a
+    # scratch env for manual experimentation.
+    ArgoCDChart(
+        app,
+        "argocd-k3d",
+        envs=("development",),
+        autosync_envs=("development",),
+        autosync_holdouts=(),  # the prod OBS holdout is minipc-only
+        selfheal=False,
+        notifications_secret=False,  # dev runs notifications.enabled=false
+        tailscale_ui=False,
+        lan_host=f"argocd.{load_env('development').dns_base}",
+        lan_tls=False,
+        ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
+        t5_watchdog=False,  # no Talos node on the k3d dev cluster to probe or reboot
+        arc=False,  # no runner host on the dev cluster; runners are minipc-only
+        kmsg=False,  # k3d has no Talos API; there is no kernel log to read
+    )
+    # Argo-native delivery of the platform Helm stack — one multi-source Helm
+    # Application per release (offline: just Application objects, no rendered
+    # charts). MONITOR-ONLY until adopted; see gitops/README.md.
+    PlatformArgoChart(app, "platform-argo")
+    # Burrito trial config (TerraformRepository + core layer + runner creds +
+    # UI ingress) — plan/drift-detect only, applied after the Burrito chart
+    # syncs. See constructs/burrito.py.
+    BurritoChart(app, "burrito")
+    # UPS monitor (observe-only NUT client) — cluster-singleton in the `ups`
+    # namespace, env-agnostic. Delivered by a minipc-only Argo Application (the
+    # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
+    # NUT server). See constructs/ups_monitor.py.
+    UpsMonitorChart(app, "ups-monitor")
+    # The T5 watchdog — same singleton shape, reboots the node when the
+    # /var/mnt/data UserVolume stops answering. See constructs/t5_watchdog.py.
+    T5WatchdogChart(app, "t5-watchdog")
+    # ARC supporting unit (namespaces + runner LimitRange + GitHub App
+    # ExternalSecret) — cluster-singleton, delivered by a minipc-only Argo
+    # Application. The two ARC Helm charts are platform components
+    # (helm_platform.py). See constructs/arc.py.
+    ArcChart(app, "arc")
+    # Kernel-log shipper — cluster-singleton in the `kmsg` namespace,
+    # env-agnostic. Streams the node's dmesg to stdout, where alloy-logs picks it
+    # up for Loki. Minipc-only (the k3d dev Argo has no Talos API to read). See
+    # constructs/kmsg.py.
+    KmsgChart(app, "kmsg")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with
@@ -59,12 +144,12 @@ if not only:
 # the env-platform chart (external-dns + NATS) is per env-platform namespace.
 if os.environ.get("CDK8S_PLATFORM"):
     PlatformChart(app, "platform-minipc", cluster="minipc", env=load_env("prod-1"))
-    # bees k8s-monitoring needs its live chart version pinned first (see
-    # PlatformChart) — skip it here so the synth stays green until captured.
+    # the k3d dev cluster's k8s-monitoring needs its live chart version pinned
+    # first (see PlatformChart) — skip it here so the synth stays green until captured.
     PlatformChart(
         app,
-        "platform-bees",
-        cluster="bees",
+        "platform-k3d",
+        cluster="k3d",
         env=load_env("development"),
         skip_monitoring=True,
     )

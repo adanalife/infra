@@ -17,7 +17,10 @@
 # Terraform
 .terraform
 *.plan
+*.tfstate
 *.tfstate.backup
+# bootstrap runs local state (it creates the S3 backend), and this is the only copy
+!terraform/bootstrap/terraform.tfstate
 *.auto.tfvars
 
 # k8s secrets
@@ -33,3 +36,6 @@ backups/
 # hand-edited per host.
 k8s/**/values.local.yml
 k8s/**/*.local.yaml
+
+# Wrangler's local account/state cache
+.wrangler/

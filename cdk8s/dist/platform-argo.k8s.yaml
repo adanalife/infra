@@ -1,0 +1,546 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: shared cluster platform (Helm) reconciled by Argo CD
+  sourceRepos:
+    - git@github.com:adanalife/infra.git
+    - ghcr.io/actions/actions-runner-controller-charts
+    - ghcr.io/padok-team/charts
+    - https://argoproj.github.io/argo-helm
+    - https://charts.external-secrets.io
+    - https://charts.jetstack.io
+    - https://cloudnative-pg.github.io/charts
+    - https://grafana.github.io/helm-charts
+    - https://helm.cilium.io
+    - https://kubernetes-sigs.github.io/external-dns/
+    - https://kubernetes-sigs.github.io/metrics-server/
+    - https://nats-io.github.io/k8s/helm/charts/
+    - https://pkgs.tailscale.com/helmcharts
+    - https://prometheus-community.github.io/helm-charts
+    - https://traefik.github.io/charts
+    - https://victoriametrics.github.io/helm-charts/
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    argocd.argoproj.io/secret-type: repository
+  name: argocd-repo-oci-ghcr-io-actions-actions-runner-controller-charts
+  namespace: argocd
+stringData:
+  name: oci-ghcr-io-actions-actions-runner-controller-charts
+  type: helm
+  url: ghcr.io/actions/actions-runner-controller-charts
+  enableOCI: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    argocd.argoproj.io/secret-type: repository
+  name: argocd-repo-oci-ghcr-io-padok-team-charts
+  namespace: argocd
+stringData:
+  name: oci-ghcr-io-padok-team-charts
+  type: helm
+  url: ghcr.io/padok-team/charts
+  enableOCI: "true"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://kubernetes-sigs.github.io/metrics-server/
+      chart: metrics-server
+      targetRevision: 3.13.1
+      helm:
+        releaseName: metrics-server
+        valueFiles:
+          - $values/k8s/metrics-server/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-secrets
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://charts.external-secrets.io
+      chart: external-secrets
+      targetRevision: 2.6.0
+      helm:
+        releaseName: external-secrets
+        valueFiles:
+          - $values/k8s/external-secrets/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://pkgs.tailscale.com/helmcharts
+      chart: tailscale-operator
+      targetRevision: 1.98.3
+      helm:
+        releaseName: tailscale-operator
+        valueFiles:
+          - $values/k8s/tailscale-operator/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      path: k8s/tailscale-operator
+      directory:
+        include: proxygroup.yml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: burrito
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: ghcr.io/padok-team/charts
+      chart: burrito
+      targetRevision: 0.13.0
+      helm:
+        releaseName: burrito
+        valueFiles:
+          - $values/k8s/burrito/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: burrito-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-workflows
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-workflows
+      targetRevision: 2.0.2
+      helm:
+        releaseName: argo-workflows
+        valueFiles:
+          - $values/k8s/argo-workflows/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-workflows
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-controller
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: ghcr.io/actions/actions-runner-controller-charts
+      chart: gha-runner-scale-set-controller
+      targetRevision: 0.14.2
+      helm:
+        releaseName: arc-controller
+        valueFiles:
+          - $values/k8s/arc/controller/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-systems
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-amd64
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: ghcr.io/actions/actions-runner-controller-charts
+      chart: gha-runner-scale-set
+      targetRevision: 0.14.2
+      helm:
+        releaseName: arc-amd64
+        valueFiles:
+          - $values/k8s/arc/runners/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-runners
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.20.2
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/k8s/cert-manager/prod-1/config.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: 0.29.0
+      helm:
+        releaseName: cnpg
+        valueFiles:
+          - $values/k8s/cloudnative-pg/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plugin-barman-cloud
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: plugin-barman-cloud
+      targetRevision: 0.7.0
+      helm:
+        releaseName: plugin-barman-cloud
+        valueFiles:
+          - $values/k8s/plugin-barman-cloud/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: node-exporter
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: prometheus-node-exporter
+      targetRevision: 4.55.0
+      helm:
+        releaseName: node-exporter
+        valueFiles:
+          - $values/k8s/monitoring/node-exporter/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-host
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: victoria-metrics
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://victoriametrics.github.io/helm-charts/
+      chart: victoria-metrics-single
+      targetRevision: 0.42.0
+      helm:
+        releaseName: victoria-metrics
+        valueFiles:
+          - $values/k8s/monitoring/victoria-metrics/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-monitoring
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: k8s-monitoring
+      targetRevision: 4.1.4
+      helm:
+        releaseName: k8s-monitoring
+        valueFiles:
+          - $values/k8s/monitoring/prod-1/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-1-nats
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://nats-io.github.io/k8s/helm/charts/
+      chart: nats
+      targetRevision: 2.14.0
+      helm:
+        releaseName: nats
+        valueFiles:
+          - $values/k8s/nats/values.yml
+          - $values/k8s/nats/prod-1/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stage-1-nats
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://nats-io.github.io/k8s/helm/charts/
+      chart: nats
+      targetRevision: 2.14.0
+      helm:
+        releaseName: nats
+        valueFiles:
+          - $values/k8s/nats/values.yml
+          - $values/k8s/nats/stage-1/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: stage-1-platform
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind

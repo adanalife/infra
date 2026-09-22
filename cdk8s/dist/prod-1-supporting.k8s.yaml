@@ -1,0 +1,218 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-cloud-otlp
+  namespace: prod-1
+spec:
+  dataFrom:
+    - extract:
+        key: /k8s/grafana-cloud-otlp
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-parameterstore
+  target:
+    creationPolicy: Owner
+    name: grafana-cloud-otlp
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sentry-tripbot
+  namespace: prod-1
+spec:
+  dataFrom:
+    - extract:
+        key: /k8s/sentry-tripbot
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-parameterstore
+  target:
+    creationPolicy: Owner
+    name: sentry-tripbot
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sentry-onscreens-server
+  namespace: prod-1
+spec:
+  dataFrom:
+    - extract:
+        key: /k8s/sentry-onscreens-server
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-parameterstore
+  target:
+    creationPolicy: Owner
+    name: sentry-onscreens-server
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cert-manager-aws-credentials
+  namespace: prod-1
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/external-dns/aws-credentials
+        property: access-key
+      secretKey: access-key-id
+    - remoteRef:
+        key: /k8s/external-dns/aws-credentials
+        property: secret-key
+      secretKey: secret-access-key
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: aws-parameterstore
+  target:
+    name: cert-manager-aws-credentials
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-staging-route53
+  namespace: prod-1
+spec:
+  acme:
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-route53-account
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    solvers:
+      - dns01:
+          route53:
+            accessKeyIDSecretRef:
+              key: access-key-id
+              name: cert-manager-aws-credentials
+            region: us-east-1
+            role: arn:aws:iam::704461573429:role/ExternalDNSRole
+            secretAccessKeySecretRef:
+              key: secret-access-key
+              name: cert-manager-aws-credentials
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-route53
+  namespace: prod-1
+spec:
+  acme:
+    email: danadotlol@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-route53-account
+    server: https://acme-v02.api.letsencrypt.org/directory
+    solvers:
+      - dns01:
+          route53:
+            accessKeyIDSecretRef:
+              key: access-key-id
+              name: cert-manager-aws-credentials
+            region: us-east-1
+            role: arn:aws:iam::704461573429:role/ExternalDNSRole
+            secretAccessKeySecretRef:
+              key: secret-access-key
+              name: cert-manager-aws-credentials
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: prod-stream
+  namespace: prod-1
+description: Live-stream workloads — outrank default-priority co-tenants; preempt them under node pressure.
+globalDefault: false
+value: 1000
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: prod-support
+  namespace: prod-1
+description: Prod support workloads (the console) — outrank default-priority co-tenants and preempt them under node pressure, but stay below the live-stream tier (prod-stream).
+globalDefault: false
+value: 900
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-low
+  namespace: prod-1
+description: CI runner pods (ARC) — most-preemptible tier, alongside dashcam-cv-low. Evicted before any default-priority workload; a killed build is just a re-run.
+globalDefault: false
+value: -10
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: aws-parameterstore
+  namespace: prod-1
+spec:
+  provider:
+    aws:
+      service: ParameterStore
+      region: us-east-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:
+            name: eso-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKeySecretRef:
+            name: eso-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vlc-dashcam
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: ""
+  volumeName: vlc-dashcam-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vlc-dashcam-local
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 700Gi
+  storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obs-music
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ""
+  volumeName: obs-music-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obs-music-local
+  namespace: prod-1
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-path

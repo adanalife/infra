@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vlc-dashcam-nfs
+spec:
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 1Ti
+  nfs:
+    path: <export path>
+    readOnly: true
+    server: <NFS server address>
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: obs-music-nfs
+spec:
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 50Gi
+  nfs:
+    path: <music export path>
+    readOnly: true
+    server: <NFS server address>
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""

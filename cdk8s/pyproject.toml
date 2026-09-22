@@ -4,16 +4,15 @@ version = "0.1.0"
 description = "cdk8s (Python) authoring layer for the adanalife Kubernetes deployments"
 requires-python = ">=3.12"
 dependencies = [
-    "cdk8s>=2.69",
-    "cdk8s-plus-30>=2.0",
-    "constructs>=10.3",
+    "cdk8s>=2.70.89",
+    "constructs>=10.8.0",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=8",
-    "kubernetes>=31",
-    "rich>=13",
+    "pytest>=9.1.1",
+    "pyyaml>=6.0.3",  # already transitive via kubernetes; named so a dist-reading test can rely on it
+    "kubernetes>=36.0.3",
 ]
 
 [tool.uv]

@@ -1,10 +1,7 @@
-"""Phase 0 smoke tests: the harness synths and the env table loads."""
+"""Smoke tests: the env table loads. The app charts moved to the tripbot repo
+(their synth is gated there); infra's per-env supporting/data units are exercised
+by test_data_namespace.py."""
 
-from cdk8s import (
-    Testing as K8sTesting,
-)  # aliased so pytest doesn't collect it as a test class
-
-from adanalife_k8s.charts import AppsChart
 from adanalife_k8s.config import ENVS, load_env
 
 
@@ -13,10 +10,24 @@ def test_all_envs_load():
         assert load_env(name).name == name
 
 
-def test_appschart_synthesizes_per_env():
+def test_dashcam_envs_converge_on_shared_path(monkeypatch):
+    """Both prod and stage read the shared NFS_PATH (the canonical _opt/clips
+    corpus); no per-env override repoints stage. The per-env override mechanism
+    stays generic (config.py nfs_path_env) for the next time one env needs to
+    diverge."""
+    monkeypatch.setenv("NFS_SERVER", "nas")
+    monkeypatch.setenv("NFS_PATH", "/regen/_opt/clips")
+    monkeypatch.setenv("STAGE_NFS_PATH", "/somewhere/else")  # retired → no effect
+    assert load_env("prod-1").nfs_path == "/regen/_opt/clips"
+    assert load_env("stage-1").nfs_path == "/regen/_opt/clips"
+
+
+def test_dashcam_golden_render_uses_placeholders(monkeypatch):
+    """With no coords in the env (the committed-golden synth), every nfs env —
+    stage included — renders the placeholder, so the override adds no golden diff."""
+    for var in ("NFS_SERVER", "NFS_PATH", "STAGE_NFS_PATH"):
+        monkeypatch.delenv(var, raising=False)
     for name in ENVS:
-        app = K8sTesting.app()
-        chart = AppsChart(app, f"{name}-apps", env=load_env(name))
-        manifests = K8sTesting.synth(chart)
-        # Phase 0: chart is empty; assert synth runs without error.
-        assert isinstance(manifests, list)
+        env = load_env(name)
+        if env.dashcam_mode == "nfs":
+            assert env.nfs_path == "<export path>"

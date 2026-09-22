@@ -69,19 +69,25 @@ def test_headless_service_matches_render():
 
 def test_container_spec_matches_render():
     c = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["containers"][0]
-    assert c["image"] == "pgvector/pgvector:pg16"
+    assert c["image"] == "ghcr.io/adanalife/mirror/pgvector:pg16"
     assert c["securityContext"]["allowPrivilegeEscalation"] is False
     assert c["ports"][0] == {"name": "postgres", "containerPort": 5432}
     assert c["envFrom"][0]["secretRef"]["name"] == "postgres-secret"
+    # Shell form, not a bare argv: POSTGRES_USER comes from envFrom, which
+    # kubelet's $(VAR) probe substitution does not cover.
     assert c["livenessProbe"]["exec"]["command"] == [
-        "pg_isready",
-        "-U",
-        "$(POSTGRES_USER)",
+        "sh",
+        "-c",
+        'exec pg_isready -U "$POSTGRES_USER"',
     ]
     assert c["readinessProbe"]["tcpSocket"]["port"] == "postgres"
     mount = c["volumeMounts"][0]
     assert mount["mountPath"] == "/var/lib/postgresql/data"
-    assert mount["subPath"] == "pgdata"
+    # PGDATA sits below the mount (not a subPath) so non-root postgres owns
+    # the directory it initdbs into; kubelet-created subPath dirs are
+    # root-owned and uid 999 can't chmod them.
+    assert "subPath" not in mount
+    assert {"name": "PGDATA", "value": "/var/lib/postgresql/data/pgdata"} in c["env"]
     # pod-level seccomp hardening
     pod_sc = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["securityContext"]
     assert pod_sc["seccompProfile"]["type"] == "RuntimeDefault"
@@ -110,14 +116,48 @@ def test_backup_cronjob_prod_only():
     assert cj["spec"]["concurrencyPolicy"] == "Forbid"
     tmpl = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]
     assert tmpl["restartPolicy"] == "Never"
-    backup = tmpl["containers"][0]
-    assert backup["image"] == "postgres:16-alpine"
-    assert "pg_dump" in backup["args"][0]
-    env_secrets = {e["secretRef"]["name"] for e in backup["envFrom"]}
-    assert env_secrets == {"postgres-secret", "postgres-backup-s3"}
+    dump = tmpl["initContainers"][0]
+    upload = tmpl["containers"][0]
+    # cnpg env: an 18 client (a 16 pg_dump refuses an 18 server) aimed at the
+    # Cluster's rw Service.
+    assert dump["image"] == "postgres:18-alpine"
+    assert {"name": "PGHOST", "value": "pg-rw"} in dump["env"]
+    assert "pg_dump" in dump["args"][0]
+    assert "--host" not in dump["args"][0]
+    # vectors are derived + reproducible; excluding them keeps tiered dumps small
+    assert "--exclude-table-data=frame_embeddings" in dump["args"][0]
+    assert [e["secretRef"]["name"] for e in dump["envFrom"]] == ["postgres-secret"]
+    # the aws CLI ships in its own image, so nothing is installed at runtime
+    assert "apk add" not in dump["args"][0] + upload["args"][0]
+    assert "aws s3 cp" in upload["args"][0]
+    assert [e["secretRef"]["name"] for e in upload["envFrom"]] == ["postgres-backup-s3"]
+    # the dump is handed over on an emptyDir both containers mount
+    assert tmpl["volumes"] == [{"name": "dump", "emptyDir": {}}]
+    for c in (dump, upload):
+        assert c["volumeMounts"] == [{"name": "dump", "mountPath": "/backup"}]
+        assert {"name": "DUMP", "value": "/backup/dump.pgcustom"} in c["env"]
     # absent everywhere else
     for e in ("stage-1", "development", "local"):
         assert not _by(_synth(e), "CronJob", "postgres-backup")
+
+
+def test_backup_cronjob_psa_restricted():
+    cj = _by(_synth("prod-1"), "CronJob", "postgres-backup")[0]
+    tmpl = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    # fsGroup group-owns the emptyDir so both non-root uids can write the dump.
+    assert tmpl["securityContext"] == {
+        "runAsNonRoot": True,
+        "fsGroup": 65532,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+    # uid 70 = postgres in the Alpine image; the aws CLI image has no such user.
+    for c, uid in ((tmpl["initContainers"][0], 70), (tmpl["containers"][0], 65532)):
+        assert c["securityContext"] == {
+            "allowPrivilegeEscalation": False,
+            "capabilities": {"drop": ["ALL"]},
+            "runAsNonRoot": True,
+            "runAsUser": uid,
+        }
 
 
 # --- StorageClass: prod only ---
@@ -144,7 +184,7 @@ def test_external_secret_on_eso_envs():
         assert (
             es["spec"]["target"]["template"]["data"]["POSTGRES_USER"] == "{{ .user }}"
         )
-        assert es["spec"]["secretStoreRef"]["name"] == "aws-secretsmanager"
+        assert es["spec"]["secretStoreRef"]["name"] == "aws-parameterstore"
         props = {d["remoteRef"]["property"] for d in es["spec"]["data"]}
         assert props == {"user", "password", "db"}
         # the local Secret must NOT appear on eso envs
