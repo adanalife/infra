@@ -113,6 +113,10 @@ class HelmComponent:
     namespace: str
     value_files: tuple[str, ...] = ()  # -f paths under K8S
     values: dict = field(default_factory=dict)  # extra inline overrides (e.g. LAN IP)
+    # In-repo raw manifest (path under K8S) delivered alongside the chart — the
+    # custom resources of a CRD the chart ships, so they sync with the operator
+    # that reconciles them. Argo path only; the cdk8s.Helm render skips it.
+    manifests: str = ""
     # Argo-manageable? False for the bootstrap floor Argo can't own — cilium (the
     # CNI Argo itself rides on) and argo-cd (managing its own install). Those stay
     # task-installed; the Argo-native platform layer (argo_platform.py) skips them.
@@ -205,6 +209,7 @@ def cluster_components(
                 "tailscale-operator",
                 "tailscale",
                 value_files=("tailscale-operator/values.yml",),
+                manifests="tailscale-operator/proxygroup.yml",
             )
         )
 
