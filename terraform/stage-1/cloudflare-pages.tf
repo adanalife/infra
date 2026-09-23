@@ -14,15 +14,7 @@ variable "project_name" {
   description = "Cloudflare Pages project name"
 }
 
-variable "production_branch" {
-  type        = string
-  description = "Git branch used for production deployments of the Pages project"
-  default     = "main"
-}
-
-# Token sourced from AWS Secrets Manager — see secrets.tf for the
-# bootstrap flow. Lives here (not providers.tf) so prod-1's symlink
-# to providers.tf doesn't inherit a provider it has no resources for.
+# Token read from SSM Parameter Store — see secrets.tf for the bootstrap flow.
 provider "cloudflare" {
   api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
@@ -30,9 +22,8 @@ provider "cloudflare" {
 module "pages" {
   source = "../modules/cloudflare-pages-project"
 
-  account_id        = var.cloudflare_account_id
-  project_name      = var.project_name
-  production_branch = var.production_branch
+  account_id   = var.cloudflare_account_id
+  project_name = var.project_name
 
   domains = [
     # A real hostname for the staging site, handy for sharing previews and for

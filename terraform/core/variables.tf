@@ -128,20 +128,10 @@ variable "primary_www_acm_dns_record" {
   type = string
 }
 
-variable "primary_www_acm_dns_type" {
-  type    = string
-  default = "CNAME"
-}
-
 variable "primary_naked_acm_dns_name" {
   type = string
 }
 
 variable "primary_naked_acm_dns_record" {
   type = string
-}
-
-variable "primary_naked_acm_dns_type" {
-  type    = string
-  default = "CNAME"
 }
