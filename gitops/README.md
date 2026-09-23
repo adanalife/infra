@@ -166,7 +166,7 @@ merged `dist/` describes the state you want *before* turning Argo back on.
 
 The git-declarable platform charts (ESO, cert-manager, node-exporter,
 victoria-metrics, k8s-monitoring, tailscale-operator, NATS, CNPG, ARC,
-metrics-server) are authored as **Argo Applications with
+metrics-server, Kyverno) are authored as **Argo Applications with
 a multi-source Helm source** — the upstream chart (version-pinned) + the in-repo
 `k8s/<component>/values.yml` via a `$values` ref. Argo runs `helm template`
 in-cluster, so **no rendered charts land in git** — only the small Application
@@ -179,7 +179,9 @@ intentionally broad **`platform` AppProject** governs them (platform installs CR
 An Application can carry in-repo raw manifests as an extra source when they are
 custom resources of a CRD its chart ships: `tailscale-operator` also delivers
 `k8s/tailscale-operator/proxygroup.yml` (the `ingress-proxies` ProxyGroup), so the
-proxy fleet syncs with the operator that reconciles it.
+proxy fleet syncs with the operator that reconciles it, and `kyverno` delivers
+`k8s/kyverno/policies.yml` (its admission policies, Audit-only). The file is the
+component's `manifests` field in `helm_platform.py`.
 
 **Not Argo-managed — they stay task-installed (`task k8s:<env>:platform:up`):**
 

@@ -315,6 +315,7 @@ def cluster_components(
                 "kyverno",
                 "kyverno",
                 value_files=("kyverno/values.yml",),
+                manifests="kyverno/policies.yml",
             )
         )
 
