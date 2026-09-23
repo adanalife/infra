@@ -57,6 +57,7 @@ REPOS = {
     # the missing scheme and passes helm the full oci:// chart ref instead.
     "burrito": "ghcr.io/padok-team/charts",
     "actions-runner": "ghcr.io/actions/actions-runner-controller-charts",
+    "kyverno": "https://kyverno.github.io/kyverno",
 }
 
 # --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
@@ -99,6 +100,9 @@ VERSIONS = {
     # retired rpi5 stack ran.
     "arc-controller": "0.14.2",
     "arc-runner-set": "0.14.2",
+    # Kyverno v1.19.1 — admission policy engine. Latest stable at add time
+    # (2026-09-23).
+    "kyverno": "3.9.1",
 }
 
 
@@ -297,6 +301,20 @@ def cluster_components(
                 "arc-runner-set",
                 "arc-runners",
                 value_files=("arc/runners/values.yml",),
+            )
+        )
+
+    # Kyverno — admission policy engine, validation-only and fail-open (see
+    # k8s/kyverno/values.yml). Cleanly Argo-manageable (no host-coupled values).
+    if minipc:
+        components.append(
+            HelmComponent(
+                "kyverno",
+                "kyverno",
+                "kyverno",
+                "kyverno",
+                "kyverno",
+                value_files=("kyverno/values.yml",),
             )
         )
 
