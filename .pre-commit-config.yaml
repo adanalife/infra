@@ -93,6 +93,31 @@ repos:
       # - id: terraform_trivy
       # - id: infracost_breakdown
 
+  # This repo is public; the private-notes tree it grew up next to is not. A
+  # reference to it anywhere in the tree — a README, a YAML comment, an alert
+  # description — points readers at something they cannot open. Content grep,
+  # not a comment linter: the ones that slipped through lived outside code
+  # comments. Fix by restating the finding inline or removing the pointer,
+  # never by guessing a public link.
+  #
+  # Two shapes, because a path match alone missed one: the `vault/<dir>/` path
+  # the rest of the fleet's copy of this hook matches, and the prose form
+  # ("see vault ...", "the vault docs") that carries the same dead pointer in
+  # words. HashiCorp Vault and cert-manager's `vault:` issuer are unrelated and
+  # deliberately not matched.
+  - repo: local
+    hooks:
+      - id: no-vault-refs
+        name: no private-notes references (paths or prose)
+        language: pygrep
+        # pre-commit only: without this the hook also runs at commit-msg, where
+        # it scans COMMIT_EDITMSG and rejects the very commit that explains it.
+        stages: [pre-commit]
+        entry: '(?i)\bvault/(infra|tripbot|console|general|decisions|sessions|incidents|website|guessr|obs|playout|platform-gateway|video-pipeline|flare|tempomat|van|twitch|business)/|(?i:\bsee (the )?vault\b)|(?i:\bvault (docs?|notes?|memory|memories|session)\b)'
+        types: [text]
+        # The CRD bundles are vendored upstream and talk about HashiCorp Vault.
+        exclude: ^(\.pre-commit-config\.yaml|cdk8s/crds/)
+
   # Conventional Commits — enforce `type(scope): summary` on commit messages so
   # history stays machine-parseable: it underpins release automation and gives
   # every contributor/agent the same commit grammar without re-explaining it.

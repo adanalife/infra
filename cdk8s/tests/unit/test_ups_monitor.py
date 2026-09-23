@@ -26,7 +26,9 @@ _DEV = dict(
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
     ups_monitor=False,
+    t5_watchdog=False,
     arc=False,
+    kmsg=False,
 )
 
 

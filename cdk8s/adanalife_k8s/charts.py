@@ -25,12 +25,15 @@ from adanalife_k8s.constructs.dashcam import (
 )
 from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.music import (
+    emit_music_index_rbac,
     emit_music_local_pvc,
     emit_music_localize_job,
     emit_music_pv,
     emit_music_pvc,
 )
+from adanalife_k8s.constructs.kmsg import KmsgShipper
 from adanalife_k8s.constructs.postgres import Postgres
+from adanalife_k8s.constructs.t5_watchdog import T5Watchdog
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
 from adanalife_k8s.eso import secret_store
 from adanalife_k8s.priority import emit_priority_classes
@@ -55,7 +58,6 @@ class SupportingChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
-        self.env = env
 
         # shared observability secrets + cert-manager issuers (eso envs only)
         emit_supporting(self, env)
@@ -115,7 +117,6 @@ class DataChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.data_ns or None)
-        self.env = env
 
         # --- ESO SecretStore (eso envs only): the postgres ExternalSecret here
         #     references it, so it lives in the same (data) namespace. When the DB
@@ -164,7 +165,6 @@ class MediamtxChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig, platform: str):
         super().__init__(scope, id, namespace=env.namespace or None)
-        self.env = env
         Mediamtx(self, env=env, platform=platform)
 
 
@@ -209,6 +209,7 @@ class MusicLocalizeChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
+        emit_music_index_rbac(self, env)
         emit_music_localize_job(self, env)
 
 
@@ -223,6 +224,32 @@ class UpsMonitorChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         UpsMonitor(self)
+
+
+class KmsgChart(Chart):
+    """The kernel-log shipper — a cluster-singleton (one minipc) in its own
+    `kmsg` namespace, in the same shape as the UPS monitor. Env-agnostic, so
+    it's authored once and synthed to dist/kmsg.k8s.yaml, delivered by a
+    dedicated minipc-only Argo Application (see constructs/argocd.py — gated off
+    the k3d dev instance, which has no Talos API to read). See
+    constructs/kmsg.py for why it reads the API rather than setting
+    KmsgLogConfig."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        KmsgShipper(self)
+
+
+class T5WatchdogChart(Chart):
+    """The T5 watchdog — a cluster-singleton (one minipc, one T5) in its own
+    `node-watchdog` namespace. Env-agnostic, so it's authored once and synthed to
+    dist/t5-watchdog.k8s.yaml, delivered by a dedicated minipc-only Argo
+    Application (see constructs/argocd.py — gated off the k3d dev instance, which
+    has no Talos node to reboot). See constructs/t5_watchdog.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        T5Watchdog(self)
 
 
 class ArcChart(Chart):

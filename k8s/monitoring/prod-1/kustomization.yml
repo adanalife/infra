@@ -5,6 +5,7 @@ namespace: monitoring
 
 resources:
   - external-secret.yaml
+  - pdc-agent.yaml
 
 # Apply order: kustomize creates the ExternalSecret, ESO reconciles
 # the Secret materialization within ~30s, then `helm upgrade --install`

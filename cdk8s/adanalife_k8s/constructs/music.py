@@ -36,6 +36,42 @@ _CAPACITY = "50Gi"
 # tripbot/cdk8s/adanalife_k8s/constructs/tripbot.py name it verbatim.
 LOCAL_CLAIM = "obs-music-local"
 
+# The album track index and the ConfigMap it travels in. tripbot mounts this
+# instead of the claim — it lists the library to shuffle and advance tracks but
+# never opens a track, and a ConfigMap volume can be optional where a PVC volume
+# cannot (an unbound claim would hold every tripbot Deployment unschedulable over
+# a bed nobody is listening to). Four-way name contract: tripbot's
+# constructs/tripbot.py MUSIC_INDEX_CONFIGMAP, pkg/obs/beds.MusicIndexFile, and
+# tripbot's bin/stage-streambeats, which writes the same file from a Mac with the
+# share mounted. The paths inside it are where OBS sees the tracks, which is why
+# POD_MUSIC_DIR has to match tripbot's MUSIC_MOUNT_PATH and beds.MusicDir exactly.
+INDEX_CONFIGMAP = "obs-music-index"
+INDEX_KEY = "index.json"
+POD_MUSIC_DIR = "/opt/tripbot/assets/music"
+
+# Where the localize step hands the rendered ConfigMap to the step that applies
+# it. An emptyDir between an initContainer and the container proper, because the
+# two need different images and only one of them has a shell.
+_HANDOFF_DIR = "/handoff"
+_HANDOFF_FILE = f"{_HANDOFF_DIR}/{INDEX_CONFIGMAP}.yaml"
+
+# kubectl from the Kubernetes project's own registry, pinned to the cluster's
+# minor. Not a ghcr mirror: ghcr-base-image-mirrors.md exists because Docker Hub
+# rate-limits CI pulls, and registry.k8s.io is neither Docker Hub nor CI — it is
+# unauthenticated and unmetered, so mirroring it would buy a manual refresh
+# chore and nothing else. Distroless, so `kubectl` is the entrypoint and there is
+# no shell to pipe through — the manifest arrives ready to apply.
+_KUBECTL_IMAGE = "registry.k8s.io/kubectl:v1.36.0"
+
+# ServiceAccount, Role and RoleBinding all share this name — there is exactly one
+# of each and they only ever refer to one another.
+_SA = "music-localize"
+
+# The audio extensions an album track can have. Same set as tripbot's
+# bin/stage-streambeats AUDIO_EXTS, and the reason the Synology `@eaDir` sidecar
+# files (`... .mp3@SynoEAStream`) never reach the index: they end in neither.
+_AUDIO_EXTS = ("mp3", "flac", "m4a", "ogg")
+
 # Size of the node-local music PVC. The staged library is 6.3 GB across 11 albums
 # (measured 2026-08-05) and the full StreamBeats set is ~30, so ~20 GB covers the
 # whole thing with room to grow — a rounding error against the T5's 1.3 TB free.
@@ -58,10 +94,13 @@ _LOCAL_CAPACITY = "20Gi"
 # (xargs -P, as dashcam-localize does) only if the library grows enough to care.
 # SRC/DST are overridable so tests/unit/test_music.py can run this against tmp
 # dirs — the resume-after-truncation path is the reason this isn't a plain cp -r.
-_LOCALIZE_SCRIPT = """
+_LOCALIZE_SCRIPT = r"""
 set -eu
 SRC="${SRC:-/nfs}"
 DST="${DST:-/local}"
+# OUT/CM/KEY/POD carry no defaults on purpose: they come from the container env
+# so the Python constants stay the single source of the names, and `set -u` turns
+# a cdk8s change that drops one into a failed Job rather than a moved index.
 TMP=$DST/.partial
 mkdir -p "$TMP"
 cd "$SRC"
@@ -86,6 +125,40 @@ find . -type f -print | while read -r f; do
 done
 rmdir "$TMP" 2>/dev/null || true
 echo "music-localize done: $(find "$DST" -type f | wc -l | tr -d ' ') file(s) local"
+
+# The album index, rendered as a whole ConfigMap manifest for the kubectl step.
+# Built from $DST rather than $SRC so it can only ever name tracks that are
+# already local: an interrupted mirror yields a short index, never an entry that
+# resolves to nothing when the bed tries to play it. Rebuilt from scratch each
+# run, so an album deleted from the share leaves the index on the next one.
+# No namespace on the object — kubectl in-cluster defaults to the pod's own,
+# which is the one the tripbot Deployments read it from.
+echo "music-index: writing $OUT"
+{
+  printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\ndata:\n  %s: |\n' "$CM" "$KEY"
+  cd "$DST"
+  find . -type f \( -name '*.mp3' -o -name '*.flac' -o -name '*.m4a' -o -name '*.ogg' \) |
+    sed 's|^\./||' |
+    grep / |
+    LC_ALL=C sort |
+    awk -v pod="$POD" '
+      function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+      BEGIN { print "{" }
+      {
+        a = $0; sub(/\/.*/, "", a)
+        if (a != album) {
+          if (album != "") printf "\n  ],\n"
+          printf "  \"%s\": [", esc(a)
+          album = a; first = 1
+        }
+        printf "%s\n    \"%s/%s\"", (first ? "" : ","), pod, esc($0)
+        first = 0
+      }
+      END { if (album != "") printf "\n  ]\n"; print "}" }
+    ' |
+    sed 's/^/    /'
+} >"$OUT"
+echo "music-index: $(grep -c '^        "' "$OUT") track(s) indexed"
 """.lstrip("\n")  # no leading blank line → cdk8s won't emit a trailing-whitespace row
 
 
@@ -171,10 +244,66 @@ def emit_music_local_pvc(scope: Construct, env: EnvConfig) -> None:
     )
 
 
+def emit_music_index_rbac(scope: Construct, env: EnvConfig) -> None:
+    """The identity the localize Job publishes the index under.
+
+    Scoped to one ConfigMap by name, and to the verbs `kubectl apply` needs to
+    create it once and patch it after: this Job runs on the same node as the live
+    stream, so the smallest credential that does the job is the one worth having.
+    No `delete` and no `list` — nothing here should be able to remove the index
+    the bed is playing off, and a Role that can't enumerate can't be borrowed to
+    read the namespace's other ConfigMaps."""
+    if env.dashcam_mode != "nfs":
+        return
+    ns = env.namespace or None
+    k8s.KubeServiceAccount(
+        scope, "music-localize-sa", metadata=k8s.ObjectMeta(name=_SA, namespace=ns)
+    )
+    k8s.KubeRole(
+        scope,
+        "music-localize-role",
+        metadata=k8s.ObjectMeta(name=_SA, namespace=ns),
+        rules=[
+            k8s.PolicyRule(
+                api_groups=[""],
+                resources=["configmaps"],
+                resource_names=[INDEX_CONFIGMAP],
+                verbs=["get", "patch", "update"],
+            ),
+            # `create` cannot be narrowed by resourceName — the object does not
+            # exist yet, so there is nothing for the authorizer to match on. It is
+            # the one verb here that covers the whole namespace, which is why the
+            # rest are split out rather than folded into a single rule.
+            k8s.PolicyRule(api_groups=[""], resources=["configmaps"], verbs=["create"]),
+        ],
+    )
+    k8s.KubeRoleBinding(
+        scope,
+        "music-localize-rolebinding",
+        metadata=k8s.ObjectMeta(name=_SA, namespace=ns),
+        role_ref=k8s.RoleRef(
+            api_group="rbac.authorization.k8s.io", kind="Role", name=_SA
+        ),
+        subjects=[
+            k8s.Subject(kind="ServiceAccount", name=_SA, namespace=env.namespace)
+        ],
+    )
+
+
 def emit_music_localize_job(scope: Construct, env: EnvConfig) -> None:
-    """One-shot Job that mirrors the NFS music share onto the node-local claim.
-    Mounts the NFS export read-only + the local PVC read-write and runs a
-    resumable, atomic-rename copy (see _LOCALIZE_SCRIPT).
+    """One-shot Job that mirrors the NFS music share onto the node-local claim and
+    publishes the album index describing what landed.
+
+    Two steps, because they need different images and only one needs a shell: an
+    initContainer mounts the NFS export read-only + the local PVC read-write and
+    runs the resumable, atomic-rename copy (see _LOCALIZE_SCRIPT), leaving a
+    rendered ConfigMap manifest on a shared emptyDir; the container proper is
+    distroless kubectl and applies it. Running them in that order is the point —
+    the index is written from the local volume after the copy, so it can only
+    describe tracks that are really there, and the copy and the index can no
+    longer drift apart the way they did when the index was a manual step
+    (2026-09-08: seven hours of dead air on both prod platforms, because the
+    ConfigMap had never been created at all).
 
     Kept OUTSIDE Argo — it carries the NAS coords, so it lives in its own
     dist/<env>-music-localize.k8s.yaml that no ApplicationSet globs, applied on
@@ -187,6 +316,11 @@ def emit_music_localize_job(scope: Construct, env: EnvConfig) -> None:
     if env.dashcam_mode != "nfs":
         return
     q = k8s.Quantity.from_string
+    small = k8s.ResourceRequirements(
+        requests={"cpu": q("100m"), "memory": q("64Mi")},
+        limits={"cpu": q("500m"), "memory": q("256Mi")},
+    )
+    handoff = k8s.VolumeMount(name="handoff", mount_path=_HANDOFF_DIR)
     k8s.KubeJob(
         scope,
         "music-localize-job",
@@ -198,24 +332,44 @@ def emit_music_localize_job(scope: Construct, env: EnvConfig) -> None:
                     restart_policy="Never",
                     priority_class_name="dashcam-cv-low",
                     node_selector={"kubernetes.io/hostname": MINIPC_NODE},
-                    containers=[
+                    service_account_name=_SA,
+                    init_containers=[
                         k8s.Container(
                             name="localize",
                             image="ghcr.io/adanalife/mirror/ubuntu:24.04",
                             command=["sh", "-c", _LOCALIZE_SCRIPT],
-                            resources=k8s.ResourceRequirements(
-                                requests={"cpu": q("100m"), "memory": q("64Mi")},
-                                limits={"cpu": q("500m"), "memory": q("256Mi")},
-                            ),
+                            # The names the script writes into the manifest live in
+                            # Python, not the shell, so this file stays the one
+                            # place they are spelled.
+                            env=[
+                                k8s.EnvVar(name="OUT", value=_HANDOFF_FILE),
+                                k8s.EnvVar(name="CM", value=INDEX_CONFIGMAP),
+                                k8s.EnvVar(name="KEY", value=INDEX_KEY),
+                                k8s.EnvVar(name="POD", value=POD_MUSIC_DIR),
+                            ],
+                            resources=small,
                             volume_mounts=[
                                 k8s.VolumeMount(
                                     name="nfs", mount_path="/nfs", read_only=True
                                 ),
                                 k8s.VolumeMount(name="local", mount_path="/local"),
+                                handoff,
                             ],
                         )
                     ],
+                    containers=[
+                        k8s.Container(
+                            name="publish-index",
+                            image=_KUBECTL_IMAGE,
+                            args=["apply", "-f", _HANDOFF_FILE],
+                            resources=small,
+                            volume_mounts=[handoff],
+                        )
+                    ],
                     volumes=[
+                        k8s.Volume(
+                            name="handoff", empty_dir=k8s.EmptyDirVolumeSource()
+                        ),
                         k8s.Volume(
                             name="nfs",
                             nfs=k8s.NfsVolumeSource(

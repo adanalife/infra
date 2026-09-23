@@ -15,6 +15,8 @@ from adanalife_k8s.constructs.burrito import (
     CONSOLE_ENVS,
     DATASTORE_SECRET,
     LAYERS,
+    PLUGIN_CACHE_DIR,
+    RUNNER_UID,
     TENANT_NS,
 )
 
@@ -132,6 +134,55 @@ def test_gcp_layers_authenticate_keylessly():
         (source,) = projected["projected"]["sources"]
         assert source["serviceAccountToken"]["audience"] == "adanalife-burrito"
         assert spec["serviceAccountName"] == "burrito-runner"
+
+
+def test_providers_come_from_a_cache_on_the_t5():
+    # Every layer, not just the ones that happen to plan often: an uncached
+    # `terraform init` downloads the providers onto the pod filesystem, which
+    # sits on the disk etcd fsyncs to. The cache has to be on /var/mnt/data
+    # (the T5 UserVolume) and reachable by the runner's uid.
+    objs = _synth()
+    layers = _kind(objs, "TerraformLayer")
+    assert layers
+    for layer in layers:
+        spec = layer["spec"]["overrideRunnerSpec"]
+        env = {e["name"]: e["value"] for e in spec["env"]}
+        assert env["TF_PLUGIN_CACHE_DIR"] == PLUGIN_CACHE_DIR
+        assert PLUGIN_CACHE_DIR.startswith("/var/mnt/data/")
+
+        (host,) = [v for v in spec["volumes"] if "hostPath" in v]
+        assert host["hostPath"]["path"] == PLUGIN_CACHE_DIR
+        assert host["hostPath"]["type"] == "DirectoryOrCreate"
+        assert host["name"] in [
+            m["name"]
+            for m in spec["volumeMounts"]
+            if m["mountPath"] == PLUGIN_CACHE_DIR
+        ]
+
+        # A root-owned hostPath is unwritable by the runner without this.
+        (chown,) = spec["initContainers"]
+        assert chown["securityContext"]["runAsUser"] == 0
+        assert chown["command"] == [
+            "chown",
+            f"{RUNNER_UID}:{RUNNER_UID}",
+            PLUGIN_CACHE_DIR,
+        ]
+
+
+def test_the_plugin_cache_never_has_two_writers():
+    # Terraform does not guarantee the plugin cache is concurrency safe, so
+    # the shared directory is only sound while the controller schedules one
+    # runner pod at a time.
+    assert _values()["config"]["burrito"]["controller"]["maxConcurrentRunnerPods"] == 1
+
+
+def test_the_plugin_cache_hostpath_is_admitted():
+    # The runner pods mount the plugin cache as a hostPath, which the
+    # cluster-wide PodSecurity baseline rejects; the tenant namespace must
+    # carry the privileged exemption or no runner pod is ever created.
+    (tenant,) = _values()["tenants"]
+    labels = tenant["namespace"]["metadata"]["labels"]
+    assert labels["pod-security.kubernetes.io/enforce"] == "privileged"
 
 
 def test_server_is_never_unauthenticated():

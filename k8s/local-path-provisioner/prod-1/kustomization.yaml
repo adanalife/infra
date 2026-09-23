@@ -25,7 +25,7 @@
 #
 # Applied via `kubectl apply -k` at the top of `task k8s:prod:platform:up`,
 # before any PVC-consuming workload. Pinned to v0.0.32 (the validated running
-# version); bumping is a separate decision per use-latest-stable-when-adding.
+# version); bumping is a separate decision.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

@@ -391,6 +391,9 @@ class UpsMonitor(Construct):
                         annotations={CONFIG_HASH_ANNOTATION: config_hash(scripts)},
                     ),
                     spec=k8s.PodSpec(
+                        # PSA `restricted`: runAsNonRoot + the uid sit on both
+                        # containers (secctx above), which is where admission
+                        # reads them; the pod level carries what only it can.
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
                             # Group-own the emptyDirs so the non-root user can write

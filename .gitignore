@@ -17,7 +17,10 @@
 # Terraform
 .terraform
 *.plan
+*.tfstate
 *.tfstate.backup
+# bootstrap runs local state (it creates the S3 backend), and this is the only copy
+!terraform/bootstrap/terraform.tfstate
 *.auto.tfvars
 
 # k8s secrets

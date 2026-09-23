@@ -22,6 +22,11 @@ resource "aws_route53_zone" "dev_subdomain_zone" {
   # secondary_domain is whereisdana.today (primary_domain is dana.lol — the
   # tripbot/vlc/obs hosts live under *.dev.whereisdana.today, matching prod/stage).
   name = "dev.${var.secondary_domain}"
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; core's tfvars carry the delegated NS set by hand.
+    prevent_destroy = true
+  }
 }
 
 # Scope the SHARED external-dns principal's ChangeResourceRecordSets to the

@@ -35,11 +35,6 @@ variable "secondary_domain" {
   description = "The domain name used for secondary DNS"
 }
 
-variable "external_dns_role" {
-  type    = string
-  default = "ExternalDNSRole"
-}
-
 
 variable "static_site_public_dir" {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"
@@ -50,10 +45,6 @@ variable "primary_acm_cert_alternative_names" {
   type    = list(string)
   default = []
 }
-
-# Cloudflare-related variables live in cloudflare-pages.tf so that
-# prod-1 (which symlinks this file) doesn't see them as required
-# inputs without having any cloudflare resources to use them on.
 
 # GCP project this environment manages (tripbot-stage / tripbot-prod). Per-env
 # value in terraform.tfvars; google.tf is otherwise identical across envs.
@@ -77,5 +68,4 @@ locals {
   full_account_name   = "${local.org_name}-${var.environment}-${var.label}"
   primary_subdomain   = "${var.environment}.${var.primary_domain}"
   secondary_subdomain = "${var.environment}.${var.secondary_domain}"
-  primary_static_site = "static.${local.primary_subdomain}"
 }

@@ -1,3 +1,46 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: music-localize
+  namespace: prod-1
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: music-localize
+  namespace: prod-1
+rules:
+  - apiGroups:
+      - ""
+    resourceNames:
+      - obs-music-index
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: music-localize
+  namespace: prod-1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: music-localize
+subjects:
+  - kind: ServiceAccount
+    name: music-localize
+    namespace: prod-1
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -8,6 +51,23 @@ spec:
   template:
     spec:
       containers:
+        - args:
+            - apply
+            - -f
+            - /handoff/obs-music-index.yaml
+          image: registry.k8s.io/kubectl:v1.36.0
+          name: publish-index
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /handoff
+              name: handoff
+      initContainers:
         - command:
             - sh
             - -c
@@ -15,6 +75,9 @@ spec:
               set -eu
               SRC="${SRC:-/nfs}"
               DST="${DST:-/local}"
+              # OUT/CM/KEY/POD carry no defaults on purpose: they come from the container env
+              # so the Python constants stay the single source of the names, and `set -u` turns
+              # a cdk8s change that drops one into a failed Job rather than a moved index.
               TMP=$DST/.partial
               mkdir -p "$TMP"
               cd "$SRC"
@@ -39,6 +102,49 @@ spec:
               done
               rmdir "$TMP" 2>/dev/null || true
               echo "music-localize done: $(find "$DST" -type f | wc -l | tr -d ' ') file(s) local"
+
+              # The album index, rendered as a whole ConfigMap manifest for the kubectl step.
+              # Built from $DST rather than $SRC so it can only ever name tracks that are
+              # already local: an interrupted mirror yields a short index, never an entry that
+              # resolves to nothing when the bed tries to play it. Rebuilt from scratch each
+              # run, so an album deleted from the share leaves the index on the next one.
+              # No namespace on the object — kubectl in-cluster defaults to the pod's own,
+              # which is the one the tripbot Deployments read it from.
+              echo "music-index: writing $OUT"
+              {
+                printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\ndata:\n  %s: |\n' "$CM" "$KEY"
+                cd "$DST"
+                find . -type f \( -name '*.mp3' -o -name '*.flac' -o -name '*.m4a' -o -name '*.ogg' \) |
+                  sed 's|^\./||' |
+                  grep / |
+                  LC_ALL=C sort |
+                  awk -v pod="$POD" '
+                    function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+                    BEGIN { print "{" }
+                    {
+                      a = $0; sub(/\/.*/, "", a)
+                      if (a != album) {
+                        if (album != "") printf "\n  ],\n"
+                        printf "  \"%s\": [", esc(a)
+                        album = a; first = 1
+                      }
+                      printf "%s\n    \"%s/%s\"", (first ? "" : ","), pod, esc($0)
+                      first = 0
+                    }
+                    END { if (album != "") printf "\n  ]\n"; print "}" }
+                  ' |
+                  sed 's/^/    /'
+              } >"$OUT"
+              echo "music-index: $(grep -c '^        "' "$OUT") track(s) indexed"
+          env:
+            - name: OUT
+              value: /handoff/obs-music-index.yaml
+            - name: CM
+              value: obs-music-index
+            - name: KEY
+              value: index.json
+            - name: POD
+              value: /opt/tripbot/assets/music
           image: ghcr.io/adanalife/mirror/ubuntu:24.04
           name: localize
           resources:
@@ -54,11 +160,16 @@ spec:
               readOnly: true
             - mountPath: /local
               name: local
+            - mountPath: /handoff
+              name: handoff
       nodeSelector:
         kubernetes.io/hostname: adanalife-minipc
       priorityClassName: dashcam-cv-low
       restartPolicy: Never
+      serviceAccountName: music-localize
       volumes:
+        - emptyDir: {}
+          name: handoff
         - name: nfs
           nfs:
             path: <music export path>

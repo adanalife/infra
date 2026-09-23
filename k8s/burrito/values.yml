@@ -11,6 +11,15 @@ config:
         # minipc — keep it hourly so the trial doesn't compete with the live
         # stream for CPU (chart default is 10m).
         driftDetection: 1h
+        # A failing layer retries forever, and each retry runs `terraform init
+        # -upgrade` with no plugin cache — re-downloading the aws, google,
+        # cloudflare and tailscale providers onto the node's internal NVMe, the
+        # same Talos EPHEMERAL partition etcd's WAL sits on. At the chart's 10s
+        # default that is ~360 runs/hour per broken layer, enough write load to
+        # stall etcd fsyncs; 10m caps it at ~6. Drift detection is hourly, so
+        # this costs a healthy layer nothing, and the `Burrito runs stuck
+        # retrying` alert (for=20m) still fires.
+        onError: 10m
       # One runner at a time, same reasoning.
       maxConcurrentRunnerPods: 1
     datastore:
@@ -123,3 +132,13 @@ tenants:
   - namespace:
       create: true
       name: burrito
+      metadata:
+        # The runner pods mount the provider plugin cache as a hostPath
+        # (constructs/burrito.py), which the cluster-wide PodSecurity
+        # `baseline` Talos enforces rejects — so label the namespace
+        # `privileged` to exempt it, the same escape hatch as arc-runners.
+        # Without it the controller cannot create a single runner pod and
+        # every layer sits in Retrying forever.
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/warn: privileged

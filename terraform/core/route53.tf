@@ -1,11 +1,21 @@
 # manage the dana.lol domain
 resource "aws_route53_zone" "primary" {
   name = var.domain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; the registrar delegation is set by hand.
+    prevent_destroy = true
+  }
 }
 
 # manage the whereisdana.today domain
 resource "aws_route53_zone" "secondary" {
   name = var.secondary_domain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; the registrar delegation is set by hand.
+    prevent_destroy = true
+  }
 }
 
 # use the prod nameservers so prod can manage its own routes
@@ -87,7 +97,7 @@ resource "aws_route53_record" "primary_naked_acm_cert_validation" {
   name    = var.primary_naked_acm_dns_name
   records = [var.primary_naked_acm_dns_record]
   ttl     = 60
-  type    = var.primary_naked_acm_dns_type
+  type    = "CNAME"
   zone_id = aws_route53_zone.primary.zone_id
 }
 
@@ -195,7 +205,7 @@ resource "aws_route53_record" "primary_www_acm_cert_validation" {
   name    = var.primary_www_acm_dns_name
   records = [var.primary_www_acm_dns_record]
   ttl     = 60
-  type    = var.primary_www_acm_dns_type
+  type    = "CNAME"
   zone_id = aws_route53_zone.primary.zone_id
 }
 
@@ -220,13 +230,37 @@ resource "aws_route53_record" "keybase" {
   records = ["keybase-site-verification=4c5lF70z6Zp4jBKt7lDhS9PT-fJ5xFTip_2H_qBkZ1c"]
 }
 
-# for verifying Brave browser
-resource "aws_route53_record" "brave" {
+# Route 53 holds one record set per name+type, so every apex TXT string --
+# the Brave browser verification and the SPF policy for ImprovMX -- shares
+# this resource. Adding another apex TXT resource would collide with it.
+resource "aws_route53_record" "apex_txt" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = var.domain
   type    = "TXT"
   ttl     = "300"
-  records = ["brave-ledger-verification=9422ad35f6a8d886d6636c1ef09d84e950b5c1bf2ab28d28f00d0acc613aac79"]
+  records = [
+    "brave-ledger-verification=9422ad35f6a8d886d6636c1ef09d84e950b5c1bf2ab28d28f00d0acc613aac79",
+    "v=spf1 include:spf.improvmx.com ~all",
+  ]
+}
+
+moved {
+  from = aws_route53_record.brave
+  to   = aws_route53_record.apex_txt
+}
+
+# ImprovMX forwards every address at the domain on to a real inbox. Apple
+# rejects free-provider addresses when enrolling an organization in the
+# Developer Program, so dana.lol needs to accept mail of its own.
+resource "aws_route53_record" "improvmx" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = var.domain
+  type    = "MX"
+  ttl     = "300"
+  records = [
+    "10 mx1.improvmx.com",
+    "20 mx2.improvmx.com",
+  ]
 }
 
 resource "aws_route53_record" "develop" {

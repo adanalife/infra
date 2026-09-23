@@ -30,10 +30,17 @@ vars:
 
 tasks:
   # ---------------------------------------------------------------------------
-  # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/), migrating off
-  # the Kustomize overlays. These are ADDITIVE: the live `k8s:<env>:apply` tasks
-  # still drive Kustomize until the per-component cutover. `cdk8s:<env>:diff` is
-  # the safe read-only way to compare cdk8s output against the live cluster.
+  # cdk8s — the Python Kubernetes authoring layer (infra/cdk8s/). `cdk8s:synth`
+  # renders infra's deploy units into the committed cdk8s/dist/, and Argo serves
+  # the app + platform-Helm layers from there (see gitops/README.md), so these
+  # tasks build and gate the manifests rather than push them.
+  #
+  # Kustomize covers only the platform bits Argo deliberately excludes, applied
+  # by `k8s:{dev,prod}:platform:up` / `k8s:stage:platform-env:up`: the ESO
+  # cluster-store, cert-manager's ClusterIssuers, external-dns, the Intel
+  # GPU/XPU plugins, local-path-provisioner, and the ExternalSecrets the Helm
+  # releases read their credentials from. The exclusion list is authoritative in
+  # `cdk8s/adanalife_k8s/constructs/argo_platform.py`'s docstring.
   # ---------------------------------------------------------------------------
   cdk8s:cli:
     desc: Install the pinned cdk8s CLI into cdk8s/node_modules from the committed package-lock.json
@@ -118,15 +125,17 @@ tasks:
   # volume that keeps a NAS outage out of the stream path. Run after staging new
   # albums with tripbot's bin/stage-streambeats, and after a T5 wipe. Re-runnable:
   # files already present are skipped.
-  # Watch: kubectl -n <env> logs -f job/music-localize
+  # Watch the copy: kubectl -n <env> logs -f job/music-localize -c localize
+  # (-c is needed — the copy is the initContainer; the container proper is the
+  # kubectl step that publishes the album index the copy renders.)
   k8s:stage:music-localize:
-    desc: copy the stage-1 music share NFS -> node-local PVC (the one-shot localize Job)
+    desc: copy the stage-1 music share NFS -> node-local PVC and publish the album index ConfigMap (the one-shot localize Job)
     cmds:
       - task: k8s:_music-localize:apply
         vars: { ENV: stage-1 }
 
   k8s:prod:music-localize:
-    desc: copy the prod-1 music share NFS -> node-local PVC (the one-shot localize Job)
+    desc: copy the prod-1 music share NFS -> node-local PVC and publish the album index ConfigMap (the one-shot localize Job)
     cmds:
       - task: k8s:_music-localize:apply
         vars: { ENV: prod-1 }
@@ -134,34 +143,41 @@ tasks:
   # Post-rollout verification: confirm APP's running pods actually carry the
   # image the Deployment asks for. imagePullPolicy Always can silently roll a
   # pod onto a different image than expected — check the SHA before
-  # feature-testing a deploy. Read-only.
+  # feature-testing a deploy. Read-only, so it names its own context rather than
+  # borrowing the ambient one: CONTEXT defaults to the minipc's, and
+  # CONTEXT=tailscale-operator.<tailnet> reads it off-LAN. No
+  # `kubectl config use-context` needed.
   k8s:stage:verify-sha:
-    desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot)
+    desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot [CONTEXT=…])
     cmds:
       - task: k8s:_verify-sha
-        vars: { ENV: stage-1, APP: '{{.APP}}' }
+        vars: { ENV: stage-1, APP: '{{.APP}}', CONTEXT: '{{.CONTEXT}}' }
 
   k8s:prod:verify-sha:
-    desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot)
+    desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot [CONTEXT=…])
     cmds:
       - task: k8s:_verify-sha
-        vars: { ENV: prod-1, APP: '{{.APP}}' }
+        vars: { ENV: prod-1, APP: '{{.APP}}', CONTEXT: '{{.CONTEXT}}' }
 
   k8s:_verify-sha:
     internal: true
     requires:
       vars: [APP]
+    vars:
+      CONTEXT: '{{.CONTEXT | default "admin@adanalife-minipc"}}'
     preconditions:
-      - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
+      - sh: kubectl --context '{{.CONTEXT}}' cluster-info >/dev/null 2>&1
+        msg: "kube-context {{.CONTEXT}} is unreachable — on the LAN, or pass CONTEXT=<the tailscale-operator context>"
     cmds:
       - |
         set -euo pipefail
-        ns={{.ENV}}
-        want=$(kubectl -n "$ns" get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
+        k() { kubectl --context '{{.CONTEXT}}' -n {{.ENV}} "$@"; }
+        want=$(k get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
         echo "deployment image: $want"
-        sel=$(kubectl -n "$ns" get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
-        kubectl -n "$ns" get pods -l "$sel" -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
+        sel=$(k get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+        # Running only: a Completed pod the GC hasn't reaped yet carries the
+        # digest it last ran, which reads as a mismatch that isn't one.
+        k get pods -l "$sel" --field-selector=status.phase=Running -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
 
   k8s:_nfs-pv:apply:
     internal: true
@@ -242,10 +258,13 @@ tasks:
         f="$out/{{.ENV}}-music-localize.k8s.yaml"
         test -f "$f" || { echo "no music localize Job for {{.ENV}} — only nfs envs render one"; exit 1; }
         # Jobs are largely immutable, so clear any prior run before re-applying.
+        # Only the Job — the ServiceAccount/Role/RoleBinding beside it in the same
+        # file re-apply in place, and deleting them would revoke the credential
+        # mid-run on a re-apply while one is going.
         kubectl -n {{.ENV}} delete job music-localize --ignore-not-found
         echo "Applying {{.ENV}} music localize Job (NFS -> node-local PVC, outside Argo)"
         kubectl apply -f "$f"
-        echo "Watch: kubectl -n {{.ENV}} logs -f job/music-localize"
+        echo "Watch: kubectl -n {{.ENV}} logs -f job/music-localize -c localize"
 
   # dashcam-cv (stage-only vector fill) moved to the video-pipeline repo, which
   # owns its own cdk8s/dist + apply/ramp tasks now; Argo delivers it cross-repo.
@@ -282,33 +301,9 @@ tasks:
       # -kubernetes-version tracks the live cluster (kubectl version); bump it with talos upgrades
       - mise exec -- kubeconform -strict -summary -kubernetes-version 1.36.0 -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{`{{.Group}}`}}/{{`{{.ResourceKind}}`}}_{{`{{.ResourceAPIVersion}}`}}.json' -ignore-missing-schemas dist/
 
-  # cdk8s:<env>:diff — kubectl diff the synthesized app manifests against the
-  # live cluster (read-only; safe pre-cutover check). Output is colorized via the
-  # top-level KUBECTL_EXTERNAL_DIFF (--color=always). kubectl diff exits non-zero
-  # when a diff exists, so `|| true` keeps Task from treating "there's a diff" as
-  # a failure. Point kubectl at the right context first.
-  # The tripbot APP manifests (per <env>-<component>-<platform>) moved to the
-  # tripbot repo's cdk8s; diff them there (`task cdk8s:{stage,prod}:diff` in
-  # ~/adanalife/tripbot). infra keeps only the data + supporting + dashcam units.
-
-  # cdk8s:dev:apply — bootstrap the development (k3d) DATA unit directly.
-  # dev's apps + supporting + identity are Argo-managed (the k3d Argo reads the
-  # tripbot repo @ main); this just lays down the postgres + SecretStore unit
-  # that Argo's app sync depends on, before/independently of an Argo bootstrap.
-  # Pre-req: a running k3d cluster + `task k8s:dev:bootstrap-secrets` for the
-  # eso-aws-credentials Secret.
-  cdk8s:dev:apply:
-    desc: apply the synthesized development DATA unit (postgres + SecretStore) to the k3d cluster — apps come via the k3d Argo from the tripbot repo
-    dir: cdk8s
-    deps: [cdk8s:synth]
-    preconditions:
-      # Guard: k3d dev cluster only — never the minipc (Talos). Applying
-      # dev manifests against the minipc would collide with the live stage/prod
-      # workloads. (dir: cdk8s, so reach back up to the repo-root kubeconfig.)
-      - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
-        msg: "refusing: cdk8s:dev:apply must target the k3d dev cluster, but the current kube-context is not a k3d cluster. Run `kubectl config use-context k3d-adanalife-dev` (or `task k8s:dev:cluster:up`) first."
-    cmds:
-      - kubectl apply -f dist/development-data.k8s.yaml
+  # infra synthesizes only the data + supporting + dashcam units. The tripbot APP
+  # manifests (per <env>-<component>-<platform>) live in the tripbot repo's
+  # cdk8s — diff them from there with `task cdk8s:{stage,prod}:diff`.
 
   # Burrito's config unit is NOT in GITOPS_MANIFESTS: its CRs need the Burrito
   # CRDs, which only exist once the `burrito` Argo Application has synced — a
@@ -521,8 +516,8 @@ tasks:
         last_attempt=$(kubectl -n burrito get terraformruns -l burrito/managed-by={{.LAYER}} -o json 2>/dev/null \
           | jq -r '[.items[] | select(.spec.action == "apply") | .metadata.creationTimestamp | fromdateiso8601] | max // 0')
         if [ "$plan_epoch" -gt 0 ]; then
-          [ "$apply_epoch" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates the last apply ($applied) — the state has moved since; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
-          [ "$last_attempt" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates an apply attempt at $(jq -rn --argjson t "$last_attempt" '$t | todate') — even a failed one moves the state; re-plan first: task burrito:{{.PLAN_ENV}}:plan"
+          [ "$apply_epoch" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates the last apply ($applied) — the state has moved since; re-plan first: task burrito:{{.PLAN_ENV}}:plan" || true
+          [ "$last_attempt" -gt "$plan_epoch" ] && refuse "the plan ($planned) predates an apply attempt at $(jq -rn --argjson t "$last_attempt" '$t | todate') — even a failed one moves the state; re-plan first: task burrito:{{.PLAN_ENV}}:plan" || true
         fi
 
         # The apply verdict is read from the layer afterwards, so remember what
@@ -717,6 +712,12 @@ tasks:
   contract:sync:
     desc: Sync contract.json from the tripbot repo (the anti-drift bridge's source of truth)
     dir: cdk8s
+    preconditions:
+      # The copy reads the sibling's working tree, and a checkout behind
+      # origin/main syncs stale content and succeeds silently. Refuse unless the
+      # synced files match origin/main.
+      - sh: git -C {{.SIBLINGS}}/tripbot fetch -q origin && git -C {{.SIBLINGS}}/tripbot diff --quiet origin/main -- pkg/contract/
+        msg: "{{.SIBLINGS}}/tripbot pkg/contract/ differs from origin/main — pull that checkout (or push its change) first; syncing from it copies stale content"
     cmds:
       - cp {{.SIBLINGS}}/tripbot/pkg/contract/contract.json contract.json
       - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
@@ -727,6 +728,12 @@ tasks:
   # platforms); never hand-edit it here.
   platforms:sync:
     desc: Re-sync platforms.json from the sibling platform-gateway checkout (the fleet-wide source of truth)
+    preconditions:
+      # The copy reads the sibling's working tree, and a checkout behind
+      # origin/main syncs stale content and succeeds silently. Refuse unless the
+      # synced files match origin/main.
+      - sh: git -C {{.SIBLINGS}}/platform-gateway fetch -q origin && git -C {{.SIBLINGS}}/platform-gateway diff --quiet origin/main -- platforms.json
+        msg: "{{.SIBLINGS}}/platform-gateway platforms.json differs from origin/main — pull that checkout (or push its change) first; syncing from it copies stale content"
     cmds:
       - cp {{.SIBLINGS}}/platform-gateway/platforms.json platforms.json
 
@@ -745,22 +752,12 @@ tasks:
       - aws-vault exec adanalife-stage -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:stage:init:
-    desc: terraform init against stage-1
+    desc: >-
+      terraform init against stage-1 — pass extra flags after --,
+      e.g. task tf:stage:init -- -migrate-state
     dir: terraform/stage-1
     cmds:
       - aws-vault exec adanalife-stage -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:stage:init:reconfigure:
-    desc: terraform init -reconfigure against stage-1
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:stage:init:migrate:
-    desc: terraform init -migrate-state against stage-1
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:stage:destroy:
     desc: terraform destroy against stage-1
@@ -791,22 +788,12 @@ tasks:
       - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:prod:init:
-    desc: terraform init against prod-1
+    desc: >-
+      terraform init against prod-1 — pass extra flags after --,
+      e.g. task tf:prod:init -- -migrate-state
     dir: terraform/prod-1
     cmds:
       - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:prod:init:reconfigure:
-    desc: terraform init -reconfigure against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:prod:init:migrate:
-    desc: terraform init -migrate-state against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:prod:destroy:
     desc: terraform destroy against prod-1
@@ -824,6 +811,45 @@ tasks:
     cmds:
       - aws-vault exec adanalife-prod -- mise exec -- terraform import {{.CLI_ARGS}}
 
+  # prod-1-data holds the prod resources that can't be recreated from this
+  # repo (the Talos PKI KMS key, the postgres backup bucket). Own state file,
+  # same account and profile as tf:prod:* — see terraform/prod-1-data/README.md.
+  tf:prod-data:apply:
+    desc: terraform apply against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform apply {{.CLI_ARGS}}
+
+  tf:prod-data:plan:
+    desc: terraform plan against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
+
+  tf:prod-data:init:
+    desc: terraform init against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
+
+  tf:prod-data:init:reconfigure:
+    desc: terraform init -reconfigure against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
+
+  tf:prod-data:init:migrate:
+    desc: terraform init -migrate-state against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
+
+  tf:prod-data:destroy:
+    desc: terraform destroy against prod-1-data
+    dir: terraform/prod-1-data
+    cmds:
+      - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
+
   # Core uses --no-session because session tokens can't make IAM changes.
   tf:core:apply:
     desc: terraform apply against core (no session token; IAM changes need full creds)
@@ -838,22 +864,12 @@ tasks:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:core:init:
-    desc: terraform init against core
+    desc: >-
+      terraform init against core — pass extra flags after --,
+      e.g. task tf:core:init -- -migrate-state
     dir: terraform/core
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:core:init:reconfigure:
-    desc: terraform init -reconfigure against core
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:core:init:migrate:
-    desc: terraform init -migrate-state against core
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:core:destroy:
     desc: terraform destroy against core
@@ -889,22 +905,12 @@ tasks:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
 
   tf:platform:init:
-    desc: terraform init against platform
+    desc: >-
+      terraform init against platform — pass extra flags after --,
+      e.g. task tf:platform:init -- -migrate-state
     dir: terraform/platform
     cmds:
       - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:platform:init:reconfigure:
-    desc: terraform init -reconfigure against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
-
-  tf:platform:init:migrate:
-    desc: terraform init -migrate-state against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
 
   tf:platform:destroy:
     desc: terraform destroy against platform
@@ -993,23 +999,14 @@ tasks:
   #   k8s:dev:sync    → re-sync Argo apps / revert a local image to CI :main
   #   k8s:dev:status  → pods + running image tags + Argo health
   k8s:dev:cluster:up:
-    desc: "create the local k3d dev cluster — example video by default; DASHCAM_NAS=<host path> still bind-mounts a real dashcam dir at /host/nas-dashcam, but cdk8s dev does not consume it yet (the legacy development-nas overlay is gone — re-wire via cdk8s dev config if needed)"
+    desc: "create the local k3d dev cluster from k8s/k3d-config.yaml (just the cluster — no host bind-mounts)"
     cmds:
-      # Development plays the committed example video (mounted at
-      # /host/dashcam) by default — the 99% case. To stream a real dashcam
-      # directory instead, pass its host path as DASHCAM_NAS=<path>; it's
-      # bind-mounted :ro at /host/nas-dashcam. NOTE: the legacy development-nas
-      # overlay that consumed this mount is gone; cdk8s dev does not read it yet
-      # (known gap — wire it into cdk8s dev config). The path is a runtime arg so the
-      # real footage location never gets committed. k3d bind-mounts are
-      # fixed at create time, so this must be set on cluster:up, not apply.
-      - |
-        if [ -n "{{.DASHCAM_NAS}}" ]; then
-          echo "mounting dashcam: {{.DASHCAM_NAS}} -> /host/nas-dashcam (:ro)"
-          k3d cluster create -c k8s/k3d-config.yaml --volume "{{.DASHCAM_NAS}}:/host/nas-dashcam:ro@server:*"
-        else
-          k3d cluster create -c k8s/k3d-config.yaml
-        fi
+      # No host bind-mounts: no dev workload reads video off the node (no
+      # cdk8s dev config declares a hostPath). Footage in dev comes back as a
+      # dev playout + mediamtx pair serving RTSP, not as a bind-mount — k3d
+      # mounts are fixed at create time, so a mount would have to be added
+      # here if that ever changes.
+      - k3d cluster create -c k8s/k3d-config.yaml
 
   k8s:dev:cluster:down:
     desc: tear down the local k3d dev cluster (delete; use k8s:dev:cluster:stop to suspend without wipe)
@@ -1037,7 +1034,6 @@ tasks:
     aliases: ["k8s:dev:cluster:rebuild"]
     cmds:
       - task: k8s:dev:cluster:up
-        vars: { DASHCAM_NAS: '{{.DASHCAM_NAS}}' }
       - task: k8s:dev:platform:up
       - task: k8s:dev:sync
 
@@ -1051,38 +1047,42 @@ tasks:
   # tasks below (bootstrap-secrets / platform:up / apply) target the live
   # Talos cluster; there is no k8s:prod:cluster:*.
 
-  # Build the dev app images locally, tag them :dev-local, and import them into
-  # the k3d dev cluster's image store. APP=tripbot|obs|onscreens builds just
+  # Build the dev app images locally as :dev-local and import them into the k3d
+  # dev cluster's image store. APP=tripbot|obs|onscreens builds just
   # one; omit for all three. The committed manifests still pin CI's :main so a
   # fresh cluster cold-starts on registry images — this (+ k8s:dev:deploy) is
   # only for iterating on a LOCAL build.
   k8s:dev:images:build:
-    desc: "build local app images, tag :dev-local, import into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
-    dir: ../tripbot
+    desc: "build local app images as :dev-local and import them into the dev cluster (APP=tripbot|obs|onscreens for one; default all three)"
     cmds:
-      # --project-directory + --env-file mirror bin/devenv so build contexts
-      # resolve relative to the tripbot repo root and ${VAR} substitutions in
-      # the compose file pick up env.docker. On arm64 (Apple Silicon) layer
-      # docker-compose.arm64.yml so OBS builds from Dockerfile.arm64 (compiles
-      # OBS + CEF from source — without it browser_source silently breaks at
-      # scene load). First arm64 OBS build is ~30min for the CEF compile; cached
-      # thereafter. Locally-built images are single-platform, so k3d image
-      # import works cleanly (unlike multi-arch registry pulls).
+      # Each app is built straight from its own Dockerfile in its own sibling
+      # checkout — tripbot and onscreens-server out of the tripbot repo, OBS out
+      # of the obs repo. The image repo in the table has to match the one the
+      # committed manifests pin, or k8s:dev:deploy's initContainer override
+      # can't recognize the containers sharing the app's image.
+      # Locally-built images are single-platform, so k3d image import works
+      # cleanly (unlike multi-arch registry pulls).
       - |
         set -e
         target="{{.APP}}"
-        # app : compose-service : image-repo
-        all="tripbot:tripbot:adanalife/tripbot \
-             obs:obs:adanalife/obs \
-             onscreens:onscreens-server:adanalife/onscreens-server"
-        args="--project-directory . --env-file infra/docker/env.docker -f infra/docker/docker-compose.yml"
-        case "$(uname -m)" in arm64|aarch64) args="$args -f infra/docker/docker-compose.arm64.yml" ;; esac
+        # On arm64 (Apple Silicon) OBS builds from Dockerfile.arm64, which
+        # starts FROM the pre-baked ghcr.io/adanalife/obs-cef-base image: the
+        # OBS PPA publishes CEF-bundled packages for amd64 only, and Ubuntu's
+        # universe build strips CEF, so browser_source fails at scene load. The
+        # CEF compile lives in that base image and is pulled, not rebuilt here.
+        obs_dockerfile=Dockerfile
+        case "$(uname -m)" in arm64|aarch64) obs_dockerfile=Dockerfile.arm64 ;; esac
+        # app : build context : dockerfile (relative to the context) : image repo
+        all="tripbot:{{.SIBLINGS}}/tripbot:infra/docker/tripbot/Dockerfile:adanalife/tripbot \
+             obs:{{.SIBLINGS}}/obs:$obs_dockerfile:ghcr.io/adanalife/obs \
+             onscreens:{{.SIBLINGS}}/tripbot:infra/docker/onscreens-server/Dockerfile:adanalife/onscreens-server"
         for row in $all; do
-          app=${row%%:*}; rest=${row#*:}; svc=${rest%%:*}; repo=${rest#*:}
+          app=${row%%:*}; rest=${row#*:}
+          ctx=${rest%%:*}; rest=${rest#*:}
+          dockerfile=${rest%%:*}; repo=${rest#*:}
           { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
-          echo "==> build $repo  (compose service: $svc)"
-          docker compose $args build "$svc"
-          docker tag "$repo:latest" "$repo:dev-local"
+          echo "==> build $repo:dev-local  ($ctx/$dockerfile)"
+          docker build -f "$ctx/$dockerfile" -t "$repo:dev-local" "$ctx"
           k3d image import "$repo:dev-local" --cluster=adanalife-dev
         done
 
@@ -1108,7 +1108,7 @@ tasks:
         # app : deployment : container : image-repo  (dev platform suffix = twitch;
         # obs's container is named `obs`, the others `<app>-twitch`)
         all="tripbot:tripbot-twitch:tripbot-twitch:adanalife/tripbot \
-             obs:obs-twitch:obs:adanalife/obs \
+             obs:obs-twitch:obs:ghcr.io/adanalife/obs \
              onscreens:onscreens-twitch:onscreens-twitch:adanalife/onscreens-server"
         for row in $all; do
           app=${row%%:*}; r=${row#*:}; dep=${r%%:*}; r=${r#*:}; ctr=${r%%:*}; repo=${r#*:}
@@ -1149,7 +1149,7 @@ tasks:
       - 'echo "== pods (development) =="'
       - kubectl get pods -n development
       - 'echo "== running images =="'
-      - kubectl get deploy -n development -o custom-columns='DEPLOY:.metadata.name,IMAGE:.spec.template.spec.containers[0].image,POLICY:.spec.template.spec.containers[0].imagePullPolicy'
+      - kubectl get deploy -n development -o custom-columns='DEPLOY:.metadata.name,REPLICAS:.spec.replicas,READY:.status.readyReplicas,IMAGE:.spec.template.spec.containers[0].image,POLICY:.spec.template.spec.containers[0].imagePullPolicy'
       - 'echo "== Argo apps =="'
       - kubectl get applications -n argocd -o custom-columns='APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status' | grep -E 'APP|development-'
 
@@ -1566,9 +1566,6 @@ tasks:
   # cert-manager: issues LE certs via DNS-01 against Route53 for any
   # Ingress annotated with `cert-manager.io/cluster-issuer`. Issuance
   # works regardless of inbound network state — only serving TLS does.
-  # A smoke-test Certificate (cert-test.<env>.whereisdana.today, LE
-  # staging) ships in the cert-manager kustomize so the pipeline is
-  # exercised even before any app Ingress requests a cert.
   k8s:dev:platform:up:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the dev cluster
     deps: [k8s:dev:bootstrap-secrets]
@@ -1698,8 +1695,13 @@ tasks:
   # gesture — it re-enables selfHeal on the app Applications (k8s:dev:deploy
   # pauses it to pin a local :dev-local image) and re-syncs them to the
   # committed manifest. Replaces clicking Sync in the UI.
+  #
+  # Replica count is runtime-owned — the console scales prod/stage and Argo
+  # ignores .spec.replicas, so the manifests commit `replicas: 0`. Dev has no
+  # console, so the sync scales the dev apps to 1 itself; without that every
+  # Argo app reads Synced/Healthy with zero app pods running.
   k8s:dev:sync:
-    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps); also reverts a k8s:dev:deploy local-image override back to CI :main"
+    desc: "sync the dev Argo apps in order (data -> supporting -> identity -> apps), then scale the dev app Deployments to 1 (replica count is runtime-owned, and dev has no console); also reverts a k8s:dev:deploy local-image override back to CI :main"
     aliases: ["k8s:dev:argo:sync"]
     preconditions:
       - sh: '[ "$(kubectl config current-context 2>/dev/null | cut -c1-4)" = "k3d-" ]'
@@ -1736,6 +1738,17 @@ tasks:
             -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}' >/dev/null
         done
         argocd app sync $apps --core --timeout 300
+      # The three app Deployments (tripbot-twitch, onscreens-twitch,
+      # obs-twitch) are the only Deployments in the namespace — postgres is a
+      # StatefulSet — so `--all` needs no name list to keep in sync with the
+      # manifests. A rollout that doesn't settle is a warning, not a failure:
+      # obs has no arm64 image to pull, and the other two are still useful.
+      - |
+        kubectl -n development scale deploy --all --replicas=1
+        for dep in $(kubectl -n development get deploy -o name); do
+          kubectl -n development rollout status "$dep" --timeout=180s \
+            || echo "⚠️  $dep not ready after 180s — continuing (check: kubectl -n development describe $dep)"
+        done
 
   # prod-1 sibling — same shape, references k8s/<component>/prod-1/ paths.
   # KEEP-IN-SYNC with k8s:dev:platform:up; structural changes should
@@ -2219,6 +2232,14 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM]
     preconditions:
+      # The helpers live in the sibling obs checkout's working tree: a checkout
+      # that predates a script fails with a bare "no such file", and a stale one
+      # silently runs an old helper.
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-browser-refresh
+        msg: "{{.SIBLINGS}}/obs/bin/obs-browser-refresh not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - &obs-bin-fresh-guard
+        sh: git -C {{.SIBLINGS}}/obs fetch -q origin && git -C {{.SIBLINGS}}/obs diff --quiet origin/main -- bin/
+        msg: "{{.SIBLINGS}}/obs bin/ differs from origin/main — run `git -C {{.SIBLINGS}}/obs pull` so this runs the current helper"
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2234,7 +2255,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-browser-refresh
+          {{.SIBLINGS}}/obs/bin/obs-browser-refresh
 
   # Repoint an OBS media source at a different RTSP URL — the incident move
   # when the MediaMTX relay is unhealthy and the Dashcam source has to fall
@@ -2276,6 +2297,9 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM, SOURCE, URL]
     preconditions:
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-input-repoint
+        msg: "{{.SIBLINGS}}/obs/bin/obs-input-repoint not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2291,7 +2315,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
+          {{.SIBLINGS}}/obs/bin/obs-input-repoint '{{.URL}}' '{{.SOURCE}}'
 
   # Swap the stream key on a running OBS — the alternative to re-seeding the
   # secret and restarting the pod, which drops the stream. Same port-forward +
@@ -2337,6 +2361,9 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM]
     preconditions:
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-stream-key-rotate
+        msg: "{{.SIBLINGS}}/obs/bin/obs-stream-key-rotate not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2354,7 +2381,7 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
+          {{.SIBLINGS}}/obs/bin/obs-stream-key-rotate {{if .DRY_RUN}}--dry-run{{end}}
 
   # Screenshot every source in the live OBS scene and fail on the blank ones —
   # release acceptance for the overlays. A crashed browser_source stays in the
@@ -2394,6 +2421,9 @@ tasks:
     requires:
       vars: [NAMESPACE, PLATFORM, MIN_BYTES]
     preconditions:
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-screenshot-check
+        msg: "{{.SIBLINGS}}/obs/bin/obs-screenshot-check not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} -n {{.NAMESPACE}} >/dev/null 2>&1
@@ -2411,7 +2441,7 @@ tasks:
         SCREENSHOT_DIR='{{.SCREENSHOT_DIR}}' \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-screenshot-check
+          {{.SIBLINGS}}/obs/bin/obs-screenshot-check
 
   obs:media:restart:
     desc: Restart all OBS media sources (ffmpeg/vlc) via websocket — forces OBS to reconnect to the RTSP stream after the publisher restarts (override PLATFORM=, default twitch)
@@ -2419,6 +2449,9 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "twitch"}}'
     preconditions:
       - *minipc-context-guard
+      - sh: test -x {{.SIBLINGS}}/obs/bin/obs-media-restart
+        msg: "{{.SIBLINGS}}/obs/bin/obs-media-restart not found — run `git -C {{.SIBLINGS}}/obs pull`"
+      - *obs-bin-fresh-guard
       - sh: command -v uv >/dev/null
         msg: "uv not found — install with `brew install uv`"
       - sh: kubectl get deploy obs-{{.PLATFORM}} >/dev/null 2>&1
@@ -2434,12 +2467,12 @@ tasks:
         OBS_WEBSOCKET_HOST=localhost \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \
-          {{.HOME}}/adanalife/obs/bin/obs-media-restart
+          {{.SIBLINGS}}/obs/bin/obs-media-restart
 
   # Talos PKI (adanalife-minipc). The generated machine configs + talosconfig
   # hold the cluster CA key, bootstrap/trustd tokens, and etcd encryption
   # secrets. They're SOPS-encrypted with the prod-1 KMS key
-  # (alias/sops-talos-pki, terraform/prod-1/sops.tf) and committed as
+  # (alias/sops-talos-pki, terraform/prod-1-data/sops.tf) and committed as
   # talos/adanalife-minipc/*.sops.yaml; the plaintext stays gitignored.
   # Encrypted as opaque binary blobs because the configs are
   # multi-document YAML (sops's native YAML store doesn't handle multi-doc).
@@ -2476,14 +2509,16 @@ tasks:
         msg: "plaintext Talos PKI not present in talos/adanalife-minipc — nothing to encrypt"
     cmds:
       # Sources the KMS key ARN from terraform output (key must already be
-      # applied via `task tf:prod:apply`). --input-type binary treats each
+      # applied via `task tf:prod:apply`). terraform runs under mise from the
+      # layer dir so its .terraform-version pin resolves; the repo root has no
+      # pin, and a bare `terraform` here lands on an unversioned tfenv shim. --input-type binary treats each
       # file as one opaque blob, sidestepping the multi-doc-YAML limitation.
       # tailscale.patch.yaml is optional (only exists once tailscale is wired) —
       # skip it if absent.
       - |
         aws-vault exec adanalife-prod -- bash -c '
           set -euo pipefail
-          kms=$(terraform -chdir=../../terraform/prod-1 output -raw sops_talos_kms_key_arn)
+          kms=$(mise exec --cd ../../terraform/prod-1-data -- terraform output -raw sops_talos_kms_key_arn)
           for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml" "tailscale.patch.yaml:tailscale.patch.sops.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
             [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
@@ -2949,7 +2984,7 @@ tasks:
       # the namespace baked in); applied from its committed dist in the sibling
       # tripbot checkout (same source assumption as `task contract:sync`).
       - kubectl delete job tripbot-seed -n development --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/development-job-seed.k8s.yaml -n development
+      - kubectl apply -f {{.SIBLINGS}}/tripbot/cdk8s/dist/development-job-seed.k8s.yaml -n development
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |
@@ -2967,7 +3002,7 @@ tasks:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
     cmds:
       - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
-      - kubectl apply -f ../tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
+      - kubectl apply -f {{.SIBLINGS}}/tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
       # kubectl wait doesn't short-circuit on Failed when asked for
       # Complete — wait the full window then disambiguate after the fact.
       - |

@@ -33,8 +33,7 @@
 # `talosctl health` won't go fully green until the helm install lands — expected.
 #
 # Tailscale: the installer schematic bakes in the siderolabs/tailscale extension
-# (schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale; the GPU
-# extension is UNCHANGED, so the proven VAAPI path is untouched). Its config —
+# (schematic = i915 + intel-ucode + tailscale). Its config —
 # an ExtensionServiceConfig carrying the secret TS_AUTHKEY — is NOT in this
 # (committed, non-secret) patch: it lives in tailscale.patch.yaml (gitignored
 # plaintext) / tailscale.patch.sops.yaml (committed, SOPS-sealed), applied as an
@@ -45,17 +44,35 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    # Schematic = i915-ucode + intel-ucode + iscsi-tools + tailscale extensions
-    # + the usb-storage.quirks=04e8:61f5:u kernel arg. The quirk forces the
-    # plain usb-storage driver (no UAS command queuing) for the Samsung T5
-    # (the /var/mnt/data UserVolume), which drops off the USB bus under
-    # sustained UAS write load — taking the XFS filesystem and both postgreses
-    # down with it. Slower sequential I/O, stable link. The config uses UKI
-    # (grubUseUKICmdline), so kernel args live in the factory schematic, not
-    # install.extraKernelArgs — regenerate via the curl block in the bootstrap
-    # runbook, and note image changes only land via `talosctl upgrade`, not
-    # apply-config alone.
-    image: factory.talos.dev/installer/915463e793b97f79f7ea950f7b4e9d4a3ce9d674dd45e63ffe12f934d0b792c9:v1.13.2
+    # Schematic = i915 + intel-ucode + tailscale extensions + the two T5
+    # kernel args below. There is no iSCSI in this
+    # cluster — both StorageClasses are rancher.io/local-path — so
+    # iscsi-tools is not in the schematic, which is also what lets
+    # workloadIsolation below be safe (see the SecurityProfileConfig doc).
+    # `siderolabs/i915` is the canonical name for the Intel GPU microcode +
+    # kernel modules; the Factory resolves the legacy `i915-ucode` spelling
+    # to the same extension, so the VAAPI path is byte-identical.
+    #
+    # Two kernel args, both scoped to the Samsung T5 (the /var/mnt/data
+    # UserVolume) by its USB ID 04e8:61f5:
+    #
+    #   usb-storage.quirks=04e8:61f5:u  forces the plain usb-storage driver (no
+    #     UAS command queuing). The drive drops off the USB bus under sustained
+    #     UAS write load, taking the XFS filesystem and both postgreses with it.
+    #     Slower sequential I/O, stable link.
+    #   usbcore.quirks=04e8:61f5:k      USB_QUIRK_NO_LPM — disables USB3 link
+    #     power management for the drive. An idle SuperSpeed link parked in
+    #     U1/U2 that fails to wake is reported by the host as a clean
+    #     disconnect, which is the signature of the 2026-09-13 drop (idle box,
+    #     no xhci error, no reset). Upstream 6.18.39 applies the same quirk to
+    #     the sibling Samsung T5 EVO (04e8:6200) for the same symptom; the
+    #     in-kernel table does not cover 61f5, so the cmdline is the lever.
+    #
+    # The config uses UKI (grubUseUKICmdline), so kernel args live in the
+    # factory schematic, not install.extraKernelArgs — regenerate via the curl
+    # block in the bootstrap runbook, and note image changes only land via
+    # `talosctl upgrade`, not apply-config alone.
+    image: factory.talos.dev/installer/37f99a4495388d34eab07d35d471c43775003c559e9e3434a5448d3f6d81d20e:v1.14.0
   network:
     interfaces:
       - interface: enp88s0
@@ -100,6 +117,27 @@ machine:
 
 cluster:
   allowSchedulingOnControlPlanes: true
+  # etcd serves /metrics on its client port by default, which on this cluster
+  # means mTLS on 2379 — scrapeable only by something holding the etcd client
+  # PKI, which nothing in the cluster does. `listen-metrics-urls` moves the
+  # metrics (and /health) handler onto a second, plaintext listener that needs
+  # no client certificate, so Alloy can scrape it as an ordinary target. This
+  # is the only way to see etcd's fsync latency: nothing else reports it, and
+  # etcd stalling past the 5s lease deadline is the standing suspect behind the
+  # lockstep controller restarts (the `control-plane-health` alert group).
+  #
+  # 2381 carries no read or write API and no cluster data — the client (2379)
+  # and peer (2380) listeners keep their mTLS untouched. It is reachable from
+  # the LAN and the tailnet, which is the cost: a reader learns the cluster's
+  # health and size, not its contents.
+  #
+  # NOT creation-time. Patching this on the running node restarts etcd, and on
+  # a single-node control plane the API server is unavailable for those few
+  # seconds — the same lockstep restart this exists to explain. Nothing in the
+  # stream path depends on the control plane, so running pods keep serving.
+  etcd:
+    extraArgs:
+      listen-metrics-urls: http://0.0.0.0:2381
   # Cilium owns the dataplane — Talos installs no CNI and no kube-proxy.
   network:
     cni:
@@ -110,6 +148,31 @@ cluster:
   # explicitly so the dependency is visible.
   discovery:
     enabled: true
+  # Reap terminated pods once more than 50 exist, oldest first. The upstream
+  # default is 12500, which on a one-node cluster means never — so every
+  # Failed pod ever produced stays visible in `kubectl get pods -A` forever.
+  #
+  # That clutter is not cosmetic: on 2026-08-28 eighteen stale obs
+  # `UnexpectedAdmissionError` pods were read as the i915 plugin flapping
+  # *right then*, and shaped a live incident's recovery. Only the newest such
+  # pod carries any signal (does it predate kube-apiserver's startedAt), and
+  # the newest is exactly what a count-based GC keeps.
+  #
+  # Succeeded pods are already bounded by each CronJob's history limits; Failed
+  # ones are bounded by nothing and are removed by hand today. 82 terminated
+  # pods were live when this was written, the oldest three days back.
+  #
+  # The threshold is a count, not an age, so a burst of short-lived pods
+  # shortens the retained window — a Burrito plan storm produces ~17/h. That is
+  # the accepted cost: diagnostic value decays with age anyway, and the
+  # alternative on offer is keeping everything forever.
+  #
+  # NOT creation-time. Patching this on the running node restarts
+  # kube-controller-manager only; the API server, etcd and every running pod
+  # are untouched, so nothing in the stream path notices.
+  controllerManager:
+    extraArgs:
+      terminated-pod-gc-threshold: "50"
   # kube-apiserver serving-cert SANs for Tailscale-native kubectl + the LAN-DNS
   # pointer (see machine.certSANs above). Lets
   # `server: https://adanalife-minipc.tail020deb.ts.net:6443` verify TLS from any
@@ -163,3 +226,39 @@ provisioning:
   grow: true
 filesystem:
   type: xfs
+# The global FilesystemTrimConfig below does not apply here. This disk is the
+# Samsung T5 behind the usb-storage UAS quirk — it already drops off the bus
+# under sustained write load, and discard traffic over that link is exactly the
+# class of I/O the quirk exists to avoid. The internal NVMe gets its trims; this
+# one does not.
+trim:
+  enabled: false
+---
+apiVersion: v1alpha1
+kind: SecurityProfileConfig
+# Runs CRI containerd, the kubelet, and every pod in a dedicated PID + mount
+# namespace anchored by the sandboxd service, in its own least-privilege SELinux
+# domain. If sandboxd dies the kernel tears the namespace down and Talos rebuilds
+# it — relaunching CRI, the kubelet and the pods — without rebooting the node.
+# Logs: `talosctl logs sandboxd`.
+#
+# The one thing isolation breaks is the deprecated in-tree Kubernetes iSCSI
+# volume plugin: the kubelet can't reach the host iscsid across the sandbox PID
+# boundary. This cluster has no iSCSI at all (local-path is the only
+# provisioner), and iscsi-tools is not in the schematic. A future iSCSI need is
+# served by a CSI node plugin, which does its own attach/mount in a privileged
+# pod and is unaffected.
+#
+# Talos only emits this document for clusters generated on 1.14+; an upgraded
+# cluster stays non-isolated until it is applied, so this is opt-in either way.
+workloadIsolation: true
+---
+apiVersion: v1alpha1
+kind: FilesystemTrimConfig
+# Periodic fstrim of eligible volumes, so the Kingston NVMe keeps its write
+# performance as the EPHEMERAL partition churns. Talos hashes a stable schedule
+# per node and volume rather than trimming everything at once.
+#
+# Clusters generated on Talos 1.14+ ship this document by default; an upgraded
+# cluster has no trimming until it is applied. The T5 UserVolume opts out above.
+interval: 168h0m0s

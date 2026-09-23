@@ -173,6 +173,11 @@ resource "tailscale_oauth_client" "operator" {
   tags   = ["tag:k8s-operator"]
 
   depends_on = [tailscale_acl.this]
+
+  lifecycle {
+    # Recreating the client mints a new secret; the operator cannot reach the tailnet until it is redeployed.
+    prevent_destroy = true
+  }
 }
 
 # Operator creds → SSM (TF owns the value). ESO materializes these into the
@@ -210,6 +215,11 @@ resource "tailscale_tailnet_key" "node" {
   description   = "adanalife-minipc Talos node join key"
 
   depends_on = [tailscale_acl.this]
+
+  lifecycle {
+    # The key is sealed into a committed SOPS machine-config patch; a new one strands the node until it is wiped and rejoined.
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ssm_parameter" "tailscale_node_authkey" {

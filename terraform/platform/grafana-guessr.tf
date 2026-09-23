@@ -25,6 +25,11 @@ locals {
   # above. Cloudflare's own documented setup keeps these in a committed
   # wrangler config, which is where these two are read from
   # (guessr/wrangler.d1.jsonc).
+  #
+  # The id is copied by hand from `cloudflare_d1_database.guessr_answers` in
+  # terraform/prod-1/cloudflare-pages-guessr.tf — a different workspace, so no
+  # terraform dependency links them. Recreating that database breaks every
+  # guessr panel below until this literal is updated.
   guessr_d1_production = "121f1d0c-5212-482e-bbc2-ceab1084f279"
 }
 

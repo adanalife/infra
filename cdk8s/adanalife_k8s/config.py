@@ -40,7 +40,6 @@ class EnvConfig:
     dns_base: str  # prod.whereisdana.today | stage... | dev...  ("" for local)
     secret_source: str = "eso"  # eso | local
     dashcam_mode: str = "hostpath"  # nfs | hostpath
-    tailscale: bool = False  # emit the tailscale Ingress
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
@@ -99,6 +98,10 @@ class EnvConfig:
     # Size of the node-local corpus PVC. The regenerated _opt/clips corpus is
     # ~630 GB; this leaves headroom without crowding the other local-path PVCs.
     dashcam_local_size: str = "700Gi"
+    # Serve the relay's stream over LL-HLS as well as RTSP (adds the muxer's
+    # :8888 listener to the container and the Service). Off by default; it's how
+    # a native client reads the raw pre-OBS dashcam feed without an iGPU slot.
+    mediamtx_hls: bool = False
     # Platforms this env runs a per-platform mediamtx relay for. Set from
     # SUPPORTED_PLATFORMS on the minipc envs; twitch-only on the test envs.
     platforms: tuple[str, ...] = ("twitch",)
@@ -144,7 +147,6 @@ ENVS: dict[str, EnvConfig] = {
         dashcam_local_enabled=True,  # serve the corpus off the minipc's local NVMe
         dns_base="prod.whereisdana.today",
         dashcam_mode="nfs",
-        tailscale=True,
         postgres_size="50Gi",
         postgres_storage_class="local-path-retain",
         postgres_backup=True,
@@ -164,6 +166,9 @@ ENVS: dict[str, EnvConfig] = {
         # at replicas:0 until a console scale-up, so this list only governs the
         # infra-authored relay fan-out.
         platforms=SUPPORTED_PLATFORMS,
+        # The native app's raw-feed player reads the relay's LL-HLS muxer; it
+        # only repackages the passthrough H.264, so it costs no iGPU encode slot.
+        mediamtx_hls=True,
     ),
     "stage-1": EnvConfig(
         name="stage-1",
@@ -171,7 +176,6 @@ ENVS: dict[str, EnvConfig] = {
         cluster="minipc",
         dns_base="stage.whereisdana.today",
         dashcam_mode="nfs",
-        tailscale=True,
         postgres_size="10Gi",
         postgres_storage_class="local-path",
         cnpg=True,
@@ -180,13 +184,15 @@ ENVS: dict[str, EnvConfig] = {
         music_pv_name="obs-music-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
         # same as prod, but keeps its own PV name (PVs bind 1:1).
-        # Stage rehearses DB-in-its-own-namespace: postgres + its SecretStore land
-        # in stage-1-data, so a `kubectl delete ns stage-1` can't take the DB. prod
-        # follows on its next wipe (set prod-1's data_namespace to prod-1-data).
+        # postgres + its SecretStore land in stage-1-data, so a
+        # `kubectl delete ns stage-1` can't take the DB. Same isolation as prod-1;
+        # development and local co-locate the DB in the app namespace.
         data_namespace="stage-1-data",
         # Full supported set → one mediamtx relay per platform on stage too
         # (the gateway/obs/playout Applications self-discover from their repos).
         platforms=SUPPORTED_PLATFORMS,
+        # Same LL-HLS muxer as prod, so the native app has a stage feed to point at.
+        mediamtx_hls=True,
     ),
     "development": EnvConfig(
         name="development",
@@ -194,7 +200,6 @@ ENVS: dict[str, EnvConfig] = {
         cluster="k3d",
         dns_base="dev.whereisdana.today",
         dashcam_mode="hostpath",
-        tailscale=False,
         external_dns_role_arn=_STAGE_ROLE,
         platforms=("twitch",),
     ),
@@ -205,7 +210,6 @@ ENVS: dict[str, EnvConfig] = {
         dns_base="",
         secret_source="local",
         dashcam_mode="hostpath",
-        tailscale=False,
         platforms=("twitch",),
     ),
 }

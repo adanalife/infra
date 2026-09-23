@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: kmsg
+    app.kubernetes.io/part-of: infra
+  name: kmsg
+  namespace: kmsg
+data:
+  fetch-talosctl.py: |
+    import os
+    import urllib.request
+
+    url = os.environ["TALOSCTL_URL"]
+    dst = os.environ["TALOSCTL_PATH"]
+    print(f"fetching {url}", flush=True)
+    urllib.request.urlretrieve(url, dst)
+    os.chmod(dst, 0o755)
+    print(f"talosctl -> {dst}", flush=True)
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: kmsg
+    app.kubernetes.io/part-of: infra
+  name: kmsg-talosconfig
+  namespace: kmsg
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/kmsg/talosconfig
+      secretKey: talosconfig
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    name: kmsg-talosconfig
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: kmsg
+    app.kubernetes.io/part-of: infra
+  name: kmsg
+  namespace: kmsg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kmsg
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: d8eedb3e1d
+      labels:
+        app: kmsg
+    spec:
+      containers:
+        - command:
+            - /opt/talos/talosctl
+            - --talosconfig
+            - /talos/talosconfig
+            - --nodes
+            - 192.168.40.111
+            - dmesg
+            - --follow
+            - --tail
+          env:
+            - name: HOME
+              value: /tmp
+          image: python:3.14-alpine
+          name: kmsg
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+          volumeMounts:
+            - mountPath: /opt/talos
+              name: talosctl
+              readOnly: true
+            - mountPath: /talos
+              name: talosconfig
+              readOnly: true
+            - mountPath: /tmp
+              name: home
+      initContainers:
+        - command:
+            - python3
+            - /app/fetch-talosctl.py
+          env:
+            - name: TALOSCTL_URL
+              value: https://github.com/siderolabs/talos/releases/download/v1.14.0/talosctl-linux-amd64
+            - name: TALOSCTL_PATH
+              value: /opt/talos/talosctl
+          image: python:3.14-alpine
+          name: fetch-talosctl
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+          volumeMounts:
+            - mountPath: /app
+              name: script
+              readOnly: true
+            - mountPath: /opt/talos
+              name: talosctl
+      securityContext:
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - configMap:
+            name: kmsg
+          name: script
+        - emptyDir: {}
+          name: talosctl
+        - emptyDir: {}
+          name: home
+        - name: talosconfig
+          secret:
+            optional: true
+            secretName: kmsg-talosconfig

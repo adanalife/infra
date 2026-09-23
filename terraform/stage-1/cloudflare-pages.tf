@@ -14,84 +14,84 @@ variable "project_name" {
   description = "Cloudflare Pages project name"
 }
 
-variable "production_branch" {
-  type        = string
-  description = "Git branch used for production deployments of the Pages project"
-  default     = "main"
-}
-
-# Token sourced from AWS Secrets Manager — see secrets.tf for the
-# bootstrap flow. Lives here (not providers.tf) so prod-1's symlink
-# to providers.tf doesn't inherit a provider it has no resources for.
+# Token read from SSM Parameter Store — see secrets.tf for the bootstrap flow.
 provider "cloudflare" {
   api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
 
-resource "cloudflare_pages_project" "stage_1" {
-  account_id = var.cloudflare_account_id
-  name       = var.project_name
+module "pages" {
+  source = "../modules/cloudflare-pages-project"
 
-  production_branch = var.production_branch
+  account_id   = var.cloudflare_account_id
+  project_name = var.project_name
 
-  # Direct Upload project — no `source` block. Every deploy goes
-  # through `wrangler pages deploy` from GitHub Actions, so the
-  # Cloudflare → GitHub App integration was unused dead weight, and
-  # an unhealthy install threw 401 (CF error 8000011) on the matching
-  # prod-1 apply. Match prod-1's shape for parity.
+  domains = [
+    # A real hostname for the staging site, handy for sharing previews and for
+    # testing flows that depend on a non-pages.dev origin. Cloudflare is
+    # authoritative for this zone, hence the proxied CNAME below.
+    "www.${cloudflare_zone.stage_1.name}",
+    # Authoritative DNS for dana.lol lives in Route53, so there is no
+    # cloudflare_dns_record partner for this one — the matching CNAME is
+    # terraform/core/route53.tf:aws_route53_record.primary_staging, and
+    # Cloudflare validates the TLS cert through it.
+    "staging.dana.lol",
+  ]
 
-  # The dana-lol-staging project was originally created with a GitHub
-  # source block (back when develop→master used CF Pages auto-deploys).
-  # Cloudflare's API silently refuses to unset `source` on existing
-  # projects: a direct PATCH with {"source": null} returns success but
-  # the source persists on the next plan, and the dashboard's
-  # "Disconnect" UI is hidden because the GitHub App install is in the
-  # unhealthy state behind the original 8000011 error. The dead source
-  # block stays attached but does nothing — every deploy goes through
-  # wrangler from CI, not git push.
-  lifecycle {
-    ignore_changes = [source]
+  dns_record = {
+    zone_id = cloudflare_zone.stage_1.id
+    name    = "www"
   }
+}
+
+moved {
+  from = cloudflare_pages_project.stage_1
+  to   = module.pages.cloudflare_pages_project.this
+}
+
+moved {
+  from = cloudflare_pages_domain.stage_1_whalecore_www
+  to   = module.pages.cloudflare_pages_domain.this["www.whalecore.com"]
+}
+
+moved {
+  from = cloudflare_pages_domain.stage_1_staging_dana_lol
+  to   = module.pages.cloudflare_pages_domain.this["staging.dana.lol"]
+}
+
+moved {
+  from = cloudflare_dns_record.stage_1_whalecore_www_pages
+  to   = module.pages.cloudflare_dns_record.this[0]
 }
 
 output "pages_url" {
   description = "Cloudflare Pages URL"
-  value       = "${var.project_name}.pages.dev"
+  value       = module.pages.pages_url
 }
 
 output "pages_project_name" {
   description = "Cloudflare Pages project name (used by wrangler)"
-  value       = cloudflare_pages_project.stage_1.name
+  value       = module.pages.project_name
 }
 
-# Custom domain: bind www.whalecore.com to the staging Pages project so
-# the staging site is reachable at a real hostname (handy for sharing
-# previews and for testing flows that depend on a non-pages.dev origin).
-# The matching DNS record is below.
-resource "cloudflare_pages_domain" "stage_1_whalecore_www" {
-  account_id   = var.cloudflare_account_id
-  project_name = cloudflare_pages_project.stage_1.name
-  name         = "www.${cloudflare_zone.stage_1.name}"
+# whalecore.com: authoritative DNS lives here, not Route53. Point the
+# registrar's nameservers at `terraform output stage_1_zone_name_servers`.
+# It carries the www.whalecore.com Pages custom domain above and the post@
+# Email Routing inbox (cloudflare-post-inbox.tf). A fresh root domain rather than a subzone of
+# whereisdana.today because Cloudflare Free only creates zones for roots.
+resource "cloudflare_zone" "stage_1" {
+  account = {
+    id = var.cloudflare_account_id
+  }
+  name = "whalecore.com"
+  type = "full"
+
+  lifecycle {
+    # Recreating the zone assigns new Cloudflare nameservers; the registrar points at them by hand.
+    prevent_destroy = true
+  }
 }
 
-# Orange-cloud CNAME so www.whalecore.com resolves through Cloudflare's
-# edge and Universal SSL fronts the Pages origin. Pages requires the
-# proxy on for custom-domain TLS to work.
-resource "cloudflare_dns_record" "stage_1_whalecore_www_pages" {
-  zone_id = cloudflare_zone.stage_1.id
-  name    = "www"
-  type    = "CNAME"
-  ttl     = 1 # 1 = auto when proxied
-  proxied = true
-  content = "${cloudflare_pages_project.stage_1.name}.pages.dev"
-}
-
-# Second custom domain: staging.dana.lol. Authoritative DNS for
-# dana.lol lives in Route53 (not Cloudflare), so there's no
-# cloudflare_dns_record partner here — the matching CNAME is in
-# terraform/core/route53.tf:aws_route53_record.primary_staging.
-# Cloudflare validates the TLS cert via that Route53-managed CNAME.
-resource "cloudflare_pages_domain" "stage_1_staging_dana_lol" {
-  account_id   = var.cloudflare_account_id
-  project_name = cloudflare_pages_project.stage_1.name
-  name         = "staging.dana.lol"
+output "stage_1_zone_name_servers" {
+  value       = cloudflare_zone.stage_1.name_servers
+  description = "Update whalecore.com NS at the registrar to these"
 }

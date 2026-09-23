@@ -40,6 +40,11 @@ SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
 PORT = 5432
 METRICS_PORT = 9187  # CNPG's exporter, scraped by alloy in the monitoring ns
 
+# Where the backup CronJob's two containers hand the dump off to each other.
+_DUMP_DIR = "/backup"
+# nonroot in the distroless convention — the upload image has no postgres user.
+_NONROOT_UID = 65532
+
 # SSM parameter paths (terraform-owned values; the SM names with a leading
 # slash since the SM → SSM migration). See base/external-secret.yaml.
 _CREDS_SM = "/k8s/postgres/credentials"
@@ -53,19 +58,13 @@ _LOCAL_SECRET = {
     "POSTGRES_DB": "tripbot_docker",
 }
 
-# The backup CronJob's dump-and-upload script. frame_embeddings data is
+# The backup CronJob's dump and upload scripts. frame_embeddings data is
 # excluded: the vectors are derived + reproducible (re-runnable batch embed,
 # dedicated dump via `task tripbot:stage:db:backup:vectors`) and would bloat
 # every tiered dump by GBs. The table definition still ships (schema, not
 # data), so a restore leaves an empty table for migrations/seed to fill.
-_BACKUP_SCRIPT = """\
+_DUMP_SCRIPT = """\
 set -euo pipefail
-apk add --no-cache aws-cli
-TS=$(date -u +%Y%m%d-%H%M%SZ)
-HOUR=$(date -u +%H)
-DOW=$(date -u +%u)   # 1=Mon ... 7=Sun
-DUMP=/tmp/dump.pgcustom
-
 echo "Dumping ${POSTGRES_DB}"
 PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \\
   --format=custom \\
@@ -73,6 +72,14 @@ PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \\
   --exclude-table-data=frame_embeddings \\
   "$POSTGRES_DB" \\
   > "$DUMP"
+echo "Dumped $(wc -c < "$DUMP") bytes"
+"""
+
+_UPLOAD_SCRIPT = """\
+set -euo pipefail
+TS=$(date -u +%Y%m%d-%H%M%SZ)
+HOUR=$(date -u +%H)
+DOW=$(date -u +%u)   # 1=Mon ... 7=Sun
 
 echo "Uploading hourly/${TS}.dump"
 aws s3 cp --no-progress "$DUMP" "s3://${S3_BUCKET}/hourly/${TS}.dump"
@@ -87,7 +94,6 @@ if [ "$HOUR" = "04" ] && [ "$DOW" = "7" ]; then
   aws s3 cp --no-progress "$DUMP" "s3://${S3_BUCKET}/weekly/${TS}.dump"
 fi
 
-rm -f "$DUMP"
 echo "OK"
 """
 
@@ -440,17 +446,62 @@ class Postgres(Construct):
         )
 
     def _backup_cronjob(self, ns, *, cnpg):
+        # Split in two so the whole pod can satisfy PSA `restricted`: pg_dump
+        # and the aws CLI live in different images, and installing one into the
+        # other at runtime would need root. The dump lands on a shared
+        # emptyDir, group-owned via fsGroup so both non-root uids can write it.
+        dump_mount = k8s.VolumeMount(name="dump", mount_path=_DUMP_DIR)
+        dump_env = k8s.EnvVar(name="DUMP", value=f"{_DUMP_DIR}/dump.pgcustom")
         # The client major must be >= the server's: a 16 pg_dump refuses an
         # 18 server outright. PGHOST picks the server the same way — the CNPG
         # Cluster's rw Service, or the legacy StatefulSet's Service.
-        backup = k8s.Container(
-            name="backup",
+        dump = k8s.Container(
+            name="dump",
             image="postgres:18-alpine" if cnpg else "postgres:16-alpine",
             command=["/bin/sh", "-c"],
-            args=[_BACKUP_SCRIPT],
-            env=[k8s.EnvVar(name="PGHOST", value="pg-rw" if cnpg else "postgres")],
+            args=[_DUMP_SCRIPT],
+            # uid 70 = postgres in the Alpine images (999 is the Debian ones).
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+                run_as_non_root=True,
+                run_as_user=70,
+            ),
+            env=[
+                k8s.EnvVar(name="PGHOST", value="pg-rw" if cnpg else "postgres"),
+                dump_env,
+            ],
             env_from=[
                 k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME)),
+            ],
+            resources=k8s.ResourceRequirements(
+                requests={
+                    "cpu": k8s.Quantity.from_string("100m"),
+                    "memory": k8s.Quantity.from_string("128Mi"),
+                },
+                limits={"memory": k8s.Quantity.from_string("512Mi")},
+            ),
+            volume_mounts=[dump_mount],
+        )
+        upload = k8s.Container(
+            name="upload",
+            # ECR Public, not Docker Hub: an hourly pull has no rate-limit
+            # headroom to spare. No floating major tag is published there.
+            image="public.ecr.aws/aws-cli/aws-cli:2.36.38",
+            command=["/bin/sh", "-c"],
+            args=[_UPLOAD_SCRIPT],
+            security_context=k8s.SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=k8s.Capabilities(drop=["ALL"]),
+                run_as_non_root=True,
+                run_as_user=_NONROOT_UID,
+            ),
+            env=[
+                dump_env,
+                # The CLI probes $HOME for a config file; /root isn't ours.
+                k8s.EnvVar(name="HOME", value="/tmp"),
+            ],
+            env_from=[
                 k8s.EnvFromSource(
                     secret_ref=k8s.SecretEnvSource(name="postgres-backup-s3")
                 ),
@@ -462,6 +513,7 @@ class Postgres(Construct):
                 },
                 limits={"memory": k8s.Quantity.from_string("512Mi")},
             ),
+            volume_mounts=[dump_mount],
         )
         k8s.KubeCronJob(
             self,
@@ -480,7 +532,23 @@ class Postgres(Construct):
                         ttl_seconds_after_finished=604800,
                         template=k8s.PodTemplateSpec(
                             spec=k8s.PodSpec(
-                                restart_policy="Never", containers=[backup]
+                                restart_policy="Never",
+                                security_context=k8s.PodSecurityContext(
+                                    run_as_non_root=True,
+                                    fs_group=_NONROOT_UID,
+                                    seccomp_profile=k8s.SeccompProfile(
+                                        type="RuntimeDefault"
+                                    ),
+                                ),
+                                # Ordered: the dump has to exist before the upload.
+                                init_containers=[dump],
+                                containers=[upload],
+                                volumes=[
+                                    k8s.Volume(
+                                        name="dump",
+                                        empty_dir=k8s.EmptyDirVolumeSource(),
+                                    )
+                                ],
                             )
                         ),
                     )

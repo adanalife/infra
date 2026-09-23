@@ -97,6 +97,10 @@ resource "cloudflare_pages_project" "guessr" {
 #
 # Free tier covers this comfortably: ~300 rows, one indexed read per guess,
 # against 5 GB of storage and 5M row-reads a day.
+# terraform/platform/grafana-guessr.tf carries this database's id as a literal
+# (`guessr_d1_production`) because it is a separate workspace; update it there if
+# this database is ever recreated, or the guessr Grafana panels read an id that
+# no longer exists.
 resource "cloudflare_d1_database" "guessr_answers" {
   account_id = var.cloudflare_account_id
   name       = "adanalife-guessr-answers"
@@ -123,6 +127,9 @@ resource "cloudflare_d1_database" "guessr_answers" {
   # stage-1's (where the plan-time replacement was first observed).
   lifecycle {
     ignore_changes = [primary_location_hint]
+
+    # Holds `plays`, the one table nothing can regenerate.
+    prevent_destroy = true
   }
 }
 

@@ -22,12 +22,14 @@ from adanalife_k8s.charts import (
     ArgoCDChart,
     BurritoChart,
     DashcamLocalizeChart,
+    KmsgChart,
     NfsPVChart,
     DataChart,
     MediamtxChart,
     MusicLocalizeChart,
     PlatformArgoChart,
     SupportingChart,
+    T5WatchdogChart,
     UpsMonitorChart,
 )
 from adanalife_k8s.config import ENVS, load_env
@@ -105,7 +107,9 @@ if not only:
         lan_host=f"argocd.{load_env('development').dns_base}",
         lan_tls=False,
         ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
+        t5_watchdog=False,  # no Talos node on the k3d dev cluster to probe or reboot
         arc=False,  # no runner host on the dev cluster; runners are minipc-only
+        kmsg=False,  # k3d has no Talos API; there is no kernel log to read
     )
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
@@ -120,11 +124,19 @@ if not only:
     # k3d dev Argo doesn't reference it — that cluster can't reach the Synology
     # NUT server). See constructs/ups_monitor.py.
     UpsMonitorChart(app, "ups-monitor")
+    # The T5 watchdog — same singleton shape, reboots the node when the
+    # /var/mnt/data UserVolume stops answering. See constructs/t5_watchdog.py.
+    T5WatchdogChart(app, "t5-watchdog")
     # ARC supporting unit (namespaces + runner LimitRange + GitHub App
     # ExternalSecret) — cluster-singleton, delivered by a minipc-only Argo
     # Application. The two ARC Helm charts are platform components
     # (helm_platform.py). See constructs/arc.py.
     ArcChart(app, "arc")
+    # Kernel-log shipper — cluster-singleton in the `kmsg` namespace,
+    # env-agnostic. Streams the node's dmesg to stdout, where alloy-logs picks it
+    # up for Loki. Minipc-only (the k3d dev Argo has no Talos API to read). See
+    # constructs/kmsg.py.
+    KmsgChart(app, "kmsg")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with

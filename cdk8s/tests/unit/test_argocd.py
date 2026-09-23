@@ -19,8 +19,10 @@ _DEV = dict(
     tailscale_ui=False,
     lan_host="argocd.dev.whereisdana.today",
     lan_tls=False,
-    ups_monitor=False,  # dev can't reach the Synology NUT server
+    ups_monitor=False,
+    t5_watchdog=False,  # dev can't reach the Synology NUT server
     arc=False,  # no runner host on the dev cluster
+    kmsg=False,  # k3d has no Talos API; there is no kernel log to read
 )
 
 

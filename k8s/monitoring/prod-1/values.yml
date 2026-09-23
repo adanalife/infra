@@ -5,6 +5,9 @@
 # terraform/platform/grafana-dashboards/:
 #
 #   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
+#   - alloy-receiver → OTLP in from the app pods (tripbot, onscreens,
+#     playout, console, gateway), fanned out to VictoriaMetrics and to
+#     the Grafana Cloud OTLP gateway
 #   - kube-state-metrics → cluster/pod state metrics to Mimir
 #   - kubelet + cAdvisor scrape (built into clusterMetrics)
 #
@@ -14,10 +17,13 @@
 # gets its own ns labeled `privileged`. This chart's workloads all stay
 # under baseline.
 #
-# Credentials come from the grafana-cloud-metrics-write Secret in this
-# namespace, materialized by the ExternalSecret in external-secret.yaml.
+# Credentials come from the grafana-cloud-metrics-write and grafana-cloud-otlp
+# Secrets in this namespace, materialized by the ExternalSecrets in
+# external-secret.yaml.
 #
 # Deltas from development/values.yml:
+#   - applicationObservability + the alloy-receiver collector exist only
+#     here: no app pod exports OTLP in development (OTEL_SDK_DISABLED).
 #   - cluster.name — labels the physical cluster (adanalife-minipc) in
 #     Grafana Cloud dashboard filters. stage-1 and prod-1 co-tenant this
 #     one mini-PC cluster and are separated by the `namespace` label
@@ -47,13 +53,22 @@ destinations:
       create: false
       name: grafana-cloud-metrics-write
       namespace: monitoring
+    # OTLP-sourced series only: promote resource attributes to labels, so the
+    # alert rules' `service_platform` / `deployment_environment` selectors
+    # keep matching. Mimir's own OTLP gateway did this promotion for the
+    # pods' direct pushes; the remote_write path has to be told. Scraped
+    # series are untouched.
+    openTelemetryConversion:
+      resourceToTelemetryConversion: true
     # Cloud allowlist. This destination's remote_write feeds Grafana
     # Cloud's capped free tier (15K active-series hard cap); localMetrics
     # (VictoriaMetrics) receives the full scrape unfiltered, so anything
-    # dropped here stays queryable there. OTLP-push app metrics
-    # (tripbot/obs/playout/onscreens) bypass this pipeline entirely — they
-    # push straight to the cloud OTLP endpoint — so the cloud holds all of
-    # those regardless of these rules.
+    # dropped here stays queryable there. App metrics arriving over OTLP
+    # (tripbot/obs/playout/onscreens/console) come through this same
+    # pipeline — applicationObservability below lists this destination —
+    # so the keep-list is the one gate on what reaches the cloud, for
+    # scraped and pushed series alike. Dashboards read VictoriaMetrics
+    # over PDC; only what an alert rule evaluates needs to be here.
     #
     # The keep rule is an allowlist: it ships only the scraped series that
     # cloud alerts and dashboards depend on, and drops every other scraped
@@ -65,6 +80,17 @@ destinations:
     #                         the relay-health alerts.
     #   kube_pod_{info,start_time,container_status_restarts_total}  — the
     #                         per-service pod-health rows on service-health-*.
+    #   kube_deployment_status_replicas_available  — scrape-health's
+    #                         alloy-receiver rule. The receiver publishes no
+    #                         metrics of its own (no otelcol_* family reaches
+    #                         either store, and nothing scrapes the Alloy pods),
+    #                         so kube-state-metrics' view of its Deployment is
+    #                         the only signal that separates "the receiver is
+    #                         down" from "all five apps went quiet at once".
+    #                         Whole family rather than one deployment: 67 series
+    #                         outside stage-1, against 2802 active of a 15000
+    #                         cap, and scoping it would need a second relabel
+    #                         rule since this one keys on __name__.
     #   xpum_*              — the igpu-performance dashboard. ~9 series for
     #                         the shared-encoder contention view; the iGPU is
     #                         the scarcest resource on the minipc, so this one
@@ -117,6 +143,22 @@ destinations:
     #                         repository and job_name (~170 series), and the
     #                         two duration histograms add a `le` dimension on
     #                         top of that (~7800).
+    #   etcd_disk_wal_fsync_duration_seconds_(bucket|sum) /
+    #   etcd_disk_backend_commit_duration_seconds_bucket /
+    #   etcd_server_leader_changes_seen_total  — the two write-latency
+    #                         histograms and the leader-change counter, for the
+    #                         control-plane-health rules. A single-node control
+    #                         plane wedges when these stall past the 5s lease
+    #                         deadline, and every other signal of that is a
+    #                         downstream symptom. The buckets carry a `le`
+    #                         dimension, so ~35 series for one node against a
+    #                         15000 cap; the rest of etcd's ~200 families stay
+    #                         local-VM-only. fsync also keeps its `_sum`, one
+    #                         more series, so the mean is computable as
+    #                         rate(_sum) / rate(_bucket{le="+Inf"}): the p99
+    #                         alerts, but a thin multi-second tail and a
+    #                         uniformly slow drive look the same in quantiles
+    #                         and different in the mean.
     #   up                  — every scrape target's own health, for the
     #                         scrape-health alert. This is the family that
     #                         tells "the condition an alert watches is true"
@@ -130,6 +172,27 @@ destinations:
     #                         cluster-wide (3 of them stage-dropped) plus the
     #                         integrations' own, against 2802 active series of
     #                         a 15000 cap measured 2026-09-02.
+    #   The OTLP-pushed app families, exactly the ones an alert rule reads
+    #   (grep terraform/platform/grafana-alerts.tf before touching this):
+    #   console_platform_component_up  — the stream-health gate signal.
+    #   console_terraform_plan_age_seconds  — burrito-health's plan-staleness
+    #                         rule. The console's number rather than Burrito's,
+    #                         which is why it is the one that still moves when
+    #                         Burrito is what died. Four series, one per layer.
+    #   go_goroutine_count, go_memory_used_bytes  — the go-runtime group.
+    #   obs_*  (nine gauges)  — stream-health: streaming_active, the
+    #                         skipped/total frame counters, congestion,
+    #                         reconnecting, background-audio state.
+    #   playout_nats_connected, playout_pipeline_running_time_ms  — relay-health.
+    #   tripbot_*  (nine)   — channel_live, gateway_up, twitch_connected,
+    #                         eventsub_subscriptions, the token expiry, the
+    #                         OBS recovery/silent-disconnect counters, the
+    #                         background-audio bed/tracks gauges.
+    #                         Everything else the apps push (HTTP/DB
+    #                         histograms, command durations, chat counters —
+    #                         ~3K series) is VM-only, where the dashboards
+    #                         read it. Adding a rule against a pushed metric
+    #                         means adding its name here, same as scraped.
     # The rest of what's scraped is local-VM-only: the other node_*
     # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
     # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
@@ -208,7 +271,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|up)/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|etcd_disk_wal_fsync_duration_seconds_(bucket|sum)|etcd_disk_backend_commit_duration_seconds_bucket|etcd_server_leader_changes_seen_total|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
@@ -219,6 +282,15 @@ destinations:
     # collectors scrape, including the stage-1 and launch-day-trim
     # series the cloud destination drops.
     url: http://victoria-metrics.monitoring.svc.cluster.local:8428/api/v1/write
+    # For the app metrics that arrive over OTLP (applicationObservability
+    # below): promote every resource attribute to a label, so
+    # deployment_environment / service_platform / service_name are
+    # selectable in PromQL the way they are in Grafana Cloud. Without this
+    # the OTLP→Prometheus conversion parks them on target_info only, and a
+    # stage-1 series is indistinguishable from prod-1 in VM. Scraped series
+    # are untouched.
+    openTelemetryConversion:
+      resourceToTelemetryConversion: true
 
   logs:
     type: loki
@@ -231,6 +303,58 @@ destinations:
       create: false
       name: grafana-cloud-metrics-write
       namespace: monitoring
+
+  # Grafana Cloud's OTLP gateway, fed by alloy-receiver: app logs to Loki
+  # and spans to Tempo. The receiver is the one place the cloud credential
+  # lives; the app pods carry only the receiver's Service address. The pod-side secret is JSON in OTEL env-var shape, so the
+  # ExternalSecret re-templates it into the two keys read here. (The chart
+  # lowercases destination names when it labels Alloy components, hence
+  # `secret.cloudotlp` below against a `cloudOtlp` destination.)
+  cloudOtlp:
+    type: otlp
+    protocol: http
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.cloudotlp.data["OTLP_ENDPOINT"])
+    extraHeadersFrom:
+      Authorization: convert.nonsensitive(remote.kubernetes.secret.cloudotlp.data["OTLP_AUTHORIZATION"])
+    secret:
+      create: false
+      name: grafana-cloud-otlp
+      namespace: monitoring
+    # Logs and traces only. App metrics reach the cloud through the
+    # `metrics` destination above and its keep-list; sending them here too
+    # would land every pushed series in Mimir unfiltered (that was ~75% of
+    # the tenant's active series) and double up the allowlisted ones.
+    metrics:
+      enabled: false
+    logs:
+      enabled: true
+    traces:
+      enabled: true
+
+# OTLP in from the app pods. Every app that exports OTLP points
+# OTEL_EXPORTER_OTLP_ENDPOINT at this collector's Service
+# (http://k8s-monitoring-alloy-receiver.monitoring.svc:4318) instead of
+# at Grafana Cloud. Metrics fan out to VictoriaMetrics in full (the
+# dashboards and the console's cluster PromQL source read there, stage-1
+# included) and to the cloud Mimir tenant through the keep-list (only what
+# the alert rules evaluate); logs and traces go to the cloud gateway —
+# there is no in-cluster log or trace store.
+applicationObservability:
+  enabled: true
+  collector: alloy-receiver
+  destinations:
+    - localMetrics
+    - metrics
+    - cloudOtlp
+  receivers:
+    otlp:
+      http:
+        enabled: true
+  connectors:
+    # Host-info metrics for Grafana Cloud's application-observability
+    # product; nothing here reads them and they would spend cloud series.
+    grafanaCloudMetrics:
+      enabled: false
 
 clusterMetrics:
   enabled: true
@@ -410,6 +534,54 @@ telemetryServices:
 collectors:
   alloy-metrics:
     presets: [clustered, statefulset]
+    # etcd's plaintext metrics listener on the control-plane node. The chart
+    # has no etcd feature, and etcd is a Talos host service rather than a pod,
+    # so there is nothing to annotate for autodiscovery — it takes a scrape of
+    # its own. Node discovery rather than a hardcoded address: the node's
+    # address is its tailnet IP, which is not a thing to pin in a values file.
+    #
+    # Depends on `cluster.etcd.extraArgs.listen-metrics-urls` in the Talos
+    # machine config (talos/adanalife-minipc/controlplane.patch.yaml). Without
+    # it nothing listens on 2381 and this target reads `up = 0`, which the
+    # scrape-health rule pages on after 15m — so apply the machine config
+    # BEFORE syncing this chart, not after.
+    #
+    # Control-plane nodes only. etcd runs nowhere else, and a worker in the
+    # target set would be a permanently-down target rather than a finding.
+    extraConfig: |-
+      discovery.kubernetes "etcd_nodes" {
+        role = "node"
+      }
+
+      discovery.relabel "etcd" {
+        targets = discovery.kubernetes.etcd_nodes.targets
+
+        rule {
+          // The label's VALUE is empty on a control-plane node, so presence is
+          // what has to be tested — matching the value would match every node.
+          source_labels = ["__meta_kubernetes_node_labelpresent_node_role_kubernetes_io_control_plane"]
+          regex         = "true"
+          action        = "keep"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+          target_label  = "__address__"
+          replacement   = "$1:2381"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          target_label  = "instance"
+        }
+      }
+
+      prometheus.scrape "etcd" {
+        targets    = discovery.relabel.etcd.output
+        job_name   = "etcd"
+        forward_to = [
+          prometheus.remote_write.localmetrics.receiver,
+          prometheus.remote_write.metrics.receiver,
+        ]
+      }
   alloy-logs:
     # `clustered` lets replicas partition pods between themselves so
     # podLogsViaKubernetesApi doesn't N-multiply kube-API log fetches.
@@ -417,6 +589,21 @@ collectors:
     presets: [clustered, daemonset]
   alloy-singleton:
     presets: [singleton]
+  # OTLP in from the app pods (applicationObservability). A plain
+  # Deployment: it holds no scrape state, so it needs neither the
+  # clustered nor the statefulset preset the scrapers use.
+  #
+  # Two replicas because every app's telemetry funnels through this one
+  # collector — tripbot, onscreens, playout, the console and the gateway
+  # all export here, and the SDKs only retry briefly, so a receiver
+  # outage is permanent data loss for all five at once rather than a
+  # delayed backfill. Statelessness is what makes the second replica free:
+  # the Service round-robins, and neither replica needs to know about the
+  # other. Both land on the one minipc node, so this covers a crash, an
+  # OOM kill and a rollout, not the node itself.
+  alloy-receiver:
+    presets: [deployment]
+    replicas: 2
 
 # `collectorCommon.alloy` passes through to the underlying grafana/alloy
 # subchart, which uses two distinct securityContext keys (the doubled
