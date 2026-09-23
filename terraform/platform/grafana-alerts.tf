@@ -95,8 +95,7 @@ locals {
   ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
 
   // The frame gauge the encoder-wedged rule fires on, in Explore rather than on
-  // a dashboard: the only panel plotting it is scoped to service_name=vlc-server
-  // and would show none of the alert's series. Responders want to see when the
+  // a dashboard: no dashboard panel plots it. Responders want to see when the
   // gauge flattened before bouncing the pod.
   obs_frames_link = "[frames](${local.grafana_url}/explore?left=${urlencode(jsonencode({
     queries = [{

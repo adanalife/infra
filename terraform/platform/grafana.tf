@@ -103,11 +103,6 @@ locals {
     "application-latency-commands-and-db",
     "platform-services",
     "miles-leaderboard", # all-time per-viewer miles, read from tripbot's /api/stats/community over the tripbot-api datasource rather than from a metric (grafana-tripbot-api.tf)
-    # The vlc-server graveyard (titled 90/92 so they sort below everything).
-    # vlc-server was deleted 2026-07-17 (tripbot#1135) and emits nothing;
-    # these two chart only vlc-server-labeled series and are permanently dark.
-    "service-health-vlc-server",
-    "tripbot-to-vlc-traffic",
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}
