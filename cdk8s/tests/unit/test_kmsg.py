@@ -101,19 +101,7 @@ def test_minipc_emits_kmsg_application():
 def test_dev_omits_kmsg():
     # k3d has no Talos API to read, so the dev Argo must not carry the unit or
     # its namespace destination.
-    objs = _argo(
-        envs=("development",),
-        autosync_envs=("development",),
-        autosync_holdouts=(),
-        selfheal=False,
-        notifications_secret=False,
-        tailscale_ui=False,
-        lan_host="argocd.dev.whereisdana.today",
-        lan_tls=False,
-        ups_monitor=False,
-        arc=False,
-        kmsg=False,
-    )
+    objs = _argo(cluster="k3d")
     assert not [
         o
         for o in objs

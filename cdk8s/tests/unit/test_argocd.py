@@ -10,20 +10,7 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
 
-_DEV = dict(
-    envs=("development",),
-    autosync_envs=("development",),
-    autosync_holdouts=(),
-    selfheal=False,  # dev autosyncs but doesn't revert hand-edits (scratch env)
-    notifications_secret=False,
-    tailscale_ui=False,
-    lan_host="argocd.dev.whereisdana.today",
-    lan_tls=False,
-    ups_monitor=False,
-    t5_watchdog=False,  # dev can't reach the Synology NUT server
-    arc=False,  # no runner host on the dev cluster
-    kmsg=False,  # k3d has no Talos API; there is no kernel log to read
-)
+_DEV = dict(cluster="k3d")
 
 
 def _synth(**kwargs):

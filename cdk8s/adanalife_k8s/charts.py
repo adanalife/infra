@@ -273,13 +273,13 @@ class ArgoCDChart(Chart):
     it's committed to dist/ + golden-gated like the app units. Cluster-level
     (env-agnostic — it lists the envs internally)."""
 
-    def __init__(self, scope: Construct, id: str, **argo_kwargs):
+    def __init__(self, scope: Construct, id: str, cluster: str = "minipc"):
         super().__init__(scope, id)
         from adanalife_k8s.constructs.argocd import ArgoCD
 
-        # argo_kwargs select the cluster's env-set + UI mode: defaults give the
-        # minipc instance; main.py passes the k3d dev variant (development, no UI).
-        ArgoCD(self, **argo_kwargs)
+        # `cluster` selects the env-set + UI mode: "minipc" (the default) or
+        # the k3d dev variant main.py passes.
+        ArgoCD(self, cluster=cluster)
 
 
 class BurritoChart(Chart):

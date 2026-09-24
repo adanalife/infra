@@ -222,34 +222,53 @@ class ArgoCD(Construct):
     env-set so the same authoring path emits both the minipc instance (prod-1 +
     stage-1) and the k3d dev instance (development only). Each Argo targets its OWN
     cluster in-cluster, so there's no cross-cluster networking; the instances differ
-    by which envs + how the UI is exposed:
+    by which envs + how the UI is exposed, all selected by `cluster`
+    ("minipc" | "k3d"); the per-cluster values are derived at the top of
+    __init__:
 
       * `tailscale_ui` — emit the tailnet UI Ingress (minipc only; the dev cluster
         has no tailscale-operator).
-      * `lan_host` — the traefik UI Ingress host (external-dns-published), or None
-        for no traefik UI. minipc: argocd.prod.whereisdana.today; the k3d dev
-        cluster: argocd.dev.whereisdana.today, reached at :9080 via the k3d
-        port-map. `lan_tls` adds the cert-manager TLS block (minipc; off on dev)."""
+      * `lan_host` — the traefik UI Ingress host (external-dns-published).
+        minipc: argocd.prod.whereisdana.today; the k3d dev cluster:
+        argocd.dev.whereisdana.today, reached at :9080 via the k3d port-map.
+        `lan_tls` adds the cert-manager TLS block (minipc; off on dev)."""
 
     def __init__(
         self,
         scope: Construct,
         id: str = "argocd",
         *,
-        envs: tuple[str, ...] = CUTOVER_ENVS,
-        autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
-        autosync_holdouts: tuple[tuple[str, str], ...] = AUTOSYNC_HOLDOUTS,
-        selfheal: bool = True,
-        tailscale_ui: bool = True,
-        lan_host: str | None = LAN_HOST,
-        lan_tls: bool = True,
-        notifications_secret: bool = True,
-        ups_monitor: bool = True,
-        t5_watchdog: bool = True,
-        arc: bool = True,
-        kmsg: bool = True,
+        cluster: str = "minipc",
     ):
         super().__init__(scope, id)
+        if cluster not in ("minipc", "k3d"):
+            raise ValueError(f"unknown Argo cluster {cluster!r}")
+        minipc = cluster == "minipc"
+        # The minipc Argo manages prod-1 + stage-1; the k3d dev Argo is a
+        # separate in-cluster install managing only development, where every
+        # app autosyncs since the env is throwaway. The prod OBS holdout is
+        # minipc-only.
+        envs = CUTOVER_ENVS if minipc else ("development",)
+        autosync_envs = AUTOSYNC_ENVS if minipc else ("development",)
+        autosync_holdouts = AUTOSYNC_HOLDOUTS if minipc else ()
+        # UI exposure: tailnet Ingress on the minipc only (no tailscale-operator
+        # on the dev cluster); the traefik Ingress everywhere, TLS on the minipc
+        # only.
+        tailscale_ui = minipc
+        if minipc:
+            lan_host = LAN_HOST
+        else:
+            from adanalife_k8s.config import load_env
+
+            lan_host = f"argocd.{load_env('development').dns_base}"
+        lan_tls = minipc
+        # The dev cluster runs notifications.enabled=false.
+        notifications_secret = minipc
+        # The minipc singletons, each off on k3d: the dev cluster can't reach
+        # the Synology NUT server (UPS monitor), has no Talos node to probe or
+        # reboot (T5 watchdog), no runner host (ARC — runners are minipc-only),
+        # and no Talos API, so no kernel log to read (kmsg).
+        ups_monitor = t5_watchdog = arc = kmsg = minipc
         self.envs = envs
         # Whether the autosync block reconciles live drift (selfHeal). True on the
         # minipc (prod/stage must match git). False on the throwaway k3d dev
@@ -257,7 +276,7 @@ class ArgoCD(Construct):
         # sticks (Argo shows OutOfSync rather than stomping it) — dev is a scratch
         # env, so manual experimentation shouldn't be fought. The /spec/syncPolicy
         # emergency brake (ignoreApplicationDifferences) still applies on top.
-        self._selfheal = selfheal
+        self._selfheal = minipc
         # Envs whose console (the cross-repo tripbot-console unit) this Argo
         # delivers — the envs with a defined console revision. Resolves empty on
         # the k3d dev instance (development deploys via `task deploy:dev` in the
