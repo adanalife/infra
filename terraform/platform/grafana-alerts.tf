@@ -885,6 +885,77 @@ resource "grafana_rule_group" "host_lifecycle" {
       })
     }
   }
+
+  // Tier three: what the reboot cost. The two rules above answer "did the box
+  // restart"; neither says whether anything was lost when it did. tripbot
+  // counts, two minutes after each boot, the platform's login events from
+  // before this process started that no logout ever paired
+  // (cmd/tripbot/opsevents.go) — a graceful exit pairs every session and
+  // reports 0, and anything else names how many viewers had in-flight miles
+  // discarded. The two-minute delay is what keeps a rolling update's draining
+  // pod from reading as an orphan.
+  //
+  // The gauge is set once per boot and then held for the life of the pod, so
+  // this rule stays firing until a later boot reports a clean exit. That is
+  // the intended shape rather than a stuck alert: the orphaned rows are still
+  // orphaned, and the reading is a fact about data on disk rather than a
+  // transient. for = 0 because the value never flaps — it is written once.
+  //
+  // No platform gate. A parked platform's tripbot still runs and still loses
+  // sessions on an ungraceful exit, and the loss is in the same events table
+  // either way.
+  rule {
+    name           = "tripbot: the last exit left sessions without a logout"
+    for            = "0m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.service_platform }} tripbot booted to {{ $value }} orphaned sessions — that many viewers lost in-flight miles"
+      description = "tripbot_orphaned_sessions on {{ $labels.service_platform }} is above zero: the previous process exited without writing a logout for every open session, so those viewers' in-flight miles were discarded. The count is taken two minutes after boot and covers only sessions opened before this process started. Correlate with the sibling reboot rules first — if the node bounced, this is its cost and there is nothing to fix beyond knowing the number. If it did not, the pod was killed some other way (OOM, an ungraceful rollout, a liveness kill) and that is the thing to chase: `kubectl --context admin@adanalife-minipc -n prod-1 describe pod -l app=tripbot-{{ $labels.service_platform }}` names the last termination reason. The gauge holds its value for the life of the pod, so this resolves at the next boot that reports a clean exit rather than on its own."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (service_platform) (tripbot_orphaned_sessions{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
 }
 
 # UPS health — the Synology is the NUT *server* and the mini-PC only a client,
