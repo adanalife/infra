@@ -223,19 +223,34 @@ resource "grafana_contact_point" "healthchecks_deadman" {
   }
 }
 
-// Always-on mute timing. Covers every minute of every day, so any notification
-// policy route that references it never delivers. Used to silence a kept-but-
-// noisy rule (labelled mute=true): the rule keeps evaluating and shows in the
-// Alerting UI, but no notification is sent.
-resource "grafana_mute_timing" "always" {
-  name = "always-muted"
+// Mute timing that covers the whole week except one hour: Monday 14:00–15:00
+// UTC. A route that references it delivers nothing outside that hour, and
+// inside it Alertmanager sends whatever is still firing — a muted notification
+// is dropped without being logged as sent, so the next group flush after the
+// window opens goes out. With the route's 1h repeat_interval that is one
+// message per alert per week: a weekly digest of the kept-but-noisy rules
+// (labelled mute=true), which stay evaluating and visible in the Alerting UI
+// the rest of the time. Anything that fires and resolves between Mondays is
+// never pushed, which is the point of muting it.
+resource "grafana_mute_timing" "weekly_digest" {
+  name = "muted-except-monday-digest"
 
+  intervals {
+    weekdays = ["tuesday:saturday", "sunday"]
+  }
   intervals {
     times {
       start = "00:00"
+      end   = "14:00"
+    }
+    weekdays = ["monday"]
+  }
+  intervals {
+    times {
+      start = "15:00"
       end   = "24:00"
     }
-    weekdays = ["sunday:saturday"]
+    weekdays = ["monday"]
   }
 }
 
@@ -304,12 +319,15 @@ resource "grafana_notification_policy" "root" {
   }
 
   // Muted-but-kept alerts (labelled mute=true): the two frame-skip early
-  // warnings and the gateway metadata-drift rule. Each fires often enough, with
-  // no per-firing action, that the push is noise — routine iGPU contention on
-  // the shared single-node minipc for the first two, a broadcast the gateway
-  // does not own for the third. They're silenced via the always-on mute timing
-  // while the rules are kept (still visible and firing in the Alerting UI, and
-  // still the place to look when the sustained escalation above them does page).
+  // warnings. Each fires often enough, with no per-firing action, that a push
+  // per firing is noise — routine iGPU contention on the shared single-node
+  // minipc. The rules are kept (still visible and firing in the Alerting UI,
+  // and still the place to look when the sustained escalation above them does
+  // page), and the route delivers them once a week: the mute timing opens for
+  // one hour on Monday, so whatever is still firing then reaches Discord as a
+  // digest, and nothing that fired and cleared in between ever does. A muted
+  // rule that has been firing for three weeks unseen is how the youtube/tags
+  // drift went unnoticed; the weekly line is the fix for that.
   // continue=false so it never falls through to the Discord default receiver.
   policy {
     matcher {
@@ -319,7 +337,7 @@ resource "grafana_notification_policy" "root" {
     }
     contact_point   = grafana_contact_point.discord_alerts.name
     continue        = false
-    mute_timings    = [grafana_mute_timing.always.name]
+    mute_timings    = [grafana_mute_timing.weekly_digest.name]
     group_by        = ["grafana_folder", "alertname"]
     group_wait      = "30s"
     group_interval  = "5m"
