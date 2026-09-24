@@ -26,7 +26,8 @@ _SHARED_SECRETS = [
 
 
 def emit_supporting(scope: Construct, env: EnvConfig) -> None:
-    """shared-secrets + cert-manager app-issuers for an eso env. The ESO
+    """shared-secrets + the per-namespace cert-manager ACME Issuers (and their
+    Route53 credential) for an eso env. The ESO
     SecretStore these reference is emitted by DataChart, not here."""
     if env.secret_source != "eso":
         return  # local env: no ESO, no cert-manager
