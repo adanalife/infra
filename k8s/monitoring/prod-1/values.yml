@@ -457,6 +457,22 @@ clusterEvents:
 podLogsViaKubernetesApi:
   enabled: true
   collector: alloy-logs
+  # Loki's free tier caps ingest at 50 GB/month. CI job output already lives
+  # in GitHub, so the runner pods are skipped outright (arc-systems, where the
+  # listener and controller log, is still collected).
+  excludeNamespaces: [arc-runners]
+  # ArgoCD's per-reconcile "Reconciliation completed" lines and Alloy's
+  # per-stream "opened log stream" lines are most of those two services'
+  # volume and carry no signal; warn and error still ship.
+  extraLogProcessingStages: |-
+    stage.match {
+      selector = "{namespace=\"argocd\"} |= \"level=info\""
+      action   = "drop"
+    }
+    stage.match {
+      selector = "{namespace=\"monitoring\", service_name=\"alloy-logs\"} |= \"level=info\""
+      action   = "drop"
+    }
 
 annotationAutodiscovery:
   enabled: true
