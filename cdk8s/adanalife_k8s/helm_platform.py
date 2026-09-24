@@ -151,7 +151,8 @@ def cluster_components(
     them via cdk8s.Helm; argo_platform emits an Argo Application per
     Argo-manageable one. Excludes the per-env charts (external-dns, NATS — see
     `env_components`) and the kustomize-only bits (local-path-provisioner,
-    intel-gpu/xpu, ESO cluster-store, cert-manager app-issuers)."""
+    intel-gpu/xpu, ESO cluster-store). The per-namespace cert-manager Issuers
+    come from `supporting.emit_supporting`."""
     minipc = cluster == "minipc"
     components: list[HelmComponent] = []
     if minipc:
