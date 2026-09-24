@@ -23,19 +23,7 @@ from adanalife_k8s.constructs.t5_watchdog import (
 )
 from adanalife_k8s.naming import CONFIG_HASH_ANNOTATION, config_hash
 
-_DEV = dict(
-    envs=("development",),
-    autosync_envs=("development",),
-    autosync_holdouts=(),
-    selfheal=False,
-    notifications_secret=False,
-    tailscale_ui=False,
-    lan_host="argocd.dev.whereisdana.today",
-    lan_tls=False,
-    ups_monitor=False,
-    t5_watchdog=False,
-    arc=False,
-)
+_DEV = dict(cluster="k3d")
 
 
 def _synth():

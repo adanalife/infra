@@ -20,18 +20,7 @@ from adanalife_k8s.config import load_env
 # name).
 CONSOLE_ROLE = "tripbot-console-arc"
 
-_DEV = dict(
-    envs=("development",),
-    autosync_envs=("development",),
-    autosync_holdouts=(),
-    selfheal=False,
-    notifications_secret=False,
-    tailscale_ui=False,
-    lan_host="argocd.dev.whereisdana.today",
-    lan_tls=False,
-    ups_monitor=False,
-    arc=False,
-)
+_DEV = dict(cluster="k3d")
 
 
 def _synth(chart):
