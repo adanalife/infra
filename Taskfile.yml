@@ -143,34 +143,41 @@ tasks:
   # Post-rollout verification: confirm APP's running pods actually carry the
   # image the Deployment asks for. imagePullPolicy Always can silently roll a
   # pod onto a different image than expected — check the SHA before
-  # feature-testing a deploy. Read-only.
+  # feature-testing a deploy. Read-only, so it names its own context rather than
+  # borrowing the ambient one: CONTEXT defaults to the minipc's, and
+  # CONTEXT=tailscale-operator.<tailnet> reads it off-LAN. No
+  # `kubectl config use-context` needed.
   k8s:stage:verify-sha:
-    desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot)
+    desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot [CONTEXT=…])
     cmds:
       - task: k8s:_verify-sha
-        vars: { ENV: stage-1, APP: '{{.APP}}' }
+        vars: { ENV: stage-1, APP: '{{.APP}}', CONTEXT: '{{.CONTEXT}}' }
 
   k8s:prod:verify-sha:
-    desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot)
+    desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot [CONTEXT=…])
     cmds:
       - task: k8s:_verify-sha
-        vars: { ENV: prod-1, APP: '{{.APP}}' }
+        vars: { ENV: prod-1, APP: '{{.APP}}', CONTEXT: '{{.CONTEXT}}' }
 
   k8s:_verify-sha:
     internal: true
     requires:
       vars: [APP]
+    vars:
+      CONTEXT: '{{.CONTEXT | default "admin@adanalife-minipc"}}'
     preconditions:
-      - sh: kubectl cluster-info >/dev/null 2>&1
-        msg: "no reachable cluster — point kubectl at the adanalife-minipc context first"
+      - sh: kubectl --context '{{.CONTEXT}}' cluster-info >/dev/null 2>&1
+        msg: "kube-context {{.CONTEXT}} is unreachable — on the LAN, or pass CONTEXT=<the tailscale-operator context>"
     cmds:
       - |
         set -euo pipefail
-        ns={{.ENV}}
-        want=$(kubectl -n "$ns" get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
+        k() { kubectl --context '{{.CONTEXT}}' -n {{.ENV}} "$@"; }
+        want=$(k get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
         echo "deployment image: $want"
-        sel=$(kubectl -n "$ns" get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
-        kubectl -n "$ns" get pods -l "$sel" -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
+        sel=$(k get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+        # Running only: a Completed pod the GC hasn't reaped yet carries the
+        # digest it last ran, which reads as a mismatch that isn't one.
+        k get pods -l "$sel" --field-selector=status.phase=Running -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
 
   k8s:_nfs-pv:apply:
     internal: true

@@ -12,10 +12,10 @@
       "id": 0,
       "type": "text",
       "title": "About this dashboard",
-      "gridPos": { "x": 0, "y": 62, "w": 24, "h": 3 },
+      "gridPos": { "x": 0, "y": 72, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "These metrics populate when tripbot is receiving Twitch chat over gateway-twitch and messages are flowing. If panels look empty, check `kubectl logs deploy/gateway-twitch` for failing `inbound_chat` requests, and verify gateway-twitch's Twitch token is still valid. **Twitch Helix metrics are not here** — the platform-gateway is the single Helix caller, so rate-budget and Helix-error panels live on the Service Health / platform-gateway dashboard under its Twitch Helix row. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...,service_platform=...}` for the events-table write rate — every kind in the taxonomy, not just login/logout, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate. **Chat feed row** (added 2026-05-15): each chat message arrives as a Loki log record under `{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540))."
+        "content": "These metrics populate when tripbot is receiving Twitch chat over gateway-twitch and messages are flowing. If panels look empty, check `kubectl logs deploy/gateway-twitch` for failing `inbound_chat` requests, and verify gateway-twitch's Twitch token is still valid. **Twitch Helix metrics are not here** — the platform-gateway is the single Helix caller, so rate-budget and Helix-error panels live on the Service Health / platform-gateway dashboard under its Twitch Helix row. The custom counters live in `pkg/instrumentation/tripbot.go` (`tripbot_chat_messages`, `tripbot_chat_commands{command=...}`, `twitch_subscribers_total`, `twitch_followers_total`). Subs/followers are gauges refreshed by the 5-min cron in `cmd/tripbot/tripbot.go`. **Operations row** (added 2026-05-15): `tripbot_command_duration_seconds{command=...}` for per-command latency, `tripbot_events_total{event=...,service_platform=...}` for the events-table write rate — every kind in the taxonomy, not just login/logout, `tripbot_scoreboard_writes_total{scoreboard=...}` for monthly miles/guesses write rate. **Chat feed row** (added 2026-05-15): each chat message arrives as a Loki log record under `{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\", scope_name=\"twitch-chat\"}` with `twitch.user` + `twitch.channel` as attributes — replaces the retired Stackdriver path (see [tripbot#540](https://github.com/adanalife/tripbot/pull/540)). **Most-asked songs**: tripbot's `GET /api/stats/songs` over the `tripbot-api` Infinity datasource, ranking the tracks `!song` named (each answer is recorded in its `command_run` event)."
       }
     },
     {
@@ -137,10 +137,26 @@
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
     },
     {
+      "id": 22,
+      "type": "table",
+      "title": "Most-asked songs (!song, 90d)",
+      "description": "The tracks chat asked about most with !song, from the track each answer named. Read from prod tripbot's /api/stats/songs over the tripbot-api datasource, so the platform and environment selectors don't apply. Bots excluded.",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "tripbot-api" },
+      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 10 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "tripbot-api" }, "type": "json", "source": "url", "format": "table", "parser": "backend", "url": "/api/stats/songs", "url_options": { "method": "GET", "params": [{ "key": "days", "value": "90" }] }, "root_selector": "songs", "columns": [ { "selector": "title", "text": "song", "type": "string" }, { "selector": "artist", "text": "artist", "type": "string" }, { "selector": "count", "text": "asks", "type": "number" }, { "selector": "askers", "text": "viewers", "type": "number" }, { "selector": "last_asked", "text": "last asked", "type": "timestamp" } ] }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": {}, "overrides": [
+        { "matcher": { "id": "byName", "options": "asks" }, "properties": [ { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } } ] },
+        { "matcher": { "id": "byName", "options": "last asked" }, "properties": [ { "id": "unit", "value": "dateTimeFromNow" } ] }
+      ] }
+    },
+    {
       "id": 11,
       "type": "row",
       "title": "Operations",
-      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 42, "w": 24, "h": 1 },
       "collapsed": false
     },
     {
@@ -148,7 +164,7 @@
       "type": "stat",
       "title": "Events / min (all kinds)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 33, "w": 8, "h": 5 },
+      "gridPos": { "x": 0, "y": 43, "w": 8, "h": 5 },
       "targets": [
         { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_events_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -160,7 +176,7 @@
       "type": "stat",
       "title": "Scoreboard writes / min",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 8, "y": 33, "w": 8, "h": 5 },
+      "gridPos": { "x": 8, "y": 43, "w": 8, "h": 5 },
       "targets": [
         { "refId": "A", "expr": "sum by (deployment_environment) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -172,7 +188,7 @@
       "type": "stat",
       "title": "Command p95 (all)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 16, "y": 33, "w": 8, "h": 5 },
+      "gridPos": { "x": 16, "y": 43, "w": 8, "h": 5 },
       "targets": [
         { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))" , "legendFormat": "[{{deployment_environment}}]" }
       ],
@@ -184,7 +200,7 @@
       "type": "timeseries",
       "title": "Command latency (p50 / p95 / p99)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 38, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 48, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p50 [{{deployment_environment}}]" },
         { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 [{{deployment_environment}}]" },
@@ -197,7 +213,7 @@
       "type": "timeseries",
       "title": "Command p95 by command (top 10)",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 38, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 48, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "topk(10, histogram_quantile(0.95, sum by (le, command, deployment_environment) (rate(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))))", "legendFormat": "{{command}} [{{deployment_environment}}]" }
       ],
@@ -208,7 +224,7 @@
       "type": "timeseries",
       "title": "Event rate by kind",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 46, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 56, "w": 24, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "sum by (event, deployment_environment) (rate(tripbot_events_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{event}} / min [{{deployment_environment}}]" }
       ],
@@ -219,7 +235,7 @@
       "type": "timeseries",
       "title": "Scoreboard writes by scoreboard",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 54, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 64, "w": 24, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "sum by (scoreboard, deployment_environment) (rate(tripbot_scoreboard_writes_total{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[5m])) * 60", "legendFormat": "{{scoreboard}} [{{deployment_environment}}]" }
       ],

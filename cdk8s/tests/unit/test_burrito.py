@@ -176,6 +176,15 @@ def test_the_plugin_cache_never_has_two_writers():
     assert _values()["config"]["burrito"]["controller"]["maxConcurrentRunnerPods"] == 1
 
 
+def test_the_plugin_cache_hostpath_is_admitted():
+    # The runner pods mount the plugin cache as a hostPath, which the
+    # cluster-wide PodSecurity baseline rejects; the tenant namespace must
+    # carry the privileged exemption or no runner pod is ever created.
+    (tenant,) = _values()["tenants"]
+    labels = tenant["namespace"]["metadata"]["labels"]
+    assert labels["pod-security.kubernetes.io/enforce"] == "privileged"
+
+
 def test_server_is_never_unauthenticated():
     # The chart spells this out: with both basic auth and OIDC disabled the
     # server is publicly accessible. It is a UI that can reach terraform.
