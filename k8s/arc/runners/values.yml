@@ -157,14 +157,13 @@ template:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
+        # _tmp is TMPDIR for the runner container; it has to exist before
+        # the runner process starts, and the runner only creates _work/_temp.
         command:
           - sudo
-          - chown
-          - "1001:123"
-          - /cache/dot-cache
-          - /cache/gomod
-          - /cache/toolcache
-          - /cache/work
+          - sh
+          - -c
+          - mkdir -p /cache/work/_tmp && chown 1001:123 /cache/dot-cache /cache/gomod /cache/toolcache /cache/work /cache/work/_tmp
         volumeMounts:
           - name: cache-dot-cache
             mountPath: /cache/dot-cache
@@ -198,6 +197,27 @@ template:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
+          # Everything a job writes to the container filesystem lands on /var
+          # (the disk etcd fsyncs to — see the volumeMounts note below), so the
+          # per-job toolchain and scratch paths are pointed into this pod's
+          # _work directory on the T5 instead. Per pod, not shared: mise's
+          # installs must not be (ETXTBSY, below), and rustup has no
+          # multi-writer story either. The arc-workspace-reap CronJob removes
+          # them with the workspace. Measured on a tempomat `cargo audit` job,
+          # per pod: mise's data dir ~350 MB (the binary mise-action installs
+          # plus every toolchain), ~/.cargo ~290 MB, ~/.rustup ~90 MB, /tmp
+          # ~470 MB (`cargo install` builds there) — about 1.2 GB of NVMe
+          # writes per job, every one of them avoidable. mise's download
+          # cache is MISE_CACHE_DIR, under the shared ~/.cache mount, and stays
+          # there.
+          - name: MISE_DATA_DIR
+            value: /home/runner/_work/_toolchains/mise
+          - name: RUSTUP_HOME
+            value: /home/runner/_work/_toolchains/rustup
+          - name: CARGO_HOME
+            value: /home/runner/_work/_toolchains/cargo
+          - name: TMPDIR
+            value: /home/runner/_work/_tmp
         # Warm caches shared across runner pods via hostPath — a single-node
         # cluster, so every pod sees the same disk. Ephemeral runners
         # otherwise re-download every toolchain and package on every job,
@@ -209,8 +229,9 @@ template:
         # etcd past its 5s lease deadline — every leader-election client in
         # the cluster (kube-scheduler, kube-controller-manager, cilium-operator,
         # cnpg, the alloy operator) then exits and restarts together. Every
-        # heavy write path a job has — these caches and the _work workspace
-        # below — is mounted off /var for that reason.
+        # heavy write path a job has — these caches, the _work workspace
+        # below, and the toolchain/TMPDIR env above — is kept off /var for
+        # that reason.
         #
         # Only shared where the tool is multi-writer safe: uv hardlinks,
         # go-build is content-addressed, pre-commit locks, and the setup actions
