@@ -3439,14 +3439,6 @@ resource "grafana_rule_group" "gateway_health" {
     labels = {
       severity = "warning"
       service  = "gateway"
-      // Muted: drift is a discrepancy to look at, not an outage to be woken
-      // for, and it fires often enough — YouTube holds a broadcast the gateway
-      // did not create, whose title and description read back different from
-      // the stored values — that the push is noise. Kept (still evaluates and
-      // shows in the Alerting UI, so the dashboard and the alert list still
-      // answer "is anything drifting?") but routed through the always-on mute
-      // timing — see the mute=true sub-route on grafana_notification_policy.root.
-      mute = "true"
     }
 
     data {
