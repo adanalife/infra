@@ -488,42 +488,12 @@
     {
       "id": 501,
       "type": "stat",
-      "title": "Layers in sync",
-      "description": "Share of the terraform layers burrito tracks that it last reconciled cleanly. 100% means every layer burrito currently reports is in sync; anything less means at least one has a plan burrito could not call clean — the \"Layers needing attention\" panel beside this one counts them, and the table names them. Both halves of the ratio are derived from the one-hot status series, so a layer added or retired is picked up on the next scrape, and a layer that disappears entirely drops out of the denominator instead of silently reading as healthy.",
+      "title": "Layers with a failed plan",
+      "description": "Layers whose last completed run reported a terraform failure — the state the \"Burrito layer plan or apply failed\" alert watches. Zero is the normal reading; nonzero means that workspace's real drift is unknown until it plans clean again. It deliberately does not count status=\"warning\": burrito sets that for every layer whose plan is merely *due* (PlanNeeded), which over a measured 24h was ~86% of samples on all four layers while every lastResult read zero changes. Drift itself is only in lastResult, which burrito does not export, so no stat on this row can show it — the table beside this one names the current status per layer, and the panel next door watches whether planning is happening at all.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 50, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "100 * (count(burrito_terraform_layer_status{cluster=~\"$cluster\", status=\"success\"} == 1) or vector(0)) / count(burrito_terraform_layer_status{cluster=~\"$cluster\"} == 1)" }
-      ],
-      "options": {
-        "colorMode": "background", "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "decimals": 0,
-          "noValue": "0",
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "red", "value": null },
-            { "color": "orange", "value": 1 },
-            { "color": "green", "value": 100 }
-          ]}
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 502,
-      "type": "stat",
-      "title": "Layers needing attention",
-      "description": "Layers whose current status is anything other than success — drift burrito has detected but not resolved. Matched as status!=\"success\" rather than by listing warning/error, so a status value burrito adds later still lands here instead of being silently dropped. Nonzero is not an outage; it means the committed terraform and the live infrastructure disagree, and the plan is waiting on someone.",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 6, "y": 50, "w": 6, "h": 4 },
-      "targets": [
-        { "refId": "A", "expr": "count(burrito_terraform_layer_status{cluster=~\"$cluster\", status!=\"success\"} == 1)" }
+        { "refId": "A", "expr": "count(burrito_terraform_layer_status{cluster=~\"$cluster\", status=\"error\"} == 1) or vector(0)" }
       ],
       "options": {
         "colorMode": "background", "graphMode": "none",
@@ -532,10 +502,38 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "noValue": "0",
           "thresholds": { "mode": "absolute", "steps": [
             { "color": "green", "value": null },
-            { "color": "orange", "value": 1 }
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 502,
+      "type": "stat",
+      "title": "Oldest plan",
+      "description": "Age of the least recently completed plan across all layers. Burrito plans hourly, so anything past an hour means a round was missed and past 3h means drift has gone unreported long enough to alert (\"Burrito: a layer's last plan has gone stale\"). This is the console's gauge rather than burrito's own, which is the point: it is the one number that still moves when burrito itself is what died. A layer wedged mid-run keeps reporting the status of its last COMPLETED plan forever, so the status panels beside this one cannot see a stalled loop — only the age can.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(console_terraform_plan_age_seconds{cluster=~\"$cluster\"})" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 3600 },
+            { "color": "red", "value": 10800 }
           ]}
         },
         "overrides": []

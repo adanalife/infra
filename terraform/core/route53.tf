@@ -97,7 +97,7 @@ resource "aws_route53_record" "primary_naked_acm_cert_validation" {
   name    = var.primary_naked_acm_dns_name
   records = [var.primary_naked_acm_dns_record]
   ttl     = 60
-  type    = var.primary_naked_acm_dns_type
+  type    = "CNAME"
   zone_id = aws_route53_zone.primary.zone_id
 }
 
@@ -205,7 +205,7 @@ resource "aws_route53_record" "primary_www_acm_cert_validation" {
   name    = var.primary_www_acm_dns_name
   records = [var.primary_www_acm_dns_record]
   ttl     = 60
-  type    = var.primary_www_acm_dns_type
+  type    = "CNAME"
   zone_id = aws_route53_zone.primary.zone_id
 }
 

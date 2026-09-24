@@ -9,7 +9,6 @@ module "env_base" {
 
   account_name                       = local.account_name
   core_account_id                    = var.core_account_id
-  external_dns_role                  = var.external_dns_role
   full_account_name                  = local.full_account_name
   gcp_project                        = var.gcp_project
   primary_subdomain                  = local.primary_subdomain

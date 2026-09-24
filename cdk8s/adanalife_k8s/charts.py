@@ -58,7 +58,6 @@ class SupportingChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.namespace or None)
-        self.env = env
 
         # shared observability secrets + cert-manager issuers (eso envs only)
         emit_supporting(self, env)
@@ -118,7 +117,6 @@ class DataChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.data_ns or None)
-        self.env = env
 
         # --- ESO SecretStore (eso envs only): the postgres ExternalSecret here
         #     references it, so it lives in the same (data) namespace. When the DB
@@ -167,7 +165,6 @@ class MediamtxChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig, platform: str):
         super().__init__(scope, id, namespace=env.namespace or None)
-        self.env = env
         Mediamtx(self, env=env, platform=platform)
 
 

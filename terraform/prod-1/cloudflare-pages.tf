@@ -20,16 +20,7 @@ variable "project_name" {
   description = "Cloudflare Pages project name"
 }
 
-variable "production_branch" {
-  type        = string
-  description = "Git branch used for production deployments of the Pages project"
-  default     = "main"
-}
-
-# Token sourced from AWS Secrets Manager — see secrets.tf for the
-# bootstrap flow. Lives here (not providers.tf) so prod-1 doesn't
-# inherit a hanging cloudflare provider via the symlinked providers.tf
-# from stage-1 (which intentionally omits it).
+# Token read from SSM Parameter Store — see secrets.tf for the bootstrap flow.
 provider "cloudflare" {
   api_token = data.aws_ssm_parameter.cloudflare_api_token.value
 }
@@ -37,9 +28,8 @@ provider "cloudflare" {
 module "pages" {
   source = "../modules/cloudflare-pages-project"
 
-  account_id        = var.cloudflare_account_id
-  project_name      = var.project_name
-  production_branch = var.production_branch
+  account_id   = var.cloudflare_account_id
+  project_name = var.project_name
 
   # Cloudflare provisions the TLS cert via DNS-01 against the Route53 CNAME
   # (terraform/core/route53.tf:aws_route53_record.primary_www), which targets

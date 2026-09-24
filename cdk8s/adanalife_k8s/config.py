@@ -40,7 +40,6 @@ class EnvConfig:
     dns_base: str  # prod.whereisdana.today | stage... | dev...  ("" for local)
     secret_source: str = "eso"  # eso | local
     dashcam_mode: str = "hostpath"  # nfs | hostpath
-    tailscale: bool = False  # emit the tailscale Ingress
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
@@ -148,7 +147,6 @@ ENVS: dict[str, EnvConfig] = {
         dashcam_local_enabled=True,  # serve the corpus off the minipc's local NVMe
         dns_base="prod.whereisdana.today",
         dashcam_mode="nfs",
-        tailscale=True,
         postgres_size="50Gi",
         postgres_storage_class="local-path-retain",
         postgres_backup=True,
@@ -178,7 +176,6 @@ ENVS: dict[str, EnvConfig] = {
         cluster="minipc",
         dns_base="stage.whereisdana.today",
         dashcam_mode="nfs",
-        tailscale=True,
         postgres_size="10Gi",
         postgres_storage_class="local-path",
         cnpg=True,
@@ -203,7 +200,6 @@ ENVS: dict[str, EnvConfig] = {
         cluster="k3d",
         dns_base="dev.whereisdana.today",
         dashcam_mode="hostpath",
-        tailscale=False,
         external_dns_role_arn=_STAGE_ROLE,
         platforms=("twitch",),
     ),
@@ -214,7 +210,6 @@ ENVS: dict[str, EnvConfig] = {
         dns_base="",
         secret_source="local",
         dashcam_mode="hostpath",
-        tailscale=False,
         platforms=("twitch",),
     ),
 }

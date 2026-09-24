@@ -2706,26 +2706,30 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // SomaFM down a while — informational. The fallback keeps audible music on
-  // air, so this isn't dead air (the dead-air rule above covers that); it's a
-  // heads-up that a stream has been on a local bed instead of the intended
-  // music for 20m, i.e. SomaFM's edge has been unreachable for a sustained
-  // stretch. Warning → Discord, not a page. for=20m so a brief SomaFM blip the
-  // fallback rides through doesn't notify.
+  // SomaFM unreachable a while — informational. The fallback keeps audible
+  // music on air, so this isn't dead air (the dead-air rule above covers that);
+  // it's a heads-up that a stream has been on a local bed instead of the
+  // intended music for 20m, i.e. SomaFM's edge has been unreachable *from here*
+  // for a sustained stretch. Warning → Discord, not a page. for=20m so a brief
+  // SomaFM blip the fallback rides through doesn't notify.
+  //
+  // Titled for what is true when it fires — SomaFM unreachable, the stream on
+  // its local bed — rather than for the fallback mechanism: "on the fallback
+  // bed" reads as a fault in the fallback, when the fallback is the part working.
   //
   // Grouped by service_platform for the same reason as the dead-air rule: only
   // a platform that selected the SomaFM bed can be on its fallback, so an
   // ungrouped max() reports "something is on the fallback" without saying what.
   rule {
-    name           = "OBS: on SomaFM fallback bed for 20m"
+    name           = "OBS: SomaFM unreachable, stream on its local bed for 20m"
     for            = "20m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "{{ $labels.service_platform }} background audio has been on the fallback bed for 20m"
-      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Check whether SomaFM is having an outage by streaming a few bytes with a plain GET (icecast rejects Range/HEAD, so curl -I lies): curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. If it's a prolonged outage, nothing to do but wait for the watchdog to swap back."
+      summary     = "SomaFM unreachable — {{ $labels.service_platform }} has been on its local bed for 20m"
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Unreachable from here is not the same as down: a probe from this network cannot tell a SomaFM outage from SomaFM refusing this network's address, so compare against an outside vantage (Globalping, or a phone off wifi) streaming a few bytes with a plain GET — curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. Down everywhere: wait for the watchdog to swap back. Up everywhere else: the block is on this network or its address, and waiting will not fix it — re-select a local bed from the console so the watchdog stops retrying."
     }
     labels = {
       severity = "warning"
@@ -5049,6 +5053,68 @@ resource "grafana_rule_group" "synthetic_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name = "A public endpoint is failing its synthetic probes"
+    for  = "5m"
+    // Covers every check but guessr-admin, which has its own rule above
+    // because it alerts on a specific status code rather than on reachability.
+    condition      = "C"
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.job }} is failing its synthetic probes"
+      description = "Grafana Synthetic Monitoring probes this endpoint from North Virginia, Oregon and London, and more than half of one region's probes in the last fifteen minutes came back failed. The checks and their body assertions are in terraform/platform/grafana-synthetic-monitoring.tf: `guessr` is the leaderboard API, which fails if either Pages or the D1 binding behind it is down; `dana-lol` and `whalecore` serve the same site from separate origins, DNS and certificates, so one failing alone is a DNS or certificate problem rather than an outage. A Pages deployment that publishes nothing still answers 200, which is why every check asserts on the body -- a rule firing while the site looks up means the body assertion is what failed."
+    }
+    labels = {
+      severity = "warning"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 1800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // The fraction of a region's probes that succeeded, not the last one.
+        // The slowest check runs every ten minutes against a five-minute
+        // Prometheus staleness, so an instant read is no-data for half of
+        // every interval; a fifteen-minute window always spans a probe.
+        // Averaging rather than min_over_time keeps one failed probe from
+        // latching the rule for the whole window, and taking the min across
+        // jobs-by-region still catches the regional edge failure the three
+        // probe locations exist to find.
+        expr          = "min by (job) (avg_over_time(probe_success{job!=\"guessr-admin\"}[15m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [0.5] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
