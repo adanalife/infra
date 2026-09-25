@@ -90,10 +90,10 @@ VERSIONS = {
     # Argo Workflows app v4.1.2 — the batch engine for spare-compute work.
     # Latest stable at add time (2026-08-22).
     "argo-workflows": "2.0.2",
-    # Burrito v0.13.0 — terraform GitOps controller (plan/drift-detect trial).
-    # Latest stable at add time (2026-08-19); pre-1.0, so minors can break —
+    # Burrito v0.14.0 — terraform GitOps controller (plan/drift-detect trial).
+    # Latest stable as of 2026-09-25; pre-1.0, so minors can break —
     # read the release notes before bumping.
-    "burrito": "0.13.0",
+    "burrito": "0.14.0",
     # ARC — self-hosted GHA runners for the private repos' CI + release
     # workflows. Latest stable at re-add time (2026-08-22); same pin the
     # retired rpi5 stack ran.
