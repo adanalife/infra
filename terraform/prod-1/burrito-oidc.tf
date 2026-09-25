@@ -68,10 +68,14 @@ resource "cloudflare_zero_trust_access_policy" "internal_admin" {
 }
 
 resource "cloudflare_zero_trust_access_application" "burrito" {
-  account_id           = var.cloudflare_account_id
-  name                 = "burrito"
-  type                 = "saas"
-  session_duration     = "24h"
+  account_id = var.cloudflare_account_id
+  name       = "burrito"
+  type       = "saas"
+  # A month, Access's longest preset: each sign-in is a one-time PIN by email,
+  # and at 24h that friction kept the UI unused. Burrito's own 24h session
+  # cookie expiring inside this window re-authenticates silently against the
+  # live Access session, with no PIN.
+  session_duration     = "730h"
   app_launcher_visible = false
 
   policies = [
