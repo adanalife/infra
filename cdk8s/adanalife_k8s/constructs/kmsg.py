@@ -79,6 +79,23 @@ TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
 # KmsgShipper (cluster store → SSM /k8s/kmsg/talosconfig).
 TALOSCONFIG_SECRET = "kmsg-talosconfig"
 
+# Reattach on any exit instead of letting the container die: a stream the API
+# closes reconnects after a short pause, and an absent talosconfig (the Secret
+# is optional, so an unseeded env still schedules) waits rather than crashes.
+# Both stay visible in the pod log; neither shows up as a restart.
+_RUN_SCRIPT = f"""\
+while :; do
+  if [ ! -s {TALOSCONFIG_PATH} ]; then
+    echo "kmsg: {TALOSCONFIG_PATH} is absent or empty; waiting for the Secret" >&2
+    sleep 60
+    continue
+  fi
+  {TALOSCTL_PATH} --talosconfig {TALOSCONFIG_PATH} --nodes {TALOS_NODE} dmesg --follow --tail
+  echo "kmsg: talosctl exited $?; reattaching" >&2
+  sleep 5
+done
+"""
+
 # initContainer: fetch the pinned talosctl into the shared volume, with stdlib
 # urllib from the same image. Verified-by-pin, not checksum — the same trade the
 # sibling UPS daemon makes for a LAN-only helper binary.
@@ -159,18 +176,12 @@ class KmsgShipper(Construct):
             name=NAME,
             image=IMAGE,
             # The whole workload: stream kmsg to stdout and let alloy-logs do the
-            # rest. On a node reboot or an API blip talosctl exits, the container
-            # restarts, and `--tail` means it resumes without replaying the ring.
-            command=[
-                TALOSCTL_PATH,
-                "--talosconfig",
-                TALOSCONFIG_PATH,
-                "--nodes",
-                TALOS_NODE,
-                "dmesg",
-                "--follow",
-                "--tail",
-            ],
+            # rest. The loop is what keeps the restart count meaningful: the
+            # Talos API drops the stream every ~12h, and the credential mount is
+            # optional, so without it every drop and every unseeded environment
+            # reads as a crashloop. `--tail` means each reattach resumes without
+            # replaying the ring.
+            command=["sh", "-c", _RUN_SCRIPT],
             env=[k8s.EnvVar(name="HOME", value="/tmp")],
             security_context=secctx,
             resources=k8s.ResourceRequirements(

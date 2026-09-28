@@ -38,18 +38,36 @@ def _container(objs):
 # --- the streaming contract ---
 
 
+def _script(objs):
+    cmd = _container(objs)["command"]
+    assert cmd[:2] == ["sh", "-c"]
+    return cmd[2]
+
+
 def test_streams_new_messages_only():
-    # --tail is what stops a pod restart replaying an old disconnect into a live
+    # --tail is what stops a reattach replaying an old disconnect into a live
     # alert. See the module docstring.
-    cmd = _container(_synth())["command"]
-    assert "dmesg" in cmd
-    assert "--follow" in cmd
-    assert "--tail" in cmd
+    assert "dmesg --follow --tail" in _script(_synth())
 
 
 def test_reads_the_node_api():
-    cmd = _container(_synth())["command"]
-    assert cmd[cmd.index("--nodes") + 1] == TALOS_NODE
+    assert f"--nodes {TALOS_NODE} " in _script(_synth())
+
+
+def test_reattaches_instead_of_exiting():
+    # The API closes the stream every ~12h; a bare talosctl would turn each
+    # drop into a container restart, and the restart count into noise.
+    script = _script(_synth())
+    assert script.startswith("while :; do")
+    assert "talosctl exited" in script
+
+
+def test_waits_for_an_absent_credential_instead_of_crashing():
+    # The Secret is optional (below), so an unseeded env schedules the pod; it
+    # must idle on the empty mount rather than crashloop on it.
+    script = _script(_synth())
+    assert "[ ! -s /talos/talosconfig ]" in script
+    assert "sleep 60" in script
 
 
 def test_credential_is_optional_so_an_unseeded_env_still_schedules():
