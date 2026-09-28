@@ -63,6 +63,13 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s import eso
+from adanalife_k8s.constructs.talosctl import (
+    FETCH_TALOSCTL,
+    TALOS_NODE,
+    TALOSCONFIG_PATH,
+    TALOSCTL_PATH,
+    TALOSCTL_URL,
+)
 from adanalife_k8s.naming import (
     CONFIG_HASH_ANNOTATION,
     config_hash,
@@ -81,9 +88,6 @@ NUT_USER = "monuser"
 NUT_PASS = "secret"  # Synology's fixed public default — not a real secret
 POLL_INTERVAL = "30"  # seconds between reads on utility power
 POLL_INTERVAL_ONBATTERY = "10"  # faster reads while on battery (quicker reaction)
-# The minipc Talos node — the control-plane / etcd / DB node this shuts down. The
-# rpi5 worker isn't on this UPS, so it's deliberately out of scope.
-TALOS_NODE = "192.168.40.111"
 # Shut down once estimated runtime drops below this (s). Set well above the time
 # `talosctl shutdown` needs (SHUTDOWN_TIMEOUT) so the node powers off with
 # battery to spare — the 2026-07-19 outage fired at 81s left and the shutdown
@@ -95,42 +99,17 @@ CONFIRM_POLLS = "2"  # require the trigger condition this many polls in a row
 # NAS lost power too and we're blind). Only arms after an on-battery read.
 UNREACHABLE_CONFIRM = "3"
 SHUTDOWN_TIMEOUT = "90"  # seconds allowed for a single `talosctl shutdown`
-TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
-TALOSCTL_PATH = "/opt/talos/talosctl"  # placed by the initContainer
 # ARMED — the trigger executes the real `talosctl shutdown`. Flip to "true" for
 # log-only mode (it logs the command it WOULD run). See the module docstring.
 DRY_RUN = "false"
 # python:3.14-alpine — current latest stable, multi-arch (minipc is amd64). The
 # reader is pure stdlib, so no NUT package or pip install is needed.
 IMAGE = "python:3.14-alpine"
-# Pinned to the cluster's Talos version. The initContainer fetches the
-# client binary at pod start (the Python image doesn't ship it); a single
-# long-lived pod fetches once. amd64 — the minipc's arch.
-TALOSCTL_VERSION = "v1.14.0"
-TALOSCTL_URL = (
-    f"https://github.com/siderolabs/talos/releases/download/{TALOSCTL_VERSION}"
-    "/talosctl-linux-amd64"
-)
 # The Secret holding the os:operator-scoped talosconfig, delivered by the
 # ExternalSecret emitted in UpsMonitor (cluster store → SSM
 # /k8s/ups/talosconfig). Mounted OPTIONALLY so a deploy without the seeded
 # parameter (fresh env, DRY_RUN testing) still schedules.
 TALOSCONFIG_SECRET = "ups-talosconfig"
-
-# initContainer: fetch the pinned talosctl into the shared volume. stdlib urllib
-# (the same Python image), so no extra tooling. Verified-by-pin, not checksum —
-# acceptable for a LAN safety daemon; revisit if supply-chain hardening is wanted.
-_FETCH_TALOSCTL = """\
-import os
-import urllib.request
-
-url = os.environ["TALOSCTL_URL"]
-dst = os.environ["TALOSCTL_PATH"]
-print(f"fetching {url}", flush=True)
-urllib.request.urlretrieve(url, dst)
-os.chmod(dst, 0o755)
-print(f"talosctl -> {dst}", flush=True)
-"""
 
 # The reader. Authenticates, reads ups.status + battery vars, logs every change,
 # and on a sustained on-battery + low-battery (or low-runtime) condition runs the
@@ -282,7 +261,7 @@ class UpsMonitor(Construct):
         labels = meta_labels(NAME, part_of="infra")
         sel = selector(NAME)
 
-        scripts = {"nutread.py": _READER, "fetch-talosctl.py": _FETCH_TALOSCTL}
+        scripts = {"nutread.py": _READER, "fetch-talosctl.py": FETCH_TALOSCTL}
         k8s.KubeConfigMap(
             self,
             "reader",

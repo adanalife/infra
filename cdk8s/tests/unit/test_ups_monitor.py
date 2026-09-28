@@ -13,6 +13,7 @@ from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
+from adanalife_k8s.constructs.talosctl import TALOSCTL_VERSION
 from adanalife_k8s.constructs.ups_monitor import IMAGE, UpsMonitor
 from adanalife_k8s.naming import CONFIG_HASH_ANNOTATION, config_hash
 
@@ -136,7 +137,7 @@ def test_targets_only_the_minipc_node():
 def test_initcontainer_fetches_pinned_talosctl():
     init = _deploy(_synth())["spec"]["template"]["spec"]["initContainers"][0]
     url = next(e["value"] for e in init["env"] if e["name"] == "TALOSCTL_URL")
-    assert "v1.14.0" in url and "talosctl-linux-amd64" in url
+    assert TALOSCTL_VERSION in url and "talosctl-linux-amd64" in url
 
 
 def test_security_context_forbids_privilege_and_host_access():
