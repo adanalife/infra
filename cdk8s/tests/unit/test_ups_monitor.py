@@ -136,7 +136,7 @@ def test_targets_only_the_minipc_node():
 def test_initcontainer_fetches_pinned_talosctl():
     init = _deploy(_synth())["spec"]["template"]["spec"]["initContainers"][0]
     url = next(e["value"] for e in init["env"] if e["name"] == "TALOSCTL_URL")
-    assert "v1.13.2" in url and "talosctl-linux-amd64" in url
+    assert "v1.14.0" in url and "talosctl-linux-amd64" in url
 
 
 def test_security_context_forbids_privilege_and_host_access():

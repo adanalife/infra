@@ -103,10 +103,10 @@ DRY_RUN = "false"
 # python:3.14-alpine — current latest stable, multi-arch (minipc is amd64). The
 # reader is pure stdlib, so no NUT package or pip install is needed.
 IMAGE = "python:3.14-alpine"
-# Pinned to the cluster's Talos version (1.13.2). The initContainer fetches the
+# Pinned to the cluster's Talos version. The initContainer fetches the
 # client binary at pod start (the Python image doesn't ship it); a single
 # long-lived pod fetches once. amd64 — the minipc's arch.
-TALOSCTL_VERSION = "v1.13.2"
+TALOSCTL_VERSION = "v1.14.0"
 TALOSCTL_URL = (
     f"https://github.com/siderolabs/talos/releases/download/{TALOSCTL_VERSION}"
     "/talosctl-linux-amd64"

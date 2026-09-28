@@ -262,7 +262,7 @@ spec:
             - /app/fetch-talosctl.py
           env:
             - name: TALOSCTL_URL
-              value: https://github.com/siderolabs/talos/releases/download/v1.13.2/talosctl-linux-amd64
+              value: https://github.com/siderolabs/talos/releases/download/v1.14.0/talosctl-linux-amd64
             - name: TALOSCTL_PATH
               value: /opt/talos/talosctl
           image: python:3.14-alpine
