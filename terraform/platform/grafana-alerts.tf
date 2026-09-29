@@ -3797,6 +3797,78 @@ resource "grafana_rule_group" "batch_health" {
     }
   }
 
+  rule {
+    name      = "guessr: the prod schedule runs out within 6 days"
+    for       = "6h"
+    condition = "C"
+    // The rule above watches the generator; this one watches what it is for.
+    // A run can succeed and still leave the horizon thin — a drained queue, a
+    // pool with nothing left to draw — and that is invisible to success age.
+    // Alerting on no data because the query COALESCEs an empty schedule to -1:
+    // a missing row means the datasource stopped answering, not that all is well.
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr prod has fewer than 6 days of rounds scheduled"
+      description = "The last date in prod's round_days is under 6 days away, so the game goes dark the day after it unless the schedule is topped up. The weekly guessr-rounds run keeps 14 days ahead, so the trough is 7: below 6 means a run failed to fill, not just that one is due. Read the horizon with `task schedule:prod` in the guessr repo (days_left, the queued pool, unplaced rounds), and the last run's logs with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds`. A run that succeeded with nothing queued to draw from is the usual cause. To generate now: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. A value of -1 is an empty round_days table."
+    }
+    labels = {
+      severity = "warning"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = grafana_data_source.guessr_d1.uid
+      // The same Infinity shape as the guessr dashboard's panels (see
+      // grafana-guessr.tf); the backend parser is what makes it evaluable
+      // server-side. The SQL is guessr's own schedule.sql horizon read.
+      model = jsonencode({
+        refId  = "A"
+        type   = "json"
+        source = "url"
+        format = "table"
+        parser = "backend"
+        url    = "/${local.guessr_d1_production}/query"
+        url_options = {
+          method            = "POST"
+          body_type         = "raw"
+          body_content_type = "application/json"
+          data              = jsonencode({ sql = "SELECT COALESCE(CAST(julianday(MAX(date)) - julianday(date('now')) AS INTEGER), -1) AS days_left FROM round_days" })
+        }
+        root_selector = "result.0.results"
+        columns       = [{ selector = "days_left", text = "days_left", type = "number" }]
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // 14-day horizon topped up weekly: 7 at the trough, so 6 is one day of
+        // slack past a run that should have filled it.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [6] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Prod Postgres dumps hourly to S3 from an in-cluster CronJob — the logical
   // complement to the CNPG WAL archive (pitr-health group), in a separate
   // failure domain. The PVC has been lost outright twice (a talosctl upgrade
