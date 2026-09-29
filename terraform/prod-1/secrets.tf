@@ -92,37 +92,14 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
   })
 }
 
-# JSON array of email addresses, e.g. ["you@example.com"]. Whoever may open
-# guessr's /admin/ on the production game — the Access policy in
-# cloudflare-pages-guessr.tf includes one rule per address, and Access mails a
-# one-time PIN to it. Here rather than in the terraform because this repo is
-# public and these are personal addresses.
-#
-# Its own parameter rather than a read of the staging one, which lives in a
-# different AWS account: this list decides who can reshuffle the schedule players
-# are actually getting, and the two lists being separately editable is the point
-# rather than duplication to be tidied away. KEEP-IN-SYNC is not wanted here.
+# Who may sign in to the cluster's internal admin UIs through Cloudflare
+# Access — burrito today (burrito-oidc.tf).
 #
 # Outside the map above because the placeholder has to be valid JSON that
 # jsondecode can read pre-seed, and the map's is an object rather than an array.
 # The empty placeholder is NOT a usable value — a policy with no rules is
-# rejected — so the policy carries a precondition that says so.
-resource "aws_ssm_parameter" "guessr_admin_emails" {
-  name        = "/prod-1/guessr-admin-emails"
-  description = "Email addresses allowed through Cloudflare Access to guessr's /admin/ on production. JSON array of addresses."
-  type        = "SecureString"
-  value       = "[]"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-# Who may sign in to the cluster's internal admin UIs through Cloudflare
-# Access — burrito today (burrito-oidc.tf). Separate from the guessr list on
-# purpose: that one gates a game-scheduling surface, this one gates terraform.
-# Same empty-placeholder shape as guessr's, and the policy carries the
-# precondition that explains the two-apply bootstrap.
+# rejected — so the policy carries a precondition that explains the two-apply
+# bootstrap.
 resource "aws_ssm_parameter" "internal_admin_emails" {
   name        = "/prod-1/internal-admin-emails"
   description = "Email addresses allowed through Cloudflare Access to the cluster's internal admin UIs. JSON array of addresses."
@@ -182,10 +159,6 @@ data "aws_ssm_parameter" "cloudflare_api_token" {
 # to apply time whenever any entry is added to the map.
 data "aws_ssm_parameter" "discord_alerts_webhook" {
   name = "/k8s/tripbot/discord-alerts-webhook"
-}
-
-data "aws_ssm_parameter" "guessr_admin_emails" {
-  name = aws_ssm_parameter.guessr_admin_emails.name
 }
 
 data "aws_ssm_parameter" "internal_admin_emails" {

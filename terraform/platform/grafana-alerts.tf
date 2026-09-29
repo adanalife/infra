@@ -5099,8 +5099,8 @@ resource "grafana_rule_group" "synthetic_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "guessr.dana.lol/admin/ has stopped answering 403"
-      description = "The guessr-admin probe expects 403 — the JWT middleware refusing an anonymous request, which is the custom domain's resting state. Anything else means the gate moved: 503 is the middleware finding no Access application to check a login against, which locks Dana out as surely as it locks out a stranger, and a 2xx is the admin surface answering a stranger. The two values behind it, ACCESS_TEAM_DOMAIN and ACCESS_AUD, are Pages bindings typed in by hand on the guessr project — terraform cannot write deployment_configs — so a rollback or a dashboard edit is the usual cause. Read the answer with `curl -si https://guessr.dana.lol/admin/`; guessr's smoke.sh carries the same case block with the full reasoning."
+      summary     = "guessr.dana.lol/admin/ has stopped answering 401"
+      description = "The guessr-admin probe expects 401 — the game refusing a request that carries no Twitch bearer token, which is the admin surface's resting state. Anything else means the gate moved: a 2xx is the admin surface answering a stranger, a 302 is Cloudflare Access back in front of it, and a 5xx is the Python Worker down or the Pages project's `API` service binding (set by hand in the dashboard — terraform cannot write deployment_configs) dropped, in which case the deleted JS Functions answer nothing. Read the answer with `curl -si https://guessr.dana.lol/admin/`; guessr's smoke.sh carries the same case block with the full reasoning."
     }
     labels = {
       severity = "warning"
