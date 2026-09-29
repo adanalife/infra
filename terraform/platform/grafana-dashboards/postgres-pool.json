@@ -139,6 +139,71 @@
         { "refId": "A", "expr": "sum by (method, status, deployment_environment) (rate(db_sql_latency_milliseconds_count{service_name=\"tripbot\", deployment_environment=~\"$deployment_environment\"}[5m]))", "legendFormat": "{{method}} / {{status}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Server — CNPG exporter (pg-1)",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 30, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Backends by state",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 31, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace, state) (cnpg_backends_total{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"})", "legendFormat": "{{state}} [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (cnpg_backends_waiting_total{namespace=~\"$deployment_environment-data\"})", "legendFormat": "waiting on a lock [{{namespace}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Longest open transaction",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 31, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "max by (namespace) (cnpg_backends_max_tx_duration_seconds{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"})", "legendFormat": "{{namespace}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Transactions / s (commit vs rollback)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 39, "w": 8, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(cnpg_pg_stat_database_xact_commit{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"}[5m]))", "legendFormat": "commit [{{namespace}}]" },
+        { "refId": "B", "expr": "sum by (namespace) (rate(cnpg_pg_stat_database_xact_rollback{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"}[5m]))", "legendFormat": "rollback [{{namespace}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Buffer cache hit ratio",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 8, "y": 39, "w": 8, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (rate(cnpg_pg_stat_database_blks_hit{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"}[5m])) / (sum by (namespace) (rate(cnpg_pg_stat_database_blks_hit{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"}[5m])) + sum by (namespace) (rate(cnpg_pg_stat_database_blks_read{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"}[5m])))", "legendFormat": "{{namespace}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Database size",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 16, "y": 39, "w": 8, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (namespace) (cnpg_pg_database_size_bytes{namespace=~\"$deployment_environment-data\", datname=\"tripbot\"})", "legendFormat": "{{namespace}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     }
   ]
 }
