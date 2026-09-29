@@ -13,7 +13,7 @@
         "label": "Platform",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info{service_namespace=\"tripbot\"}, service_platform)",
+        "query": "label_values(target_info{job=~\"tripbot/.+\"}, service_platform)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -25,7 +25,7 @@
         "name": "deployment_environment",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info{service_name=\"onscreens-server\"}, deployment_environment)",
+        "query": "label_values(target_info{job=\"tripbot/onscreens-server\"}, deployment_environment)",
         "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
@@ -108,7 +108,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 3 },
       "targets": [
-        { "refId": "A", "expr": "group by (service_version) (target_info{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
+        { "refId": "A", "expr": "group by (service_version) (target_info{job=\"tripbot/onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "{{service_version}}" }
       ],
       "options": { "colorMode": "none", "graphMode": "none", "textMode": "name", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": {}, "overrides": [] }
