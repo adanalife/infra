@@ -120,30 +120,22 @@ resource "grafana_synthetic_monitoring_check" "whalecore" {
 }
 
 # The other half of guessr that can break without the game noticing: the login
-# on /admin. That surface is fronted by Cloudflare Access on the pages.dev
-# hostname and by a JWT middleware on the custom domain, and the middleware
-# reads ACCESS_TEAM_DOMAIN and ACCESS_AUD from Pages bindings typed in by hand
-# -- terraform cannot write deployment_configs (see the guessr Pages project in
-# terraform/prod-1). A value dropped by a rollback or edited in the dashboard
-# leaves the middleware with no application to check a login against, and it
-# answers 503: closed to a stranger, and closed to Dana too.
+# on /admin. The game gates that surface on a Twitch bearer token and answers
+# 401 to a request that carries none -- closed to a stranger, open to Dana once
+# he signs in. 401 is therefore the healthy answer, not 200: a 2xx is the admin
+# surface answering a stranger, and anything else is the gate having moved (a
+# 302 is Cloudflare Access back in front of it; a 5xx is the Worker down). The
+# body assertion pins the refusal to *the game's* gate rather than any other
+# 401 on the path.
 #
-# guessr's smoke.sh asserts exactly this on every deploy, which is the gap this
-# fills -- a binding that rots between releases stays invisible until the next
+# guessr's smoke.sh asserts the same on every deploy, which is the gap this
+# fills -- a gate that rots between releases stays invisible until the next
 # tag.
 #
-# 403 is the healthy answer, not 200: the custom domain is where the middleware
-# refuses a request that reached it without a token. So the status code is the
-# whole signal, and 503 is the failure the check exists to catch. The body
-# assertion pins the refusal to *our* middleware rather than any other 403 on
-# the path -- Cloudflare's WAF or a future Access rule would answer with
-# something else.
-#
-# One probe, not local.sm_probes: a Pages binding is account configuration and
-# fails identically from every region, so the regional diversity the other
-# checks need buys nothing here. Ten minutes, not two, for the same reason --
-# a value typed by hand does not rot mid-hour. Together they cost ~4.4k
-# executions/month against the ~8k the quota note above leaves.
+# One probe, not local.sm_probes: the gate is the same from every region, so
+# the regional diversity the other checks need buys nothing here. Ten minutes,
+# not two, for the same reason. Together they cost ~4.4k executions/month
+# against the ~8k the quota note above leaves.
 resource "grafana_synthetic_monitoring_check" "guessr_admin" {
   job       = "guessr-admin"
   target    = "https://guessr.dana.lol/admin/"
@@ -159,8 +151,8 @@ resource "grafana_synthetic_monitoring_check" "guessr_admin" {
     http {
       method                          = "GET"
       ip_version                      = "V4"
-      valid_status_codes              = [403]
-      fail_if_body_not_matches_regexp = ["Access-protected"]
+      valid_status_codes              = [401]
+      fail_if_body_not_matches_regexp = ["sign in with Twitch"]
     }
   }
 }
