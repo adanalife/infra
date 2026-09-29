@@ -3715,10 +3715,11 @@ resource "grafana_rule_group" "gateway_health" {
 // The population: guessr's round-generation CronJob, the hourly prod Postgres
 // dump, and video-pipeline's long batch passes (last rule). guessr's runs
 // weekly and keeps the game's schedule topped up; the game goes dark the day
-// after its last scheduled date, and nothing about that is loud. publish.sh has
-// a depth guard that fails the run when the post-run horizon is thin, and the
-// job failing IS that alert — but a guard inside a run cannot fire for a run
-// that never happened, which is the failure mode with no other witness.
+// after its last scheduled date, and nothing about that is loud. A run that
+// happens is watched from inside it (verify_days.sh fails it on any upcoming
+// date short of a full game) and from outside it (the schedule-depth rule
+// below reads the horizon from D1) — but neither can fire for a run that never
+// happened, which is the failure mode with no other witness.
 //
 // So the signal is neither "did a job fail" nor "did a job run" but "how long
 // since one *succeeded*", which collapses both into one number and needs no
@@ -3745,7 +3746,7 @@ resource "grafana_rule_group" "batch_health" {
 
     annotations = {
       summary     = "guessr-rounds last succeeded over 8 days ago — the schedule is not being topped up"
-      description = "The weekly guessr-rounds CronJob in stage-1 has not recorded a success in 8 days, so the game's schedule is running down with nothing refilling it. At the weekly cadence and a 14-day horizon this leaves roughly six days before a date has no rounds on it, which is a player-visible dark day. Read the last run with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds` and its pod logs; `task schedule:prod` and `task schedule:stage` in the guessr repo say how much runway is actually left. A run that failed the depth guard reports it in the logs as `is scheduled only N days out`. To generate outside the schedule: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. If this fires with no CronJob in the cluster at all, the alert is telling you the object is gone rather than the run is late — check Argo."
+      description = "The weekly guessr-rounds CronJob in stage-1 has not recorded a success in 8 days, so the game's schedule is running down with nothing refilling it. At the weekly cadence and a 14-day horizon this leaves roughly six days before a date has no rounds on it, which is a player-visible dark day. Read the last run with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds` and its pod logs; `task schedule:prod` and `task schedule:stage` in the guessr repo say how much runway is actually left. A run that failed verify_days.sh logs `has dates scheduled with fewer than 5 rounds` and lists them. To generate outside the schedule: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. If this fires with no CronJob in the cluster at all, the alert is telling you the object is gone rather than the run is late — check Argo."
     }
     labels = {
       severity = "warning"
@@ -3789,6 +3790,78 @@ resource "grafana_rule_group" "batch_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [691200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name      = "guessr: the prod schedule runs out within 6 days"
+    for       = "6h"
+    condition = "C"
+    // The rule above watches the generator; this one watches what it is for.
+    // A run can succeed and still leave the horizon thin — a drained queue, a
+    // pool with nothing left to draw — and that is invisible to success age.
+    // Alerting on no data because the query COALESCEs an empty schedule to -1:
+    // a missing row means the datasource stopped answering, not that all is well.
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr prod has fewer than 6 days of rounds scheduled"
+      description = "The last date in prod's round_days is under 6 days away, so the game goes dark the day after it unless the schedule is topped up. The weekly guessr-rounds run keeps 14 days ahead, so the trough is 7: below 6 means a run failed to fill, not just that one is due. Read the horizon with `task schedule:prod` in the guessr repo (days_left, the queued pool, unplaced rounds), and the last run's logs with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds`. A run that succeeded with nothing queued to draw from is the usual cause. To generate now: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. A value of -1 is an empty round_days table."
+    }
+    labels = {
+      severity = "warning"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = grafana_data_source.guessr_d1.uid
+      // The same Infinity shape as the guessr dashboard's panels (see
+      // grafana-guessr.tf); the backend parser is what makes it evaluable
+      // server-side. The SQL is guessr's own schedule.sql horizon read.
+      model = jsonencode({
+        refId  = "A"
+        type   = "json"
+        source = "url"
+        format = "table"
+        parser = "backend"
+        url    = "/${local.guessr_d1_production}/query"
+        url_options = {
+          method            = "POST"
+          body_type         = "raw"
+          body_content_type = "application/json"
+          data              = jsonencode({ sql = "SELECT COALESCE(CAST(julianday(MAX(date)) - julianday(date('now')) AS INTEGER), -1) AS days_left FROM round_days" })
+        }
+        root_selector = "result.0.results"
+        columns       = [{ selector = "days_left", text = "days_left", type = "number" }]
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // 14-day horizon topped up weekly: 7 at the trough, so 6 is one day of
+        // slack past a run that should have filled it.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [6] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
