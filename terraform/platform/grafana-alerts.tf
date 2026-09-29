@@ -3715,10 +3715,11 @@ resource "grafana_rule_group" "gateway_health" {
 // The population: guessr's round-generation CronJob, the hourly prod Postgres
 // dump, and video-pipeline's long batch passes (last rule). guessr's runs
 // weekly and keeps the game's schedule topped up; the game goes dark the day
-// after its last scheduled date, and nothing about that is loud. publish.sh has
-// a depth guard that fails the run when the post-run horizon is thin, and the
-// job failing IS that alert — but a guard inside a run cannot fire for a run
-// that never happened, which is the failure mode with no other witness.
+// after its last scheduled date, and nothing about that is loud. A run that
+// happens is watched from inside it (verify_days.sh fails it on any upcoming
+// date short of a full game) and from outside it (the schedule-depth rule
+// below reads the horizon from D1) — but neither can fire for a run that never
+// happened, which is the failure mode with no other witness.
 //
 // So the signal is neither "did a job fail" nor "did a job run" but "how long
 // since one *succeeded*", which collapses both into one number and needs no
@@ -3745,7 +3746,7 @@ resource "grafana_rule_group" "batch_health" {
 
     annotations = {
       summary     = "guessr-rounds last succeeded over 8 days ago — the schedule is not being topped up"
-      description = "The weekly guessr-rounds CronJob in stage-1 has not recorded a success in 8 days, so the game's schedule is running down with nothing refilling it. At the weekly cadence and a 14-day horizon this leaves roughly six days before a date has no rounds on it, which is a player-visible dark day. Read the last run with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds` and its pod logs; `task schedule:prod` and `task schedule:stage` in the guessr repo say how much runway is actually left. A run that failed the depth guard reports it in the logs as `is scheduled only N days out`. To generate outside the schedule: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. If this fires with no CronJob in the cluster at all, the alert is telling you the object is gone rather than the run is late — check Argo."
+      description = "The weekly guessr-rounds CronJob in stage-1 has not recorded a success in 8 days, so the game's schedule is running down with nothing refilling it. At the weekly cadence and a 14-day horizon this leaves roughly six days before a date has no rounds on it, which is a player-visible dark day. Read the last run with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds` and its pod logs; `task schedule:prod` and `task schedule:stage` in the guessr repo say how much runway is actually left. A run that failed verify_days.sh logs `has dates scheduled with fewer than 5 rounds` and lists them. To generate outside the schedule: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. If this fires with no CronJob in the cluster at all, the alert is telling you the object is gone rather than the run is late — check Argo."
     }
     labels = {
       severity = "warning"
