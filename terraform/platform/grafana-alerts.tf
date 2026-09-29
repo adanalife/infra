@@ -753,6 +753,11 @@ resource "grafana_rule_group" "host_storage" {
 // series is ever absent — during the window between a terraform apply and the
 // k8s-monitoring sync that starts shipping the metric, and on a node so
 // thoroughly down that nothing scrapes it (which the deadman covers instead).
+//
+// exec_err_state = OK on both, for the same reason one layer up: a query that
+// fails to evaluate says Grafana Cloud's query path is unhealthy, not that the
+// box bounced, and a DatasourceError titled "minipc rebooted" reads as a crash.
+// Grafana losing its own query path is the deadman's job.
 resource "grafana_rule_group" "host_lifecycle" {
   name             = "host-lifecycle"
   folder_uid       = grafana_folder.tripbot.uid
@@ -772,7 +777,7 @@ resource "grafana_rule_group" "host_lifecycle" {
     for            = "0m"
     condition      = "C"
     no_data_state  = "OK"
-    exec_err_state = "Error"
+    exec_err_state = "OK"
 
     annotations = {
       summary     = "minipc booted within the last 15m — prod restarted with it"
@@ -838,7 +843,7 @@ resource "grafana_rule_group" "host_lifecycle" {
     for            = "0m"
     condition      = "C"
     no_data_state  = "OK"
-    exec_err_state = "Error"
+    exec_err_state = "OK"
 
     annotations = {
       summary     = "minipc has rebooted more than once in 6h — crash loop, prod is flapping"
