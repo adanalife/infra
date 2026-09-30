@@ -5211,3 +5211,96 @@ resource "grafana_rule_group" "synthetic_health" {
     }
   }
 }
+
+// The game's API: every /api/* request on guessr.dana.lol goes to the Python
+// Worker adanalife-guessr-api through the Pages project's API service binding.
+// An invocation that throws past the ASGI app, or dies over its CPU or memory
+// limit, reaches the player as a bare 500 (`error code: 1101`) and the app as
+// "Could not reach the scorer" -- and leaves no log line anywhere this stack
+// reads. Cloudflare's invocation analytics count it, so this reads that count.
+//
+// The synthetic guessr check samples the leaderboard from three regions every
+// two minutes and fires on more than half of one region failing, so an API
+// failing a third of its requests can pass it for hours; this one counts every
+// request.
+//
+// 5 errors in 15 minutes against the measured baseline (2026-09-29, the
+// Worker's first day in production): 5 errors across 18:00-22:59 UTC, never
+// more than 2 in an hour, against ~100-150 requests an hour. The incident that
+// motivated the rule read 38 errors in 84 requests over 15 minutes.
+resource "grafana_rule_group" "guessr_api" {
+  name             = "guessr-api"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name      = "guessr: the API Worker is failing requests"
+    for       = "5m"
+    condition = "C"
+    // No requests at all in the window is an empty list and no rows -- a quiet
+    // night, not a failure. A token Cloudflare refuses is an HTTP 400, so a
+    // broken credential surfaces through exec_err_state instead.
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr's API Worker failed more than 5 requests in 15 minutes"
+      description = "adanalife-guessr-api returned an error on more than 5 invocations in the last 15 minutes; its baseline is under 2 an hour. Players see this as a 500 with `error code: 1101` on scoring, the day's rounds and the leaderboards, and the iOS app as \"Could not reach the scorer\". The Worker's own record is Workers Logs in the Cloudflare dashboard (Workers & Pages → adanalife-guessr-api → Observability), where each failed invocation carries its outcome — `exceededResources` for the CPU or memory limit, `exception` with a stack trace for a throw. Fastest mitigation: remove the `API` service binding on the adanalife-guessr Pages project (Settings → Bindings) and redeploy, which hands /api/* back to the JS Functions — the guessr-admin probe will fire while it is off, since only the Worker answers /admin."
+    }
+    labels = {
+      severity = "critical"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = grafana_data_source.cloudflare_analytics.uid
+      // Infinity's backend parser fills the $${__from}/$${__to} macros from the
+      // rule's own time range, which is what makes the window 15 minutes. With
+      // no dimensions the query sums the whole window into one row; with no
+      // traffic it returns an empty list, which is no rows.
+      model = jsonencode({
+        refId  = "A"
+        type   = "json"
+        source = "url"
+        format = "table"
+        parser = "backend"
+        url    = "/graphql"
+        url_options = {
+          method            = "POST"
+          body_type         = "raw"
+          body_content_type = "application/json"
+          data = jsonencode({
+            query = "{viewer{accounts(filter:{accountTag:\"${var.cloudflare_account_id}\"}){workersInvocationsAdaptive(limit:1,filter:{scriptName:\"adanalife-guessr-api\",datetime_geq:\"$${__from:date:iso}\",datetime_leq:\"$${__to:date:iso}\"}){sum{errors requests}}}}}"
+          })
+        }
+        root_selector = "data.viewer.accounts.0.workersInvocationsAdaptive"
+        columns       = [{ selector = "sum.errors", text = "errors", type = "number" }]
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
