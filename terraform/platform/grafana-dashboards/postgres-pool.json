@@ -15,7 +15,7 @@
           "type": "prometheus",
           "uid": "__DS_PROMETHEUS__"
         },
-        "query": "label_values(target_info{service_name=\"tripbot\"}, deployment_environment)",
+        "query": "label_values(target_info{job=\"tripbot/tripbot\"}, deployment_environment)",
         "current": {
           "text": "prod-1",
           "value": "prod-1"
