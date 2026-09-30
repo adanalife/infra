@@ -80,6 +80,9 @@ destinations:
     #                         the relay-health alerts.
     #   kube_pod_{info,start_time,container_status_restarts_total}  — the
     #                         per-service pod-health rows on service-health-*.
+    #   kube_pod_container_status_waiting_reason  — rollout-health's
+    #                         image-pull rule. Emitted only for a container
+    #                         that is waiting, so a handful of series at most.
     #   kube_deployment_status_replicas_available  — scrape-health's
     #                         alloy-receiver rule. The receiver publishes no
     #                         metrics of its own (no otelcol_* family reaches
@@ -274,7 +277,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|etcd_disk_wal_fsync_duration_seconds_(bucket|sum)|etcd_disk_backend_commit_duration_seconds_bucket|etcd_server_leader_changes_seen_total|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|orphaned_sessions|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|etcd_disk_wal_fsync_duration_seconds_(bucket|sum)|etcd_disk_backend_commit_duration_seconds_bucket|etcd_server_leader_changes_seen_total|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|orphaned_sessions|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
