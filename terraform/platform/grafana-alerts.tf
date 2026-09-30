@@ -4614,6 +4614,81 @@ resource "grafana_rule_group" "control_plane_health" {
   }
 }
 
+// Rollout health — a new pod that can never start because its image won't pull.
+//
+// The 2026-09-29 shape: platform-gateway's v1.38.0 release job never ran (an
+// Actions budget block, zero steps), so the tag existed and Argo rolled the
+// three prod gateway Deployments to an image nobody pushed. The old ReplicaSet
+// kept serving, so no stream, probe or error rate moved; Argo read Degraded and
+// the new pods sat in ImagePullBackOff for 21 hours until a health check
+// happened to look. The release workflow's own failure alert was a job in the
+// same blocked run, so it never fired either.
+//
+// kube_pod_container_status_waiting_reason is allowlisted into the cloud for
+// this rule (k8s/monitoring/prod-1/values.yml); kube-state-metrics emits it only
+// for a container that is waiting, so the series is small. `max by (namespace,
+// pod, container)` collapses the duplicate scrapers the control-plane group
+// documents. `for = 30m` outlasts a slow pull and the image-gate Jobs, which
+// retry while a just-cut release is still publishing.
+resource "grafana_rule_group" "rollout_health" {
+  name             = "rollout-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "k8s: a prod pod cannot pull its image"
+    for            = "30m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) has been unable to pull its image for 30m"
+      description = "A prod container has sat in ErrImagePull / ImagePullBackOff for half an hour. When the Deployment's previous ReplicaSet is still serving, nothing user-facing is down yet, but the release it was rolling out never landed and the next restart of an old pod will not come back. Read the image the pod wants (`kubectl --context admin@adanalife-minipc -n {{ $labels.namespace }} get pod {{ $labels.pod }} -o jsonpath='{.spec.containers[*].image}'`), then check whether that tag was ever published: the usual cause is a release workflow whose build job failed or never started (an Actions budget block reads as zero steps). Re-running the release's failed jobs republishes it: `gh run rerun <run-id> --repo adanalife/<repo> --failed`."
+    }
+    labels = {
+      severity = "warning"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{namespace=~\"prod-1|prod-1-data\", reason=~\"ErrImagePull|ImagePullBackOff\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // ARC self-hosted runner health. The fleet's CI runs on the runner scale set
 // in arc-systems/arc-runners on this same mini-PC, so a broken listener stops
 // every repo's checks at once — and does it silently, because GitHub shows the
