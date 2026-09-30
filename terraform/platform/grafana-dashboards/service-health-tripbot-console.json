@@ -197,7 +197,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "HTTP latency (p50 / p95 / p99)",
-      "description": "Server-side request latency, in seconds. Reads a flat 2.5 / 4.75 / 4.95 until tripbot-console#337 ships: the histogram was left on the OTel SDK default bucket boundaries, which are spaced for milliseconds, so every seconds-valued observation fell into the single (0, 5] bucket and each quantile was `q * 5` from interpolating inside it rather than a measurement. True mean over that period was 78ms (sum/count). Once the explicit seconds boundaries deploy, a window spanning the deploy shows a one-time step as the old le series stop and the new ones start.",
+      "description": "Server-side request latency, in seconds, from explicit seconds-spaced bucket boundaries (5ms to 10s). A quantile that comes back as a clean fraction of one bucket bound is interpolation inside a single occupied bucket, not a measurement.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 7, "w": 12, "h": 8 },
       "targets": [
