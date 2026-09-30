@@ -54,6 +54,28 @@ resource "grafana_data_source" "guessr_d1" {
   })
 }
 
+# Cloudflare's GraphQL analytics API, for how the game's Python Worker is
+# holding up: requests and errors per invocation, which is the only record of
+# an invocation that died over its CPU or memory limit. A second datasource
+# rather than a wider guessr-d1 token because the scopes differ -- this one
+# holds Account Analytics read and nothing else, created by hand and parked in
+# SSM the same way as the D1 token above.
+resource "grafana_data_source" "cloudflare_analytics" {
+  type = "yesoreyeram-infinity-datasource"
+  name = "cloudflare-analytics"
+  uid  = "cloudflare-analytics"
+  url  = "https://api.cloudflare.com/client/v4"
+
+  json_data_encoded = jsonencode({
+    auth_method  = "bearerToken"
+    allowedHosts = ["https://api.cloudflare.com"]
+  })
+
+  secure_json_data_encoded = jsonencode({
+    bearerToken = data.aws_ssm_parameter.cloudflare_analytics_read.value
+  })
+}
+
 resource "grafana_folder" "guessr" {
   title = "Guessr"
 }

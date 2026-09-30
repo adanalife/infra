@@ -99,6 +99,10 @@ data "aws_ssm_parameter" "cloudflare_d1_read" {
   name = "/platform/cloudflare-d1-read"
 }
 
+data "aws_ssm_parameter" "cloudflare_analytics_read" {
+  name = "/platform/cloudflare-analytics-read"
+}
+
 data "aws_ssm_parameter" "discord_alerts_webhook" {
   name = "/platform/discord-alerts-webhook"
 }
