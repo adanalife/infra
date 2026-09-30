@@ -94,18 +94,10 @@ locals {
   // where you see whether the box bounced underneath it.
   ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
 
-  // The frame gauge the encoder-wedged rule fires on, in Explore rather than on
-  // a dashboard: the only panel plotting it is scoped to service_name=vlc-server
-  // and would show none of the alert's series. Responders want to see when the
-  // gauge flattened before bouncing the pod.
-  obs_frames_link = "[frames](${local.grafana_url}/explore?left=${urlencode(jsonencode({
-    queries = [{
-      refId      = "A"
-      datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus.uid }
-      expr       = "max by (service_platform) (obs_stream_output_total_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
-    }]
-    range = { from = "now-6h", to = "now" }
-  }))})"
+  // The output frame-rate panel on the stream-health board, beside the
+  // stream-state and encoder panels the encoder-wedged rule reads alongside.
+  // Responders want to see when the frames flattened before bouncing the pod.
+  obs_frames_link = "[frames](${local.grafana_url}/d/stream-health/?viewPanel=33)"
 
   // The obs container's decoder complaints, on the same Loki matchers the
   // decode-error rule counts. OBS's own counters stay clean through a corrupt
