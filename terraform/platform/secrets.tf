@@ -48,6 +48,9 @@ data "aws_ssm_parameter" "github_automation_app_key" {
 #   - platform/cloudflare-d1-read — a bare token. Scope it to D1 read and
 #     nothing else. D1 tokens cannot be scoped per-database, so this reaches
 #     both tiers' databases; read-only is what bounds it.
+#   - platform/cloudflare-analytics-read — a bare token. Scope it to Account
+#     Analytics read and nothing else; it reads Worker invocation counts over
+#     Cloudflare's GraphQL API for the guessr-api alert rule.
 #   - platform/discord-alerts-webhook — the Grafana contact-point webhook URL.
 #     Same value as /k8s/tripbot/discord-alerts-webhook in the env accounts,
 #     which stays there for its ESO consumers (tripbot's !report, guessr).
@@ -62,6 +65,7 @@ locals {
     "platform/grafana-cloud-api"         = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
     "platform/grafana-sm-access"         = "Synthetic Monitoring access token for the grafana provider's sm_access_token."
     "platform/cloudflare-d1-read"        = "Cloudflare API token, D1 read only, for the Grafana Infinity datasource over guessr's play data."
+    "platform/cloudflare-analytics-read" = "Cloudflare API token, Account Analytics read only, for the Grafana Infinity datasource over Worker invocation counts."
     "platform/discord-alerts-webhook"    = "Discord webhook URL for the Grafana discord-alerts contact point."
     "platform/ntfy-critical-webhook"     = "ntfy webhook URL for the Grafana independent critical-alert contact point."
     "platform/healthchecks-deadman-ping" = "healthchecks.io ping URL for the Grafana alerting deadman switch."
