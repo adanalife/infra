@@ -977,6 +977,228 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 800,
+      "type": "row",
+      "title": "Go runtime",
+      "description": "Go runtime metrics from the Prometheus client's Go collector (go_goroutines, go_memstats_*) on the gateway's /metrics scrape, scoped by pod to the platform selector.",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 801,
+          "type": "timeseries",
+          "title": "Goroutines",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 61,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_goroutines{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 802,
+          "type": "timeseries",
+          "title": "OS thread limit (GOMAXPROCS)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 61,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_sched_gomaxprocs_threads{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 5
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 803,
+          "type": "timeseries",
+          "title": "Memory used (stack vs heap)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 69,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_memstats_stack_inuse_bytes{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}",
+              "legendFormat": "{{pod}} / stack"
+            },
+            {
+              "refId": "B",
+              "expr": "go_memstats_heap_inuse_bytes{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}",
+              "legendFormat": "{{pod}} / heap"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 20,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 804,
+          "type": "timeseries",
+          "title": "Heap allocation rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 77,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(go_memstats_alloc_bytes_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[$__rate_interval])",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 805,
+          "type": "timeseries",
+          "title": "Allocation count rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 77,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(go_memstats_mallocs_total{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}[$__rate_interval])",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 806,
+          "type": "timeseries",
+          "title": "GC heap goal",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 85,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_memstats_next_gc_bytes{cluster=~\"$cluster\", namespace=~\"$deployment_environment\", pod=~\"gateway-$platform.*\"}",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 5
+              }
+            },
+            "overrides": []
+          }
+        }
+      ]
     }
   ]
 }
