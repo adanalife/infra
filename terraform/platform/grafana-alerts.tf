@@ -4295,7 +4295,7 @@ resource "grafana_rule_group" "burrito_health" {
 
     annotations = {
       summary     = "Burrito layer {{ $labels.layer_name }} last plan or apply failed — that workspace's drift is unknown"
-      description = "burrito_terraform_layer_status{layer_name=\"{{ $labels.layer_name }}\", status=\"error\"} has been set for 15m: the layer completed a run and terraform reported failure, so this workspace's real drift is unknown until it plans clean again. Read the run log from the UI at https://burrito.prod.whereisdana.today, or from the datastore bucket (layers/burrito/{{ $labels.layer_name }}/<run>/<attempt>/run.log). A failure on core or platform is a plan failure by construction — those layers hold a read-only credential and cannot apply. no_data is OK: the gauge drops the error label entirely once a layer recovers."
+      description = "burrito_terraform_layer_status{layer_name=\"{{ $labels.layer_name }}\", status=\"error\"} has been set for 15m: the layer completed a run and terraform reported failure, so this workspace's real drift is unknown until it plans clean again. Read the run log from the UI at https://burrito.prod.whereisdana.today, or from the datastore bucket (layers/burrito/{{ $labels.layer_name }}/<run>/<attempt>/run.log). A failure on core, platform or prod-1-data is a plan failure by construction — those layers hold a read-only credential and cannot apply. no_data is OK: the gauge drops the error label entirely once a layer recovers."
     }
     labels = {
       severity = "warning"

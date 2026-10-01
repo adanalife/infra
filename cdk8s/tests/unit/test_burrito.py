@@ -240,7 +240,8 @@ def test_apply_has_a_real_datastore_behind_it():
 
 def test_only_stage_and_prod_can_apply():
     # core holds IAM and Organizations; platform holds the automation App's
-    # key. Their apply path stays a workstation gesture. And because
+    # key; prod-1-data holds the resources that cannot be rebuilt from the
+    # repo. Their apply path stays a workstation gesture. And because
     # overrideRunnerSpec is per-layer rather than per-action, marking one
     # appliable would also hand its hourly drift plan an admin credential —
     # so this is a wider decision than "can I click apply".
@@ -248,6 +249,16 @@ def test_only_stage_and_prod_can_apply():
         "stage-1",
         "prod-1",
     }
+
+
+def test_prod_data_layer_plans_with_prods_read_only_user():
+    # prod-1-data is the prod account's state, so its runner holds that
+    # account's read-only `burrito` key — the SM pair prod-1 planned with
+    # before it became appliable. A prefix of its own would point ESO at a
+    # parameter pair nothing seeds.
+    by_name = {layer.name: layer for layer in LAYERS}
+    assert by_name["prod-1-data"].sm_prefix == by_name["prod-1"].sm_prefix
+    assert by_name["prod-1-data"].sm_key_prefix == "prod"
 
 
 def test_credential_matches_whether_the_layer_can_apply():
