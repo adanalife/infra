@@ -541,6 +541,34 @@ annotationAutodiscovery:
     // different value but same timestamp" before discarding the duplicate;
     // that log line is the price of the iGPU contention view. ~9 series.
 
+# Alloy's own metrics, from every collector this chart runs. Without it the
+# telemetry pipeline has no signal of its own: kube-state-metrics can say a
+# collector pod is up, but not whether it is delivering. The chart's default
+# allow-list keeps the remote-write, WAL and component-health families plus
+# the receiver's *span* counters. The includes add the receiver's metric-point
+# and log-record counters, because the app pods push metrics and logs over
+# OTLP, not spans. Metrics leave the receiver through remote_write, so
+# delivery reads off prometheus_remote_storage_* (already in the default
+# list); logs leave through an OTLP exporter, hence its sent/failed counters.
+#
+# Every series lands in VictoriaMetrics. Grafana Cloud only keeps what the
+# metrics destination's keep regex names, which is `up` here: one series per
+# collector pod. An alert on any other family needs its name added there.
+integrations:
+  collector: alloy-metrics
+  alloy:
+    instances:
+      - name: alloy
+        namespaces: [monitoring]
+        labelSelectors:
+          app.kubernetes.io/name: [alloy-metrics, alloy-logs, alloy-singleton, alloy-receiver]
+        metrics:
+          tuning:
+            includeMetrics:
+              - otelcol_receiver_(accepted|refused|failed)_(metric_points|log_records)_total
+              - otelcol_exporter_(sent|send_failed)_(metric_points|log_records)_total
+              - otelcol_exporter_queue_(size|capacity)
+
 telemetryServices:
   kube-state-metrics:
     deploy: true
