@@ -351,6 +351,223 @@
       "targets": [
         { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"onscreens-server\" && resource.deployment.environment =~ \"$deployment_environment\" } | select(resource.deployment.environment)", "limit": 20 }
       ]
+    },
+    {
+      "id": 800,
+      "type": "row",
+      "title": "Go runtime",
+      "description": "Go runtime metrics from the OTel runtime instrumentation (go_* via OTLP), scoped to this service and the platform/env selectors.",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 801,
+          "type": "timeseries",
+          "title": "Goroutines",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 51,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_goroutine_count{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}",
+              "legendFormat": "{{service_platform}} [{{deployment_environment}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 802,
+          "type": "timeseries",
+          "title": "OS thread limit (GOMAXPROCS)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 51,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_processor_limit{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}",
+              "legendFormat": "{{service_platform}} [{{deployment_environment}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 5
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 803,
+          "type": "timeseries",
+          "title": "Memory used (stack vs heap)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 59,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_memory_used_bytes{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}",
+              "legendFormat": "{{service_platform}} / {{go_memory_type}} [{{deployment_environment}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 20,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 804,
+          "type": "timeseries",
+          "title": "Heap allocation rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 67,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(go_memory_allocated_bytes_total{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])",
+              "legendFormat": "{{service_platform}} [{{deployment_environment}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 805,
+          "type": "timeseries",
+          "title": "Allocation count rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 67,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(go_memory_allocations_total{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])",
+              "legendFormat": "{{service_platform}} [{{deployment_environment}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 806,
+          "type": "timeseries",
+          "title": "GC heap goal",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "__DS_PROMETHEUS__"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 75,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_memory_gc_goal_bytes{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}",
+              "legendFormat": "{{service_platform}} [{{deployment_environment}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 5
+              }
+            },
+            "overrides": []
+          }
+        }
+      ]
     }
   ]
 }

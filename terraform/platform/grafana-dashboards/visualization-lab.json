@@ -66,7 +66,7 @@
       "id": 1,
       "type": "heatmap",
       "title": "Command latency distribution",
-      "description": "Heatmap of tripbot_command_duration_seconds_bucket. Y = latency bucket, X = time, color = rate. Compare with the p50/p95/p99 lines on dashboard 11 — the heatmap reveals bimodal latency (fast path vs. DB-bound path) that the quantile lines smooth over.",
+      "description": "Heatmap of tripbot_command_duration_seconds_bucket. Y = latency bucket, X = time, color = rate. Compare with the p50/p95/p99 lines on the Application Latency dashboard — the heatmap reveals bimodal latency (fast path vs. DB-bound path) that the quantile lines smooth over.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
       "targets": [

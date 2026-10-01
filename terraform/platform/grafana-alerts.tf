@@ -344,7 +344,8 @@ resource "grafana_notification_policy" "root" {
 // group so it can be toggled independently of stream-health.
 //
 // Metric names come from the OTel-runtime exporter pushed via OTLP and
-// match what the go-runtime dashboard queries against.
+// match what the "Go runtime" row of the tripbot and onscreens-server
+// Service Health dashboards queries against.
 resource "grafana_rule_group" "go_runtime" {
   name             = "go-runtime"
   folder_uid       = grafana_folder.tripbot.uid
@@ -359,7 +360,7 @@ resource "grafana_rule_group" "go_runtime" {
 
     annotations = {
       summary     = "Goroutine count above 10000 for 10m"
-      description = "Sustained goroutine count > 10000 on a tripbot service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the go-runtime dashboard for the affected service and pull a goroutine profile from Pyroscope to find the leak site."
+      description = "Sustained goroutine count > 10000 on a tripbot service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the Go runtime row on the affected service's Service Health dashboard and pull a goroutine profile from Pyroscope to find the leak site."
     }
     labels = {
       severity = "warning"
@@ -412,7 +413,7 @@ resource "grafana_rule_group" "go_runtime" {
 
     annotations = {
       summary     = "Heap grew by more than 100 MB over the last hour"
-      description = "Sustained heap growth without bound suggests a memory leak — references being held that never get collected. Open the go-runtime dashboard for the affected service and pull a heap profile (alloc_space + inuse_space) from Pyroscope to find what's accumulating."
+      description = "Sustained heap growth without bound suggests a memory leak — references being held that never get collected. Open the Go runtime row on the affected service's Service Health dashboard and pull a heap profile (alloc_space + inuse_space) from Pyroscope to find what's accumulating."
     }
     labels = {
       severity = "warning"
