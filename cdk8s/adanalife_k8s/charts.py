@@ -12,7 +12,7 @@ that live in infra.
 
 from __future__ import annotations
 
-from cdk8s import Chart
+from cdk8s import ApiObject, Chart, JsonPatch
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
@@ -117,6 +117,37 @@ class DataChart(Chart):
 
     def __init__(self, scope: Construct, id: str, *, env: EnvConfig):
         super().__init__(scope, id, namespace=env.data_ns or None)
+
+        # --- the isolated data Namespace itself (isolated envs only; co-located
+        #     envs share the app namespace, which bootstrap owns). Declared here
+        #     so the deletion boundary is a reviewed object rather than a side
+        #     effect of the secrets-seeding task, which still creates it first
+        #     (the eso-aws-credentials Secret must land before this unit syncs).
+        #     `restricted` PodSecurity: every pod here (CNPG, the legacy
+        #     StatefulSet, the backup CronJob) already runs non-root with all
+        #     capabilities dropped. Delete=false keeps the Namespace even if the
+        #     Application is deleted with cascade. ---
+        if env.data_isolated:
+            ns = ApiObject(
+                self,
+                "namespace",
+                api_version="v1",
+                kind="Namespace",
+                metadata={
+                    "name": env.data_ns,
+                    "labels": {
+                        "adanalife.dev/protected": "true",
+                        "pod-security.kubernetes.io/enforce": "restricted",
+                        "pod-security.kubernetes.io/warn": "restricted",
+                        "pod-security.kubernetes.io/audit": "restricted",
+                    },
+                    "annotations": {
+                        "argocd.argoproj.io/sync-options": "Prune=false,Delete=false",
+                    },
+                },
+            )
+            # Cluster-scoped: drop the chart-default metadata.namespace.
+            ns.add_json_patch(JsonPatch.remove("/metadata/namespace"))
 
         # --- ESO SecretStore (eso envs only): the postgres ExternalSecret here
         #     references it, so it lives in the same (data) namespace. When the DB

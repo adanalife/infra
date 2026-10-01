@@ -1454,6 +1454,9 @@ tasks:
       # reads).
       - kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1 --dry-run=client -o yaml | kubectl apply -f -
+      # prod-1-data's labels + PodSecurity level are owned by the declared
+      # Namespace in the prod-1-data Argo unit (DataChart); this only ensures it
+      # exists before the Secret lands.
       - kubectl create namespace prod-1-data --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace prod-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
@@ -1516,6 +1519,8 @@ tasks:
       - kubectl create namespace stage-1 --dry-run=client -o yaml | kubectl apply -f -
       # stage-1-data: the isolated DB namespace (postgres + its SecretStore). Its
       # ExternalSecret needs eso-aws-credentials here, same as the app namespace.
+      # Labels + PodSecurity level are owned by the declared Namespace in the
+      # stage-1-data Argo unit (DataChart); this only ensures it exists.
       - kubectl create namespace stage-1-data --dry-run=client -o yaml | kubectl apply -f -
       - kubectl create namespace stage-1-platform --dry-run=client -o yaml | kubectl apply -f -
       - |
