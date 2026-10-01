@@ -176,12 +176,24 @@
       "type": "timeseries",
       "title": "OBS CPU & memory",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 7 },
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 7 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_cpu_usage_percent{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "cpu % [{{deployment_environment}} / {{service_platform}}]" },
         { "refId": "B", "expr": "max by (deployment_environment, service_platform) (obs_memory_usage_mb{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "memory (MB) [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "OBS output frames /s",
+      "description": "Frame rate of obs_stream_output_total_frames. Zero while Stream reads live is an encoder wedge: OBS holds the output open and sends nothing.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (rate(obs_stream_output_total_frames{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "frames/s [{{deployment_environment}} / {{service_platform}}]" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "fps", "min": 0, "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5 } }, "overrides": [] }
     },
     {
       "id": 40,
