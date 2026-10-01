@@ -7,20 +7,20 @@ objects that tell it what to plan:
   * TerraformRepository `infra` — the infra repo over anonymous HTTPS (public,
     so no deploy key — same as the obs/playout Argo sources).
   * One TerraformLayer per remote-state workspace (LAYERS below): core,
-    platform, stage-1, prod-1. terraform/bootstrap is deliberately absent — its
-    state is a file committed in the repo, and it pins `required_version
-    ~> 0.13`, so there is nothing for a 1.x runner to plan.
-  * One runner-creds ExternalSecret per layer, materialized from SM. core and
-    platform get a ReadOnlyAccess key and so cannot be applied from here at
-    all; stage-1 and prod-1 get the admin `burrito-apply` key, which is what
-    lets a TerraformRun with action=apply against them succeed.
+    platform, stage-1, prod-1, prod-1-data. terraform/bootstrap is deliberately
+    absent — its state is a file committed in the repo, and it pins
+    `required_version ~> 0.13`, so there is nothing for a 1.x runner to plan.
+  * One runner-creds ExternalSecret per layer, materialized from SM. core,
+    platform and prod-1-data get a ReadOnlyAccess key and so cannot be applied
+    from here at all; stage-1 and prod-1 get the admin `burrito-apply` key,
+    which is what lets a TerraformRun with action=apply against them succeed.
 
     That boundary is coarser than it looks. overrideRunnerSpec is per-LAYER,
     not per-action, so an appliable layer runs its hourly drift PLAN as an
     administrator too — no arrangement plans read-only and applies with write
-    access on one layer. Making it finer means splitting the terraform state so
-    the irreplaceable resources sit in a layer that keeps a read-only
-    credential, which is the tracked follow-up. Until then core and platform
+    access on one layer. That is why prod's irreplaceable resources live in
+    their own workspace (terraform/prod-1-data): a layer whose credential is
+    read-only, in the same account as prod-1. core, platform and prod-1-data
     are the workspaces whose apply path stays a workstation gesture, and
     stage-1/prod-1 are the ones where even a plan holds admin.
   * For stage-1/prod-1, a GCP credential-config ConfigMap + a projected
@@ -145,7 +145,8 @@ class Layer:
     lets a TerraformRun with action=apply succeed. It is not an apply-time-only
     switch: overrideRunnerSpec is per-layer, not per-action, so an appliable
     layer runs its hourly drift PLAN as an administrator too. That is the whole
-    reason core and platform are left alone — see the module docstring.
+    reason core, platform and prod-1-data are left alone — see the module
+    docstring.
     """
 
     name: str
@@ -197,6 +198,13 @@ LAYERS = (
         gcp_project_number="876608406330",
         appliable=True,
     ),
+    # prod's irreplaceable resources, split out of prod-1 so they can sit behind
+    # a plan-only credential. Same account as prod-1, so the same `prod` SM
+    # prefix: without `appliable` that resolves to the account's read-only
+    # `burrito` user (terraform/modules/env-base/burrito.tf), while prod-1's
+    # runner reads the `prod-apply` pair. Never appliable, by design — see
+    # terraform/prod-1-data/README.md.
+    Layer(name="prod-1-data", path="terraform/prod-1-data", sm_prefix="prod"),
 )
 
 

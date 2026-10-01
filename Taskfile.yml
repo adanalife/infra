@@ -309,7 +309,7 @@ tasks:
   # CRDs, which only exist once the `burrito` Argo Application has synced — a
   # blanket gitops:apply would fail on a cluster that hasn't installed it.
   k8s:prod:burrito:apply:
-    desc: "Apply the Burrito config (TerraformRepository + the four layers + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
+    desc: "Apply the Burrito config (TerraformRepository + every layer + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
     preconditions:
       - *minipc-context-guard
       - sh: kubectl get crd terraformlayers.config.terraform.padok.cloud >/dev/null 2>&1
