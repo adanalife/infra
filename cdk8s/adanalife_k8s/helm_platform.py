@@ -57,6 +57,7 @@ REPOS = {
     # the missing scheme and passes helm the full oci:// chart ref instead.
     "burrito": "ghcr.io/padok-team/charts",
     "actions-runner": "ghcr.io/actions/actions-runner-controller-charts",
+    "kyverno": "https://kyverno.github.io/kyverno",
 }
 
 # --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
@@ -99,6 +100,9 @@ VERSIONS = {
     # retired rpi5 stack ran.
     "arc-controller": "0.14.2",
     "arc-runner-set": "0.14.2",
+    # Kyverno v1.19.1 — admission policy engine. Latest stable at add time
+    # (2026-09-23).
+    "kyverno": "3.9.1",
 }
 
 
@@ -113,6 +117,10 @@ class HelmComponent:
     namespace: str
     value_files: tuple[str, ...] = ()  # -f paths under K8S
     values: dict = field(default_factory=dict)  # extra inline overrides (e.g. LAN IP)
+    # In-repo raw manifest (path under K8S) delivered alongside the chart — the
+    # custom resources of a CRD the chart ships, so they sync with the operator
+    # that reconciles them. Argo path only; the cdk8s.Helm render skips it.
+    manifests: str = ""
     # Argo-manageable? False for the bootstrap floor Argo can't own — cilium (the
     # CNI Argo itself rides on) and argo-cd (managing its own install). Those stay
     # task-installed; the Argo-native platform layer (argo_platform.py) skips them.
@@ -206,6 +214,7 @@ def cluster_components(
                 "tailscale-operator",
                 "tailscale",
                 value_files=("tailscale-operator/values.yml",),
+                manifests="tailscale-operator/proxygroup.yml",
             )
         )
 
@@ -293,6 +302,21 @@ def cluster_components(
                 "arc-runner-set",
                 "arc-runners",
                 value_files=("arc/runners/values.yml",),
+            )
+        )
+
+    # Kyverno — admission policy engine, validation-only and fail-open (see
+    # k8s/kyverno/values.yml). Cleanly Argo-manageable (no host-coupled values).
+    if minipc:
+        components.append(
+            HelmComponent(
+                "kyverno",
+                "kyverno",
+                "kyverno",
+                "kyverno",
+                "kyverno",
+                value_files=("kyverno/values.yml",),
+                manifests="kyverno/policies.yml",
             )
         )
 
