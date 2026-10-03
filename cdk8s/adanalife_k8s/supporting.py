@@ -15,11 +15,9 @@ import imports.io.cert_manager as cm
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.eso import ESData, external_secret
 
-# Cross-cutting observability secrets (k8s/shared-secrets/base) — all
-# dataFrom.extract from SSM Parameter Store, materialized into the env
-# namespace, envFrom'd by tripbot / onscreens-server with optional: false.
+# Sentry DSNs for tripbot / onscreens-server — dataFrom.extract from SSM
+# Parameter Store into the env namespace, envFrom'd with optional: true.
 _SHARED_SECRETS = [
-    ("grafana-cloud-otlp", "/k8s/grafana-cloud-otlp"),
     ("sentry-tripbot", "/k8s/sentry-tripbot"),
     ("sentry-onscreens-server", "/k8s/sentry-onscreens-server"),
 ]
