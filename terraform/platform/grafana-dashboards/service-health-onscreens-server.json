@@ -261,22 +261,11 @@
       "title": "Requests by route",
       "description": "Per-route request rate. OBS browser sources poll /onscreens/state.json; chatbot drives /onscreens/{slug}/{action}. The pkg/onscreens-server `tagged()` helper sets http.route on every registration so the breakdown is real (not collapsed to '').",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 15, "w": 24, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "sum by (http_route, deployment_environment) (rate(http_server_request_duration_seconds_count{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval]))", "legendFormat": "{{http_route}} [{{deployment_environment}}]" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Response size p95",
-      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
-      "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, deployment_environment) (rate(http_server_response_body_size_bytes_bucket{service_name=\"onscreens-server\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"}[$__rate_interval])))", "legendFormat": "p95 response [{{deployment_environment}}]" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 } }, "overrides": [] }
     },
     {
       "id": 9,
