@@ -1,7 +1,7 @@
 {
   "uid": "guessr-play",
   "title": "Guessr — how it is being played",
-  "description": "Queries production D1 over Cloudflare's REST API through the guessr-d1 Infinity datasource. Every panel is one SQL statement against `plays`, which holds one row per guess: date, opaque player id, clip, distance, points.",
+  "description": "Queries production D1 over Cloudflare's REST API through the guessr-d1 Infinity datasource. Every D1 panel is one SQL statement against `plays`, which holds one row per guess: date, opaque player id, clip, distance, points, client.",
   "tags": ["guessr"],
   "timezone": "utc",
   "editable": true,
@@ -297,6 +297,178 @@
             { "selector": "guesses", "text": "guesses", "type": "number" },
             { "selector": "avg_km", "text": "avg_km", "type": "number" },
             { "selector": "avg_points", "text": "avg_points", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Finishers by client",
+      "description": "Per date, distinct players with all five rounds recorded, split by the client that sent them: `web`, `ios`, `ipados`, `mac`, `app`. `unknown` is plays older than the client column. A player whose five rounds came from more than one client counts once, under one of them. This is the App Store against the web.",
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "guessr-d1"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "guessr-d1"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\":\"SELECT date, SUM(c = 'web') AS web, SUM(c = 'ios') AS ios, SUM(c = 'ipados') AS ipados, SUM(c = 'mac') AS mac, SUM(c = 'app') AS app, SUM(c = 'unknown') AS unknown FROM (SELECT date, player_id, COALESCE(MAX(client), 'unknown') AS c FROM plays WHERE date <= date('now') GROUP BY date, player_id HAVING COUNT(*) = 5) GROUP BY date ORDER BY date\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp",
+              "timestampFormat": "2006-01-02"
+            },
+            {
+              "selector": "web",
+              "text": "web",
+              "type": "number"
+            },
+            {
+              "selector": "ios",
+              "text": "ios",
+              "type": "number"
+            },
+            {
+              "selector": "ipados",
+              "text": "ipados",
+              "type": "number"
+            },
+            {
+              "selector": "mac",
+              "text": "mac",
+              "type": "number"
+            },
+            {
+              "selector": "app",
+              "text": "app",
+              "type": "number"
+            },
+            {
+              "selector": "unknown",
+              "text": "unknown",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Players by client, last 7 days",
+      "description": "Distinct players with at least one guess in the last seven days, per client. A player who played on two clients counts under both, so the tiles can sum past the real number of people.",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "guessr-d1"
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "guessr-d1"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\":\"SELECT COUNT(DISTINCT CASE WHEN client = 'web' THEN player_id END) AS web, COUNT(DISTINCT CASE WHEN client = 'ios' THEN player_id END) AS ios, COUNT(DISTINCT CASE WHEN client = 'ipados' THEN player_id END) AS ipados, COUNT(DISTINCT CASE WHEN client = 'mac' THEN player_id END) AS mac, COUNT(DISTINCT CASE WHEN client = 'app' THEN player_id END) AS app, COUNT(DISTINCT CASE WHEN client IS NULL THEN player_id END) AS unknown FROM plays WHERE date > date('now', '-7 days') AND date <= date('now')\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            {
+              "selector": "web",
+              "text": "web",
+              "type": "number"
+            },
+            {
+              "selector": "ios",
+              "text": "ios",
+              "type": "number"
+            },
+            {
+              "selector": "ipados",
+              "text": "ipados",
+              "type": "number"
+            },
+            {
+              "selector": "mac",
+              "text": "mac",
+              "type": "number"
+            },
+            {
+              "selector": "app",
+              "text": "app",
+              "type": "number"
+            },
+            {
+              "selector": "unknown",
+              "text": "unknown",
+              "type": "number"
+            }
           ]
         }
       ]
