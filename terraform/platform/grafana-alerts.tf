@@ -343,9 +343,11 @@ resource "grafana_notification_policy" "root" {
 // holding references that never get collected). Lives in its own rule
 // group so it can be toggled independently of stream-health.
 //
-// Metric names come from the OTel-runtime exporter pushed via OTLP and
-// match what the "Go runtime" row of the tripbot and onscreens-server
-// Service Health dashboards queries against.
+// tripbot and onscreens-server push the OTel-runtime names over OTLP
+// (go_goroutine_count, go_memory_used_bytes). platform-gateway is scraped
+// and exposes the Prometheus Go collector's (go_goroutines,
+// go_memstats_heap_inuse_bytes), with no service_name, so its branch of
+// each expression copies `job` (gateway-<platform>) into service_name.
 resource "grafana_rule_group" "go_runtime" {
   name             = "go-runtime"
   folder_uid       = grafana_folder.tripbot.uid
@@ -360,7 +362,7 @@ resource "grafana_rule_group" "go_runtime" {
 
     annotations = {
       summary     = "Goroutine count above 10000 for 10m"
-      description = "Sustained goroutine count > 10000 on a tripbot service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the Go runtime row on the affected service's Service Health dashboard and pull a goroutine profile from Pyroscope to find the leak site."
+      description = "Sustained goroutine count > 10000 on a tripbot or gateway service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the Go runtime row on the affected service's Service Health dashboard and pull a goroutine profile from Pyroscope to find the leak site."
     }
     labels = {
       severity = "warning"
@@ -376,7 +378,7 @@ resource "grafana_rule_group" "go_runtime" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|onscreens-server\"})"
+        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|onscreens-server\"}) or max by (service_name) (label_replace(go_goroutines{job=~\"gateway-.+\"}, \"service_name\", \"$1\", \"job\", \"(.+)\"))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -429,7 +431,7 @@ resource "grafana_rule_group" "go_runtime" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"} offset 1h)"
+        expr          = "(max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"} offset 1h)) or (max by (service_name) (label_replace(go_memstats_heap_inuse_bytes{job=~\"gateway-.+\"}, \"service_name\", \"$1\", \"job\", \"(.+)\")) - max by (service_name) (label_replace(go_memstats_heap_inuse_bytes{job=~\"gateway-.+\"} offset 1h, \"service_name\", \"$1\", \"job\", \"(.+)\")))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
