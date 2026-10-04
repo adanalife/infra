@@ -84,8 +84,9 @@ resource "grafana_dashboard" "guessr" {
   folder = grafana_folder.guessr.uid
   # sensitive() for the same reason as the tripbot dashboards in grafana.tf:
   # the diff is a thousand lines of JSON that drowns out the rest of a plan.
-  config_json = sensitive(replace(
+  config_json = sensitive(replace(replace(
     file("${path.module}/grafana-dashboards/guessr.json"),
-    "__D1_PRODUCTION__", local.guessr_d1_production
+    "__D1_PRODUCTION__", local.guessr_d1_production),
+    "__CLOUDFLARE_ACCOUNT__", var.cloudflare_account_id
   ))
 }
