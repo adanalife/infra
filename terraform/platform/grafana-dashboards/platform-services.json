@@ -36,7 +36,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(external_dns_registry_endpoints_per_zone{cluster=~\"$cluster\"})" }
+        { "refId": "A", "expr": "sum(external_dns_registry_endpoints_total{cluster=~\"$cluster\"})" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -48,7 +48,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(external_dns_source_endpoints_per_zone{cluster=~\"$cluster\"})" }
+        { "refId": "A", "expr": "sum(external_dns_source_endpoints_total{cluster=~\"$cluster\"})" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -111,8 +111,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 5, "w": 12, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "sum(external_dns_source_endpoints_per_zone{cluster=~\"$cluster\"})", "legendFormat": "source" },
-        { "refId": "B", "expr": "sum(external_dns_registry_endpoints_per_zone{cluster=~\"$cluster\"})", "legendFormat": "registry" }
+        { "refId": "A", "expr": "sum(external_dns_source_endpoints_total{cluster=~\"$cluster\"})", "legendFormat": "source" },
+        { "refId": "B", "expr": "sum(external_dns_registry_endpoints_total{cluster=~\"$cluster\"})", "legendFormat": "registry" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
     },
@@ -207,7 +207,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 13, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(certmanager_acme_client_request_count{cluster=~\"$cluster\", status!~\"2..\"}[1h]))" }
+        { "refId": "A", "expr": "sum(increase(certmanager_http_acme_client_request_count{cluster=~\"$cluster\", status!~\"2..\"}[1h]))" }
       ],
       "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -274,7 +274,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (status) (rate(certmanager_acme_client_request_count{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
+        { "refId": "A", "expr": "sum by (status) (rate(certmanager_http_acme_client_request_count{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
     },
