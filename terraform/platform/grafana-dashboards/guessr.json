@@ -1,7 +1,7 @@
 {
   "uid": "guessr-play",
   "title": "Guessr — how it is being played",
-  "description": "Queries production D1 over Cloudflare's REST API through the guessr-d1 Infinity datasource. Every D1 panel is one SQL statement against `plays`, which holds one row per guess: date, opaque player id, clip, distance, points, client.",
+  "description": "Queries production D1 over Cloudflare's REST API through the guessr-d1 Infinity datasource. Every D1 panel is one SQL statement against `plays`, which holds one row per guess: date, opaque player id, clip, distance, points, client. The API Worker panels read Cloudflare's Workers invocation analytics through the cloudflare-analytics datasource.",
   "tags": ["guessr"],
   "timezone": "utc",
   "editable": true,
@@ -467,6 +467,162 @@
             {
               "selector": "unknown",
               "text": "unknown",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "API Worker — requests and errors",
+      "description": "Per hour, invocations of the adanalife-guessr-api Worker that serves every /api/* request, and how many of them failed. Cloudflare's invocation analytics are the only record of an invocation that threw past the app or died over its CPU or memory limit; players see one as a 500 with `error code: 1101`. Errors read on the right axis. The alert `guessr: the API Worker is failing requests` fires on more than 5 errors in 15 minutes.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "cloudflare-analytics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "cloudflare-analytics"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/graphql",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"query\":\"{viewer{accounts(filter:{accountTag:\\\"__CLOUDFLARE_ACCOUNT__\\\"}){workersInvocationsAdaptive(limit:10000,filter:{scriptName:\\\"adanalife-guessr-api\\\",datetime_geq:\\\"${__from:date:iso}\\\",datetime_leq:\\\"${__to:date:iso}\\\"},orderBy:[datetimeHour_ASC]){dimensions{datetimeHour} sum{requests errors}}}}}\"}"
+          },
+          "root_selector": "data.viewer.accounts.0.workersInvocationsAdaptive",
+          "columns": [
+            {
+              "selector": "dimensions.datetimeHour",
+              "text": "hour",
+              "type": "timestamp"
+            },
+            {
+              "selector": "sum.requests",
+              "text": "requests",
+              "type": "number"
+            },
+            {
+              "selector": "sum.errors",
+              "text": "errors",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "API Worker — CPU and wall time",
+      "description": "Per hour, the median and 99th-percentile CPU time and wall time of an adanalife-guessr-api invocation. CPU time is what counts against the Worker's limit; wall time includes waiting on D1.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "cloudflare-analytics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "cloudflare-analytics"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/graphql",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"query\":\"{viewer{accounts(filter:{accountTag:\\\"__CLOUDFLARE_ACCOUNT__\\\"}){workersInvocationsAdaptive(limit:10000,filter:{scriptName:\\\"adanalife-guessr-api\\\",datetime_geq:\\\"${__from:date:iso}\\\",datetime_leq:\\\"${__to:date:iso}\\\"},orderBy:[datetimeHour_ASC]){dimensions{datetimeHour} quantiles{cpuTimeP50 cpuTimeP99 wallTimeP50 wallTimeP99}}}}}\"}"
+          },
+          "root_selector": "data.viewer.accounts.0.workersInvocationsAdaptive",
+          "columns": [
+            {
+              "selector": "dimensions.datetimeHour",
+              "text": "hour",
+              "type": "timestamp"
+            },
+            {
+              "selector": "quantiles.cpuTimeP50",
+              "text": "cpu p50",
+              "type": "number"
+            },
+            {
+              "selector": "quantiles.cpuTimeP99",
+              "text": "cpu p99",
+              "type": "number"
+            },
+            {
+              "selector": "quantiles.wallTimeP50",
+              "text": "wall p50",
+              "type": "number"
+            },
+            {
+              "selector": "quantiles.wallTimeP99",
+              "text": "wall p99",
               "type": "number"
             }
           ]
