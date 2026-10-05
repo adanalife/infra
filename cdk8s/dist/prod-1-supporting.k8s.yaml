@@ -127,6 +127,15 @@ description: CI runner pods (ARC) — most-preemptible tier, alongside dashcam-c
 globalDefault: false
 value: -10
 ---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: dashcam-cv-low
+  namespace: prod-1
+description: Background batch (video-pipeline embed/coords, music Jobs) — preemptible; never outranks live workloads.
+globalDefault: false
+value: -10
+---
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:

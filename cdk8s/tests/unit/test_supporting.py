@@ -45,3 +45,20 @@ def test_local_supporting_has_no_eso_or_issuers():
     assert not [o for o in objs if o["kind"] == "ExternalSecret"]
     assert not [o for o in objs if o["kind"] == "Issuer"]
     assert not _by(objs, "Secret", "tripbot-secret")
+
+
+def test_prod_supporting_owns_every_priority_class():
+    """infra is the single definition of the cluster's scheduling tiers — the
+    app repos reference a class by name and never emit one."""
+    tiers = {
+        o["metadata"]["name"]: o["value"]
+        for o in _synth("prod-1")
+        if o["kind"] == "PriorityClass"
+    }
+    assert tiers == {
+        "prod-stream": 1000,
+        "prod-support": 900,
+        "ci-low": -10,
+        "dashcam-cv-low": -10,
+    }
+    assert not [o for o in _synth("stage-1") if o["kind"] == "PriorityClass"]
