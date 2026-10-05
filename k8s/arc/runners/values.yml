@@ -93,6 +93,9 @@ listenerTemplate:
 # GitHub's side until a slot frees. ARC allocates one ephemeral runner per
 # assigned job and never more, so there is no queue-depth threshold to
 # configure.
+# The *CI runner pool saturated* alert (terraform/platform/grafana-alerts.tf)
+# hardcodes this cap, because gha_max_runners is not in Grafana Cloud — change
+# both together.
 #
 # The pool is narrow because CI activity correlates with the node misbehaving.
 # Eleven node deaths on 2026-08-23 (thirteen across the 23rd and 24th) each
