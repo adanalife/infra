@@ -43,9 +43,10 @@ def test_arc_unit_emits_both_namespaces():
     }
 
 
-def test_arc_runners_namespace_is_privileged_for_dind():
-    # dind runs a privileged sidecar; the cluster-wide baseline PodSecurity would
-    # reject it without this exemption. The controller ns stays unlabeled.
+def test_arc_runners_namespace_is_privileged_for_hostpath():
+    # Runner pods mount hostPath caches and workspaces, which the cluster-wide
+    # baseline PodSecurity rejects without this exemption. The controller ns
+    # stays unlabeled.
     ns = {
         n["metadata"]["name"]: n for n in _synth(ArcChart) if n["kind"] == "Namespace"
     }
@@ -117,25 +118,21 @@ def test_arc_workspace_reaper_cannot_eat_a_live_job():
 
 
 def test_arc_runner_limitrange_bounds_containers():
-    # A LimitRange (not a ResourceQuota) so ARC's resource-less injected dind /
-    # init-dind-externals containers get defaults instead of being quota-rejected,
-    # while still capping per-container CPU/memory to protect the co-tenant
-    # prod streams.
+    # A LimitRange (not a ResourceQuota) so a container that declares no
+    # resources gets defaults instead of being quota-rejected.
     objs = _synth(ArcChart)
-    assert not _by_kind(objs, "ResourceQuota")  # the quota was the bug — gone
+    assert not _by_kind(objs, "ResourceQuota")
     lr = next(iter(_by_kind(objs, "LimitRange")))
     assert lr["metadata"]["namespace"] == "arc-runners"
     item = lr["spec"]["limits"][0]
     assert item["type"] == "Container"
     assert item["default"]["cpu"] and item["default"]["memory"]
     assert item["defaultRequest"]["cpu"] and item["defaultRequest"]["memory"]
-    # dind is a native sidecar the chart injects with no resources, so these two
-    # numbers ARE its budget and the request is what the scheduler packs
-    # against. A token request here lets the scheduler place runners the node
-    # can't feed, which is how the node died twice on 2026-08-23 — pin both so a
-    # regression to a smaller default is a test failure and not an outage.
-    assert item["defaultRequest"]["memory"] == "2Gi"
-    assert item["default"]["memory"] == "3Gi"
+    # The only container these reach is the chown-caches init
+    # container. Keep them small: a build-sized default would hand any
+    # container added without resources a budget nobody sized for it.
+    assert item["defaultRequest"]["memory"] == "32Mi"
+    assert item["default"]["memory"] == "128Mi"
 
 
 def test_arc_github_app_secret_reads_the_cluster_store():
