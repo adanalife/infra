@@ -90,7 +90,8 @@ VERSIONS = {
     # Argo Workflows app v4.1.2 — the batch engine for spare-compute work.
     # Latest stable at add time (2026-08-22).
     "argo-workflows": "2.0.2",
-    # Burrito v0.14.0 — terraform GitOps controller (plan/drift-detect trial).
+    # Burrito v0.14.0 — terraform GitOps controller: hourly drift plans on
+    # every layer, applies on stage-1/prod-1 (constructs/burrito.py).
     # Latest stable as of 2026-09-25; pre-1.0, so minors can break —
     # read the release notes before bumping.
     "burrito": "0.14.0",
