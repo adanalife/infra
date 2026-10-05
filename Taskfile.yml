@@ -1081,6 +1081,7 @@ tasks:
           ctx=${rest%%:*}; rest=${rest#*:}
           dockerfile=${rest%%:*}; repo=${rest#*:}
           { [ -n "$target" ] && [ "$target" != "$app" ]; } && continue
+          [ -d "$ctx" ] || { echo "no sibling checkout at $ctx — clone adanalife/${ctx##*/} there (or pass APP= to build another app)" >&2; exit 1; }
           echo "==> build $repo:dev-local  ($ctx/$dockerfile)"
           docker build -f "$ctx/$dockerfile" -t "$repo:dev-local" "$ctx"
           k3d image import "$repo:dev-local" --cluster=adanalife-dev
