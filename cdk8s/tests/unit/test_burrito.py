@@ -253,9 +253,9 @@ def test_only_stage_and_prod_can_apply():
 
 def test_prod_data_layer_plans_with_prods_read_only_user():
     # prod-1-data is the prod account's state, so its runner holds that
-    # account's read-only `burrito` key — the SM pair prod-1 planned with
-    # before it became appliable. A prefix of its own would point ESO at a
-    # parameter pair nothing seeds.
+    # account's read-only `burrito` key — the pair the shared `prod` prefix
+    # resolves to without `appliable`. A prefix of its own would point ESO at
+    # a parameter pair nothing seeds.
     by_name = {layer.name: layer for layer in LAYERS}
     assert by_name["prod-1-data"].sm_prefix == by_name["prod-1"].sm_prefix
     assert by_name["prod-1-data"].sm_key_prefix == "prod"
