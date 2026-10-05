@@ -16,18 +16,19 @@
   "templating": {
     "list": [
       {
-        "name": "cluster",
+        "name": "platform",
+        "label": "Platform",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "__DS_PROMETHEUS__"
         },
-        "query": "label_values(kube_pod_info, cluster)",
+        "query": "label_values(platform_gateway_chat_sent_total, platform)",
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": "twitch",
+          "value": "twitch"
         },
-        "includeAll": true,
+        "includeAll": false,
         "multi": false,
         "refresh": 2,
         "sort": 1
@@ -50,19 +51,18 @@
         "sort": 1
       },
       {
-        "name": "platform",
-        "label": "Platform",
+        "name": "cluster",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "__DS_PROMETHEUS__"
         },
-        "query": "label_values(platform_gateway_chat_sent_total, platform)",
+        "query": "label_values(kube_pod_info, cluster)",
         "current": {
-          "text": "twitch",
-          "value": "twitch"
+          "text": "All",
+          "value": "$__all"
         },
-        "includeAll": false,
+        "includeAll": true,
         "multi": false,
         "refresh": 2,
         "sort": 1
