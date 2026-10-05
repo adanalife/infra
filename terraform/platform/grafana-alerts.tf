@@ -2333,6 +2333,75 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // The case every watchdog rule above stands down for: the OBS output is
+  // stopped. The watchdog only acts on an active output (an operator stopping
+  // the stream is outside its scope), so obs_streaming_active=0 with
+  // tripbot_channel_live=0 reads identically to "turned off on purpose" — and
+  // on 2026-08-24 YouTube sat dark 90 minutes that way after a console
+  // egress-stop, with nothing reporting it.
+  //
+  // What separates the two is the console's mode: obs_mode_gate is only armed
+  // while the console says this platform's OBS is meant to be up, and parking
+  // or going dark scales it down. So OBS stopped *and* channel offline while
+  // the mode says live is a stream nobody meant to end. The sum is 0 only
+  // when both read 0, so it can't double-page alongside the silent-disconnect
+  // rule (OBS=1/platform=0 sums to 1). 15m clears the legitimate gaps — an
+  // OBS bounce plus a YouTube broadcast transition is about a minute — and
+  // 30 days of history at 5m resolution never reached 0 under the gate.
+  rule {
+    name           = "OBS: stream stopped while the console says live"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.service_platform }} has been dark for 15m with its OBS output stopped, but the console mode still says live"
+      link        = "${local.watchdog_panel_link}"
+      description = "obs_streaming_active=0 and tripbot_channel_live=0 on {{ $labels.service_platform }} for 15m while console_platform_component_up says its OBS is meant to be running. No watchdog covers a stopped output, so nothing will restart it. If the stop was deliberate, park the platform (or switch it to dark) from the console and this clears. Otherwise start the stream again from the console; on youtube, if the gateway refuses the egress start with `403 Stream is inactive`, the broadcast is gone — check YouTube Studio before retrying."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "(max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) + max by (service_platform) (tripbot_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})) ${local.obs_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // The wedged-encoder case: OBS reports the output active, the RTMP socket is
   // healthy, and the encoder is pushing nothing. On 2026-08-05 a hung NFS mount
   // blocked the render pipeline for 9h41m while outputActive stayed 1, so every
