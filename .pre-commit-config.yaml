@@ -117,6 +117,16 @@ repos:
         types: [text]
         # The CRD bundles are vendored upstream and talk about HashiCorp Vault.
         exclude: ^(\.pre-commit-config\.yaml|cdk8s/crds/)
+      # An alert on a metric the Alloy cloud keep rule drops reads no data
+      # forever and never fires; this keeps the rule and its keep-list entry
+      # in the same change. Stdlib only, so `language: python` installs nothing.
+      - id: alert-metrics-kept
+        name: alert metrics reach Grafana Cloud
+        language: python
+        entry: scripts/check-alert-keep-list.py
+        files: ^(terraform/platform/grafana-alerts\.tf|k8s/monitoring/prod-1/values\.yml|scripts/check-alert-keep-list\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
 
   # Conventional Commits — enforce `type(scope): summary` on commit messages so
   # history stays machine-parseable: it underpins release automation and gives
