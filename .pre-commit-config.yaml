@@ -124,7 +124,7 @@ repos:
         name: alert metrics reach Grafana Cloud
         language: python
         entry: scripts/check-alert-keep-list.py
-        files: ^(terraform/platform/grafana-alerts\.tf|k8s/monitoring/prod-1/values\.yml|scripts/check-alert-keep-list\.py)$
+        files: ^(terraform/platform/grafana-alerts\.tf|k8s/monitoring/prod-1/values\.yml|cdk8s/metrics\.json|scripts/check-alert-keep-list\.py)$
         pass_filenames: false
         stages: [pre-commit]
 
