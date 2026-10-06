@@ -738,6 +738,27 @@ tasks:
     cmds:
       - cp {{.SIBLINGS}}/platform-gateway/platforms.json platforms.json
 
+  # Each emitter's metrics.json lists the Prometheus series it exports;
+  # scripts/check-alert-keep-list.py fails an alert rule that names one of an
+  # emitter's series missing from its list. tripbot's rides contract:sync.
+  metrics:sync:
+    desc: Re-sync the gateway, console and playout metrics.json lists from their sibling checkouts
+    dir: cdk8s
+    preconditions:
+      # The copies read the siblings' working trees, and a checkout behind
+      # origin/main syncs stale content and succeeds silently. Refuse unless the
+      # synced files match origin/main.
+      - sh: git -C {{.SIBLINGS}}/platform-gateway fetch -q origin && git -C {{.SIBLINGS}}/platform-gateway diff --quiet origin/main -- metrics.json
+        msg: "{{.SIBLINGS}}/platform-gateway metrics.json differs from origin/main — pull that checkout (or push its change) first"
+      - sh: git -C {{.SIBLINGS}}/tripbot-console fetch -q origin && git -C {{.SIBLINGS}}/tripbot-console diff --quiet origin/main -- metrics.json
+        msg: "{{.SIBLINGS}}/tripbot-console metrics.json differs from origin/main — pull that checkout (or push its change) first"
+      - sh: git -C {{.SIBLINGS}}/playout fetch -q origin && git -C {{.SIBLINGS}}/playout diff --quiet origin/main -- metrics.json
+        msg: "{{.SIBLINGS}}/playout metrics.json differs from origin/main — pull that checkout (or push its change) first"
+    cmds:
+      - cp {{.SIBLINGS}}/platform-gateway/metrics.json metrics-platform-gateway.json
+      - cp {{.SIBLINGS}}/tripbot-console/metrics.json metrics-tripbot-console.json
+      - cp {{.SIBLINGS}}/playout/metrics.json metrics-playout.json
+
   # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
   # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
   tf:stage:apply:

@@ -18,10 +18,11 @@ probe that asks Grafana Cloud whether each still has series: the keep rule
 passing a name says nothing about whether anything still emits it, and a
 renamed metric empties its alert just as quietly as a dropped one.
 
-A name whose first segment is one of tripbot's prefixes must also appear in
-cdk8s/metrics.json, the list of series tripbot emits (synced by
-`task contract:sync`), so renaming a tripbot metric fails here rather than
-emptying the alert after deploy.
+A name whose first segment is one an emitter owns must also appear in that
+emitter's list of the series it emits: cdk8s/metrics.json for tripbot (synced
+by `task contract:sync`) and cdk8s/metrics-<repo>.json for platform-gateway,
+tripbot-console and playout (synced by `task metrics:sync`). Renaming an
+emitter's metric fails here rather than emptying the alert after deploy.
 """
 
 import json
@@ -32,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ALERTS = ROOT / "terraform/platform/grafana-alerts.tf"
 VALUES = ROOT / "k8s/monitoring/prod-1/values.yml"
-EMITTED = ROOT / "cdk8s/metrics.json"
+EMITTED = sorted((ROOT / "cdk8s").glob("metrics*.json"))
 CLOUD_DATASOURCE = "data.grafana_data_source.prometheus.uid"
 
 # Written straight into Grafana Cloud, never through Alloy, so the keep rule
@@ -109,10 +110,14 @@ def main() -> int:
         print("\n".join(sorted({name for _, name, _ in cloud_selectors()})))
         return 0
     keep = keep_regex()
-    emitted = set(json.loads(EMITTED.read_text())["metrics"])
-    # ponytail: ownership by first name segment; a second emitter that shares
-    # one of these prefixes needs its own list here.
-    owned = {n.split("_", 1)[0] for n in emitted}
+    # First name segment -> (series names, list file) across every emitter list.
+    # ponytail: ownership by first name segment; two emitters sharing one pool
+    # their names, so a rename moving a series between them still passes.
+    owned: dict[str, tuple[set[str], str]] = {}
+    for path in EMITTED:
+        for n in json.loads(path.read_text())["metrics"]:
+            names, _ = owned.setdefault(n.split("_", 1)[0], (set(), path.name))
+            names.add(n)
     bad = []
     for lineno, name, mount in cloud_selectors():
         if any(d.fullmatch(name) for d in DIRECT):
@@ -124,10 +129,11 @@ def main() -> int:
                 + (f' (mountpoint="{mount}")' if mount else "")
                 + f" — not in the Grafana Cloud keep rule in {VALUES.relative_to(ROOT)}"
             )
-        if name.split("_", 1)[0] in owned and name not in emitted:
+        names, source = owned.get(name.split("_", 1)[0], (None, ""))
+        if names is not None and name not in names:
             bad.append(
                 f"{ALERTS.relative_to(ROOT)}:{lineno}: {name}"
-                + f" — tripbot emits no such series ({EMITTED.relative_to(ROOT)})"
+                + f" — its emitter lists no such series (cdk8s/{source})"
             )
     for b in bad:
         print(b)
