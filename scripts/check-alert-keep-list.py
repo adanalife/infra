@@ -12,6 +12,11 @@ Metric names are pulled out of each expression by stripping strings, label
 matchers, grouping clauses, ranges and offsets, then dropping function calls
 and keywords — a heuristic, not a PromQL parser, so an expression it misreads
 shows up here as an unknown name rather than passing quietly.
+
+`--names` prints every metric name those rules select, one per line, for a
+probe that asks Grafana Cloud whether each still has series: the keep rule
+passing a name says nothing about whether anything still emits it, and a
+renamed metric empties its alert just as quietly as a dropped one.
 """
 
 import re
@@ -78,25 +83,35 @@ def selectors(expr: str) -> list[tuple[str, str]]:
     return found
 
 
-def main() -> int:
-    keep = keep_regex()
+def cloud_selectors() -> list[tuple[int, str, str]]:
+    """(line, metric, mountpoint) for every selector in a cloud alert rule."""
     datasource = None
-    bad = []
+    found = []
     for lineno, line in enumerate(ALERTS.read_text().splitlines(), 1):
         if m := re.search(r"datasource_uid\s*=\s*(\S+)", line):
             datasource = m.group(1)
         m = re.match(r'\s*expr\s*=\s*"(.*)"\s*$', line)
         if not m or datasource != CLOUD_DATASOURCE:
             continue
-        for name, mount in selectors(m.group(1).replace('\\"', '"')):
-            if any(d.fullmatch(name) for d in DIRECT):
-                continue
-            # The keep rule matches __name__ and mountpoint joined by "/".
-            if not keep.fullmatch(f"{name}/{mount}"):
-                bad.append(
-                    f"{ALERTS.relative_to(ROOT)}:{lineno}: {name}"
-                    + (f' (mountpoint="{mount}")' if mount else "")
-                )
+        found += [(lineno, *s) for s in selectors(m.group(1).replace('\\"', '"'))]
+    return found
+
+
+def main() -> int:
+    if sys.argv[1:] == ["--names"]:
+        print("\n".join(sorted({name for _, name, _ in cloud_selectors()})))
+        return 0
+    keep = keep_regex()
+    bad = []
+    for lineno, name, mount in cloud_selectors():
+        if any(d.fullmatch(name) for d in DIRECT):
+            continue
+        # The keep rule matches __name__ and mountpoint joined by "/".
+        if not keep.fullmatch(f"{name}/{mount}"):
+            bad.append(
+                f"{ALERTS.relative_to(ROOT)}:{lineno}: {name}"
+                + (f' (mountpoint="{mount}")' if mount else "")
+            )
     for b in bad:
         print(f"{b} — not in the Grafana Cloud keep rule in {VALUES.relative_to(ROOT)}")
     return 1 if bad else 0
