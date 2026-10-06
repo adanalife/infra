@@ -17,8 +17,14 @@ shows up here as an unknown name rather than passing quietly.
 probe that asks Grafana Cloud whether each still has series: the keep rule
 passing a name says nothing about whether anything still emits it, and a
 renamed metric empties its alert just as quietly as a dropped one.
+
+A name whose first segment is one of tripbot's prefixes must also appear in
+cdk8s/metrics.json, the list of series tripbot emits (synced by
+`task contract:sync`), so renaming a tripbot metric fails here rather than
+emptying the alert after deploy.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -26,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ALERTS = ROOT / "terraform/platform/grafana-alerts.tf"
 VALUES = ROOT / "k8s/monitoring/prod-1/values.yml"
+EMITTED = ROOT / "cdk8s/metrics.json"
 CLOUD_DATASOURCE = "data.grafana_data_source.prometheus.uid"
 
 # Written straight into Grafana Cloud, never through Alloy, so the keep rule
@@ -102,6 +109,10 @@ def main() -> int:
         print("\n".join(sorted({name for _, name, _ in cloud_selectors()})))
         return 0
     keep = keep_regex()
+    emitted = set(json.loads(EMITTED.read_text())["metrics"])
+    # ponytail: ownership by first name segment; a second emitter that shares
+    # one of these prefixes needs its own list here.
+    owned = {n.split("_", 1)[0] for n in emitted}
     bad = []
     for lineno, name, mount in cloud_selectors():
         if any(d.fullmatch(name) for d in DIRECT):
@@ -111,9 +122,15 @@ def main() -> int:
             bad.append(
                 f"{ALERTS.relative_to(ROOT)}:{lineno}: {name}"
                 + (f' (mountpoint="{mount}")' if mount else "")
+                + f" — not in the Grafana Cloud keep rule in {VALUES.relative_to(ROOT)}"
+            )
+        if name.split("_", 1)[0] in owned and name not in emitted:
+            bad.append(
+                f"{ALERTS.relative_to(ROOT)}:{lineno}: {name}"
+                + f" — tripbot emits no such series ({EMITTED.relative_to(ROOT)})"
             )
     for b in bad:
-        print(f"{b} — not in the Grafana Cloud keep rule in {VALUES.relative_to(ROOT)}")
+        print(b)
     return 1 if bad else 0
 
 

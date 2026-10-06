@@ -720,7 +720,8 @@ tasks:
         msg: "{{.SIBLINGS}}/tripbot pkg/contract/ differs from origin/main — pull that checkout (or push its change) first; syncing from it copies stale content"
     cmds:
       - cp {{.SIBLINGS}}/tripbot/pkg/contract/contract.json contract.json
-      - echo "synced contract.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
+      - cp {{.SIBLINGS}}/tripbot/pkg/contract/metrics.json metrics.json
+      - echo "synced contract.json + metrics.json from tripbot/pkg/contract — re-run cdk8s:test to verify"
 
   # platforms.json is the fleet-wide supported-platform set, owned by
   # platform-gateway (its Go adapter registry is the source of truth). cdk8s
