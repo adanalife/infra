@@ -1,0 +1,19 @@
+{
+  "_comment": "Generated from src/console/metrics.py via `task metrics:json` — do not hand-edit. Every Prometheus series name the console emits, as stored after the OTLP translation. infra syncs it so an alert rule naming a console metric that no longer exists fails pre-merge.",
+  "metrics": [
+    "console_http_request_duration_seconds_bucket",
+    "console_http_request_duration_seconds_count",
+    "console_http_request_duration_seconds_sum",
+    "console_http_requests_total",
+    "console_k8s_api_calls_total",
+    "console_nats_connected",
+    "console_nats_messages_total",
+    "console_outbound_http_duration_seconds_bucket",
+    "console_outbound_http_duration_seconds_count",
+    "console_outbound_http_duration_seconds_sum",
+    "console_platform_component_up",
+    "console_sse_clients",
+    "console_terraform_plan_age_seconds",
+    "console_upstream_calls_total"
+  ]
+}
