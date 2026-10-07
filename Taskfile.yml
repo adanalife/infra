@@ -759,196 +759,50 @@ tasks:
       - cp {{.SIBLINGS}}/tripbot-console/metrics.json metrics-tripbot-console.json
       - cp {{.SIBLINGS}}/playout/metrics.json metrics-playout.json
 
-  # Terraform: tf:<env>:<verb>. Extra flags pass via the `--` separator,
-  # e.g. `task tf:stage:init -- -upgrade` or `task tf:stage:plan -- -target=…`.
-  tf:stage:apply:
-    desc: terraform apply against stage-1
-    dir: terraform/stage-1
+  # Terraform: tf:<ws>:<verb>, one task for every workspace × verb.
+  #
+  #   ws    stage → stage-1, prod → prod-1, prod-data → prod-1-data, core, platform
+  #   verb  plan, apply, init, destroy, import
+  #
+  # Extra flags pass via the `--` separator: `task tf:stage:init -- -upgrade`,
+  # `task tf:stage:plan -- -target=…`. For import, single-quote the address —
+  # zsh glob/quote-mangles for_each keys like aws_ssm_parameter.mirror["k"]:
+  # `task tf:stage:import -- '<address>' <id>`.
+  #
+  # Profiles: stage and prod use their own account's; prod-data shares prod's
+  # (own state file, same account — terraform/prod-1-data/README.md). core and
+  # platform run as adanalife-core with --no-session, because session tokens
+  # can't make IAM changes; platform has no account of its own (GitHub org
+  # config, Grafana), so its state rides in the org-global core account.
+  tf:*:*:
+    desc: "terraform <verb> against a workspace — task tf:<stage|prod|prod-data|core|platform>:<plan|apply|init|destroy|import> [-- flags]"
+    vars:
+      WS: "{{index .MATCH 0}}"
+      VERB: "{{index .MATCH 1}}"
+      DIR: '{{get (dict "stage" "stage-1" "prod" "prod-1" "prod-data" "prod-1-data" "core" "core" "platform" "platform") .WS}}'
+      PROFILE: '{{get (dict "stage" "adanalife-stage" "prod" "adanalife-prod" "prod-data" "adanalife-prod" "core" "adanalife-core --no-session" "platform" "adanalife-core --no-session") .WS}}'
+    preconditions:
+      - sh: '[ -n "{{.DIR}}" ]'
+        msg: "unknown workspace {{.WS}} — one of stage, prod, prod-data, core, platform"
+      - sh: 'case "{{.VERB}}" in plan|apply|init|destroy|import) ;; *) exit 1 ;; esac'
+        msg: "unknown verb {{.VERB}} — one of plan, apply, init, destroy, import"
+    dir: terraform/{{.DIR}}
     cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform apply {{.CLI_ARGS}}
+      - aws-vault exec {{.PROFILE}} -- mise exec -- terraform {{.VERB}} {{.CLI_ARGS}}
 
-  tf:stage:plan:
-    desc: terraform plan against stage-1
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform plan {{.CLI_ARGS}}
-
-  tf:stage:init:
-    desc: >-
-      terraform init against stage-1 — pass extra flags after --,
-      e.g. task tf:stage:init -- -migrate-state
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:stage:destroy:
-    desc: terraform destroy against stage-1
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform destroy {{.CLI_ARGS}}
-
-  tf:stage:import:
-    desc: >-
-      terraform import against stage-1 — usage:
-      task tf:stage:import -- '<address>' <id>
-      (single-quote the address; for_each keys like
-      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
-    dir: terraform/stage-1
-    cmds:
-      - aws-vault exec adanalife-stage -- mise exec -- terraform import {{.CLI_ARGS}}
-
-  tf:prod:apply:
-    desc: terraform apply against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform apply {{.CLI_ARGS}}
-
-  tf:prod:plan:
-    desc: terraform plan against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
-
-  tf:prod:init:
-    desc: >-
-      terraform init against prod-1 — pass extra flags after --,
-      e.g. task tf:prod:init -- -migrate-state
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:prod:destroy:
-    desc: terraform destroy against prod-1
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
-
-  tf:prod:import:
-    desc: >-
-      terraform import against prod-1 — usage:
-      task tf:prod:import -- '<address>' <id>
-      (single-quote the address; for_each keys like
-      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
-    dir: terraform/prod-1
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform import {{.CLI_ARGS}}
-
-  # prod-1-data holds the prod resources that can't be recreated from this
-  # repo (the Talos PKI KMS key, the postgres backup bucket). Own state file,
-  # same account and profile as tf:prod:* — see terraform/prod-1-data/README.md.
-  tf:prod-data:apply:
-    desc: terraform apply against prod-1-data
-    dir: terraform/prod-1-data
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform apply {{.CLI_ARGS}}
-
-  tf:prod-data:plan:
-    desc: terraform plan against prod-1-data
-    dir: terraform/prod-1-data
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform plan {{.CLI_ARGS}}
-
-  tf:prod-data:init:
-    desc: terraform init against prod-1-data
-    dir: terraform/prod-1-data
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init {{.CLI_ARGS}}
-
+  # Named rather than flags because the state-moving inits are the ones worth
+  # finding in `task --list`. An exact name wins over the tf:*:* wildcard.
   tf:prod-data:init:reconfigure:
     desc: terraform init -reconfigure against prod-1-data
-    dir: terraform/prod-1-data
     cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init -reconfigure {{.CLI_ARGS}}
+      - task: tf:prod-data:init
+        vars: { CLI_ARGS: "-reconfigure {{.CLI_ARGS}}" }
 
   tf:prod-data:init:migrate:
     desc: terraform init -migrate-state against prod-1-data
-    dir: terraform/prod-1-data
     cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform init -migrate-state {{.CLI_ARGS}}
-
-  tf:prod-data:destroy:
-    desc: terraform destroy against prod-1-data
-    dir: terraform/prod-1-data
-    cmds:
-      - aws-vault exec adanalife-prod -- mise exec -- terraform destroy {{.CLI_ARGS}}
-
-  # Core uses --no-session because session tokens can't make IAM changes.
-  tf:core:apply:
-    desc: terraform apply against core (no session token; IAM changes need full creds)
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform apply {{.CLI_ARGS}}
-
-  tf:core:plan:
-    desc: terraform plan against core
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
-
-  tf:core:init:
-    desc: >-
-      terraform init against core — pass extra flags after --,
-      e.g. task tf:core:init -- -migrate-state
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:core:destroy:
-    desc: terraform destroy against core
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
-
-  tf:core:import:
-    desc: >-
-      terraform import against core — usage:
-      task tf:core:import -- '<address>' <id>
-      (single-quote the address; for_each keys like
-      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
-    dir: terraform/core
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform import {{.CLI_ARGS}}
-
-  # platform = env-agnostic config, i.e. things not owned by any specific
-  # "-1" account (GitHub org config; Grafana Cloud is a migration candidate).
-  # It has no account of its own — state/SM plumbing rides in the org-global
-  # core account, hence the adanalife-core profile; --no-session because it
-  # attaches IAM policies.
-  tf:platform:apply:
-    desc: terraform apply against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform apply {{.CLI_ARGS}}
-
-  tf:platform:plan:
-    desc: terraform plan against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform plan {{.CLI_ARGS}}
-
-  tf:platform:init:
-    desc: >-
-      terraform init against platform — pass extra flags after --,
-      e.g. task tf:platform:init -- -migrate-state
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform init {{.CLI_ARGS}}
-
-  tf:platform:destroy:
-    desc: terraform destroy against platform
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform destroy {{.CLI_ARGS}}
-
-  tf:platform:import:
-    desc: >-
-      terraform import against platform — usage:
-      task tf:platform:import -- '<address>' <id>
-      (single-quote the address; for_each keys like
-      aws_ssm_parameter.mirror["k"] are glob/quote-mangled by zsh otherwise)
-    dir: terraform/platform
-    cmds:
-      - aws-vault exec adanalife-core --no-session -- mise exec -- terraform import {{.CLI_ARGS}}
+      - task: tf:prod-data:init
+        vars: { CLI_ARGS: "-migrate-state {{.CLI_ARGS}}" }
 
   # `aws-vault login` opens the AWS web console in browser
   aws:login:stage:
