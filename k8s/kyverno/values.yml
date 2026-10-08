@@ -1,0 +1,34 @@
+# Kyverno — the admission policy engine on adanalife-minipc. Chart version
+# pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered by the `kyverno`
+# Argo Application (dist/platform-argo.k8s.yaml), which also carries the
+# policies in k8s/kyverno/policies.yml.
+#
+# Fail-open by construction: this is a single-node cluster, so an admission
+# webhook that fails closed turns a Kyverno outage into "no pod anywhere can
+# be created or rescheduled", the stream included. Every webhook Kyverno
+# registers is forced to failurePolicy: Ignore, so with Kyverno down the
+# apiserver admits the request unevaluated (after the webhook timeout if the
+# pod is hung rather than gone). kube-system is excluded from the webhooks by
+# the chart's default namespaceSelector.
+features:
+  forceFailurePolicyIgnore:
+    enabled: true
+
+# Validation only: the background controller serves generate/mutate-existing
+# policies and the cleanup controller serves CleanupPolicies — neither is
+# used, so neither runs. The admission controller evaluates requests; the
+# reports controller runs the background scans that write PolicyReports.
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
+
+reportsController:
+  rbac:
+    clusterRole:
+      # The reports controller reads through the built-in `view` role, which
+      # has no cluster-scoped PersistentVolumes — the NFS mount-option policy
+      # needs them for its background scan.
+      extraResources:
+        - apiGroups: [""]
+          resources: [persistentvolumes]
