@@ -657,6 +657,7 @@ class ArgoCD(Construct):
                 ignore_replicas=True,
                 repo_url=FLARE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
+                preserve_on_deletion=True,
             )
         # The cross-repo platform-gateway unit: one Application per unit that the
         # PRIVATE platform-gateway repo synthed, self-discovered from its

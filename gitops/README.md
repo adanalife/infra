@@ -48,7 +48,8 @@ All the Argo config is authored in cdk8s (no hand-written YAML) and synthesized 
   - `ups-monitor`, `kmsg`, `t5-watchdog`, `arc` — one-element sets for the
     minipc's cluster singletons.
   - `tripbot-apps`, `platform-gateway`, `obs`, `playout`, `mediamtx`,
-    `tripbot-console` and `video-pipeline` set `preserveResourcesOnDeletion`,
+    `tripbot-console`, `video-pipeline` and `flare` set
+    `preserveResourcesOnDeletion`,
     so losing a generator element deletes the Application but orphans its
     workloads instead of cascading. It only applies
     to Applications the controller creates after the flag is set; an older
