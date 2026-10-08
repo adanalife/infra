@@ -1,14 +1,22 @@
-# Cluster-scoped store for PLATFORM components only (external-dns,
-# cert-manager, grafana-k8s-monitoring) whose ExternalSecrets live in
-# kube-system — a namespace no app overlay owns. Named
-# `aws-parameterstore-cluster` to stay visibly distinct from the
-# namespaced `aws-parameterstore` SecretStore the apps use (the two are
-# different kinds, but the distinct name keeps the split obvious).
+# Cluster-scoped store for PLATFORM components: the ExternalSecrets that live
+# in namespaces no app overlay owns (cert-manager and external-dns in
+# kube-system, grafana-k8s-monitoring, Argo CD, Burrito, ARC, the Talos-reading
+# watchdogs, the Tailscale operator). Named `aws-parameterstore-cluster` to stay
+# visibly distinct from the namespaced `aws-parameterstore` SecretStore the apps
+# use.
 #
 # Reads SSM Parameter Store; remoteRef keys are fully-qualified parameter
 # names (`/k8s/...`). Creds come from external-secrets/eso-aws-credentials —
 # the cluster owner's account (adanalife-prod on the mini-PC, adanalife-stage
 # on the dev cluster). Applied by `task k8s:<env>:platform:up`.
+#
+# `conditions` is the allowlist of namespaces that may name this store. On the
+# mini-PC the store reads the prod account, so without it an ExternalSecret in
+# stage-1 (or any namespace) could pull prod parameters and the per-env stores'
+# isolation would be one `secretStoreRef.kind` deep. An ExternalSecret outside
+# the list fails to sync with a store-not-allowed error. A new platform
+# component that needs this store adds its namespace here; an app never does —
+# it uses its namespace's `aws-parameterstore`.
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
@@ -28,3 +36,15 @@ spec:
             name: eso-aws-credentials
             key: AWS_SECRET_ACCESS_KEY
             namespace: external-secrets
+  conditions:
+    - namespaces:
+        - arc-runners
+        - argocd
+        - burrito
+        - burrito-system
+        - kmsg
+        - kube-system
+        - monitoring
+        - node-watchdog
+        - tailscale
+        - ups
