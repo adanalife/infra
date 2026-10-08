@@ -21,8 +21,8 @@ crds:
 
 controller:
   # Two workflows at a time, so a short job (a flare render) starts while a
-  # multi-day video-pipeline pass holds the other slot; flare's WorkflowTemplate
-  # sets a higher `priority` so it wins the pending queue when both are full.
+  # multi-day video-pipeline pass holds the other slot. When both are full, a
+  # Workflow's own `spec.priority` (not its template's) orders the pending queue.
   # The stream stays safe because the workflow pods' CPU limits are the
   # isolation, not this count. A queued workflow holds no pod and therefore no
   # quota. If two model-heavy passes ever queue at once, cap them with a
