@@ -441,6 +441,7 @@ class ArgoCD(Construct):
             # versions.yaml image pin, not by a branch).
             repo_url=TRIPBOT_REPO_URL,
             target_revision_tmpl="main",
+            preserve_on_deletion=True,
         )
         # The cross-repo identity unit: tripbot's per-env identity Secrets (DB creds
         # + twitch/maps/discord ExternalSecrets) and the prod-stream PriorityClass/
@@ -606,6 +607,7 @@ class ArgoCD(Construct):
                 # selfHeal on — Argo ignores .spec.replicas. dist births it at 1.
                 ignore_replicas=True,
                 repo_url=CONSOLE_REPO_URL,
+                preserve_on_deletion=True,
                 target_revision_tmpl="{{.revision}}",
             )
         # The cross-repo video-pipeline unit: one Application per env, sourcing the
@@ -632,6 +634,7 @@ class ArgoCD(Construct):
                 # ignores .spec.replicas. dist births it at its declared count.
                 ignore_replicas=True,
                 repo_url=VIDEO_PIPELINE_REPO_URL,
+                preserve_on_deletion=True,
                 target_revision_tmpl="{{.revision}}",
             )
         # The cross-repo flare unit: one Application per env, sourcing the PRIVATE
