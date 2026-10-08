@@ -271,6 +271,8 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.replicas
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
@@ -807,6 +809,8 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.replicas
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
@@ -876,6 +880,8 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.replicas
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:
@@ -943,6 +949,8 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.replicas
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if or (eq .env "stage-1") (eq .env "prod-1") }}
     spec:

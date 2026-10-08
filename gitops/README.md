@@ -29,15 +29,31 @@ All the Argo config is authored in cdk8s (no hand-written YAML) and synthesized 
   StorageClass). Caps blast radius vs the wide-open `default` project. (The
   `infra`/`platform` project names are reserved for shared cluster infrastructure;
   these are tripbot-project app workloads.)
-- **three `ApplicationSet`s**, so every deploy unit is its own sync/health/URL:
-  - `tripbot-apps` — **one Application per `<env>-<component>-<platform>`** (each of
-    tripbot/vlc/onscreens/obs × env × platform reconciles its own
-    `cdk8s/dist/<env>-<component>-<platform>.k8s.yaml`).
+- **one `ApplicationSet` per deploy-unit family** (15 on the minipc), so every
+  deploy unit is its own sync/health/URL:
+  - `tripbot-apps`, `platform-gateway`, `obs`, `playout` — git-files generators
+    that self-discover one Application per `cdk8s/dist/apps/<env>-<app>.json`
+    in the owning repo, each reconciling its own `<env>-<app>.k8s.yaml`. The
+    owning repo's synth decides which units (and platforms) exist.
+  - `tripbot-console`, `video-pipeline`, `flare` — one Application per env from
+    the owning private repo's committed dist.
+  - `mediamtx` — one Application per (env, platform) relay, from infra's dist.
+  - `tripbot-identity` — one Application per env from the tripbot repo (identity
+    Secrets + stream PriorityClass/quota). **`Prune=false`**, manual sync.
   - `tripbot-supporting` — one Application per env (shared observability Secrets +
-    cert-manager Issuers + tripbot identity Secrets).
+    cert-manager Issuers).
   - `tripbot-data` — one Application per env, targeting `env.data_ns` (the isolated
     `<env>-data` namespace where it exists). **`Prune=false`** — never deletes the
     postgres StatefulSet / PVCs.
+  - `ups-monitor`, `kmsg`, `t5-watchdog`, `arc` — one-element sets for the
+    minipc's cluster singletons.
+  - `tripbot-apps`, `platform-gateway`, `obs`, `playout`, `mediamtx`,
+    `tripbot-console`, `video-pipeline` and `flare` set
+    `preserveResourcesOnDeletion`,
+    so losing a generator element deletes the Application but orphans its
+    workloads instead of cascading. It only applies
+    to Applications the controller creates after the flag is set; an older
+    Application keeps its `resources-finalizer` until it is removed by hand.
   - `ignoreDifferences` keeps two sets of apiserver-defaulted fields out of every
     diff: ESO's `ExternalSecret` CRD schema defaults, and the
     `apiVersion`/`kind` the apiserver stamps onto StatefulSet `volumeClaimTemplates`.
@@ -81,8 +97,8 @@ every other ESO-backed secret).
    task gitops:apply
    ```
 
-   The three ApplicationSets fan out into the per-component / supporting / data
-   Applications for each cutover env, all reconciling from git. New ones come up
+   The ApplicationSets fan out into the per-unit Applications for each cutover
+   env, all reconciling from git. New ones come up
    **OutOfSync** until synced — safe under manual sync.
 
 ## Cutover status
@@ -240,7 +256,8 @@ reconciles.
 
 The config is authored by the **same** `ArgoCD` construct, parameterized to a
 different env-set → `cdk8s/dist/argocd-k3d.k8s.yaml`: the `tripbot` project + the
-three ApplicationSets scoped to `development` only, **no tailscale UI** (the dev
+apps / identity / supporting / data / obs ApplicationSets scoped to
+`development` only, **no tailscale UI** (the dev
 cluster has no tailscale-operator — reach the UI by port-forward), and
 `development` apps on **automated sync** (the env is throwaway). The data unit
 stays `Prune=false`.
