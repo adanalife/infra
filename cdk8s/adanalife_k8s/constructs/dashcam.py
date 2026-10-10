@@ -66,6 +66,7 @@ def emit_dashcam_pv(scope: Construct, env: EnvConfig) -> None:
             access_modes=["ReadOnlyMany"],
             persistent_volume_reclaim_policy="Retain",
             storage_class_name="",
+            mount_options=NFS_MOUNT_OPTIONS,
             nfs=k8s.NfsVolumeSource(
                 server=env.nfs_server, path=env.nfs_path, read_only=True
             ),
@@ -77,6 +78,13 @@ def emit_dashcam_pv(scope: Construct, env: EnvConfig) -> None:
 # node: local-path is node-local, and the minipc is the only node with the iGPU and
 # the NAS reach the stream needs.
 MINIPC_NODE = "adanalife-minipc"
+
+# Mount options for every NFS PersistentVolume. Without them the kernel defaults to
+# `hard`, where a NAS outage blocks every read forever and wedges the pod in D state;
+# `soft` returns EIO after `retrans` retries of `timeo` deciseconds (~45s here), which
+# a read-only consumer survives. The stream path mounts none of these PVs, so this
+# bounds the blast radius if one is ever re-pointed at a live pod.
+NFS_MOUNT_OPTIONS = ["soft", "timeo=150", "retrans=3"]
 
 # Parallel copy streams for the localize Job. A single NFS read tops out ~25 MB/s
 # (measured), well under the NAS aggregate, so a handful of streams multiplex past
