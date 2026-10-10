@@ -25,7 +25,7 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
-from adanalife_k8s.constructs.dashcam import MINIPC_NODE
+from adanalife_k8s.constructs.dashcam import MINIPC_NODE, NFS_MOUNT_OPTIONS
 
 # The music share is a few GB of audio, not a video corpus — but PVC capacity on
 # a statically-bound NFS PV is a label, not a quota (the NAS enforces the real
@@ -206,6 +206,7 @@ def emit_music_pv(scope: Construct, env: EnvConfig) -> None:
             access_modes=["ReadOnlyMany"],
             persistent_volume_reclaim_policy="Retain",
             storage_class_name="",
+            mount_options=NFS_MOUNT_OPTIONS,
             nfs=k8s.NfsVolumeSource(
                 server=env.nfs_server, path=env.music_nfs_path, read_only=True
             ),
