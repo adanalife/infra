@@ -432,7 +432,6 @@ class ArgoCD(Construct):
             prune_disabled=False,
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
-            selfheal=self._selfheal,
             # Replica count is runtime-owned: dist parks every app Deployment at
             # replicas:0, the console's per-platform scale button brings one live,
             # and Argo ignores .spec.replicas so the scale sticks with selfHeal on.
@@ -508,7 +507,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 preserve_on_deletion=True,
                 ignore_replicas=True,
             )
@@ -601,7 +599,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas so a hand/console scale of the console
                 # sticks (e.g. parking it on stage to free the minipc) with
                 # selfHeal on — Argo ignores .spec.replicas. dist births it at 1.
@@ -628,7 +625,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas so scaling the embed responder up/down
                 # (console button or kubectl) sticks with selfHeal on — Argo
                 # ignores .spec.replicas. dist births it at its declared count.
@@ -652,7 +648,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas so parking the editor sticks with selfHeal on.
                 ignore_replicas=True,
                 repo_url=FLARE_REPO_URL,
@@ -683,7 +678,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas: gateways park at 0 in dist and scale up
                 # via the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
@@ -717,7 +711,6 @@ class ArgoCD(Construct):
                     ("prod-1", "obs-twitch"),
                     ("prod-1", "obs-youtube"),
                 ),
-                selfheal=self._selfheal,
                 # Runtime-owned replicas: obs parks at 0 in dist and scales up via
                 # the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
@@ -752,7 +745,6 @@ class ArgoCD(Construct):
                     ("prod-1", "playout-twitch"),
                     ("prod-1", "playout-youtube"),
                 ),
-                selfheal=self._selfheal,
                 # Runtime-owned replicas: playout parks at 0 in dist and scales up
                 # via the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
@@ -890,7 +882,6 @@ class ArgoCD(Construct):
         dest_ns_tmpl: str = "{{.env}}",
         automated_envs: tuple[str, ...] = (),
         automated_holdouts: tuple[tuple[str, str], ...] = (),
-        selfheal: bool = True,
         ignore_replicas: bool = False,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
@@ -905,14 +896,14 @@ class ArgoCD(Construct):
         data have one element per env. The data set disables prune so it can
         never delete the database/volumes, even when apps flips to automated sync.
 
-        `automated_envs` turns on continuous reconcile (prune, + selfHeal when
-        `selfheal`) for just those envs via a per-element templatePatch — so one
+        `automated_envs` turns on continuous reconcile (prune, + selfHeal on a
+        minipc instance) for just those envs via a per-element templatePatch — so one
         ApplicationSet can run some envs automated and others manual. Empty = every
         Application stays manual-sync (monitor-only). `automated_holdouts` carves
         (env, app) pairs back OUT of an automated env (prod OBS: a pod-template
         change restarts the live stream, so its deploys stay a deliberate sync).
-        `selfheal=False` keeps autosync but stops Argo reverting live drift, so a
-        hand-edit sticks — used on the throwaway k3d dev instance.
+        Off minipc (the throwaway k3d dev instance) selfHeal is off: autosync
+        stays, but a hand-edit sticks.
 
         `ignore_replicas` adds an ignoreDifferences on every Deployment's
         `.spec.replicas`, so a hand/console scale sticks permanently while
@@ -1079,13 +1070,15 @@ class ArgoCD(Construct):
                 ]
                 held = f"(or {' '.join(clauses)})" if len(clauses) > 1 else clauses[0]
                 cond = f"and ({cond}) (not {held})"
-            # selfHeal follows the instance `selfheal` flag uniformly — on for the
+            # selfHeal follows the instance's `_selfheal` uniformly — on for the
             # real envs (prod-1/stage-1 both match git), off only on the throwaway
             # k3d dev instance. There is no per-env/per-app selfHeal carve-out:
             # scaling doesn't fight selfHeal (Argo ignores .spec.replicas on
             # platform workloads via ignore_replicas), so a console scale sticks
             # with selfHeal fully on.
-            selfheal_block = f"      selfHeal: {'true' if selfheal else 'false'}\n"
+            selfheal_block = (
+                f"      selfHeal: {'true' if self._selfheal else 'false'}\n"
+            )
             appset_spec["templatePatch"] = (
                 "{{- if " + cond + " }}\n"
                 "spec:\n"
