@@ -277,6 +277,33 @@ resource "grafana_notification_policy" "root" {
     repeat_interval = "5m"
   }
 
+  // Rule evaluation errors (exec_err_state = "Error") arrive as
+  // alertname=DatasourceError carrying the rule's own labels, severity included,
+  // so a Grafana Cloud query-path outage would page every critical rule at once.
+  // That storm is what exhausts ntfy.sh's free daily quota, leaving the phone
+  // dark for the real page that follows. Critical errors go to Discord only,
+  // ahead of the critical routes; Grafana itself being down is the
+  // healthchecks.io deadman's job, not ntfy's. Errors on warnings already route
+  // the way their rule does.
+  policy {
+    matcher {
+      label = "alertname"
+      match = "="
+      value = "DatasourceError"
+    }
+    matcher {
+      label = "severity"
+      match = "="
+      value = "critical"
+    }
+    contact_point   = grafana_contact_point.discord_alerts.name
+    continue        = false
+    group_by        = ["grafana_folder", "alertname"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "1h"
+  }
+
   // Criticals escalate to the independent ntfy path. continue=true so the next
   // sibling (the Discord copy below) also fires — a matched child suppresses the
   // default receiver, so criticals must be re-routed to Discord explicitly to
