@@ -1,0 +1,69 @@
+# The fleet's pre-commit job, as one reusable workflow. Each repo's
+# pre-commit.yml calls this, so a hook-runner fix lands once instead of in
+# every copy.
+#
+# Runs on the self-hosted pool: the repo's mise pins install the toolchains
+# and pre-commit itself, and pre-commit runs directly rather than through
+# pre-commit/action. That action bundles an actions/cache of
+# ~/.cache/pre-commit, which on this pool is pure duplication —
+# k8s/arc/runners/values.yml mounts ~/.cache as a hostPath shared across
+# runner pods, so the hook envs are already there. Actions cache is
+# branch-scoped, so the action would upload a ~600MB copy per PR and fill each
+# private repo's 10GB quota with byte-identical duplicates, evicting the
+# caches that do earn their keep.
+name: hooks
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: arc-amd64
+      skip:
+        description: Extra hook ids to skip, comma-separated (`no-commit-to-branch` is always skipped).
+        type: string
+        default: ""
+      rust:
+        description: Restore the repo-pinned Rust toolchain from the Actions cache and add rustfmt, for a cargo-fmt hook.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # The pool's egress to the Rust CDN has run at 5–10 kB/s, and mise
+      # installs Rust through rustup, whose toolchains live outside mise's
+      # cached data dir. The key and paths match tempomat's rust-toolchain
+      # action, so this job shares one cache entry with that repo's other
+      # Rust jobs; clippy is added for the same reason.
+      - id: rust-dirs
+        if: inputs.rust
+        run: |
+          echo "rustup=${RUSTUP_HOME:-$HOME/.rustup}" >> "$GITHUB_OUTPUT"
+          echo "cargo-bin=${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_OUTPUT"
+      - if: inputs.rust
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.rust-dirs.outputs.rustup }}
+            ${{ steps.rust-dirs.outputs.cargo-bin }}
+          key: rust-${{ runner.os }}-${{ hashFiles('.tool-versions') }}
+
+      - uses: jdx/mise-action@v4
+
+      - if: inputs.rust
+        run: rustup component add clippy rustfmt
+
+      # no-commit-to-branch guards local commits; in CI the checkout is the
+      # branch itself, so the hook would false-positive on main.
+      - run: pre-commit run --show-diff-on-failure --color=always --all-files
+        env:
+          SKIP: ${{ inputs.skip && format('no-commit-to-branch,{0}', inputs.skip) || 'no-commit-to-branch' }}
