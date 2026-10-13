@@ -153,15 +153,16 @@ class Mediamtx(Construct):
                 initial_delay_seconds=5,
                 period_seconds=5,
             ),
-            # The HLS muxer holds its segments in RAM, not on disk: the default
-            # 7 x 1s window over a ~6-12 Mbps stream is a few MB, well inside this
-            # limit.
+            # The HLS muxer holds its segments in RAM, not on disk, and one open
+            # muxer takes the working set from ~32 to ~210 MiB (the console's
+            # /hls proxy, a single viewer), so the limit leaves room for it on
+            # top of the relay.
             resources=k8s.ResourceRequirements(
                 requests={
                     "cpu": k8s.Quantity.from_string("50m"),
                     "memory": k8s.Quantity.from_string("64Mi"),
                 },
-                limits={"memory": k8s.Quantity.from_string("256Mi")},
+                limits={"memory": k8s.Quantity.from_string("512Mi")},
             ),
             volume_mounts=[
                 # MediaMTX reads /mediamtx.yml by default; mount just the file.

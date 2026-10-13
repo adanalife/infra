@@ -97,7 +97,6 @@ locals {
     "igpu-performance",                # hand-built for the Iris Xe (engine-util + frequency); the integrated GPU only emits 4 of xpumanager's metrics, so the vendored discrete-GPU dashboard couldn't populate
     "twitch-chat-activity",
     "logs-and-errors",
-    "go-runtime",
     "postgres-pool",
     "http-routes",
     "application-latency-commands-and-db",

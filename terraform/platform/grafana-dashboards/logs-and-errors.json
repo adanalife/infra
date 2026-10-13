@@ -13,7 +13,7 @@
         "label": "Platform",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info{service_namespace=\"tripbot\"}, service_platform)",
+        "query": "label_values(target_info{job=~\"tripbot/.+\"}, service_platform)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
