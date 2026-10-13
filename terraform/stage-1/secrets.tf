@@ -60,6 +60,9 @@
 #     video-pipeline's cdk8s; publish.sh only ever names the staging D1 —
 #     D1 tokens cannot be scoped per-database, so that posture lives in the
 #     script, not the token.
+#   - k8s/video-pipeline/glacier-fetch — JSON {"AWS_ACCESS_KEY_ID": ...,
+#     "AWS_SECRET_ACCESS_KEY": ...} for the core account's GlacierFetchUser;
+#     mint + seed commands in core/glacier-fetch.tf.
 #   - ESO picks up new values within 1h; force with
 #     `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`.
 
@@ -84,6 +87,7 @@ locals {
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
     "k8s/flare/ghcr-pull-token"            = "GitHub token (read:packages) for pulling the private flare image from GHCR. Keys: username, token."
+    "k8s/video-pipeline/glacier-fetch"     = "Core-account GlacierFetchUser key for the glacier-fetch CronJob (video-pipeline cdk8s). Keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY."
   }
 }
 
