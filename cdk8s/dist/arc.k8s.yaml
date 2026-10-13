@@ -20,11 +20,11 @@ spec:
   limits:
     - type: Container
       defaultRequest:
-        cpu: 250m
-        memory: 2Gi
+        cpu: 10m
+        memory: 32Mi
       default:
-        cpu: "2"
-        memory: 3Gi
+        cpu: 200m
+        memory: 128Mi
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret

@@ -116,6 +116,8 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - .spec.replicas
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   templatePatch: |
     {{- if (eq .env "development") }}
     spec:

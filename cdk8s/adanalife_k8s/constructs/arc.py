@@ -73,10 +73,11 @@ class Arc(Construct):
     def __init__(self, scope: Construct, id: str = "arc"):
         super().__init__(scope, id)
 
-        # arc-runners hosts the runner pods + their dind sidecar (a privileged
-        # Docker daemon), which the cluster-wide PodSecurity `baseline` Talos
-        # enforces would reject — so label the namespace `privileged` to exempt
-        # it (same escape hatch as local-path-storage / monitoring-host). The
+        # arc-runners hosts the runner pods, which mount hostPath volumes (the
+        # shared toolchain caches and the per-pod job workspace) that the
+        # cluster-wide PodSecurity `baseline` Talos enforces would reject — so
+        # label the namespace `privileged` to exempt it (same escape hatch as
+        # local-path-storage / monitoring-host). The
         # controller (arc-systems) is an ordinary Deployment, no exemption.
         ns_labels = {
             RUNNERS_NS: {
@@ -96,37 +97,24 @@ class Arc(Construct):
                 metadata=meta,
             )
 
-        # Guard the shared node: bound each runner container so a build can't
-        # OOM/CPU-starve the prod streams. A LimitRange (not a ResourceQuota)
-        # is the right tool here — ARC injects `dind` + `init-dind-externals`
-        # containers that declare no resources, and a CPU/memory ResourceQuota
-        # rejects any pod whose containers don't all set requests+limits. The
-        # LimitRange instead *supplies* defaults to those injected containers
-        # (and caps per-container CPU/memory); maxRunners in the chart values
-        # bounds concurrency, and priorityClassName: ci-low makes the runner
-        # pods the first eviction victims under node pressure.
+        # Guard the shared node: give any container in arc-runners that declares
+        # no resources a small default request and limit. A LimitRange (not a
+        # ResourceQuota) because a CPU/memory quota rejects any pod whose
+        # containers don't all set requests+limits; the LimitRange supplies
+        # them instead. maxRunners in the chart values bounds concurrency, and
+        # priorityClassName: ci-low makes the runner pods the first eviction
+        # victims under node pressure.
         #
-        # These numbers are dind's resources, and this file is the only place
-        # that can set them. dind is injected as a *native sidecar* — an
-        # initContainer carrying restartPolicy: Always — so the chart builds it
-        # and a `dind` entry in the values file's template.spec.containers is
-        # silently dropped rather than merged. Because it is a native sidecar,
-        # the kubelet adds its request to the pod's, which makes defaultRequest
-        # the number the scheduler packs against.
-        #
-        # memory defaultRequest is therefore 2Gi and not a token 512Mi: dind
-        # runs `docker build`, whose build steps are its cgroup children, so it
-        # is the heaviest container in the pod and the runner beside it already
-        # requests 2.5Gi honestly for the same reason. At 512Mi the scheduler
-        # believed a runner pod needed 3Gi when it could take 10Gi, and packed
-        # runners the node could not feed until the node died — twice on
-        # 2026-08-23, the second time with the pool already capped at two.
-        # An honest request makes the scheduler queue a runner instead.
-        #
-        # The 3Gi ceiling is a bound, not a measurement — no per-container
-        # memory series reaches Grafana Cloud, so what a real image build peaks
-        # at here is unmeasured. Widen it if a `docker build` starts OOMing,
-        # and revisit maxRunners against these numbers rather than in isolation.
+        # The pool runs no dind (no containerMode — see the runners values
+        # file), so the runner container's own honest request (2.5Gi; peak
+        # measured at 1463 MiB across 112 pods on 2026-08-23) is the pod's
+        # whole budget and the number to revisit maxRunners against. The only
+        # container that reaches these defaults is the chown-caches init
+        # container, a mkdir + chown; an init container's request is maxed
+        # against the runner's, never added to it, so these numbers don't move
+        # the scheduler. They are sized for that job and the workspace reaper:
+        # a future container added with no resources gets a 128Mi limit and
+        # fails loudly instead of silently borrowing a build-sized budget.
         limits = cdk8s.ApiObject(
             self,
             "runner-limits",
@@ -141,8 +129,8 @@ class Arc(Construct):
                     "limits": [
                         {
                             "type": "Container",
-                            "defaultRequest": {"cpu": "250m", "memory": "2Gi"},
-                            "default": {"cpu": "2", "memory": "3Gi"},
+                            "defaultRequest": {"cpu": "10m", "memory": "32Mi"},
+                            "default": {"cpu": "200m", "memory": "128Mi"},
                         }
                     ]
                 },

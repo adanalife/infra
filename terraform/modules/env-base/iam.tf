@@ -1,3 +1,22 @@
+# allow users from the core account and EC2 to assume the Developer role
+data "aws_iam_policy_document" "developer_role_trust" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${var.core_account_id}:root"]
+    }
+  }
+
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
 # this is the role that Developer users will assume
 resource "aws_iam_role" "developer_role" {
   name = "DeveloperUser"
@@ -5,28 +24,7 @@ resource "aws_iam_role" "developer_role" {
   # allow Developers to stay logged in to AWS console for up to 12hrs
   max_session_duration = 12 * 60 * 60
 
-  # allow users from the core account to assume this role
-  assume_role_policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-          "Action": "sts:AssumeRole",
-          "Effect": "Allow",
-          "Principal": {
-            "AWS": "arn:aws:iam::${var.core_account_id}:root"
-          }
-      },
-      {
-          "Action": "sts:AssumeRole",
-          "Principal": {
-             "Service": "ec2.amazonaws.com"
-          },
-          "Effect": "Allow"
-      }
-    ]
-}
-EOF
+  assume_role_policy = data.aws_iam_policy_document.developer_role_trust.json
 }
 
 # attach general developer user access policy

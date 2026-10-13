@@ -124,3 +124,21 @@ def test_the_nas_units_are_the_ones_that_mount_nfs():
         assert "nfs:" in text, (
             f"{path.name} is allowlisted for NAS access but mounts none"
         )
+
+
+def test_nfs_pvs_mount_soft():
+    """An NFS PV with no mountOptions mounts `hard`, so a NAS outage hangs any
+    pod that reads it instead of failing. Every NFS PV states `soft`."""
+    pvs = [
+        (path.name, doc)
+        for path in _manifests()
+        for doc in _docs(path)
+        if doc.get("kind") == "PersistentVolume" and "nfs" in doc.get("spec", {})
+    ]
+    assert pvs, "no NFS PersistentVolume in dist/ — the mount check is vacuous"
+    hard = [
+        f"{name}: {doc['metadata']['name']}"
+        for name, doc in pvs
+        if "soft" not in (doc["spec"].get("mountOptions") or [])
+    ]
+    assert not hard, "NFS PVs that would mount hard:\n  " + "\n  ".join(hard)

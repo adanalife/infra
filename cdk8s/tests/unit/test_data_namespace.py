@@ -165,3 +165,27 @@ def test_colocated_data_ns_gets_no_ingress_policy():
     # workload there — co-located envs must not emit the policy
     objs = _synth(DataChart, _COLOCATED_NFS)
     assert not _by(objs, "NetworkPolicy", "postgres-ingress")
+
+
+# --- the isolated data Namespace is declared, PodSecurity-labeled, protected ---
+
+
+def test_isolated_data_unit_declares_its_namespace():
+    for name in ("prod-1", "stage-1"):
+        env = load_env(name)
+        ns = _by(_synth(DataChart, env), "Namespace", env.data_namespace)[0]
+        # cluster-scoped: the chart's default namespace must not leak onto it
+        assert "namespace" not in ns["metadata"]
+        labels = ns["metadata"]["labels"]
+        assert labels["pod-security.kubernetes.io/enforce"] == "restricted"
+        assert labels["adanalife.dev/protected"] == "true"
+        # survives a cascading delete of the Argo Application
+        opts = ns["metadata"]["annotations"]["argocd.argoproj.io/sync-options"]
+        assert "Delete=false" in opts.split(",")
+
+
+def test_colocated_data_unit_declares_no_namespace():
+    # the shared app namespace is bootstrap's; the data unit must not claim it
+    assert not [
+        o for o in _synth(DataChart, _COLOCATED_NFS) if o["kind"] == "Namespace"
+    ]

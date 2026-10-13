@@ -1,23 +1,6 @@
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: grafana-cloud-otlp
-  namespace: stage-1
-spec:
-  dataFrom:
-    - extract:
-        key: /k8s/grafana-cloud-otlp
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: SecretStore
-    name: aws-parameterstore
-  target:
-    creationPolicy: Owner
-    name: grafana-cloud-otlp
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
   name: sentry-tripbot
   namespace: stage-1
 spec:

@@ -222,34 +222,53 @@ class ArgoCD(Construct):
     env-set so the same authoring path emits both the minipc instance (prod-1 +
     stage-1) and the k3d dev instance (development only). Each Argo targets its OWN
     cluster in-cluster, so there's no cross-cluster networking; the instances differ
-    by which envs + how the UI is exposed:
+    by which envs + how the UI is exposed, all selected by `cluster`
+    ("minipc" | "k3d"); the per-cluster values are derived at the top of
+    __init__:
 
       * `tailscale_ui` — emit the tailnet UI Ingress (minipc only; the dev cluster
         has no tailscale-operator).
-      * `lan_host` — the traefik UI Ingress host (external-dns-published), or None
-        for no traefik UI. minipc: argocd.prod.whereisdana.today; the k3d dev
-        cluster: argocd.dev.whereisdana.today, reached at :9080 via the k3d
-        port-map. `lan_tls` adds the cert-manager TLS block (minipc; off on dev)."""
+      * `lan_host` — the traefik UI Ingress host (external-dns-published).
+        minipc: argocd.prod.whereisdana.today; the k3d dev cluster:
+        argocd.dev.whereisdana.today, reached at :9080 via the k3d port-map.
+        `lan_tls` adds the cert-manager TLS block (minipc; off on dev)."""
 
     def __init__(
         self,
         scope: Construct,
         id: str = "argocd",
         *,
-        envs: tuple[str, ...] = CUTOVER_ENVS,
-        autosync_envs: tuple[str, ...] = AUTOSYNC_ENVS,
-        autosync_holdouts: tuple[tuple[str, str], ...] = AUTOSYNC_HOLDOUTS,
-        selfheal: bool = True,
-        tailscale_ui: bool = True,
-        lan_host: str | None = LAN_HOST,
-        lan_tls: bool = True,
-        notifications_secret: bool = True,
-        ups_monitor: bool = True,
-        t5_watchdog: bool = True,
-        arc: bool = True,
-        kmsg: bool = True,
+        cluster: str = "minipc",
     ):
         super().__init__(scope, id)
+        if cluster not in ("minipc", "k3d"):
+            raise ValueError(f"unknown Argo cluster {cluster!r}")
+        minipc = cluster == "minipc"
+        # The minipc Argo manages prod-1 + stage-1; the k3d dev Argo is a
+        # separate in-cluster install managing only development, where every
+        # app autosyncs since the env is throwaway. The prod OBS holdout is
+        # minipc-only.
+        envs = CUTOVER_ENVS if minipc else ("development",)
+        autosync_envs = AUTOSYNC_ENVS if minipc else ("development",)
+        autosync_holdouts = AUTOSYNC_HOLDOUTS if minipc else ()
+        # UI exposure: tailnet Ingress on the minipc only (no tailscale-operator
+        # on the dev cluster); the traefik Ingress everywhere, TLS on the minipc
+        # only.
+        tailscale_ui = minipc
+        if minipc:
+            lan_host = LAN_HOST
+        else:
+            from adanalife_k8s.config import load_env
+
+            lan_host = f"argocd.{load_env('development').dns_base}"
+        lan_tls = minipc
+        # The dev cluster runs notifications.enabled=false.
+        notifications_secret = minipc
+        # The minipc singletons, each off on k3d: the dev cluster can't reach
+        # the Synology NUT server (UPS monitor), has no Talos node to probe or
+        # reboot (T5 watchdog), no runner host (ARC — runners are minipc-only),
+        # and no Talos API, so no kernel log to read (kmsg).
+        ups_monitor = t5_watchdog = arc = kmsg = minipc
         self.envs = envs
         # Whether the autosync block reconciles live drift (selfHeal). True on the
         # minipc (prod/stage must match git). False on the throwaway k3d dev
@@ -257,7 +276,7 @@ class ArgoCD(Construct):
         # sticks (Argo shows OutOfSync rather than stomping it) — dev is a scratch
         # env, so manual experimentation shouldn't be fought. The /spec/syncPolicy
         # emergency brake (ignoreApplicationDifferences) still applies on top.
-        self._selfheal = selfheal
+        self._selfheal = minipc
         # Envs whose console (the cross-repo tripbot-console unit) this Argo
         # delivers — the envs with a defined console revision. Resolves empty on
         # the k3d dev instance (development deploys via `task deploy:dev` in the
@@ -413,7 +432,6 @@ class ArgoCD(Construct):
             prune_disabled=False,
             automated_envs=autosync_envs,
             automated_holdouts=autosync_holdouts,
-            selfheal=self._selfheal,
             # Replica count is runtime-owned: dist parks every app Deployment at
             # replicas:0, the console's per-platform scale button brings one live,
             # and Argo ignores .spec.replicas so the scale sticks with selfHeal on.
@@ -422,6 +440,7 @@ class ArgoCD(Construct):
             # versions.yaml image pin, not by a branch).
             repo_url=TRIPBOT_REPO_URL,
             target_revision_tmpl="main",
+            preserve_on_deletion=True,
         )
         # The cross-repo identity unit: tripbot's per-env identity Secrets (DB creds
         # + twitch/maps/discord ExternalSecrets) and the prod-stream PriorityClass/
@@ -488,7 +507,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 preserve_on_deletion=True,
                 ignore_replicas=True,
             )
@@ -581,12 +599,12 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas so a hand/console scale of the console
                 # sticks (e.g. parking it on stage to free the minipc) with
                 # selfHeal on — Argo ignores .spec.replicas. dist births it at 1.
                 ignore_replicas=True,
                 repo_url=CONSOLE_REPO_URL,
+                preserve_on_deletion=True,
                 target_revision_tmpl="{{.revision}}",
             )
         # The cross-repo video-pipeline unit: one Application per env, sourcing the
@@ -607,12 +625,12 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas so scaling the embed responder up/down
                 # (console button or kubectl) sticks with selfHeal on — Argo
                 # ignores .spec.replicas. dist births it at its declared count.
                 ignore_replicas=True,
                 repo_url=VIDEO_PIPELINE_REPO_URL,
+                preserve_on_deletion=True,
                 target_revision_tmpl="{{.revision}}",
             )
         # The cross-repo flare unit: one Application per env, sourcing the PRIVATE
@@ -630,11 +648,11 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas so parking the editor sticks with selfHeal on.
                 ignore_replicas=True,
                 repo_url=FLARE_REPO_URL,
                 target_revision_tmpl="{{.revision}}",
+                preserve_on_deletion=True,
             )
         # The cross-repo platform-gateway unit: one Application per unit that the
         # PRIVATE platform-gateway repo synthed, self-discovered from its
@@ -660,7 +678,6 @@ class ArgoCD(Construct):
                 include_tmpl="{{.env}}-{{.app}}.k8s.yaml",
                 prune_disabled=False,
                 automated_envs=autosync_envs,
-                selfheal=self._selfheal,
                 # Runtime-owned replicas: gateways park at 0 in dist and scale up
                 # via the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
@@ -694,7 +711,6 @@ class ArgoCD(Construct):
                     ("prod-1", "obs-twitch"),
                     ("prod-1", "obs-youtube"),
                 ),
-                selfheal=self._selfheal,
                 # Runtime-owned replicas: obs parks at 0 in dist and scales up via
                 # the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
@@ -729,7 +745,6 @@ class ArgoCD(Construct):
                     ("prod-1", "playout-twitch"),
                     ("prod-1", "playout-youtube"),
                 ),
-                selfheal=self._selfheal,
                 # Runtime-owned replicas: playout parks at 0 in dist and scales up
                 # via the console; Argo ignores .spec.replicas so the scale sticks.
                 ignore_replicas=True,
@@ -867,7 +882,6 @@ class ArgoCD(Construct):
         dest_ns_tmpl: str = "{{.env}}",
         automated_envs: tuple[str, ...] = (),
         automated_holdouts: tuple[tuple[str, str], ...] = (),
-        selfheal: bool = True,
         ignore_replicas: bool = False,
         repo_url: str = REPO_URL,
         target_revision_tmpl: str = TARGET_REVISION,
@@ -882,14 +896,14 @@ class ArgoCD(Construct):
         data have one element per env. The data set disables prune so it can
         never delete the database/volumes, even when apps flips to automated sync.
 
-        `automated_envs` turns on continuous reconcile (prune, + selfHeal when
-        `selfheal`) for just those envs via a per-element templatePatch — so one
+        `automated_envs` turns on continuous reconcile (prune, + selfHeal on a
+        minipc instance) for just those envs via a per-element templatePatch — so one
         ApplicationSet can run some envs automated and others manual. Empty = every
         Application stays manual-sync (monitor-only). `automated_holdouts` carves
         (env, app) pairs back OUT of an automated env (prod OBS: a pod-template
         change restarts the live stream, so its deploys stay a deliberate sync).
-        `selfheal=False` keeps autosync but stops Argo reverting live drift, so a
-        hand-edit sticks — used on the throwaway k3d dev instance.
+        Off minipc (the throwaway k3d dev instance) selfHeal is off: autosync
+        stays, but a hand-edit sticks.
 
         `ignore_replicas` adds an ignoreDifferences on every Deployment's
         `.spec.replicas`, so a hand/console scale sticks permanently while
@@ -1056,13 +1070,15 @@ class ArgoCD(Construct):
                 ]
                 held = f"(or {' '.join(clauses)})" if len(clauses) > 1 else clauses[0]
                 cond = f"and ({cond}) (not {held})"
-            # selfHeal follows the instance `selfheal` flag uniformly — on for the
+            # selfHeal follows the instance's `_selfheal` uniformly — on for the
             # real envs (prod-1/stage-1 both match git), off only on the throwaway
             # k3d dev instance. There is no per-env/per-app selfHeal carve-out:
             # scaling doesn't fight selfHeal (Argo ignores .spec.replicas on
             # platform workloads via ignore_replicas), so a console scale sticks
             # with selfHeal fully on.
-            selfheal_block = f"      selfHeal: {'true' if selfheal else 'false'}\n"
+            selfheal_block = (
+                f"      selfHeal: {'true' if self._selfheal else 'false'}\n"
+            )
             appset_spec["templatePatch"] = (
                 "{{- if " + cond + " }}\n"
                 "spec:\n"

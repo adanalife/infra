@@ -54,6 +54,28 @@ resource "grafana_data_source" "guessr_d1" {
   })
 }
 
+# Cloudflare's GraphQL analytics API, for how the game's Python Worker is
+# holding up: requests and errors per invocation, which is the only record of
+# an invocation that died over its CPU or memory limit. A second datasource
+# rather than a wider guessr-d1 token because the scopes differ -- this one
+# holds Account Analytics read and nothing else, created by hand and parked in
+# SSM the same way as the D1 token above.
+resource "grafana_data_source" "cloudflare_analytics" {
+  type = "yesoreyeram-infinity-datasource"
+  name = "cloudflare-analytics"
+  uid  = "cloudflare-analytics"
+  url  = "https://api.cloudflare.com/client/v4"
+
+  json_data_encoded = jsonencode({
+    auth_method  = "bearerToken"
+    allowedHosts = ["https://api.cloudflare.com"]
+  })
+
+  secure_json_data_encoded = jsonencode({
+    bearerToken = data.aws_ssm_parameter.cloudflare_analytics_read.value
+  })
+}
+
 resource "grafana_folder" "guessr" {
   title = "Guessr"
 }
@@ -62,8 +84,9 @@ resource "grafana_dashboard" "guessr" {
   folder = grafana_folder.guessr.uid
   # sensitive() for the same reason as the tripbot dashboards in grafana.tf:
   # the diff is a thousand lines of JSON that drowns out the rest of a plan.
-  config_json = sensitive(replace(
+  config_json = sensitive(replace(replace(
     file("${path.module}/grafana-dashboards/guessr.json"),
-    "__D1_PRODUCTION__", local.guessr_d1_production
+    "__D1_PRODUCTION__", local.guessr_d1_production),
+    "__CLOUDFLARE_ACCOUNT__", var.cloudflare_account_id
   ))
 }
