@@ -1,0 +1,175 @@
+# The fleet's release-please job, as one reusable workflow. Each repo's
+# release-please.yml calls this on push to main.
+#
+# release-please maintains a standing release PR on main — the next version,
+# computed from the conventional commits since the last release — and merging
+# it cuts the vX.Y.Z tag + GitHub Release. While that PR is open, the staging
+# pass below builds the towncrier changelog (and whatever else the repo's
+# release needs, such as a cdk8s re-synth for the pin release-please bumped)
+# onto its branch, so those land atomically with the version bump when the PR
+# squash-merges. release-please recreates the branch from main on every push,
+# so the staging pass is idempotent.
+#
+# It runs on the adanalife-automation app token, not GITHUB_TOKEN, and both
+# halves of that matter. Anything github-actions[bot] triggers is held at
+# `action_required` under the repos' first-time-contributor approval policy —
+# a status the bot never outgrows — so a bot-authored release PR parks its
+# gates unrun until someone clicks approve. And a GITHUB_TOKEN-pushed tag
+# fires no push trigger at all, so a tag-triggered release.yml would need
+# dispatching by hand. An app token is an ordinary actor on both counts.
+name: release-please
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: arc-amd64
+      changelog:
+        description: Build the towncrier changelog from changelog.d/ onto the release PR branch.
+        type: boolean
+        default: true
+      stage:
+        description: The repo's own staging commands, run from the root of the release PR branch after the changelog build; whatever they change is committed with it.
+        type: string
+        default: ""
+      rust:
+        description: Restore the repo-pinned Rust toolchain from the Actions cache before staging, for a `stage` that calls cargo.
+        type: boolean
+        default: false
+    outputs:
+      release_created:
+        description: Whether this run cut a release.
+        value: ${{ jobs.release-please.outputs.release_created }}
+      tag_name:
+        description: The tag this run cut, if any.
+        value: ${{ jobs.release-please.outputs.tag_name }}
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        required: true
+
+# Every write goes through the app token below; the job's own GITHUB_TOKEN
+# only reads the release branch.
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    # Serial, not cancel-in-progress: an interrupted run can leave the release
+    # PR half-updated.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Mint automation app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          # Without these the token carries the app installation's whole
+          # permission set. release-please needs exactly two: contents to push
+          # the branch and cut the tag, pull-requests to maintain the release PR.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Keyed off the branch existing, not `steps.release.outputs.pr`: that
+      # output is set only on runs where release-please itself changed the PR,
+      # and a push that leaves it empty skips the staging pass — so the PR
+      # merges with a stale dist / unbuilt changelog and, because the app-token
+      # push is what fires its pull_request events, no CI at all
+      # (platform-gateway 1.27.1). curl rather than `gh`: the ARC runner image
+      # ships no gh CLI.
+      - name: Check for an open release PR branch
+        if: ${{ !steps.release.outputs.release_created && (inputs.changelog || inputs.stage != '') }}
+        id: release-branch
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/release-please--branches--main")
+          echo "Release branch lookup: HTTP $code"
+          echo "exists=$([ "$code" = 200 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed with the app token so the push fires the PR's pull_request
+      # events and its gates re-run against the final release state.
+      - name: Check out the release PR branch
+        if: ${{ steps.release-branch.outputs.exists == 'true' }}
+        # zizmor: ignore[artipacked] the push at the end of this job is what the
+        # persisted credential is for
+        uses: actions/checkout@v7
+        with:
+          ref: release-please--branches--main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - if: ${{ steps.release-branch.outputs.exists == 'true' && inputs.rust }}
+        uses: adanalife/infra/.github/actions/rust-toolchain@main
+      - if: ${{ steps.release-branch.outputs.exists == 'true' && !inputs.rust }}
+        uses: jdx/mise-action@v4
+
+      # For `uvx towncrier` in repos whose mise pins carry no uv.
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+        if: ${{ steps.release-branch.outputs.exists == 'true' }}
+
+      - name: Stage the release on its PR branch
+        if: ${{ steps.release-branch.outputs.exists == 'true' }}
+        env:
+          CHANGELOG: ${{ inputs.changelog }}
+          STAGE: ${{ inputs.stage }}
+          # uvx defaults its tool dir to $HOME/.local/share/uv, which the runner
+          # user can't create: the runner pod mounts a cache volume further down
+          # that path, so the kubelet creates the intervening dirs root-owned.
+          # RUNNER_TEMP is per-job and writable; the package download itself is
+          # still served by the shared uv cache under $HOME/.cache.
+          UV_TOOL_DIR: ${{ runner.temp }}/uv-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/uv-tool-bin
+        run: |
+          set -euo pipefail
+          # release-please bumped the manifest on this branch — that version is
+          # the single source of truth for both the changelog stanza and the
+          # tag that gets cut. Read with python (mise installed it) rather than
+          # jq, which the ARC runner image does not carry.
+          VERSION=$(python -c 'import json; print(json.load(open(".release-please-manifest.json"))["."])')
+          echo "Release version: $VERSION"
+
+          if [ "$CHANGELOG" = true ]; then
+            # Fragments reach main as "+" placeholders; name each after the PR
+            # that added it, from its squash commit, before towncrier reads
+            # them. The scripts come from main: this checkout is the release
+            # branch, which release-please doesn't rebase just because main
+            # moved, so it can predate them.
+            git checkout origin/main -- scripts/number-fragment.sh scripts/number-fragments.sh
+            scripts/number-fragments.sh
+
+            # A release PR can legitimately carry no fragments (a PR labeled
+            # skip-changelog), which is no stanza rather than an error.
+            if compgen -G "changelog.d/*.md" > /dev/null; then
+              uvx towncrier build --yes --config towncrier.toml --version "$VERSION"
+            fi
+          fi
+
+          bash -euo pipefail -c "$STAGE"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: stage release artifacts for $VERSION"
+            git push origin HEAD:release-please--branches--main
+          fi
