@@ -39,28 +39,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The pool's egress to the Rust CDN has run at 5–10 kB/s, and mise
-      # installs Rust through rustup, whose toolchains live outside mise's
-      # cached data dir. The key and paths match tempomat's rust-toolchain
-      # action, so this job shares one cache entry with that repo's other
-      # Rust jobs; clippy is added for the same reason.
-      - id: rust-dirs
-        if: inputs.rust
-        run: |
-          echo "rustup=${RUSTUP_HOME:-$HOME/.rustup}" >> "$GITHUB_OUTPUT"
-          echo "cargo-bin=${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_OUTPUT"
+      # Both install the repo's mise pins; the Rust one restores the toolchain
+      # from the Actions cache first.
       - if: inputs.rust
-        uses: actions/cache@v6
-        with:
-          path: |
-            ${{ steps.rust-dirs.outputs.rustup }}
-            ${{ steps.rust-dirs.outputs.cargo-bin }}
-          key: rust-${{ runner.os }}-${{ hashFiles('.tool-versions') }}
-
-      - uses: jdx/mise-action@v4
-
-      - if: inputs.rust
-        run: rustup component add clippy rustfmt
+        uses: adanalife/infra/.github/actions/rust-toolchain@main
+      - if: ${{ !inputs.rust }}
+        uses: jdx/mise-action@v4
 
       # no-commit-to-branch guards local commits; in CI the checkout is the
       # branch itself, so the hook would false-positive on main.

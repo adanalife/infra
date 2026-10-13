@@ -1,0 +1,40 @@
+name: Rust toolchain
+description: >-
+  The repo's mise pins, with the pinned Rust restored from the Actions cache
+  rather than pulled from static.rust-lang.org on every job.
+
+# The arc-amd64 image bakes no toolchain, and the pool's egress to the Rust CDN
+# has run at 5–10 kB/s with 30 s timeouts that red a job before cargo ever
+# runs. mise installs Rust through rustup, whose toolchains live outside mise's
+# own cached data dir, so without this every job downloads rustup-init and the
+# toolchain again. The cache holds the whole rustup tree plus the proxies in
+# cargo's bin, keyed on the pin; mise's install then finds everything present.
+#
+# clippy and rustfmt are added even for jobs that never call them, so every
+# Rust job in a repo shares one cache entry. The key and paths match tempomat's
+# in-repo copy of this action, so its jobs share the entry too. On a hit the
+# component add is a no-op.
+
+runs:
+  using: composite
+  steps:
+    # Where the pod spec points rustup and cargo (k8s/arc/runners/values.yml
+    # sets RUSTUP_HOME / CARGO_HOME per pod); read rather than spelled out, so
+    # a move there does not strand this cache.
+    - id: dirs
+      shell: bash
+      run: |
+        echo "rustup=${RUSTUP_HOME:-$HOME/.rustup}" >> "$GITHUB_OUTPUT"
+        echo "cargo-bin=${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ${{ steps.dirs.outputs.rustup }}
+          ${{ steps.dirs.outputs.cargo-bin }}
+        key: rust-${{ runner.os }}-${{ hashFiles('.tool-versions') }}
+
+    - uses: jdx/mise-action@v4
+
+    - shell: bash
+      run: rustup component add clippy rustfmt
