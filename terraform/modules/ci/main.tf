@@ -176,6 +176,13 @@ resource "aws_iam_role_policy_attachment" "ci_terraform_managed_policy" {
   policy_arn = data.aws_iam_policy.managed_aws_iam_policies[each.key].arn
 }
 
+# Carries the count-era state address over to the for_each key, so the
+# attachment is relabeled in place rather than detached and re-attached.
+moved {
+  from = aws_iam_role_policy_attachment.ci_terraform_managed_policy[0]
+  to   = aws_iam_role_policy_attachment.ci_terraform_managed_policy["ReadOnlyAccess"]
+}
+
 
 # add Policy to allow CI User to Assume Terraform Role
 resource "aws_iam_policy" "ci_terraform_assume_role" {
