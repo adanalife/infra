@@ -47,7 +47,13 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s import eso
-from adanalife_k8s.constructs.ups_monitor import _FETCH_TALOSCTL
+from adanalife_k8s.constructs.talosctl import (
+    FETCH_TALOSCTL,
+    TALOS_NODE,
+    TALOSCONFIG_PATH,
+    TALOSCTL_PATH,
+    TALOSCTL_URL,
+)
 from adanalife_k8s.naming import (
     CONFIG_HASH_ANNOTATION,
     config_hash,
@@ -57,9 +63,6 @@ from adanalife_k8s.naming import (
 
 NAME = "t5-watchdog"
 NAMESPACE = "node-watchdog"
-# The minipc Talos node — the one that carries the T5. The rpi5 worker has no
-# UserVolume, so it's deliberately out of scope.
-TALOS_NODE = "192.168.40.111"
 # The UserVolume mount point (u-data), where local-path provisions every PV.
 PROBE_PATH = "/var/mnt/data"
 POLL_INTERVAL = "20"  # seconds between probes
@@ -72,21 +75,11 @@ CONFIRM_POLLS = "3"
 STARTUP_GRACE = "900"
 PROBE_TIMEOUT = "30"  # seconds allowed for a single `talosctl list`
 REBOOT_TIMEOUT = "120"  # seconds allowed for a single `talosctl reboot`
-TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
-TALOSCTL_PATH = "/opt/talos/talosctl"  # placed by the initContainer
 # ARMED — the trigger executes the real `talosctl reboot`. Flip to "true" for
 # log-only mode (it logs the command it WOULD run). See the module docstring.
 DRY_RUN = "false"
 # python:3.14-alpine — the probe is pure stdlib, so no pip install is needed.
 IMAGE = "python:3.14-alpine"
-# Pinned to the cluster's Talos version. The initContainer fetches the client
-# binary at pod start (the Python image doesn't ship it); a single long-lived
-# pod fetches once. amd64 — the minipc's arch.
-TALOSCTL_VERSION = "v1.14.0"
-TALOSCTL_URL = (
-    f"https://github.com/siderolabs/talos/releases/download/{TALOSCTL_VERSION}"
-    "/talosctl-linux-amd64"
-)
 # Shares the UPS monitor's os:operator talosconfig (same node, same role, and
 # reboot is a subset of what shutdown already permits). Mounted OPTIONALLY so a
 # deploy without the seeded parameter still schedules.
@@ -243,7 +236,7 @@ class T5Watchdog(Construct):
         labels = meta_labels(NAME, part_of="infra")
         sel = selector(NAME)
 
-        scripts = {"t5probe.py": _PROBE, "fetch-talosctl.py": _FETCH_TALOSCTL}
+        scripts = {"t5probe.py": _PROBE, "fetch-talosctl.py": FETCH_TALOSCTL}
         k8s.KubeConfigMap(
             self,
             "probe",

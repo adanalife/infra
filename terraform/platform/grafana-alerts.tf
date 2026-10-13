@@ -94,18 +94,10 @@ locals {
   // where you see whether the box bounced underneath it.
   ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
 
-  // The frame gauge the encoder-wedged rule fires on, in Explore rather than on
-  // a dashboard: the only panel plotting it is scoped to service_name=vlc-server
-  // and would show none of the alert's series. Responders want to see when the
-  // gauge flattened before bouncing the pod.
-  obs_frames_link = "[frames](${local.grafana_url}/explore?left=${urlencode(jsonencode({
-    queries = [{
-      refId      = "A"
-      datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus.uid }
-      expr       = "max by (service_platform) (obs_stream_output_total_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"})"
-    }]
-    range = { from = "now-6h", to = "now" }
-  }))})"
+  // The output frame-rate panel on the stream-health board, beside the
+  // stream-state and encoder panels the encoder-wedged rule reads alongside.
+  // Responders want to see when the frames flattened before bouncing the pod.
+  obs_frames_link = "[frames](${local.grafana_url}/d/stream-health/?viewPanel=33)"
 
   // The obs container's decoder complaints, on the same Loki matchers the
   // decode-error rule counts. OBS's own counters stay clean through a corrupt
@@ -285,6 +277,33 @@ resource "grafana_notification_policy" "root" {
     repeat_interval = "5m"
   }
 
+  // Rule evaluation errors (exec_err_state = "Error") arrive as
+  // alertname=DatasourceError carrying the rule's own labels, severity included,
+  // so a Grafana Cloud query-path outage would page every critical rule at once.
+  // That storm is what exhausts ntfy.sh's free daily quota, leaving the phone
+  // dark for the real page that follows. Critical errors go to Discord only,
+  // ahead of the critical routes; Grafana itself being down is the
+  // healthchecks.io deadman's job, not ntfy's. Errors on warnings already route
+  // the way their rule does.
+  policy {
+    matcher {
+      label = "alertname"
+      match = "="
+      value = "DatasourceError"
+    }
+    matcher {
+      label = "severity"
+      match = "="
+      value = "critical"
+    }
+    contact_point   = grafana_contact_point.discord_alerts.name
+    continue        = false
+    group_by        = ["grafana_folder", "alertname"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "1h"
+  }
+
   // Criticals escalate to the independent ntfy path. continue=true so the next
   // sibling (the Discord copy below) also fires — a matched child suppresses the
   // default receiver, so criticals must be re-routed to Discord explicitly to
@@ -351,8 +370,11 @@ resource "grafana_notification_policy" "root" {
 // holding references that never get collected). Lives in its own rule
 // group so it can be toggled independently of stream-health.
 //
-// Metric names come from the OTel-runtime exporter pushed via OTLP and
-// match what the go-runtime dashboard queries against.
+// tripbot and onscreens-server push the OTel-runtime names over OTLP
+// (go_goroutine_count, go_memory_used_bytes). platform-gateway is scraped
+// and exposes the Prometheus Go collector's (go_goroutines,
+// go_memstats_heap_inuse_bytes), with no service_name, so its branch of
+// each expression copies `job` (gateway-<platform>) into service_name.
 resource "grafana_rule_group" "go_runtime" {
   name             = "go-runtime"
   folder_uid       = grafana_folder.tripbot.uid
@@ -367,7 +389,7 @@ resource "grafana_rule_group" "go_runtime" {
 
     annotations = {
       summary     = "Goroutine count above 10000 for 10m"
-      description = "Sustained goroutine count > 10000 on a tripbot service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the go-runtime dashboard for the affected service and pull a goroutine profile from Pyroscope to find the leak site."
+      description = "Sustained goroutine count > 10000 on a tripbot or gateway service usually indicates a goroutine leak (a worker started per-request that never returns, a missing ctx-cancel, etc.). Open the Go runtime row on the affected service's Service Health dashboard and pull a goroutine profile from Pyroscope to find the leak site."
     }
     labels = {
       severity = "warning"
@@ -383,7 +405,7 @@ resource "grafana_rule_group" "go_runtime" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|onscreens-server\"})"
+        expr          = "max by (service_name) (go_goroutine_count{service_name=~\"tripbot|onscreens-server\"}) or max by (service_name) (label_replace(go_goroutines{job=~\"gateway-.+\"}, \"service_name\", \"$1\", \"job\", \"(.+)\"))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -420,7 +442,7 @@ resource "grafana_rule_group" "go_runtime" {
 
     annotations = {
       summary     = "Heap grew by more than 100 MB over the last hour"
-      description = "Sustained heap growth without bound suggests a memory leak — references being held that never get collected. Open the go-runtime dashboard for the affected service and pull a heap profile (alloc_space + inuse_space) from Pyroscope to find what's accumulating."
+      description = "Sustained heap growth without bound suggests a memory leak — references being held that never get collected. Open the Go runtime row on the affected service's Service Health dashboard and pull a heap profile (alloc_space + inuse_space) from Pyroscope to find what's accumulating."
     }
     labels = {
       severity = "warning"
@@ -436,7 +458,7 @@ resource "grafana_rule_group" "go_runtime" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"} offset 1h)"
+        expr          = "(max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"}) - max by (service_name) (go_memory_used_bytes{service_name=~\"tripbot|onscreens-server\"} offset 1h)) or (max by (service_name) (label_replace(go_memstats_heap_inuse_bytes{job=~\"gateway-.+\"}, \"service_name\", \"$1\", \"job\", \"(.+)\")) - max by (service_name) (label_replace(go_memstats_heap_inuse_bytes{job=~\"gateway-.+\"} offset 1h, \"service_name\", \"$1\", \"job\", \"(.+)\")))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -753,6 +775,11 @@ resource "grafana_rule_group" "host_storage" {
 // series is ever absent — during the window between a terraform apply and the
 // k8s-monitoring sync that starts shipping the metric, and on a node so
 // thoroughly down that nothing scrapes it (which the deadman covers instead).
+//
+// exec_err_state = OK on both, for the same reason one layer up: a query that
+// fails to evaluate says Grafana Cloud's query path is unhealthy, not that the
+// box bounced, and a DatasourceError titled "minipc rebooted" reads as a crash.
+// Grafana losing its own query path is the deadman's job.
 resource "grafana_rule_group" "host_lifecycle" {
   name             = "host-lifecycle"
   folder_uid       = grafana_folder.tripbot.uid
@@ -772,7 +799,7 @@ resource "grafana_rule_group" "host_lifecycle" {
     for            = "0m"
     condition      = "C"
     no_data_state  = "OK"
-    exec_err_state = "Error"
+    exec_err_state = "OK"
 
     annotations = {
       summary     = "minipc booted within the last 15m — prod restarted with it"
@@ -838,7 +865,7 @@ resource "grafana_rule_group" "host_lifecycle" {
     for            = "0m"
     condition      = "C"
     no_data_state  = "OK"
-    exec_err_state = "Error"
+    exec_err_state = "OK"
 
     annotations = {
       summary     = "minipc has rebooted more than once in 6h — crash loop, prod is flapping"
@@ -2333,6 +2360,75 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
+  // The case every watchdog rule above stands down for: the OBS output is
+  // stopped. The watchdog only acts on an active output (an operator stopping
+  // the stream is outside its scope), so obs_streaming_active=0 with
+  // tripbot_channel_live=0 reads identically to "turned off on purpose" — and
+  // on 2026-08-24 YouTube sat dark 90 minutes that way after a console
+  // egress-stop, with nothing reporting it.
+  //
+  // What separates the two is the console's mode: obs_mode_gate is only armed
+  // while the console says this platform's OBS is meant to be up, and parking
+  // or going dark scales it down. So OBS stopped *and* channel offline while
+  // the mode says live is a stream nobody meant to end. The sum is 0 only
+  // when both read 0, so it can't double-page alongside the silent-disconnect
+  // rule (OBS=1/platform=0 sums to 1). 15m clears the legitimate gaps — an
+  // OBS bounce plus a YouTube broadcast transition is about a minute — and
+  // 30 days of history at 5m resolution never reached 0 under the gate.
+  rule {
+    name           = "OBS: stream stopped while the console says live"
+    for            = "15m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.service_platform }} has been dark for 15m with its OBS output stopped, but the console mode still says live"
+      link        = "${local.watchdog_panel_link}"
+      description = "obs_streaming_active=0 and tripbot_channel_live=0 on {{ $labels.service_platform }} for 15m while console_platform_component_up says its OBS is meant to be running. No watchdog covers a stopped output, so nothing will restart it. If the stop was deliberate, park the platform (or switch it to dark) from the console and this clears. Otherwise start the stream again from the console; on youtube, if the gateway refuses the egress start with `403 Stream is inactive`, the broadcast is gone — check YouTube Studio before retrying."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "(max by (service_platform) (obs_streaming_active{service_name=\"tripbot\", deployment_environment=\"prod-1\"}) + max by (service_platform) (tripbot_channel_live{service_name=\"tripbot\", deployment_environment=\"prod-1\"})) ${local.obs_mode_gate}"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // The wedged-encoder case: OBS reports the output active, the RTMP socket is
   // healthy, and the encoder is pushing nothing. On 2026-08-05 a hung NFS mount
   // blocked the render pipeline for 9h41m while outputActive stayed 1, so every
@@ -3715,10 +3811,11 @@ resource "grafana_rule_group" "gateway_health" {
 // The population: guessr's round-generation CronJob, the hourly prod Postgres
 // dump, and video-pipeline's long batch passes (last rule). guessr's runs
 // weekly and keeps the game's schedule topped up; the game goes dark the day
-// after its last scheduled date, and nothing about that is loud. publish.sh has
-// a depth guard that fails the run when the post-run horizon is thin, and the
-// job failing IS that alert — but a guard inside a run cannot fire for a run
-// that never happened, which is the failure mode with no other witness.
+// after its last scheduled date, and nothing about that is loud. A run that
+// happens is watched from inside it (verify_days.sh fails it on any upcoming
+// date short of a full game) and from outside it (the schedule-depth rule
+// below reads the horizon from D1) — but neither can fire for a run that never
+// happened, which is the failure mode with no other witness.
 //
 // So the signal is neither "did a job fail" nor "did a job run" but "how long
 // since one *succeeded*", which collapses both into one number and needs no
@@ -3745,7 +3842,7 @@ resource "grafana_rule_group" "batch_health" {
 
     annotations = {
       summary     = "guessr-rounds last succeeded over 8 days ago — the schedule is not being topped up"
-      description = "The weekly guessr-rounds CronJob in stage-1 has not recorded a success in 8 days, so the game's schedule is running down with nothing refilling it. At the weekly cadence and a 14-day horizon this leaves roughly six days before a date has no rounds on it, which is a player-visible dark day. Read the last run with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds` and its pod logs; `task schedule:prod` and `task schedule:stage` in the guessr repo say how much runway is actually left. A run that failed the depth guard reports it in the logs as `is scheduled only N days out`. To generate outside the schedule: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. If this fires with no CronJob in the cluster at all, the alert is telling you the object is gone rather than the run is late — check Argo."
+      description = "The weekly guessr-rounds CronJob in stage-1 has not recorded a success in 8 days, so the game's schedule is running down with nothing refilling it. At the weekly cadence and a 14-day horizon this leaves roughly six days before a date has no rounds on it, which is a player-visible dark day. Read the last run with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds` and its pod logs; `task schedule:prod` and `task schedule:stage` in the guessr repo say how much runway is actually left. A run that failed verify_days.sh logs `has dates scheduled with fewer than 5 rounds` and lists them. To generate outside the schedule: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. If this fires with no CronJob in the cluster at all, the alert is telling you the object is gone rather than the run is late — check Argo."
     }
     labels = {
       severity = "warning"
@@ -3789,6 +3886,78 @@ resource "grafana_rule_group" "batch_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [691200] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name      = "guessr: the prod schedule runs out within 6 days"
+    for       = "6h"
+    condition = "C"
+    // The rule above watches the generator; this one watches what it is for.
+    // A run can succeed and still leave the horizon thin — a drained queue, a
+    // pool with nothing left to draw — and that is invisible to success age.
+    // Alerting on no data because the query COALESCEs an empty schedule to -1:
+    // a missing row means the datasource stopped answering, not that all is well.
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr prod has fewer than 6 days of rounds scheduled"
+      description = "The last date in prod's round_days is under 6 days away, so the game goes dark the day after it unless the schedule is topped up. The weekly guessr-rounds run keeps 14 days ahead, so the trough is 7: below 6 means a run failed to fill, not just that one is due. Read the horizon with `task schedule:prod` in the guessr repo (days_left, the queued pool, unplaced rounds), and the last run's logs with `kubectl -n stage-1 get jobs -l app.kubernetes.io/name=guessr-rounds`. A run that succeeded with nothing queued to draw from is the usual cause. To generate now: `kubectl -n stage-1 create job --from=cronjob/guessr-rounds guessr-rounds-manual`. A value of -1 is an empty round_days table."
+    }
+    labels = {
+      severity = "warning"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = grafana_data_source.guessr_d1.uid
+      // The same Infinity shape as the guessr dashboard's panels (see
+      // grafana-guessr.tf); the backend parser is what makes it evaluable
+      // server-side. The SQL is guessr's own schedule.sql horizon read.
+      model = jsonencode({
+        refId  = "A"
+        type   = "json"
+        source = "url"
+        format = "table"
+        parser = "backend"
+        url    = "/${local.guessr_d1_production}/query"
+        url_options = {
+          method            = "POST"
+          body_type         = "raw"
+          body_content_type = "application/json"
+          data              = jsonencode({ sql = "SELECT COALESCE(CAST(julianday(MAX(date)) - julianday(date('now')) AS INTEGER), -1) AS days_left FROM round_days" })
+        }
+        root_selector = "result.0.results"
+        columns       = [{ selector = "days_left", text = "days_left", type = "number" }]
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // 14-day horizon topped up weekly: 7 at the trough, so 6 is one day of
+        // slack past a run that should have filled it.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [6] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
@@ -4225,7 +4394,7 @@ resource "grafana_rule_group" "burrito_health" {
 
     annotations = {
       summary     = "Burrito layer {{ $labels.layer_name }} last plan or apply failed — that workspace's drift is unknown"
-      description = "burrito_terraform_layer_status{layer_name=\"{{ $labels.layer_name }}\", status=\"error\"} has been set for 15m: the layer completed a run and terraform reported failure, so this workspace's real drift is unknown until it plans clean again. Read the run log from the UI at https://burrito.prod.whereisdana.today, or from the datastore bucket (layers/burrito/{{ $labels.layer_name }}/<run>/<attempt>/run.log). A failure on core or platform is a plan failure by construction — those layers hold a read-only credential and cannot apply. no_data is OK: the gauge drops the error label entirely once a layer recovers."
+      description = "burrito_terraform_layer_status{layer_name=\"{{ $labels.layer_name }}\", status=\"error\"} has been set for 15m: the layer completed a run and terraform reported failure, so this workspace's real drift is unknown until it plans clean again. Read the run log from the UI at https://burrito.prod.whereisdana.today, or from the datastore bucket (layers/burrito/{{ $labels.layer_name }}/<run>/<attempt>/run.log). A failure on core, platform or prod-1-data is a plan failure by construction — those layers hold a read-only credential and cannot apply. no_data is OK: the gauge drops the error label entirely once a layer recovers."
     }
     labels = {
       severity = "warning"
@@ -4536,6 +4705,81 @@ resource "grafana_rule_group" "control_plane_health" {
   }
 }
 
+// Rollout health — a new pod that can never start because its image won't pull.
+//
+// The 2026-09-29 shape: platform-gateway's v1.38.0 release job never ran (an
+// Actions budget block, zero steps), so the tag existed and Argo rolled the
+// three prod gateway Deployments to an image nobody pushed. The old ReplicaSet
+// kept serving, so no stream, probe or error rate moved; Argo read Degraded and
+// the new pods sat in ImagePullBackOff for 21 hours until a health check
+// happened to look. The release workflow's own failure alert was a job in the
+// same blocked run, so it never fired either.
+//
+// kube_pod_container_status_waiting_reason is allowlisted into the cloud for
+// this rule (k8s/monitoring/prod-1/values.yml); kube-state-metrics emits it only
+// for a container that is waiting, so the series is small. `max by (namespace,
+// pod, container)` collapses the duplicate scrapers the control-plane group
+// documents. `for = 30m` outlasts a slow pull and the image-gate Jobs, which
+// retry while a just-cut release is still publishing.
+resource "grafana_rule_group" "rollout_health" {
+  name             = "rollout-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "k8s: a prod pod cannot pull its image"
+    for            = "30m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) has been unable to pull its image for 30m"
+      description = "A prod container has sat in ErrImagePull / ImagePullBackOff for half an hour. When the Deployment's previous ReplicaSet is still serving, nothing user-facing is down yet, but the release it was rolling out never landed and the next restart of an old pod will not come back. Read the image the pod wants (`kubectl --context admin@adanalife-minipc -n {{ $labels.namespace }} get pod {{ $labels.pod }} -o jsonpath='{.spec.containers[*].image}'`), then check whether that tag was ever published: the usual cause is a release workflow whose build job failed or never started (an Actions budget block reads as zero steps). Re-running the release's failed jobs republishes it: `gh run rerun <run-id> --repo adanalife/<repo> --failed`."
+    }
+    labels = {
+      severity = "warning"
+      service  = "k8s"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{namespace=~\"prod-1|prod-1-data\", reason=~\"ErrImagePull|ImagePullBackOff\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // ARC self-hosted runner health. The fleet's CI runs on the runner scale set
 // in arc-systems/arc-runners on this same mini-PC, so a broken listener stops
 // every repo's checks at once — and does it silently, because GitHub shows the
@@ -4706,22 +4950,20 @@ resource "grafana_rule_group" "ci_health" {
   // Runner-pool saturation: more work accepted than there are runners to run
   // it. The scale set is capped at maxRunners = 2, so a third assigned job
   // waits for a slot with nothing wrong anywhere — the console's runner panel
-  // paints this amber, and until now nothing said it out loud at 3am.
+  // paints this amber, and this rule is what says it out loud at 3am.
   //
-  // `gha_max_runners` would be the natural right-hand side, but it does not
-  // reach Grafana Cloud (the k8s-monitoring keep-list carries assigned/running
-  // jobs and registered/busy runners only, and the rules evaluate against the
-  // cloud). `gha_registered_runners` stands in for it: ARC registers a runner
-  // per slot it is willing to fill, so at the cap registered *is* max, and
-  // assigned-above-registered is the queue standing outside a full pool.
-  //
-  // 15m against the measured baseline (Grafana Cloud, the 14 days to
-  // 2026-09-09): the condition is true for 1903 of 20160 minutes — ordinary
-  // scale-up, where a job is assigned a few minutes before its ephemeral
-  // runner registers — but held continuously for 15 minutes in only one
-  // episode, 9 minutes long past the threshold. So the `for` is what separates
-  // a pool that is filling from a pool that is full, and this fires about once
-  // a fortnight.
+  // The right-hand side is the cap itself, maxRunners in
+  // k8s/arc/runners/values.yml — change the two together. `gha_max_runners`
+  // would carry it, but it does not reach Grafana Cloud (the k8s-monitoring
+  // keep-list carries assigned/running jobs and registered/busy runners only,
+  // and the rules evaluate against the cloud). `gha_registered_runners` is no
+  // stand-in with `minRunners: 0`: the pool idles at zero registered, so every
+  // job is assigned before its ephemeral runner registers, and that scale-up
+  // window alone held assigned-above-registered for 10+ minutes on 15 minutes'
+  // worth of samples in the 14 days to 2026-10-05 — one slow image pull from
+  // paging on a pool that isn't full. Against the cap, the same 14 days were
+  // over it for 28 minutes total and never for 5 minutes straight, so 15m
+  // separates a burst from a pool that is genuinely full.
   //
   // Aggregated `by (job)` for the same reason as the queue rule above: a second
   // scale set gets its own verdict rather than being averaged into a busy
@@ -4735,7 +4977,7 @@ resource "grafana_rule_group" "ci_health" {
 
     annotations = {
       summary     = "More CI jobs assigned than the runner pool has runners, for 15m — jobs are waiting on capacity"
-      description = "gha_assigned_jobs has exceeded gha_registered_runners on {{ $labels.job }} for 15 minutes: the scale set is full and work is queueing behind it. Nothing is broken — this is the pool doing its job at its ceiling — so the question is whether the ceiling is right. `kubectl --context admin@adanalife-minipc -n arc-runners get pods` shows the runners that are up against `maxRunners` in k8s/arc/runners/values.yml, and the runner panel shows how long the backlog has been standing. Raising maxRunners costs mini-PC CPU that the stream shares, so prefer waiting out a burst (a fleet-wide dependency bump, several PRs pushed together) over widening the pool for it. If assigned is high with *no* runner running, read the *CI queued with nothing running* alert instead — that one is a fault, this one is a queue."
+      description = "gha_assigned_jobs has exceeded the pool's cap of 2 runners on {{ $labels.job }} for 15 minutes: the scale set is full and work is queueing behind it. Nothing is broken — this is the pool doing its job at its ceiling — so the question is whether the ceiling is right. `kubectl --context admin@adanalife-minipc -n arc-runners get pods` shows the runners that are up against `maxRunners` in k8s/arc/runners/values.yml, and the runner panel shows how long the backlog has been standing. Raising maxRunners costs mini-PC CPU that the stream shares, so prefer waiting out a burst (a fleet-wide dependency bump, several PRs pushed together) over widening the pool for it. If assigned is high with *no* runner running, read the *CI queued with nothing running* alert instead — that one is a fault, this one is a queue."
       link        = local.ci_runners_panel_link
     }
     labels = {
@@ -4752,7 +4994,7 @@ resource "grafana_rule_group" "ci_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum by (job) (gha_assigned_jobs) > sum by (job) (gha_registered_runners)"
+        expr          = "sum by (job) (gha_assigned_jobs) > 2"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -5021,8 +5263,8 @@ resource "grafana_rule_group" "synthetic_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "guessr.dana.lol/admin/ has stopped answering 403"
-      description = "The guessr-admin probe expects 403 — the JWT middleware refusing an anonymous request, which is the custom domain's resting state. Anything else means the gate moved: 503 is the middleware finding no Access application to check a login against, which locks Dana out as surely as it locks out a stranger, and a 2xx is the admin surface answering a stranger. The two values behind it, ACCESS_TEAM_DOMAIN and ACCESS_AUD, are Pages bindings typed in by hand on the guessr project — terraform cannot write deployment_configs — so a rollback or a dashboard edit is the usual cause. Read the answer with `curl -si https://guessr.dana.lol/admin/`; guessr's smoke.sh carries the same case block with the full reasoning."
+      summary     = "guessr.dana.lol/admin/ has stopped answering 401"
+      description = "The guessr-admin probe expects 401 — the game refusing a request that carries no Twitch bearer token, which is the admin surface's resting state. Anything else means the gate moved: a 2xx is the admin surface answering a stranger, a 302 is Cloudflare Access back in front of it, and a 5xx is the Python Worker down or the Pages project's `API` service binding (set by hand in the dashboard — terraform cannot write deployment_configs) dropped, in which case the deleted JS Functions answer nothing. Read the answer with `curl -si https://guessr.dana.lol/admin/`; guessr's smoke.sh carries the same case block with the full reasoning."
     }
     labels = {
       severity = "warning"
@@ -5125,6 +5367,99 @@ resource "grafana_rule_group" "synthetic_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// The game's API: every /api/* request on guessr.dana.lol goes to the Python
+// Worker adanalife-guessr-api through the Pages project's API service binding.
+// An invocation that throws past the ASGI app, or dies over its CPU or memory
+// limit, reaches the player as a bare 500 (`error code: 1101`) and the app as
+// "Could not reach the scorer" -- and leaves no log line anywhere this stack
+// reads. Cloudflare's invocation analytics count it, so this reads that count.
+//
+// The synthetic guessr check samples the leaderboard from three regions every
+// two minutes and fires on more than half of one region failing, so an API
+// failing a third of its requests can pass it for hours; this one counts every
+// request.
+//
+// 5 errors in 15 minutes against the measured baseline (2026-09-29, the
+// Worker's first day in production): 5 errors across 18:00-22:59 UTC, never
+// more than 2 in an hour, against ~100-150 requests an hour. The incident that
+// motivated the rule read 38 errors in 84 requests over 15 minutes.
+resource "grafana_rule_group" "guessr_api" {
+  name             = "guessr-api"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name      = "guessr: the API Worker is failing requests"
+    for       = "5m"
+    condition = "C"
+    // No requests at all in the window is an empty list and no rows -- a quiet
+    // night, not a failure. A token Cloudflare refuses is an HTTP 400, so a
+    // broken credential surfaces through exec_err_state instead.
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr's API Worker failed more than 5 requests in 15 minutes"
+      description = "adanalife-guessr-api returned an error on more than 5 invocations in the last 15 minutes; its baseline is under 2 an hour. Players see this as a 500 with `error code: 1101` on scoring, the day's rounds and the leaderboards, and the iOS app as \"Could not reach the scorer\". The Worker's own record is Workers Logs in the Cloudflare dashboard (Workers & Pages → adanalife-guessr-api → Observability), where each failed invocation carries its outcome — `exceededResources` for the CPU or memory limit, `exception` with a stack trace for a throw. Fastest mitigation: remove the `API` service binding on the adanalife-guessr Pages project (Settings → Bindings) and redeploy, which hands /api/* back to the JS Functions — the guessr-admin probe will fire while it is off, since only the Worker answers /admin."
+    }
+    labels = {
+      severity = "critical"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = grafana_data_source.cloudflare_analytics.uid
+      // Infinity's backend parser fills the $${__from}/$${__to} macros from the
+      // rule's own time range, which is what makes the window 15 minutes. With
+      // no dimensions the query sums the whole window into one row; with no
+      // traffic it returns an empty list, which is no rows.
+      model = jsonencode({
+        refId  = "A"
+        type   = "json"
+        source = "url"
+        format = "table"
+        parser = "backend"
+        url    = "/graphql"
+        url_options = {
+          method            = "POST"
+          body_type         = "raw"
+          body_content_type = "application/json"
+          data = jsonencode({
+            query = "{viewer{accounts(filter:{accountTag:\"${var.cloudflare_account_id}\"}){workersInvocationsAdaptive(limit:1,filter:{scriptName:\"adanalife-guessr-api\",datetime_geq:\"$${__from:date:iso}\",datetime_leq:\"$${__to:date:iso}\"}){sum{errors requests}}}}}"
+          })
+        }
+        root_selector = "data.viewer.accounts.0.workersInvocationsAdaptive"
+        columns       = [{ selector = "sum.errors", text = "errors", type = "number" }]
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [5] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }

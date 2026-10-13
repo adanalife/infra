@@ -60,6 +60,9 @@
 #     video-pipeline's cdk8s; publish.sh only ever names the staging D1 —
 #     D1 tokens cannot be scoped per-database, so that posture lives in the
 #     script, not the token.
+#   - k8s/video-pipeline/glacier-fetch — JSON {"AWS_ACCESS_KEY_ID": ...,
+#     "AWS_SECRET_ACCESS_KEY": ...} for the core account's GlacierFetchUser;
+#     mint + seed commands in core/glacier-fetch.tf.
 #   - ESO picks up new values within 1h; force with
 #     `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`.
 
@@ -84,6 +87,7 @@ locals {
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
     "k8s/flare/ghcr-pull-token"            = "GitHub token (read:packages) for pulling the private flare image from GHCR. Keys: username, token."
+    "k8s/video-pipeline/glacier-fetch"     = "Core-account GlacierFetchUser key for the glacier-fetch CronJob (video-pipeline cdk8s). Keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY."
   }
 }
 
@@ -96,25 +100,6 @@ resource "aws_ssm_parameter" "mirror" {
   description = each.value
   type        = "SecureString"
   value       = jsonencode({ placeholder = "set via aws ssm put-parameter" })
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-# JSON array of email addresses, e.g. ["you@example.com"]. Whoever may open
-# guessr's /admin/ — the Access policy in cloudflare-pages-guessr.tf includes
-# one rule per address, and Access mails a one-time PIN to it. Here rather than
-# in the terraform because this repo is public and these are personal addresses.
-#
-# Outside the map because the placeholder has to be valid JSON that jsondecode
-# can read pre-seed. The empty placeholder is NOT a usable value — a policy
-# with no rules is rejected — so the policy carries a precondition that says so.
-resource "aws_ssm_parameter" "guessr_admin_emails" {
-  name        = "/stage-1/guessr-admin-emails"
-  description = "Email addresses allowed through Cloudflare Access to guessr's /admin/. JSON array of addresses."
-  type        = "SecureString"
-  value       = "[]"
 
   lifecycle {
     ignore_changes = [value]
@@ -188,10 +173,6 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
 
 data "aws_ssm_parameter" "cloudflare_api_token" {
   name = "/stage-1/cloudflare-api-token"
-}
-
-data "aws_ssm_parameter" "guessr_admin_emails" {
-  name = aws_ssm_parameter.guessr_admin_emails.name
 }
 
 data "aws_ssm_parameter" "discord_alerts_webhook" {

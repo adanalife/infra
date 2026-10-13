@@ -35,9 +35,6 @@ jobs:
           - terraform/stage-1
           - terraform/prod-1
           - terraform/prod-1-data
-    env:
-      # required in order to comment on MRs
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -84,10 +81,106 @@ jobs:
       - name: Export GCP token for terraform
         if: steps.gcp_auth.outcome == 'success'
         run: echo "GOOGLE_OAUTH_ACCESS_TOKEN=${{ steps.gcp_auth.outputs.access_token }}" >> "$GITHUB_ENV"
+      # The per-dir comment is off; the `comment` job posts one comment for
+      # the whole matrix, built from the summary each leg uploads below.
       - name: terraform plan
+        id: plan
         uses: dflook/terraform-plan@v3
         with:
           path: ${{ matrix.terraform-dirs }}
+          add_github_comment: false
+      - name: Summarize plan
+        if: always()
+        env:
+          DIR: ${{ matrix.terraform-dirs }}
+          OUTCOME: ${{ steps.plan.outcome }}
+          CHANGES: ${{ steps.plan.outputs.changes }}
+          TEXT_PLAN: ${{ steps.plan.outputs.text_plan_path }}
+          COUNTS: "${{ steps.plan.outputs.to_add }} to add, ${{ steps.plan.outputs.to_change }} to change, ${{ steps.plan.outputs.to_destroy }} to destroy"
+        run: |
+          mkdir -p plan-summary
+          echo "$DIR" > plan-summary/dir
+          if [ "$OUTCOME" != success ]; then
+            echo failed > plan-summary/status
+          elif [ "$CHANGES" = true ]; then
+            echo changes > plan-summary/status
+            echo "$COUNTS" > plan-summary/counts
+            # ponytail: fixed per-plan cap keeps five dirty plans under GitHub's 65536-char comment limit
+            head -c 12000 "$TEXT_PLAN" > plan-summary/plan.txt
+            if [ "$(wc -c < "$TEXT_PLAN")" -gt 12000 ]; then
+              printf '\n... truncated; the full plan is in the run log\n' >> plan-summary/plan.txt
+            fi
+          else
+            echo clean > plan-summary/status
+          fi
+      - name: Upload plan summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: plan-${{ strategy.job-index }}
+          path: plan-summary/
+          retention-days: 1
+
+  comment:
+    # One sticky PR comment for the whole plan matrix: a section per workspace
+    # with changes or a failed plan, and one line naming the clean ones.
+    needs: plan
+    if: ${{ !cancelled() && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: plan-*
+          path: plans
+      - name: Build comment
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          clean=()
+          dirty=0
+          {
+            echo "### terraform plan"
+            for d in plans/*/; do
+              dir=$(cat "$d/dir")
+              case $(cat "$d/status") in
+                failed)
+                  dirty=$((dirty + 1))
+                  echo
+                  echo ":x: **\`$dir\`: plan failed.** See the [run log]($run_url)."
+                  ;;
+                changes)
+                  dirty=$((dirty + 1))
+                  echo
+                  echo "<details><summary><code>$dir</code>: $(cat "$d/counts")</summary>"
+                  echo
+                  echo '```hcl'
+                  cat "$d/plan.txt"
+                  echo '```'
+                  echo
+                  echo "</details>"
+                  ;;
+                clean)
+                  clean+=("\`$dir\`")
+                  ;;
+              esac
+            done
+            echo
+            if [ "$dirty" -eq 0 ] && [ "${#clean[@]}" -eq 0 ]; then
+              echo "No plan results were uploaded. See the [run log]($run_url)."
+            elif [ "${#clean[@]}" -gt 0 ]; then
+              other=""
+              [ "$dirty" -gt 0 ] && other="other "
+              noun="workspaces"
+              [ "${#clean[@]}" -eq 1 ] && noun="workspace"
+              list=$(printf '%s, ' "${clean[@]}")
+              echo "No changes in ${#clean[@]} $other$noun: ${list%, }."
+            fi
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: terraform-plan
+          path: comment.md
 
   validate:
     runs-on: ubuntu-latest

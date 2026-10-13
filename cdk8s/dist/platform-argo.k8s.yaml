@@ -169,7 +169,7 @@ spec:
   sources:
     - repoURL: ghcr.io/padok-team/charts
       chart: burrito
-      targetRevision: 0.13.0
+      targetRevision: 0.14.0
       helm:
         releaseName: burrito
         valueFiles:

@@ -1,3 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  labels:
+    adanalife.dev/protected: "true"
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+  name: stage-1-data
+---
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:

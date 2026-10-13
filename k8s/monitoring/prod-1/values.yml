@@ -80,6 +80,9 @@ destinations:
     #                         the relay-health alerts.
     #   kube_pod_{info,start_time,container_status_restarts_total}  — the
     #                         per-service pod-health rows on service-health-*.
+    #   kube_pod_container_status_waiting_reason  — rollout-health's
+    #                         image-pull rule. Emitted only for a container
+    #                         that is waiting, so a handful of series at most.
     #   kube_deployment_status_replicas_available  — scrape-health's
     #                         alloy-receiver rule. The receiver publishes no
     #                         metrics of its own (no otelcol_* family reaches
@@ -180,6 +183,9 @@ destinations:
     #                         which is why it is the one that still moves when
     #                         Burrito is what died. Four series, one per layer.
     #   go_goroutine_count, go_memory_used_bytes  — the go-runtime group.
+    #   go_goroutines, go_memstats_heap_inuse_bytes  — the go-runtime group's
+    #                         platform-gateway branch. Scraped, so every prod
+    #                         Go component's copy rides along (~40 series).
     #   obs_*  (nine gauges)  — stream-health: streaming_active, the
     #                         skipped/total frame counters, congestion,
     #                         reconnecting, background-audio state.
@@ -274,7 +280,7 @@ destinations:
         // first alternative matches, and what a new family must keep.
         source_labels = ["__name__", "mountpoint"]
         separator = "/"
-        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|etcd_disk_wal_fsync_duration_seconds_(bucket|sum)|etcd_disk_backend_commit_duration_seconds_bucket|etcd_server_leader_changes_seen_total|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|orphaned_sessions|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
+        regex = "(platform_gateway_.+|paths(_.+)?|rtsp_sessions(_.+)?|kube_pod_info|kube_pod_start_time|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_deployment_status_replicas_available|xpum_.+|kube_cronjob_status_last_successful_time|kube_cronjob_created|cnpg_collector_pg_wal_archive_status|barman_cloud_cloudnative_pg_io_last_available_backup_timestamp|burrito_terraform_layer_status|burrito_runs_by_status|node_boot_time_seconds|gha_(assigned_jobs|running_jobs|registered_runners|busy_runners)|etcd_disk_wal_fsync_duration_seconds_(bucket|sum)|etcd_disk_backend_commit_duration_seconds_bucket|etcd_server_leader_changes_seen_total|up|console_(platform_component_up|terraform_plan_age_seconds)|go_goroutine_count|go_memory_used_bytes|go_goroutines|go_memstats_heap_inuse_bytes|obs_(background_audio_on_fallback|background_audio_playing|output_skipped_frames|render_skipped_frames|stream_output_congestion|stream_output_reconnecting|stream_output_skipped_frames|stream_output_total_frames|streaming_active)|playout_(nats_connected|pipeline_running_time_ms)|tripbot_(background_audio_album_tracks|background_audio_bed|channel_live|eventsub_subscriptions|gateway_up|obs_recovery_exhausted|obs_silent_disconnect_restarts_total|orphaned_sessions|twitch_connected|twitch_token_expires_at_seconds))/|node_filesystem_(avail|size)_bytes//var/mnt/data"
         action = "keep"
       }
 
@@ -457,6 +463,22 @@ clusterEvents:
 podLogsViaKubernetesApi:
   enabled: true
   collector: alloy-logs
+  # Loki's free tier caps ingest at 50 GB/month. CI job output already lives
+  # in GitHub, so the runner pods are skipped outright (arc-systems, where the
+  # listener and controller log, is still collected).
+  excludeNamespaces: [arc-runners]
+  # ArgoCD's per-reconcile "Reconciliation completed" lines and Alloy's
+  # per-stream "opened log stream" lines are most of those two services'
+  # volume and carry no signal; warn and error still ship.
+  extraLogProcessingStages: |-
+    stage.match {
+      selector = "{namespace=\"argocd\"} |= \"level=info\""
+      action   = "drop"
+    }
+    stage.match {
+      selector = "{namespace=\"monitoring\", service_name=\"alloy-logs\"} |= \"level=info\""
+      action   = "drop"
+    }
 
 annotationAutodiscovery:
   enabled: true
@@ -521,6 +543,34 @@ annotationAutodiscovery:
     // twice per scrape, which Alloy logs as "Error on ingesting samples with
     // different value but same timestamp" before discarding the duplicate;
     // that log line is the price of the iGPU contention view. ~9 series.
+
+# Alloy's own metrics, from every collector this chart runs. Without it the
+# telemetry pipeline has no signal of its own: kube-state-metrics can say a
+# collector pod is up, but not whether it is delivering. The chart's default
+# allow-list keeps the remote-write, WAL and component-health families plus
+# the receiver's *span* counters. The includes add the receiver's metric-point
+# and log-record counters, because the app pods push metrics and logs over
+# OTLP, not spans. Metrics leave the receiver through remote_write, so
+# delivery reads off prometheus_remote_storage_* (already in the default
+# list); logs leave through an OTLP exporter, hence its sent/failed counters.
+#
+# Every series lands in VictoriaMetrics. Grafana Cloud only keeps what the
+# metrics destination's keep regex names, which is `up` here: one series per
+# collector pod. An alert on any other family needs its name added there.
+integrations:
+  collector: alloy-metrics
+  alloy:
+    instances:
+      - name: alloy
+        namespaces: [monitoring]
+        labelSelectors:
+          app.kubernetes.io/name: [alloy-metrics, alloy-logs, alloy-singleton, alloy-receiver]
+        metrics:
+          tuning:
+            includeMetrics:
+              - otelcol_receiver_(accepted|refused|failed)_(metric_points|log_records)_total
+              - otelcol_exporter_(sent|send_failed)_(metric_points|log_records)_total
+              - otelcol_exporter_queue_(size|capacity)
 
 telemetryServices:
   kube-state-metrics:
