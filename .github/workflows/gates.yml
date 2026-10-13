@@ -1,0 +1,354 @@
+# The fleet's per-PR gates, as one reusable job. Every repo's pr-gates.yml
+# calls this with the inputs that apply there, so a gate is written once and a
+# new repo's workflow is a few lines of config.
+#
+# The gates run as steps of a single `gates` job: one runner, one check in the
+# PR's list, and a step that is inapplicable is skipped rather than absent, so
+# the job always reports and is safe to require in a ruleset. A repo's own
+# checks (its tests, a synth variant this job doesn't cover) go in a second job
+# of the caller, not here.
+#
+# Deliberately NOT folded in: anything needing `contents: write` (a re-synth
+# push, for instance) — job-level permissions apply to every step, so it
+# would put a write token in scope for the read-only gates.
+name: gates
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label. Private repos use the self-hosted pool, where hosted minutes would be metered.
+        type: string
+        default: ubuntu-latest
+      pr-title-types:
+        description: Conventional Commits types the PR title may use, one per line.
+        type: string
+        default: |
+          build
+          chore
+          ci
+          docs
+          feat
+          fix
+          perf
+          refactor
+          revert
+          style
+          test
+      changelog:
+        description: Require a towncrier changelog fragment (the `skip-changelog` label and release-please's own PR are exempt).
+        type: boolean
+        default: true
+      platforms:
+        description: Assert the synced platforms.json matches platform-gateway/main.
+        type: boolean
+        default: false
+      contracts:
+        description: Synced copies of tripbot's generated contract files to assert against tripbot/main, as repo paths, whitespace-separated.
+        type: string
+        default: ""
+      vendor-script:
+        description: Path to the repo's vendor.sh; its `check` subcommand asserts vendored assets match their pins.
+        type: string
+        default: ""
+      cdk8s:
+        description: Run the repo's `task cdk8s:synth` and assert the committed cdk8s/dist/ matches. Runs only when cdk8s/, pyproject.toml, uv.lock or the synced contract changed.
+        type: boolean
+        default: false
+      cdk8s-tests:
+        description: Also run `task cdk8s:test` (same path gate as `cdk8s`).
+        type: boolean
+        default: false
+      kubeconform:
+        description: Also run `task cdk8s:validate`, the repo's kubeconform pass (same path gate as `cdk8s`).
+        type: boolean
+        default: true
+      ghcr-image:
+        description: A GHCR image under the org whose tags cdk8s/ pins, e.g. `tempomat-sidecar`. Every `<ghcr-tag-key>="…"` value in cdk8s/ must name a published tag (same path gate as `cdk8s`).
+        type: string
+        default: ""
+      ghcr-tag-key:
+        description: The config key whose quoted values are the pinned tags.
+        type: string
+        default: ""
+      mise:
+        description: Install the repo's mise pins before `checks`.
+        type: boolean
+        default: false
+      checks:
+        description: The repo's own gate commands, one per line, run in order from the repo root after the shared gates.
+        type: string
+        default: ""
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: The org automation app's key, for reading the private platform-gateway repo. Needed with `platforms`.
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  # GHCR token exchange for `ghcr-image`.
+  packages: read
+
+jobs:
+  gates:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    steps:
+      # Conventional Commits enforcement for the SQUASH SUBJECT. The commit-msg
+      # pre-commit hook only guards local commits; because PRs squash-merge, the
+      # PR *title* becomes the commit subject written to history.
+      #
+      # release-please's standing release PR is titled `chore(main): release
+      # X.Y.Z`, itself a conventional subject, so it passes with no exemption.
+      - name: Conventional PR title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: ${{ inputs.pr-title-types }}
+
+      # Full history: the changelog check and the path gate both diff against
+      # the base branch.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: changed
+        if: inputs.cdk8s
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch origin "$BASE" -q
+          if git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(cdk8s/|pyproject\.toml$|uv\.lock$|pkg/contract/contract\.json$)'; then
+            echo "cdk8s=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cdk8s=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+        if: inputs.changelog || inputs.cdk8s
+
+      # Require every PR to add a towncrier changelog fragment under
+      # changelog.d/. This is what keeps the release changelog complete by
+      # construction, instead of reconstructing missing entries from PR bodies
+      # at release time.
+      #
+      # Escape hatch: the `skip-changelog` label, for PRs that genuinely warrant
+      # no entry (dependabot bumps, CI-only tweaks, pure refactors).
+      # release-please's own release PR is exempt by head branch — it collates
+      # the fragments, it doesn't add one.
+      - name: Require a changelog fragment
+        if: ${{ inputs.changelog && !contains(github.event.pull_request.labels.*.name, 'skip-changelog') && !startsWith(github.head_ref, 'release-please--') }}
+        env:
+          BASE: ${{ github.base_ref }}
+          # uvx installs the tool under ~/.local/share/uv, which the job user
+          # cannot write on the self-hosted runner image. The temp dir is
+          # per-job and writable.
+          UV_TOOL_DIR: ${{ runner.temp }}/uv-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/uv-bin
+        run: |
+          git fetch origin "$BASE" -q
+          uvx towncrier check --config towncrier.toml --compare-with "origin/$BASE"
+
+      # Guards the fleet-wide platform-set contract: platform-gateway owns
+      # platforms.json (its Go adapter registry is the source of truth) and
+      # every repo syncs a copy via `task platforms:sync`. Unguarded by changed
+      # paths on purpose — it catches the gateway adding or removing a platform
+      # the caller hasn't re-synced, which touches nothing in that repo.
+      #
+      # The gateway repo is private, so read it with an org-scoped automation
+      # app token (least privilege: platform-gateway only), not GITHUB_TOKEN.
+      #
+      # Skipped on Dependabot PRs, which cannot answer the question this asks. A
+      # Dependabot `pull_request` event is granted Actions variables but not
+      # Actions secrets, so the private key arrives empty and the mint fails —
+      # a red required check on every bump. Nothing is lost by not asking:
+      # platforms.json only ever moves by `task platforms:sync`, which no
+      # dependency bump runs, and gateway-side drift is caught by the daily
+      # platforms-contract sweep regardless of what any PR does.
+      - name: Mint automation app token
+        if: inputs.platforms && github.event.pull_request.user.login != 'dependabot[bot]'
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: platform-gateway
+
+      - name: Assert platforms.json matches platform-gateway/main
+        if: inputs.platforms && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${OWNER}/platform-gateway/contents/platforms.json?ref=main" \
+            > "${RUNNER_TEMP}/gateway-platforms.json"
+          if ! diff -u "${RUNNER_TEMP}/gateway-platforms.json" platforms.json; then
+            echo "::error file=platforms.json::platforms.json is out of sync with platform-gateway/main — run 'task platforms:sync' and commit."
+            exit 1
+          fi
+
+      # Guards the service-name/port/env-key and event contracts: tripbot's
+      # pkg/contract generates them and consumers sync copies via `task
+      # contract:sync`. Unguarded by changed paths for the same reason as
+      # platforms.json. tripbot is public, so GITHUB_TOKEN reads it; no app
+      # token to mint means no Dependabot skip either.
+      - name: Assert the tripbot contracts match tripbot/main
+        if: inputs.contracts != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          CONTRACTS: ${{ inputs.contracts }}
+        run: |
+          stale=0
+          for local in $CONTRACTS; do
+            f=$(basename "$local")
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/${OWNER}/tripbot/contents/pkg/contract/${f}?ref=main" \
+              > "${RUNNER_TEMP}/tripbot-${f}"
+            if ! diff -u "${RUNNER_TEMP}/tripbot-${f}" "$local"; then
+              echo "::error file=${local}::${local} is out of sync with tripbot/main"
+              stale=1
+            fi
+          done
+          if [ "$stale" -ne 0 ]; then
+            echo "::error::run 'task contract:sync' and commit (it re-runs the generators too)."
+            exit 1
+          fi
+
+      - name: Assert vendored assets match their pinned releases
+        if: inputs.vendor-script != ''
+        env:
+          VENDOR: ${{ inputs.vendor-script }}
+        run: $VENDOR check
+
+      # Verify the committed cdk8s/dist/ deploy units are in sync with the
+      # authoring code, through the repo's own Taskfile targets so the synth
+      # (and any freeze of release-pinned manifests), the synth-time tests and
+      # the kubeconform arguments stay where the repo maintains them.
+      - uses: jdx/mise-action@v4
+        if: steps.changed.outputs.cdk8s == 'true' || inputs.mise
+
+      # A cdk8s/ layer with its own mise config pins its own toolchain.
+      - name: Install the cdk8s/ toolchain
+        if: steps.changed.outputs.cdk8s == 'true' && hashFiles('cdk8s/.mise.toml', 'cdk8s/.tool-versions') != ''
+        working-directory: cdk8s
+        run: mise trust && mise install
+
+      - uses: arduino/setup-task@v3
+        if: steps.changed.outputs.cdk8s == 'true'
+
+      - name: Synth
+        if: steps.changed.outputs.cdk8s == 'true'
+        run: task cdk8s:synth
+
+      - name: Verify cdk8s/dist/ is committed in sync
+        if: steps.changed.outputs.cdk8s == 'true'
+        run: git diff --exit-code -- cdk8s/dist/
+
+      - name: Synth-time checks
+        if: steps.changed.outputs.cdk8s == 'true' && inputs.cdk8s-tests
+        run: task cdk8s:test
+
+      - name: Validate manifests (kubeconform)
+        if: steps.changed.outputs.cdk8s == 'true' && inputs.kubeconform
+        run: task cdk8s:validate
+
+      # Every tag cdk8s/ pins for the image names one that exists. A typo'd or
+      # not-yet-published tag synths and merges clean, then surfaces only as
+      # ImagePullBackOff once Argo has applied it.
+      #
+      # The package may be private, so an anonymous HEAD 403s whatever the tag
+      # is: trade GITHUB_TOKEN for a registry bearer first, then HEAD the
+      # manifest. The Accept list covers both multi-arch index media types and
+      # both single-manifest ones, since a bare manifest 404s a request that
+      # only accepts an index.
+      - name: Assert the pinned image tags exist in GHCR
+        if: steps.changed.outputs.cdk8s == 'true' && inputs.ghcr-image != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ github.repository_owner }}/${{ inputs.ghcr-image }}
+          KEY: ${{ inputs.ghcr-tag-key }}
+        run: |
+          bearer=$(curl -fsS -u "x:${GH_TOKEN}" \
+            "https://ghcr.io/token?scope=repository:${IMAGE}:pull" | jq -r .token)
+          missing=0
+          grep -rhoE "${KEY}=\"[^\"]+\"" cdk8s/ --include='*.py' | cut -d'"' -f2 | sort -u \
+            > "${RUNNER_TEMP}/pinned-tags"
+          while read -r tag; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -I \
+              -H "Authorization: Bearer ${bearer}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${IMAGE}/manifests/${tag}")
+            if [ "${code}" != 200 ]; then
+              echo "::error::${KEY} ${tag} names no image in ghcr.io/${IMAGE} (HTTP ${code})"
+              missing=1
+            fi
+          done < "${RUNNER_TEMP}/pinned-tags"
+          exit "${missing}"
+
+      # The repo's own gates, in the order given. Each is a command from the
+      # repo root; the first failure ends the step with its name in the log.
+      - name: Repo self-checks
+        if: inputs.checks != ''
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: |
+          while IFS= read -r cmd; do
+            [ -z "$cmd" ] && continue
+            echo "== $cmd"
+            bash -c "$cmd"
+          done <<< "$CHECKS"
+
+      # The gates run as steps of one job (see the header), so a red reads
+      # `gates` in the checks list with nothing saying which gate died. This step
+      # reads the job's own step verdicts back and reports them: a gate/verdict
+      # table on the run summary, and one error annotation per failed gate,
+      # which is what the PR's checks tab shows under the check. Reporting only.
+      - name: Name the failing gate
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          JOB: ${{ github.job }}
+        run: |
+          # A step's verdict lands in the API a beat after the step ends.
+          for _ in 1 2; do
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
+              > "${RUNNER_TEMP}/jobs.json" \
+              || { echo "::warning::could not read this job's step verdicts"; exit 0; }
+            # A called workflow's job is listed as "<caller job> / <this job>".
+            jq -r --arg job "$JOB" '
+              .jobs[] | select(.name == $job or (.name | endswith(" / " + $job))) | .steps[]
+              | select(.conclusion != null)
+              | select(.name | test("^(Set up job|Complete job|Post )") | not)
+              | "\(.conclusion)\t\(.name)"' "${RUNNER_TEMP}/jobs.json" > "${RUNNER_TEMP}/verdicts"
+            grep -q '^failure' "${RUNNER_TEMP}/verdicts" && break
+            sleep 5
+          done
+          {
+            echo "## gates"
+            echo
+            echo "| Gate | Verdict |"
+            echo "|---|---|"
+            awk -F'\t' '{
+              v = $1 == "success" ? "✅ pass" : $1 == "failure" ? "❌ **fail**" : $1 == "skipped" ? "⏭️ skipped" : $1
+              printf "| %s | %s |\n", $2, v
+            }' "${RUNNER_TEMP}/verdicts"
+          } >> "$GITHUB_STEP_SUMMARY"
+          awk -F'\t' '$1 == "failure" {
+            printf "::error title=gates: %s failed::Open the \"%s\" step in this run'\''s log.\n", $2, $2
+          }' "${RUNNER_TEMP}/verdicts"
