@@ -52,17 +52,33 @@ on:
         type: string
         default: ""
       cdk8s:
-        description: Synth the cdk8s/ authoring layer and assert the committed cdk8s/dist/ matches. Runs only when cdk8s/, pyproject.toml or uv.lock changed.
+        description: Run the repo's `task cdk8s:synth` and assert the committed cdk8s/dist/ matches. Runs only when cdk8s/, pyproject.toml, uv.lock or the synced contract changed.
         type: boolean
         default: false
       cdk8s-tests:
-        description: Also run the cdk8s layer's pytest suite (same path gate as `cdk8s`).
+        description: Also run `task cdk8s:test` (same path gate as `cdk8s`).
         type: boolean
         default: false
       kubeconform:
-        description: Schema-validate cdk8s/dist/ with kubeconform after a synth (same path gate as `cdk8s`). The caller pins kubeconform in its mise config.
+        description: Also run `task cdk8s:validate`, the repo's kubeconform pass (same path gate as `cdk8s`).
         type: boolean
         default: true
+      ghcr-image:
+        description: A GHCR image under the org whose tags cdk8s/ pins, e.g. `tempomat-sidecar`. Every `<ghcr-tag-key>="…"` value in cdk8s/ must name a published tag (same path gate as `cdk8s`).
+        type: string
+        default: ""
+      ghcr-tag-key:
+        description: The config key whose quoted values are the pinned tags.
+        type: string
+        default: ""
+      mise:
+        description: Install the repo's mise pins before `checks`.
+        type: boolean
+        default: false
+      checks:
+        description: The repo's own gate commands, one per line, run in order from the repo root after the shared gates.
+        type: string
+        default: ""
     secrets:
       AUTOMATION_APP_PRIVATE_KEY:
         description: The org automation app's key, for reading the private platform-gateway repo. Needed with `platforms`.
@@ -72,6 +88,8 @@ permissions:
   contents: read
   pull-requests: read
   actions: read
+  # GHCR token exchange for `ghcr-image`.
+  packages: read
 
 jobs:
   gates:
@@ -104,7 +122,7 @@ jobs:
           BASE: ${{ github.base_ref }}
         run: |
           git fetch origin "$BASE" -q
-          if git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(cdk8s/|pyproject\.toml$|uv\.lock$)'; then
+          if git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(cdk8s/|pyproject\.toml$|uv\.lock$|pkg/contract/contract\.json$)'; then
             echo "cdk8s=true" >> "$GITHUB_OUTPUT"
           else
             echo "cdk8s=false" >> "$GITHUB_OUTPUT"
@@ -214,34 +232,82 @@ jobs:
         run: $VENDOR check
 
       # Verify the committed cdk8s/dist/ deploy units are in sync with the
-      # authoring code. Toolchain via mise, from the caller's pins.
+      # authoring code, through the repo's own Taskfile targets so the synth
+      # (and any freeze of release-pinned manifests), the synth-time tests and
+      # the kubeconform arguments stay where the repo maintains them.
       - uses: jdx/mise-action@v4
+        if: steps.changed.outputs.cdk8s == 'true' || inputs.mise
+
+      # A cdk8s/ layer with its own mise config pins its own toolchain.
+      - name: Install the cdk8s/ toolchain
+        if: steps.changed.outputs.cdk8s == 'true' && hashFiles('cdk8s/.mise.toml', 'cdk8s/.tool-versions') != ''
+        working-directory: cdk8s
+        run: mise trust && mise install
+
+      - uses: arduino/setup-task@v3
         if: steps.changed.outputs.cdk8s == 'true'
 
       - name: Synth
         if: steps.changed.outputs.cdk8s == 'true'
-        run: uv run --group cdk8s python cdk8s/main.py
+        run: task cdk8s:synth
 
       - name: Verify cdk8s/dist/ is committed in sync
         if: steps.changed.outputs.cdk8s == 'true'
         run: git diff --exit-code -- cdk8s/dist/
 
-      - name: Manifest invariants
+      - name: Synth-time checks
         if: steps.changed.outputs.cdk8s == 'true' && inputs.cdk8s-tests
-        run: uv run --group cdk8s --group dev pytest -q
+        run: task cdk8s:test
 
-      # Argo Application specs under dist/apps/ are JSON and not k8s manifests
-      # for kubeconform's purposes.
       - name: Validate manifests (kubeconform)
         if: steps.changed.outputs.cdk8s == 'true' && inputs.kubeconform
-        run: >-
-          mise exec -- kubeconform -strict -summary
-          -kubernetes-version 1.36.0
-          -schema-location default
-          -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
-          -ignore-missing-schemas
-          -ignore-filename-pattern '\.json$'
-          cdk8s/dist/
+        run: task cdk8s:validate
+
+      # Every tag cdk8s/ pins for the image names one that exists. A typo'd or
+      # not-yet-published tag synths and merges clean, then surfaces only as
+      # ImagePullBackOff once Argo has applied it.
+      #
+      # The package may be private, so an anonymous HEAD 403s whatever the tag
+      # is: trade GITHUB_TOKEN for a registry bearer first, then HEAD the
+      # manifest. The Accept list covers both multi-arch index media types and
+      # both single-manifest ones, since a bare manifest 404s a request that
+      # only accepts an index.
+      - name: Assert the pinned image tags exist in GHCR
+        if: steps.changed.outputs.cdk8s == 'true' && inputs.ghcr-image != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ github.repository_owner }}/${{ inputs.ghcr-image }}
+          KEY: ${{ inputs.ghcr-tag-key }}
+        run: |
+          bearer=$(curl -fsS -u "x:${GH_TOKEN}" \
+            "https://ghcr.io/token?scope=repository:${IMAGE}:pull" | jq -r .token)
+          missing=0
+          grep -rhoE "${KEY}=\"[^\"]+\"" cdk8s/ --include='*.py' | cut -d'"' -f2 | sort -u \
+            > "${RUNNER_TEMP}/pinned-tags"
+          while read -r tag; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -I \
+              -H "Authorization: Bearer ${bearer}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${IMAGE}/manifests/${tag}")
+            if [ "${code}" != 200 ]; then
+              echo "::error::${KEY} ${tag} names no image in ghcr.io/${IMAGE} (HTTP ${code})"
+              missing=1
+            fi
+          done < "${RUNNER_TEMP}/pinned-tags"
+          exit "${missing}"
+
+      # The repo's own gates, in the order given. Each is a command from the
+      # repo root; the first failure ends the step with its name in the log.
+      - name: Repo self-checks
+        if: inputs.checks != ''
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: |
+          while IFS= read -r cmd; do
+            [ -z "$cmd" ] && continue
+            echo "== $cmd"
+            bash -c "$cmd"
+          done <<< "$CHECKS"
 
       # The gates run as steps of one job (see the header), so a red reads
       # `gates` in the checks list with nothing saying which gate died. This step
