@@ -5,9 +5,10 @@
 #
 # The access key is minted out-of-band so it never lands in state, then seeded
 # into the stage account's /k8s/video-pipeline/glacier-fetch (stage-1/secrets.tf),
-# where the stage-1 SecretStore reads it:
+# where the stage-1 SecretStore reads it (IAM refuses a non-MFA session token,
+# hence --no-session):
 #
-#   aws-vault exec adanalife-core -- aws iam create-access-key \
+#   aws-vault exec adanalife-core --no-session -- aws iam create-access-key \
 #     --user-name GlacierFetchUser \
 #     --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text | read -r ak sk
 #   aws-vault exec adanalife-stage -- aws ssm put-parameter \
