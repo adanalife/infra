@@ -339,7 +339,7 @@
       "id": 304,
       "type": "stat",
       "title": "ClusterSecretStore ready",
-      "description": "Should be 1 (the aws-secretsmanager store). 0 = ESO can't auth to AWS SM — check eso-aws-credentials Secret.",
+      "description": "Should be 1 (the aws-parameterstore-cluster store). 0 = ESO can't auth to AWS SSM — check eso-aws-credentials Secret.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 26, "w": 6, "h": 4 },
       "targets": [
