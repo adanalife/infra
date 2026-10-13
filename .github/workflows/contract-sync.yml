@@ -25,9 +25,13 @@ on:
         type: string
         default: arc-amd64
       tripbot:
-        description: tripbot's pkg/contract/ files this repo keeps copies of at its root, whitespace-separated.
+        description: tripbot's pkg/contract/ files this repo keeps copies of, whitespace-separated.
         type: string
         default: ""
+      tripbot-dir:
+        description: Where this repo keeps its tripbot copies, relative to the root. platforms.json is always at the root.
+        type: string
+        default: .
       platforms:
         description: This repo keeps a copy of platform-gateway's platforms.json at its root.
         type: boolean
@@ -94,23 +98,26 @@ jobs:
           TRIPBOT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           TRIPBOT_FILES: ${{ inputs.tripbot }}
+          TRIPBOT_DIR: ${{ inputs.tripbot-dir }}
           PLATFORMS: ${{ inputs.platforms }}
         run: |
-          fetch() { # <token> <repo> <path>
+          fetch() { # <token> <repo> <path> <dest>
             curl -fsSL \
               -H "Authorization: Bearer $1" \
               -H "Accept: application/vnd.github.raw" \
               "https://api.github.com/repos/${OWNER}/$2/contents/$3?ref=main" \
-              -o "$(basename "$3")"
+              -o "$4"
           }
           synced=""
           if [ "${PLATFORMS}" = true ]; then
-            fetch "${GATEWAY_TOKEN}" platform-gateway platforms.json
+            fetch "${GATEWAY_TOKEN}" platform-gateway platforms.json platforms.json
             synced="platforms.json"
           fi
           for f in ${TRIPBOT_FILES}; do
-            fetch "${TRIPBOT_TOKEN}" tripbot "pkg/contract/${f}"
-            synced="${synced} ${f}"
+            dest="${f}"
+            [ "${TRIPBOT_DIR}" = . ] || dest="${TRIPBOT_DIR}/${f}"
+            fetch "${TRIPBOT_TOKEN}" tripbot "pkg/contract/${f}" "${dest}"
+            synced="${synced} ${dest}"
           done
           {
             echo "paths<<EOF"
