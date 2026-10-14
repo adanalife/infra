@@ -21,8 +21,8 @@ locals {
   # Per-location LAN IP of the NAS. Keys match local.minipc_location_ips so the
   # shared var.minipc_active_location toggle selects both.
   nas_location_ips = {
-    "site-2" = "192.168.40.100" # current network
-    "site-1" = "192.168.1.222"  # previous network
+    "site-1" = "192.168.40.100" # current network
+    "site-2" = "192.168.1.222"  # previous network
   }
 }
 

@@ -23,8 +23,8 @@ locals {
   # Per-location LAN IP of the minipc node. Add a row when the box lands on a new
   # network; the map key is the Route53 label under whereisdana.today.
   minipc_location_ips = {
-    "site-2" = "192.168.40.111" # current network
-    "site-1" = "192.168.1.200"  # previous network
+    "site-1" = "192.168.40.111" # current network
+    "site-2" = "192.168.1.200"  # previous network
   }
 }
 
