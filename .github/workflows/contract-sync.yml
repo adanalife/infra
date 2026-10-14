@@ -1,0 +1,202 @@
+# Keeps a consumer's synced copies of the generated contracts in step with
+# their owners: platforms.json (owned by platform-gateway's Go adapter
+# registry) and the tripbot-owned files under pkg/contract/. Each consumer
+# calls this from its own contract workflow.
+#
+# When a copy differs from its owner's main, this job re-syncs it, re-runs the
+# repo's generators, and opens a PR on the fixed `bot/contract-sync` branch —
+# or force-updates the one already open, so however many owner changes land
+# there is only ever one sync PR. When main already matches (the bot PR merged,
+# or a hand-made sync landed first), the same step closes the stale PR and
+# deletes the branch.
+#
+# Upstream drift lands with no PR in the consumer to notice it, so the
+# caller's triggers are the point: tripbot and platform-gateway send
+# `contract-changed` when a push to their main touches a contract, and a daily
+# schedule catches a missed dispatch. The PR-time check is a step of the
+# shared `gates` job.
+name: contract-sync
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: arc-amd64
+      tripbot:
+        description: tripbot's pkg/contract/ files this repo keeps copies of, whitespace-separated.
+        type: string
+        default: ""
+      tripbot-dir:
+        description: Where this repo keeps its tripbot copies, relative to the root. platforms.json is always at the root.
+        type: string
+        default: .
+      platforms:
+        description: This repo keeps a copy of platform-gateway's platforms.json at its root.
+        type: boolean
+        default: false
+      regenerate:
+        description: Commands that rebuild what the repo generates from the copies, one per line, run from the root only when a copy changed. The repo's mise pins (and uv) are installed first.
+        type: string
+        default: ""
+      generated:
+        description: Paths (globs allowed) the `regenerate` commands write, one per line, to include in the sync PR.
+        type: string
+        default: ""
+      cdk8s:
+        description: Re-synth cdk8s/dist/ through the repo's `task cdk8s:synth` when a copy changed (after `regenerate`), and include it in the sync PR, for a repo whose deploy units read the synced contracts.
+        type: boolean
+        default: false
+      changelog:
+        description: Add a towncrier `+` fragment to the sync PR, for a repo whose gates require one.
+        type: boolean
+        default: true
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        required: true
+
+# Every write goes through the app token below; the job's own GITHUB_TOKEN
+# only reads.
+permissions:
+  contents: read
+
+jobs:
+  contract-sync:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # platform-gateway is private, so it's read with an org-scoped automation
+      # app token (least privilege: that repo only), not GITHUB_TOKEN.
+      - name: Mint gateway read token
+        if: inputs.platforms
+        id: gateway-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: platform-gateway
+
+      # The sync PR is opened with the app token, not GITHUB_TOKEN: a
+      # github-actions[bot] PR fires no pull_request workflows, so its gates
+      # would never run.
+      - name: Mint sync PR token
+        id: pr-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # Overwrites each copy with its owner's main, so the working tree diff is
+      # the drift. tripbot is public, so GITHUB_TOKEN reads it. curl rather
+      # than `gh api`: the ARC runner image ships no gh CLI.
+      - name: Fetch the owners' copies
+        id: fetch
+        env:
+          GATEWAY_TOKEN: ${{ steps.gateway-token.outputs.token }}
+          TRIPBOT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          TRIPBOT_FILES: ${{ inputs.tripbot }}
+          TRIPBOT_DIR: ${{ inputs.tripbot-dir }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          fetch() { # <token> <repo> <path> <dest>
+            curl -fsSL \
+              -H "Authorization: Bearer $1" \
+              -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/${OWNER}/$2/contents/$3?ref=main" \
+              -o "$4"
+          }
+          synced=""
+          if [ "${PLATFORMS}" = true ]; then
+            fetch "${GATEWAY_TOKEN}" platform-gateway platforms.json platforms.json
+            synced="platforms.json"
+          fi
+          for f in ${TRIPBOT_FILES}; do
+            dest="${f}"
+            [ "${TRIPBOT_DIR}" = . ] || dest="${TRIPBOT_DIR}/${f}"
+            fetch "${TRIPBOT_TOKEN}" tripbot "pkg/contract/${f}" "${dest}"
+            synced="${synced} ${dest}"
+          done
+          {
+            echo "paths<<EOF"
+            for f in ${synced}; do echo "${f}"; done
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+          # shellcheck disable=SC2086 # one path per word
+          stale=$(git diff --name-only -- ${synced})
+          if [ -z "${stale}" ]; then
+            echo "Every synced contract matches its owner's main."
+            exit 0
+          fi
+          git diff --stat
+          for f in ${stale}; do
+            echo "::warning file=${f}::${f} differs from its owner's main; opening a sync PR"
+          done
+          {
+            echo "stale=true"
+            echo "files=$(echo "${stale}" | paste -sd, - | sed 's/,/, /g')"
+          } >> "${GITHUB_OUTPUT}"
+
+      - if: steps.fetch.outputs.stale == 'true' && (inputs.regenerate != '' || inputs.cdk8s)
+        uses: jdx/mise-action@v4
+
+      - if: steps.fetch.outputs.stale == 'true' && (inputs.regenerate != '' || inputs.cdk8s)
+        uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+
+      - name: Regenerate
+        if: steps.fetch.outputs.stale == 'true' && inputs.regenerate != ''
+        env:
+          REGENERATE: ${{ inputs.regenerate }}
+        run: bash -euo pipefail -c "${REGENERATE}"
+
+      # The deploy units read the synced contracts (service names, ports), so a
+      # sync PR whose dist/ isn't re-synthed fails the cdk8s gate. Same
+      # toolchain steps as gates.yml's cdk8s check.
+      - name: Install the cdk8s/ toolchain
+        if: steps.fetch.outputs.stale == 'true' && inputs.cdk8s && hashFiles('cdk8s/.mise.toml', 'cdk8s/.tool-versions') != ''
+        working-directory: cdk8s
+        run: mise trust && mise install
+
+      - if: steps.fetch.outputs.stale == 'true' && inputs.cdk8s
+        uses: arduino/setup-task@v3
+
+      - name: Re-synth cdk8s/dist/
+        if: steps.fetch.outputs.stale == 'true' && inputs.cdk8s
+        run: task cdk8s:synth
+
+      # The `+` fragment satisfies the changelog gate; the release gives it the
+      # PR's number. The run ID keeps it from landing on an unreleased sync's
+      # file.
+      - name: Changelog fragment
+        if: steps.fetch.outputs.stale == 'true' && inputs.changelog
+        env:
+          FILES: ${{ steps.fetch.outputs.files }}
+        run: |
+          echo "Re-sync the generated contracts with their owners' main: ${FILES}." \
+            > "changelog.d/+contract-sync-${GITHUB_RUN_ID}.misc.md"
+
+      # Runs on every trigger, stale or not: with no diff against main it
+      # closes an open sync PR the owners' main no longer needs.
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ steps.pr-token.outputs.token }}
+          sign-commits: true
+          branch: bot/contract-sync
+          delete-branch: true
+          add-paths: |
+            ${{ steps.fetch.outputs.paths }}
+            ${{ inputs.generated }}
+            ${{ inputs.cdk8s && 'cdk8s/dist' || '' }}
+            changelog.d/+contract-sync-*.misc.md
+          commit-message: 'chore(contract): re-sync the generated contracts'
+          title: 'chore(contract): re-sync the generated contracts'
+          body: |
+            Re-syncs ${{ steps.fetch.outputs.files }} from the owners' `main` (tripbot `pkg/contract/`, platform-gateway `platforms.json`)${{ (inputs.regenerate != '' || inputs.cdk8s) && ' and re-runs the generators' || '' }}. Opened by the shared `contract-sync` workflow; it force-updates this branch while the owners keep moving and closes it once `main` matches.
+
+            **Re-syncing is only half the fix.** A contract usually grows because something here should read the new keys. Grep this repo for hand-declared copies of what the diff adds, and replace them in a follow-up PR — a push to this branch is overwritten on the next sync.
