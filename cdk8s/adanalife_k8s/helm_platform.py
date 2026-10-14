@@ -253,7 +253,7 @@ def cluster_components(
 
     # Argo Workflows — the batch/DAG engine for the spare-compute passes that are
     # hand-applied one-shot Jobs today (video-pipeline's embed/coords/auto-trim).
-    # Runs one workflow at a time at the most-preemptible priority, so a queue of
+    # Runs two workflows at a time at the most-preemptible priority, so a queue of
     # them yields to the stream. Cleanly Argo-manageable (no host-coupled values).
     # The CRs it runs are Workflows, submitted by hand or by the video-pipeline
     # repo — nothing in this repo declares one.

@@ -20,12 +20,14 @@ crds:
   full: false
 
 controller:
-  # One workflow at a time. The node also runs the live stream, and the passes
-  # this exists to run are model-heavy — serializing them is the same property
-  # video-pipeline's `wait-embed-redo` init-gate hand-rolls, except a queued
-  # workflow here holds no pod and therefore no quota. Raise it when a workload
-  # shows up that is genuinely cheap.
-  parallelism: 1
+  # Two workflows at a time, so a short job (a flare render) starts while a
+  # multi-day video-pipeline pass holds the other slot. When both are full, a
+  # Workflow's own `spec.priority` (not its template's) orders the pending queue.
+  # The stream stays safe because the workflow pods' CPU limits are the
+  # isolation, not this count. A queued workflow holds no pod and therefore no
+  # quota. If two model-heavy passes ever queue at once, cap them with a
+  # `synchronization` semaphore rather than lowering this.
+  parallelism: 2
   # Workflow pods land in the namespace holding the PVCs they mount, so the SA
   # + Role pair the chart creates has to exist there too. stage-1 is where the
   # dashcam corpus, models and output claims live.
