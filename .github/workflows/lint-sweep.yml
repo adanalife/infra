@@ -1,0 +1,57 @@
+---
+# The fleet's weekly super-linter sweep, as one reusable workflow. Each repo's
+# super-linter.yml calls this on its own schedule; the repo's validator
+# toggles, exclusions and config pointers live in its .github/super-linter.env,
+# loaded into the job environment before the linter runs (super-linter's own
+# recommended way to share a workflow across repos).
+#
+# pre-commit covers the per-PR lint surface; this is the belt-and-braces
+# full-codebase sweep, so it lints everything rather than a diff.
+name: lint-sweep
+
+on:
+  workflow_call:
+    inputs:
+      env-file:
+        description: The repo's super-linter settings, one KEY=value per line; blank lines and `#` comments are dropped.
+        type: string
+        default: .github/super-linter.env
+
+# super-linter reports each linter as its own commit status (MULTI_STATUS is on
+# by default). Without statuses: write every one of those POSTs 403s — a WARN
+# that doesn't fail the run, so the per-linter reporting silently no-ops and
+# the only record is the step log. A caller has to grant it too.
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  super-linter:
+    name: Run Linters
+    # super-linter is a container action, and the self-hosted pool is
+    # dind-less, so this stays on a hosted runner even for the private repos.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # fetch-depth: 0 is required by super-linter v6+: it diffs against the
+      # default branch to figure out which files changed, so main has to be
+      # present in the local checkout.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load the repo's linter settings
+        env:
+          ENV_FILE: ${{ inputs.env-file }}
+        run: grep -vE '^[[:space:]]*(#|$)' "$ENV_FILE" >> "$GITHUB_ENV"
+
+      # A step's own env outranks $GITHUB_ENV, so these four hold whatever the
+      # repo's file says.
+      - uses: super-linter/super-linter@v9.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: main
+          VALIDATE_ALL_CODEBASE: true
+          # The Actions step summary still carries the same content.
+          ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
