@@ -38,6 +38,14 @@ on:
         description: Restore the repo-pinned Rust toolchain from the Actions cache before staging, for a `stage` that calls cargo.
         type: boolean
         default: false
+      mise-dir:
+        description: Directory whose mise pins the staging pass installs, for a repo whose release tooling is pinned below the root.
+        type: string
+        default: .
+      branch:
+        description: The release PR's branch. release-please names it after the component for some release types (rust, for one).
+        type: string
+        default: release-please--branches--main
     outputs:
       release_created:
         description: Whether this run cut a release.
@@ -96,15 +104,16 @@ jobs:
       - name: Check for an open release PR branch
         if: ${{ !steps.release.outputs.release_created && (inputs.changelog || inputs.stage != '') }}
         id: release-branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ inputs.branch }}
         run: |
           code=$(curl -sS -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/release-please--branches--main")
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH}")
           echo "Release branch lookup: HTTP $code"
           echo "exists=$([ "$code" = 200 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Pushed with the app token so the push fires the PR's pull_request
       # events and its gates re-run against the final release state.
@@ -114,7 +123,7 @@ jobs:
         # persisted credential is for
         uses: actions/checkout@v7
         with:
-          ref: release-please--branches--main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
@@ -122,6 +131,8 @@ jobs:
         uses: adanalife/infra/.github/actions/rust-toolchain@main
       - if: ${{ steps.release-branch.outputs.exists == 'true' && !inputs.rust }}
         uses: jdx/mise-action@v4
+        with:
+          working_directory: ${{ inputs.mise-dir }}
 
       # For `uvx towncrier` in repos whose mise pins carry no uv.
       - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
@@ -132,6 +143,7 @@ jobs:
         env:
           CHANGELOG: ${{ inputs.changelog }}
           STAGE: ${{ inputs.stage }}
+          BRANCH: ${{ inputs.branch }}
           # uvx defaults its tool dir to $HOME/.local/share/uv, which the runner
           # user can't create: the runner pod mounts a cache volume further down
           # that path, so the kubelet creates the intervening dirs root-owned.
@@ -143,9 +155,9 @@ jobs:
           set -euo pipefail
           # release-please bumped the manifest on this branch — that version is
           # the single source of truth for both the changelog stanza and the
-          # tag that gets cut. Read with python (mise installed it) rather than
-          # jq, which the ARC runner image does not carry.
-          VERSION=$(python -c 'import json; print(json.load(open(".release-please-manifest.json"))["."])')
+          # tag that gets cut. Read with python rather than jq, which the ARC
+          # runner image does not carry.
+          VERSION=$(python3 -c 'import json; print(json.load(open(".release-please-manifest.json"))["."])')
           echo "Release version: $VERSION"
 
           if [ "$CHANGELOG" = true ]; then
@@ -171,5 +183,5 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
             git commit -m "chore: stage release artifacts for $VERSION"
-            git push origin HEAD:release-please--branches--main
+            git push origin "HEAD:${BRANCH}"
           fi
