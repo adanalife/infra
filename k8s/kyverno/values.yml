@@ -23,7 +23,25 @@ backgroundController:
 cleanupController:
   enabled: false
 
+# Both controllers serve Prometheus metrics on :8000, and these annotations
+# are what makes alloy-metrics scrape them (the fleet convention — see
+# k8s/monitoring/prod-1/values.yml). The admission controller emits the
+# admission-time verdicts and webhook latency; the reports controller emits
+# kyverno_validating_policy_results_total from its background scans, the
+# per-policy pass/fail count. ~1k series into the local VictoriaMetrics; the
+# Grafana Cloud keep-list doesn't name kyverno_*, so only the generic up /
+# go_* series it keeps for every target go there.
+admissionController:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+
 reportsController:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
   rbac:
     clusterRole:
       # The reports controller reads through the built-in `view` role, which
