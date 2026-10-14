@@ -33,13 +33,9 @@ resource "aws_iam_access_key" "burrito_apply" {
   pgp_key = "keybase:adanalife"
 }
 
-data "aws_iam_policy" "burrito_apply_admin" {
-  name = "AdministratorAccess"
-}
-
 resource "aws_iam_user_policy_attachment" "burrito_apply_admin" {
   user       = aws_iam_user.burrito_apply.name
-  policy_arn = data.aws_iam_policy.burrito_apply_admin.arn
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
 # The one guardrail that survives an admin attachment, and it is worth keeping:
