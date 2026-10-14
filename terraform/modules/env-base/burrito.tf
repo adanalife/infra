@@ -25,13 +25,9 @@ resource "aws_iam_access_key" "burrito" {
   pgp_key = "keybase:adanalife"
 }
 
-data "aws_iam_policy" "burrito_read_only" {
-  name = "ReadOnlyAccess"
-}
-
 resource "aws_iam_user_policy_attachment" "burrito_read_only" {
   user       = aws_iam_user.burrito.name
-  policy_arn = data.aws_iam_policy.burrito_read_only.arn
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
 # The same load-bearing Deny the CI role carries (each env's secrets.tf,
