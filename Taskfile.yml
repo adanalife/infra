@@ -105,6 +105,21 @@ tasks:
       - task: k8s:_nfs-pv:apply
         vars: { ENV: prod-1 }
 
+  # Read-only twin of the two above: nothing else notices when a merged change to
+  # the PV constructs never reached the cluster, since Argo doesn't own them.
+  # Exits 0 with no output when the live PVs match.
+  k8s:stage:nfs-pv:diff:
+    desc: "Preview what k8s:stage:nfs-pv would change: kubectl diff the stage-1 NFS PVs against the live cluster (read-only)"
+    cmds:
+      - task: k8s:_nfs-pv:apply
+        vars: { ENV: stage-1, VERB: diff }
+
+  k8s:prod:nfs-pv:diff:
+    desc: "Preview what k8s:prod:nfs-pv would change: kubectl diff the prod-1 NFS PVs against the live cluster (read-only)"
+    cmds:
+      - task: k8s:_nfs-pv:apply
+        vars: { ENV: prod-1, VERB: diff }
+
   # Populate the node-local dashcam corpus cache from NFS (the NFS<->local serving
   # toggle). Requires dashcam_local_enabled for the env (so the vlc-dashcam-local
   # PVC exists). Re-runnable: the copy skips clips already present, so a second run
@@ -207,8 +222,13 @@ tasks:
         # from cdk8s.yaml) so the real coords land in a throwaway dir, never the
         # committed golden. Apply only the cluster-scoped PVs.
         CDK8S_OUTDIR="$out" CDK8S_ENV={{.ENV}} mise exec -- uv run python main.py >/dev/null
-        echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (cluster-scoped, outside Argo)"
-        kubectl apply -f "$out/{{.ENV}}-nfs-pv.k8s.yaml"
+        if [ "{{.VERB}}" = diff ]; then
+          # kubectl diff exits 1 when it finds differences; the diff itself is the answer.
+          kubectl diff -f "$out/{{.ENV}}-nfs-pv.k8s.yaml" || [ $? -eq 1 ]
+        else
+          echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (cluster-scoped, outside Argo)"
+          kubectl apply -f "$out/{{.ENV}}-nfs-pv.k8s.yaml"
+        fi
 
   k8s:_dashcam-localize:apply:
     internal: true
