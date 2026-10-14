@@ -643,6 +643,112 @@
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
       }
+    },
+    {
+      "id": 700,
+      "type": "row",
+      "title": "kyverno (admission policy audit)",
+      "gridPos": { "x": 0, "y": 66, "w": 24, "h": 1 }
+    },
+    {
+      "id": 701,
+      "type": "stat",
+      "title": "Policies with failures (last 2h)",
+      "description": "Policies whose background scan failed at least one resource in the last 2h. The reports controller rescans every resource hourly (--backgroundScanInterval=1h), so a 2h window always spans a full scan. In Audit mode a failure only reports; a policy that holds at zero is a candidate for Enforce. Which resources failed is in `kubectl get polr -A` — the metric carries the resource kind, not its name.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 67, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(sum by (policy_name) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"fail\"}[2h])) > 0) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 702,
+      "type": "stat",
+      "title": "Admission requests denied (last 1h)",
+      "description": "Requests a policy in Enforce mode refused. Zero while every policy is in Audit; once one is flipped, a nonzero reading is a workload being blocked from rolling out.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 71, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(kyverno_admission_requests_total{cluster=~\"$cluster\", request_allowed=\"false\"}[1h])) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 703,
+      "type": "table",
+      "title": "Background-scan results by policy (last 2h)",
+      "description": "Pass and fail evaluations per policy across the scans in the window. These count evaluations, not distinct resources — one or two hourly scans land in 2h — so read Fail as zero / nonzero. Mode is Audit or Enforce.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 67, "w": 9, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"pass\"}[2h]))", "format": "table", "instant": true },
+        { "refId": "B", "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"fail\"}[2h]))", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "indexByName": { "policy_name": 0, "policy_validation_mode": 1, "Value #A": 2, "Value #B": 3 },
+            "renameByName": { "policy_name": "Policy", "policy_validation_mode": "Mode", "Value #A": "Pass", "Value #B": "Fail" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Fail" },
+            "properties": [
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 704,
+      "type": "timeseries",
+      "title": "Admission webhook latency (p95)",
+      "description": "How long Kyverno takes to answer the apiserver. Its webhooks are fail-open with a 10s timeout, so latency approaching that is every pod create and update in the cluster waiting on it — the cost of the policy engine, independent of any verdict.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 15, "y": 67, "w": 9, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, request_webhook) (rate(kyverno_admission_review_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))", "legendFormat": "{{request_webhook}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": []
+      }
     }
   ]
 }
