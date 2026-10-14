@@ -84,7 +84,7 @@ machine:
     kubespan:
       enabled: true
   # IP forwarding for the Tailscale subnet router (TS_ROUTES=192.168.40.0/24 in
-  # tailscale.patch.yaml — the current LAN, site-2). Tailscale advertises
+  # tailscale.patch.yaml — the current LAN, site-1). Tailscale advertises
   # the home LAN so off-LAN tailnet clients reach 192.168.40.111 (and the
   # Synology, etc.) with no cert-SAN/endpoint changes; forwarding lets the node
   # route to *other* LAN hosts. Host-level (machine.sysctls), not pod-level —
