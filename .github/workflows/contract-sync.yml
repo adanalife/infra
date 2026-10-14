@@ -44,6 +44,10 @@ on:
         description: Paths (globs allowed) the `regenerate` commands write, one per line, to include in the sync PR.
         type: string
         default: ""
+      cdk8s:
+        description: Re-synth cdk8s/dist/ through the repo's `task cdk8s:synth` when a copy changed (after `regenerate`), and include it in the sync PR, for a repo whose deploy units read the synced contracts.
+        type: boolean
+        default: false
       changelog:
         description: Add a towncrier `+` fragment to the sync PR, for a repo whose gates require one.
         type: boolean
@@ -139,10 +143,10 @@ jobs:
             echo "files=$(echo "${stale}" | paste -sd, - | sed 's/,/, /g')"
           } >> "${GITHUB_OUTPUT}"
 
-      - if: steps.fetch.outputs.stale == 'true' && inputs.regenerate != ''
+      - if: steps.fetch.outputs.stale == 'true' && (inputs.regenerate != '' || inputs.cdk8s)
         uses: jdx/mise-action@v4
 
-      - if: steps.fetch.outputs.stale == 'true' && inputs.regenerate != ''
+      - if: steps.fetch.outputs.stale == 'true' && (inputs.regenerate != '' || inputs.cdk8s)
         uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
 
       - name: Regenerate
@@ -150,6 +154,21 @@ jobs:
         env:
           REGENERATE: ${{ inputs.regenerate }}
         run: bash -euo pipefail -c "${REGENERATE}"
+
+      # The deploy units read the synced contracts (service names, ports), so a
+      # sync PR whose dist/ isn't re-synthed fails the cdk8s gate. Same
+      # toolchain steps as gates.yml's cdk8s check.
+      - name: Install the cdk8s/ toolchain
+        if: steps.fetch.outputs.stale == 'true' && inputs.cdk8s && hashFiles('cdk8s/.mise.toml', 'cdk8s/.tool-versions') != ''
+        working-directory: cdk8s
+        run: mise trust && mise install
+
+      - if: steps.fetch.outputs.stale == 'true' && inputs.cdk8s
+        uses: arduino/setup-task@v3
+
+      - name: Re-synth cdk8s/dist/
+        if: steps.fetch.outputs.stale == 'true' && inputs.cdk8s
+        run: task cdk8s:synth
 
       # The `+` fragment satisfies the changelog gate; the release gives it the
       # PR's number. The run ID keeps it from landing on an unreleased sync's
@@ -173,10 +192,11 @@ jobs:
           add-paths: |
             ${{ steps.fetch.outputs.paths }}
             ${{ inputs.generated }}
+            ${{ inputs.cdk8s && 'cdk8s/dist' || '' }}
             changelog.d/+contract-sync-*.misc.md
           commit-message: 'chore(contract): re-sync the generated contracts'
           title: 'chore(contract): re-sync the generated contracts'
           body: |
-            Re-syncs ${{ steps.fetch.outputs.files }} from the owners' `main` (tripbot `pkg/contract/`, platform-gateway `platforms.json`)${{ inputs.regenerate != '' && ' and re-runs the generators' || '' }}. Opened by the shared `contract-sync` workflow; it force-updates this branch while the owners keep moving and closes it once `main` matches.
+            Re-syncs ${{ steps.fetch.outputs.files }} from the owners' `main` (tripbot `pkg/contract/`, platform-gateway `platforms.json`)${{ (inputs.regenerate != '' || inputs.cdk8s) && ' and re-runs the generators' || '' }}. Opened by the shared `contract-sync` workflow; it force-updates this branch while the owners keep moving and closes it once `main` matches.
 
             **Re-syncing is only half the fix.** A contract usually grows because something here should read the new keys. Grep this repo for hand-declared copies of what the diff adds, and replace them in a follow-up PR — a push to this branch is overwritten on the next sync.

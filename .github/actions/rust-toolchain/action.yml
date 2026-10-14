@@ -11,9 +11,15 @@ description: >-
 # cargo's bin, keyed on the pin; mise's install then finds everything present.
 #
 # clippy and rustfmt are added even for jobs that never call them, so every
-# Rust job in a repo shares one cache entry. The key and paths match tempomat's
-# in-repo copy of this action, so its jobs share the entry too. On a hit the
-# component add is a no-op.
+# Rust job in a repo shares one cache entry. On a hit the component add is a
+# no-op.
+
+inputs:
+  install_args:
+    description: >-
+      Which of the repo's mise pins to install — all of them by default, or a
+      tool list such as "rust" for a job that needs nothing else.
+    default: ""
 
 runs:
   using: composite
@@ -35,6 +41,8 @@ runs:
         key: rust-${{ runner.os }}-${{ hashFiles('.tool-versions') }}
 
     - uses: jdx/mise-action@v4
+      with:
+        install_args: ${{ inputs.install_args }}
 
     - shell: bash
       run: rustup component add clippy rustfmt
