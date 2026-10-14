@@ -1,0 +1,59 @@
+name: contract-dispatch
+
+# Tells the consumers that a contract the caller owns changed on main, so each
+# one's contract workflow re-syncs its copy and opens (or updates) a sync PR
+# within minutes rather than at its next daily sweep. Consumers that don't
+# listen for the event still catch the change on that sweep. Each contract
+# owner's contract-dispatch.yml calls this, path-filtered to its contract.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: ubuntu-latest
+      repositories:
+        description: The consumer repos to notify, comma-separated, e.g. `tripbot-console,obs`.
+        required: true
+        type: string
+      event-type:
+        description: The repository_dispatch event type the consumers listen for.
+        type: string
+        default: contract-changed
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: The org automation app's key; GITHUB_TOKEN can't reach another repo.
+        required: true
+
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    steps:
+      - name: Mint automation app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.repositories }}
+          permission-contents: write
+
+      # curl rather than `gh api`: not every runner image ships the gh CLI.
+      - name: Send ${{ inputs.event-type }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOS: ${{ inputs.repositories }}
+          EVENT: ${{ inputs.event-type }}
+        run: |
+          for repo in ${REPOS//,/ }; do
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY_OWNER}/${repo}/dispatches" \
+              -d '{"event_type":"'"${EVENT}"'","client_payload":{"source":"'"${GITHUB_REPOSITORY}"'","sha":"'"${GITHUB_SHA}"'"}}'
+          done
