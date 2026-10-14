@@ -89,7 +89,7 @@ AUTOSYNC_HOLDOUTS: tuple[tuple[str, str], ...] = ()
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
 # Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
-# lives under the prod subdomain alongside the apps (vlc-twitch.prod...) and the
+# lives under the prod subdomain alongside the apps (console.prod...) and the
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
 REPO_SM_KEY = "/k8s/argocd/repo-ssh-key"
@@ -314,7 +314,7 @@ class ArgoCD(Construct):
         self._app_project(
             id="project-tripbot",
             name=TRIPBOT_PROJECT,
-            description="tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo",
+            description="tripbot app workloads (tripbot/onscreens + identity), from the tripbot repo",
             source_repos=[TRIPBOT_REPO_URL],
             namespaces=list(self.envs),
             cluster_resources=[PRIORITY_CLASS],
