@@ -54,6 +54,14 @@ resource "github_actions_variable" "automation_app_id" {
   value         = var.github_app_id
 }
 
+# Client ID, likewise not sensitive → vars.AUTOMATION_APP_CLIENT_ID.
+resource "github_actions_variable" "automation_app_client_id" {
+  for_each      = local.automation_repos
+  repository    = each.value
+  variable_name = "AUTOMATION_APP_CLIENT_ID"
+  value         = var.github_app_client_id
+}
+
 resource "github_actions_secret" "automation_app_private_key" {
   for_each    = local.automation_repos
   repository  = each.value
