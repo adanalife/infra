@@ -1,0 +1,158 @@
+# Builds the version-tagged linux/amd64 image for a release and pushes it to
+# GHCR under the org, then announces the release on Discord. Each image repo's
+# release.yml calls this on its `v*` tag (or with an explicit `tag`).
+#
+# Pushed tags: X.Y.Z, vX.Y, vX and latest. The floating :main image is
+# image.yml's; both share the image's registry layer cache, so a release
+# reuses the layers the last main merge built.
+#
+# linux/amd64 only: prod-1 and stage-1 both live on the amd64 minipc, so an
+# emulated arm64 leg would roughly double the build for an image no cluster
+# node pulls.
+name: release-image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Package name under ghcr.io/adanalife, e.g. `tripbot-console`.
+        required: true
+        type: string
+      tag:
+        description: The vX.Y.Z tag to build. Defaults to the triggering ref, so a tag push or a dispatch on a tag needs none.
+        type: string
+        default: ""
+      context:
+        description: Docker build context.
+        type: string
+        default: .
+      build-args:
+        description: Extra Docker build args, one `KEY=value` per line. `VERSION` (the bare X.Y.Z) is always passed.
+        type: string
+        default: ""
+    secrets:
+      DISCORD_WEBHOOK:
+        description: Where a shipped release is announced.
+        required: false
+      DISCORD_WEBHOOK_ALERTS:
+        description: Where a failed release is reported.
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    # GitHub-hosted, not the arc-amd64 pool: `docker build` layer writes land on
+    # the minipc's /var, the volume etcd fsyncs to, and a burst there stalls etcd
+    # past its lease deadline, dropping every leader election in the cluster.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in
+            v[0-9]*) ;;
+            *)
+              echo "::error title=Not a release tag::release builds a vX.Y.Z tag, got '$TAG'"
+              exit 1
+              ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # GITHUB_TOKEN pushes packages in its own repo, so no extra secret.
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/adanalife/${{ inputs.image }}
+          flavor: latest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.tag.outputs.tag }}
+            type=semver,pattern=v{{major}}.{{minor}},value=${{ steps.tag.outputs.tag }}
+            type=semver,pattern=v{{major}},value=${{ steps.tag.outputs.tag }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          build-args: |
+            VERSION=${{ steps.tag.outputs.version }}
+            ${{ inputs.build-args }}
+          # Layer cache in the image's own GHCR repo — the runner starts with an
+          # empty daemon every job, so the cache has to live off-box.
+          cache-from: type=registry,ref=ghcr.io/adanalife/${{ inputs.image }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/adanalife/${{ inputs.image }}:buildcache,mode=max
+
+  notify:
+    needs: [build]
+    # action-discord is a `using: docker` action, and the self-hosted pool has
+    # no docker socket to build it with.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # A workflow_dispatch run re-deploys a tag that already shipped, which is
+      # operational rather than news, so only the release itself announces.
+      # The alert below stays unconditional: a re-deploy going red is exactly
+      # the case worth paging on.
+      - name: Discord notification
+        if: github.event_name != 'workflow_dispatch'
+        # A rotated or deleted webhook returns 404 and must not fail a release
+        # that already shipped; the notification is best-effort.
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          VERSION_TAG: ${{ needs.build.outputs.tag }}
+        with:
+          # Link the tagged CHANGELOG.md, not a payload `compare` URL: one wording
+          # fleet-wide, so a release reads the same whichever repo it came from.
+          args: 'New release for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): [{{ VERSION_TAG }}]({{ EVENT_PAYLOAD.repository.html_url }}/blob/{{ VERSION_TAG }}/CHANGELOG.md)'
+
+  # Nothing else says a release went red. The release PR merged green long
+  # before the tag ran, so the only record is this run's own entry in a run
+  # list nobody is watching. `if: failure()` runs when any job above failed,
+  # including when a later one was skipped as a result; `notify` cannot trip
+  # it, since continue-on-error keeps a dead webhook out of that job's status.
+  alert:
+    needs: [build, notify]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Alert Discord on failure
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          VERSION_TAG: ${{ needs.build.outputs.tag || inputs.tag || github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          # Points at the log rather than naming what failed: any job above can
+          # be the one, and naming it would go stale as the jobs change.
+          args: 'Release failed for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}) at {{ VERSION_TAG }}: [run log]({{ RUN_URL }})'
