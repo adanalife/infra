@@ -84,12 +84,13 @@ destinations:
     #                         image-pull rule. Emitted only for a container
     #                         that is waiting, so a handful of series at most.
     #   kube_deployment_status_replicas_available  — scrape-health's
-    #                         alloy-receiver rule. The receiver publishes no
-    #                         metrics of its own (no otelcol_* family reaches
-    #                         either store, and nothing scrapes the Alloy pods),
-    #                         so kube-state-metrics' view of its Deployment is
-    #                         the only signal that separates "the receiver is
-    #                         down" from "all five apps went quiet at once".
+    #                         alloy-receiver rule. The receiver's own
+    #                         otelcol_* counters land in VictoriaMetrics only
+    #                         (the alloy integration below keeps nothing but
+    #                         `up` in the cloud), so kube-state-metrics' view
+    #                         of its Deployment is the cloud-side signal that
+    #                         separates "the receiver is down" from "all five
+    #                         apps went quiet at once".
     #                         Whole family rather than one deployment: 67 series
     #                         outside stage-1, against 2802 active of a 15000
     #                         cap, and scoping it would need a second relabel
@@ -205,9 +206,9 @@ destinations:
     # The rest of what's scraped is local-VM-only: the other node_*
     # (node-exporter-full), container_*/machine_* (cadvisor), the rest of kube_*
     # (kubernetes-views), cilium_*, traefik_*, coredns_*, certmanager_*,
-    # external(_)dns_*, externalsecret_*, windows_*. Those dashboards need a
-    # VictoriaMetrics datasource in Grafana Cloud, which does not exist yet (it
-    # needs the PDC agent) — until it does, query VM by port-forward.
+    # external(_)dns_*, externalsecret_*, windows_*. Those dashboards read the
+    # VictoriaMetrics datasource in Grafana Cloud, which reaches VM over the
+    # PDC agent (terraform/platform/grafana-victoria-metrics.tf).
     #
     # Every scraped series an alert reads is on this list, so no alert goes
     # blind. That property is the reason to check this file when adding a rule

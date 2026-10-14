@@ -26,9 +26,10 @@ locals {
 }
 
 # Quota. The free tier covers 100k API test executions/month and bills per
-# probe per execution, so three probes cost 21.9k/month at a 120s pace and
-# 13.1k at 600s. The checks below come to ~92k. A fourth check wants a slower
-# pace on all of them rather than another 13k on top; past 100k it is $5/10k.
+# probe per execution, so one probe costs 21.9k/month at a 120s pace and
+# 4.4k at 600s; three probes cost 65.7k and 13.1k. The checks below come to
+# ~96k. Another check wants a slower pace on all of them rather than more on
+# top; past 100k it is $5/10k.
 
 # The target is the leaderboard endpoint and not the page, because it is the
 # one request that exercises both halves at once: Pages serving the deploy, and
@@ -134,8 +135,8 @@ resource "grafana_synthetic_monitoring_check" "whalecore" {
 #
 # One probe, not local.sm_probes: the gate is the same from every region, so
 # the regional diversity the other checks need buys nothing here. Ten minutes,
-# not two, for the same reason. Together they cost ~4.4k executions/month
-# against the ~8k the quota note above leaves.
+# not two, for the same reason. Together they cost ~4.4k executions/month,
+# included in the quota note's total above.
 resource "grafana_synthetic_monitoring_check" "guessr_admin" {
   job       = "guessr-admin"
   target    = "https://guessr.dana.lol/admin/"
