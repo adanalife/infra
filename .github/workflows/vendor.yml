@@ -1,0 +1,53 @@
+name: vendor
+
+# Guards third-party frontend assets a repo vendors and pins in a vendor.txt,
+# through the repo's own vendor.sh. Each repo's vendor-freshness.yml calls this.
+#
+# Two things happen here. `vendor.sh check` fails when a file on disk stops
+# matching the release it claims to be -- an in-place edit, a formatting hook,
+# or an upstream re-publish under the same version. `vendor.sh latest` only
+# reports, since a new upstream release is news rather than breakage.
+#
+# The daily schedule in each caller is the point. Nothing else notices a new
+# upstream release: these assets have no manifest, so Dependabot has no
+# ecosystem to read them from -- a committed .js or .css file is invisible to
+# it. The byte check also runs per-PR in gates.yml (`vendor-script`).
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: ubuntu-latest
+      script:
+        description: Path to the repo's vendor.sh.
+        type: string
+        default: scripts/vendor.sh
+
+permissions:
+  contents: read
+
+jobs:
+  vendor-freshness:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    env:
+      VENDOR: ${{ inputs.script }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Assert vendored assets match their pinned releases
+        run: '"./${VENDOR}" check'
+
+      # Into the job summary as well as the log: a daily cron is read by
+      # opening the run, and a NEW line is the whole reason to open it.
+      - name: Report newer upstream releases
+        run: |
+          {
+            echo '```'
+            "./${VENDOR}" latest | tee /dev/stderr
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
