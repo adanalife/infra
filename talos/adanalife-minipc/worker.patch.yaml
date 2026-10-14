@@ -76,7 +76,7 @@ cluster:
   # Override the control-plane endpoint to the stable LAN-DNS pointer rather than
   # the IP baked into the generated worker.yaml. minipc.whereisdana.today is a
   # Route53 CNAME → per-location A record (terraform/core/minipc-dns.tf), so a
-  # location move (e.g. back to shadyglen) is a single DNS flip with no Pi-side
+  # location move (e.g. back to site-1) is a single DNS flip with no Pi-side
   # reconfig. REQUIRES minipc.whereisdana.today in the kube-apiserver certSANs
   # (set in controlplane.patch.yaml), or the kubelet's TLS
   # verification of the apiserver fails on a hostname mismatch.
