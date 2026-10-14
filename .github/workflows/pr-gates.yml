@@ -2,9 +2,10 @@
 # repo in the org calls; this repo calls its own copy so a change to it is
 # exercised by the PR that makes it.
 #
-# Deliberately NOT folded in: cdk8s-synth.yml, which needs `contents: write` to
-# push a re-synthed dist/ back to the PR branch. There is no changelog-fragment
-# gate here — this repo ships no releases and has no towncrier setup.
+# Deliberately NOT folded in: cdk8s-synth.yml, which pushes a re-synthed dist/
+# back to the PR branch with the automation app's write token. There is no
+# changelog-fragment gate here — this repo ships no releases and has no
+# towncrier setup.
 name: pr-gates
 
 on:

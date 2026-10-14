@@ -1,0 +1,71 @@
+# Refreshes GHCR mirrors of the Docker Hub base images a repo builds FROM, so
+# CI never pulls from Docker Hub at build time (Hub's pull rate limit breaks
+# builds; manifest GETs count against the quota even on layer-cache hits).
+# Each repo's mirror-images.yml calls this with its own image list.
+#
+# A first copy creates the package linked to the calling repo; making it
+# public is a one-time org packages UI step (visibility → public).
+name: mirror-images
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: One `<source> <mirror>` pair per line, e.g. `docker.io/debian:trixie-slim ghcr.io/adanalife/mirror/debian:trixie-slim`.
+        type: string
+        required: true
+    secrets:
+      DISCORD_WEBHOOK_ALERTS:
+        description: Where a failed refresh is reported. A scheduled run notifies nobody otherwise.
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Downloads the release binary rather than compiling crane from source;
+      # the version matches the crane image the cdk8s PreSync gate pulls.
+      - uses: imjasonh/setup-crane@v0.7
+        with:
+          version: v0.21.7
+      # crane copies the manifest registry-to-registry; it reads the
+      # docker-config auth the login step wrote.
+      - name: Copy images Hub -> GHCR
+        env:
+          IMAGES: ${{ inputs.images }}
+        run: |
+          set -euo pipefail
+          while read -r src dst; do
+            [ -z "${src}" ] && continue
+            echo "::group::${src} -> ${dst}"
+            crane copy "${src}" "${dst}"
+            echo "::endgroup::"
+          done <<< "${IMAGES}"
+
+  alert:
+    needs: [mirror]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+    steps:
+      - name: Alert Discord on failure
+        if: env.DISCORD_WEBHOOK != ''
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Base-image mirror refresh failed for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): [run log]({{ RUN_URL }})'

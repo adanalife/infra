@@ -1,0 +1,57 @@
+name: python-security
+
+# Free, private-repo-compatible security scanning for a uv-managed Python repo
+# (CodeQL needs paid Advanced Security on private repos, so it's not used):
+#   - bandit    — Python code SAST
+#   - pip-audit — known-CVE scan of the locked runtime dependencies
+# Each repo's security.yml calls this.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: ubuntu-latest
+      bandit-path:
+        description: The package directory bandit scans.
+        type: string
+        default: src
+
+permissions:
+  contents: read
+
+jobs:
+  bandit:
+    name: bandit
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+      # -ll gates CI on medium-or-higher severity findings; low-severity nits
+      # are still reported but don't fail the build.
+      - env:
+          BANDIT_PATH: ${{ inputs.bandit-path }}
+        run: uvx bandit -r "$BANDIT_PATH" -ll
+
+  pip-audit:
+    name: pip-audit
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v4
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+      - name: Audit installed runtime dependencies
+        # Audit the synced runtime env directly — no requirements re-resolution
+        # against PyPI, which keeps the audit on exactly the locked versions
+        # (and works for a dependency PyPI can't resolve, like torch's +cpu
+        # builds from a custom index).
+        run: |
+          uv sync --frozen --no-dev
+          uv run --no-sync --with pip-audit pip-audit
