@@ -1,0 +1,155 @@
+# Admission policies encoding rules the platform already follows by
+# convention. Delivered with the chart by the `kyverno` Argo Application.
+#
+# Every policy is Audit-only: a violation is recorded in a PolicyReport
+# (`kubectl get polr -A`, `kubectl get cpolr` for cluster-scoped objects) and
+# the request is admitted. A policy moves to Deny on its own once its reports
+# read clean. failurePolicy Ignore matches the chart's forced fail-open.
+#
+# ValidatingPolicy (CEL) rather than kyverno.io/v1 ClusterPolicy, which is
+# deprecated as of Kyverno 1.19.
+---
+# The prod stream path must not block on the NAS: a `hard` NFS mount turns a
+# NAS outage into an unkillable blocked thread. An inline pod `nfs` volume
+# has no mountOptions field, so it always mounts with the kernel default,
+# which is `hard`.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: prod-no-inline-nfs
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [prod-1, prod-1-data]
+  autogen:
+    podControllers:
+      controllers: [deployments, statefulsets, daemonsets, jobs, cronjobs]
+  validations:
+    - expression: >-
+        !has(object.spec.volumes) ||
+        object.spec.volumes.all(v, !has(v.nfs))
+      message: >-
+        Inline nfs volumes always mount `hard` (they cannot carry
+        mountOptions). Use node-local storage, or a PersistentVolume with
+        the `soft` mount option.
+---
+# The PersistentVolume is where NFS mount options actually live. Scoped to
+# PVs bound to a prod claim; a pre-provisioned PV has no claimRef until the
+# binder sets it, so this reports from that update and the background scan.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: prod-nfs-pv-soft-mount
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [persistentvolumes]
+  matchConditions:
+    - name: nfs-bound-to-prod
+      expression: >-
+        has(object.spec.nfs) && has(object.spec.claimRef) &&
+        has(object.spec.claimRef.namespace) &&
+        object.spec.claimRef.namespace in ['prod-1', 'prod-1-data']
+  validations:
+    - expression: >-
+        has(object.spec.mountOptions) &&
+        'soft' in object.spec.mountOptions &&
+        !('hard' in object.spec.mountOptions)
+      message: >-
+        An NFS PersistentVolume bound into prod must mount `soft` (with a
+        timeout), so a dead NAS returns an I/O error instead of blocking.
+        No mountOptions means the kernel default, `hard`.
+---
+# Requests keep the scheduler honest on a single node; a memory limit keeps
+# one leaking pod from taking the node's memory. CPU limits are deliberately
+# not required — throttling the stream's encoders is worse than contention.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-requests-limits
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [prod-1, prod-1-data, stage-1, stage-1-data]
+  autogen:
+    podControllers:
+      controllers: [deployments, statefulsets, daemonsets, jobs, cronjobs]
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers +
+        (has(object.spec.initContainers) ? object.spec.initContainers : [])
+  validations:
+    - expression: >-
+        variables.containers.all(c,
+          has(c.resources) &&
+          has(c.resources.requests) &&
+          'cpu' in c.resources.requests &&
+          'memory' in c.resources.requests &&
+          has(c.resources.limits) &&
+          'memory' in c.resources.limits)
+      message: >-
+        Every container (init containers included) needs cpu and memory
+        requests and a memory limit.
+---
+# An image reference must say exactly what runs: a digest, or an explicit
+# tag other than `latest`. Untagged means `latest`.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-pinned-image
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [prod-1, prod-1-data, stage-1, stage-1-data]
+  autogen:
+    podControllers:
+      controllers: [deployments, statefulsets, daemonsets, jobs, cronjobs]
+  variables:
+    - name: containers
+      expression: >-
+        object.spec.containers +
+        (has(object.spec.initContainers) ? object.spec.initContainers : [])
+  validations:
+    - expression: >-
+        variables.containers.all(c,
+          c.image.matches('@sha256:[0-9a-f]{64}$') ||
+          (c.image.matches(':[^:/]+$') && !c.image.endsWith(':latest')))
+      message: >-
+        Pin every image to a digest or an explicit tag; `:latest` and
+        untagged references are not allowed.

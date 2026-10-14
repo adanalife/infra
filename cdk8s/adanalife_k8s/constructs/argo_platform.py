@@ -11,7 +11,7 @@ committed + golden-gated like the app units).
 
 Scope (minipc only — development is on the k3d cluster, with its own Argo):
   * cluster-scoped releases (ESO, cert-manager, node-exporter, victoria-metrics,
-    k8s-monitoring, tailscale-operator) — installed once; values from prod-1
+    k8s-monitoring, tailscale-operator, kyverno) — installed once; values from prod-1
     (stage rides prod's cluster-scoped platform).
   * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
 
@@ -167,19 +167,20 @@ class ArgoPlatform(Construct):
         }
         sources = [chart_source, values_source]
 
-        if comp.release == "tailscale-operator":
-            # The ingress ProxyGroup is a custom resource of a CRD the operator
-            # chart ships, so it rides the operator's own Application as a third,
-            # raw-manifest source: Argo applies CRDs ahead of custom resources
-            # within one sync, and syncing the operator syncs its proxy fleet with
-            # it. `include` scopes the directory to the manifest, leaving the
-            # chart's values.yml (fed to the chart source above) out of it.
+        if comp.manifests:
+            # Custom resources of a CRD the chart ships (tailscale's ingress
+            # ProxyGroup, Kyverno's policies) ride the chart's own Application as
+            # a raw-manifest source: Argo applies CRDs ahead of custom resources
+            # within one sync, so syncing the operator syncs what it reconciles.
+            # `include` scopes the directory to the one file, leaving the chart's
+            # values.yml (fed to the chart source above) out of it.
+            directory, _, include = f"k8s/{comp.manifests}".rpartition("/")
             sources.append(
                 {
                     "repoURL": REPO_URL,
                     "targetRevision": TARGET_REVISION,
-                    "path": "k8s/tailscale-operator",
-                    "directory": {"include": "proxygroup.yml"},
+                    "path": directory,
+                    "directory": {"include": include},
                 }
             )
 

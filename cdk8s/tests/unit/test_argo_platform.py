@@ -4,6 +4,9 @@ bootstrap floor Argo can't own — cilium (the CNI) + argo-cd (itself) — must 
 get an Application. See constructs/argo_platform.py.
 """
 
+from pathlib import Path
+
+import yaml
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import PlatformArgoChart
@@ -79,3 +82,24 @@ def test_tailscale_operator_delivers_the_ingress_proxygroup():
     raw = app["spec"]["sources"][2]
     assert raw["path"] == "k8s/tailscale-operator"
     assert raw["directory"] == {"include": "proxygroup.yml"}
+
+
+def test_kyverno_delivers_its_policies():
+    (app,) = [a for a in _apps(_synth()) if _release(a) == "kyverno"]
+    raw = app["spec"]["sources"][2]
+    assert raw["path"] == "k8s/kyverno"
+    assert raw["directory"] == {"include": "policies.yml"}
+
+
+def test_kyverno_policies_audit_only_and_fail_open():
+    # Moving a policy to Deny is a deliberate per-policy change once its
+    # PolicyReports read clean; this makes that change show up here too. A
+    # policy that fails closed would let a Kyverno outage block admission on
+    # the single node.
+    path = Path(__file__).resolve().parents[3] / "k8s/kyverno/policies.yml"
+    policies = [d for d in yaml.safe_load_all(path.read_text()) if d]
+    assert policies
+    for p in policies:
+        assert p["kind"] == "ValidatingPolicy", p["metadata"]["name"]
+        assert p["spec"]["validationActions"] == ["Audit"], p["metadata"]["name"]
+        assert p["spec"]["failurePolicy"] == "Ignore", p["metadata"]["name"]
