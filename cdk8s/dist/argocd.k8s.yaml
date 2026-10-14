@@ -4,7 +4,7 @@ metadata:
   name: tripbot
   namespace: argocd
 spec:
-  description: tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo
+  description: tripbot app workloads (tripbot/onscreens + identity), from the tripbot repo
   sourceRepos:
     - https://github.com/adanalife/tripbot.git
   destinations:
