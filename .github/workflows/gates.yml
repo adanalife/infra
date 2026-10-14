@@ -122,7 +122,7 @@ jobs:
           BASE: ${{ github.base_ref }}
         run: |
           git fetch origin "$BASE" -q
-          if git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(cdk8s/|pyproject\.toml$|uv\.lock$|pkg/contract/contract\.json$)'; then
+          if git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(cdk8s/|pyproject\.toml$|uv\.lock$|(pkg/contract/)?contract\.json$)'; then
             echo "cdk8s=true" >> "$GITHUB_OUTPUT"
           else
             echo "cdk8s=false" >> "$GITHUB_OUTPUT"
@@ -303,10 +303,12 @@ jobs:
         env:
           CHECKS: ${{ inputs.checks }}
         run: |
+          # The loop's own stdin is the command list, so a check that reads stdin
+          # would consume the commands after it and the step would still pass.
           while IFS= read -r cmd; do
             [ -z "$cmd" ] && continue
             echo "== $cmd"
-            bash -c "$cmd"
+            bash -c "$cmd" < /dev/null
           done <<< "$CHECKS"
 
       # The gates run as steps of one job (see the header), so a red reads

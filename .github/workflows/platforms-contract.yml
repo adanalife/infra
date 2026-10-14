@@ -30,9 +30,11 @@ permissions:
 
 jobs:
   platforms-contract:
-    uses: adanalife/infra/.github/workflows/contract-sync.yml@main
+    uses: ./.github/workflows/contract-sync.yml
     with:
       runs-on: ubuntu-latest
+      # No towncrier here: this repo ships no releases, so the sync PR needs no fragment.
+      changelog: false
       platforms: true
       tripbot: contract.json metrics.json
       tripbot-dir: cdk8s

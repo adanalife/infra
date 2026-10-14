@@ -10,6 +10,9 @@
 #
 # The caller owns concurrency: a dev-image caller cancels a superseded main
 # build so an older run finishing last can't clobber :main with a stale image.
+#
+# A caller that passes DISCORD_WEBHOOK_ALERTS gets a Discord alert when the
+# build fails.
 name: image
 
 on:
@@ -35,6 +38,10 @@ on:
         description: Docker build args, one `KEY=value` per line.
         type: string
         default: ""
+    secrets:
+      DISCORD_WEBHOOK_ALERTS:
+        description: Where a failed build is reported. A failed :main build otherwise says nothing — whatever deploys :main keeps pulling the previous commit.
+        required: false
 
 permissions:
   contents: read
@@ -94,3 +101,25 @@ jobs:
           # authenticates to and pushes to.
           cache-from: type=registry,ref=${{ steps.refs.outputs.cache }}
           cache-to: type=registry,ref=${{ steps.refs.outputs.cache }},mode=max
+
+  # A failed build leaves :main frozen on the previous commit and says nothing:
+  # the environment that pulls it keeps running the code it was built from, and
+  # the only tell is a deploy behaving like an older commit. Points at the log
+  # rather than naming a cause — a lost packages grant, a base-image tag that
+  # moved, and a genuine build break all arrive here identically.
+  alert:
+    needs: [build]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+    steps:
+      - name: Alert Discord on failure
+        if: env.DISCORD_WEBHOOK != ''
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Dev image :main failed to rebuild for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}) — whatever deploys :main still pulls the previous commit: [run log]({{ RUN_URL }})'
