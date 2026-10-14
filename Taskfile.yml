@@ -1657,14 +1657,15 @@ tasks:
   # mirror to both unless deliberately env-specific.
   #
   # DAY-0 BRING-UP ONLY. The Argo-adoptable platform releases still installed in
-  # here (ESO, cert-manager, cnpg, node-exporter, k8s-monitoring, NATS) are
+  # here (ESO, cert-manager, node-exporter, k8s-monitoring, NATS) are
   # Argo-owned on the live cluster (platform-argo.k8s.yaml; adopted 2026-07-16) —
   # re-running their helm steps against it fails with argocd-controller
   # field-manager conflicts. Day-2 changes go through git + Argo sync; see
   # gitops/README.md ("Platform stack"). On an empty cluster this task brings up
   # the floor Argo needs (cilium, storage, ESO + the cluster store, the tailscale
-  # OAuth Secret, Argo CD itself); charts with no helm step here — metrics-server,
-  # tailscale-operator, victoria-metrics — arrive on the first Argo sync, and
+  # OAuth Secret, Argo CD itself); charts with no helm step here — cnpg,
+  # metrics-server, tailscale-operator, victoria-metrics — arrive on the first
+  # Argo sync, and
   # everything else Argo adopts.
   k8s:prod:platform:up:
     desc: "day-0 bring-up of an empty cluster (live releases are Argo-owned — see gitops/README.md)"
