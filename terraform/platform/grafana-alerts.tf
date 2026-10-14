@@ -1359,13 +1359,16 @@ resource "grafana_rule_group" "alerting_self" {
     }
   }
 
-  // Notification-delivery failure: fires when Grafana Cloud reports it's failing
-  // to push notifications to ANY contact point. This is the exact 2026-06-15
-  // failure — the Discord webhook was stale and every push 4xx'd while the rules
-  // fired into the void. Sourced from the Grafana Cloud usage datasource (the
-  // org's own internal alertmanager metrics), and labelled critical so it routes
-  // to the independent ntfy path — it must NOT depend on the very delivery path
-  // that's broken.
+  // Notification-delivery failure, split by which path is broken so each one
+  // pages over the path that still works. Grafana Cloud's usage datasource (the
+  // org's own internal alertmanager metrics) breaks failures down by
+  // `integration`: `discord` is the discord-alerts contact point, `webhook` is
+  // the ntfy and healthchecks.io ones.
+  //
+  // Discord dead: the exact 2026-06-15 failure — the webhook was stale and every
+  // push 4xx'd while the rules fired into the void. Critical, so it routes to the
+  // independent ntfy path; it must NOT depend on the very delivery path that's
+  // broken.
   rule {
     name           = "Grafana: alert notifications failing to deliver"
     for            = "5m"
@@ -1374,8 +1377,8 @@ resource "grafana_rule_group" "alerting_self" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Grafana is failing to deliver alert notifications to a contact point"
-      description = "grafanacloud_instance_alertmanager_notifications_failed_per_second is above zero — alert pushes to one or more contact points are failing, so firings are silently not reaching their channel. Most likely a stale webhook URL. The discord-alerts contact point reads SSM /platform/discord-alerts-webhook in the core account — not the /k8s/tripbot/discord-alerts-webhook copies in stage-1/prod-1, which only feed ESO consumers. Rotate the core parameter, then run `task tf:platform:apply` so the contact point picks up the new value, and re-test. This rule is delivered via the independent ntfy path so it survives a dead Discord webhook."
+      summary     = "Grafana is failing to deliver alert notifications to Discord"
+      description = "grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration=\"discord\"} is above zero — alert pushes to the discord-alerts contact point are failing, so firings are silently not reaching their channel. Most likely a stale webhook URL. The discord-alerts contact point reads SSM /platform/discord-alerts-webhook in the core account — not the /k8s/tripbot/discord-alerts-webhook copies in stage-1/prod-1, which only feed ESO consumers. Rotate the core parameter, then run `task tf:platform:apply` so the contact point picks up the new value, and re-test. This rule is delivered via the independent ntfy path so it survives a dead Discord webhook."
     }
     labels = {
       severity = "critical"
@@ -1391,7 +1394,65 @@ resource "grafana_rule_group" "alerting_self" {
       datasource_uid = data.grafana_data_source.usage.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(grafanacloud_instance_alertmanager_notifications_failed_per_second)"
+        expr          = "sum(grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration=\"discord\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // ntfy / healthchecks.io dead: a warning, Discord only. This must never be
+  // critical — a critical routes to ntfy, so ntfy's own refusals would page
+  // through ntfy and fail again, and that loop is what burned ntfy.sh's free
+  // daily quota on 2026-09-29 (206 of ~830 pushes in 30 days were this rule
+  // reporting its own delivery failures). Discord delivered throughout.
+  rule {
+    name           = "Grafana: webhook notifications failing to deliver"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Grafana is failing to deliver alert notifications to ntfy or healthchecks.io"
+      description = "grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration!=\"discord\"} is above zero — pushes to the ntfy-critical or healthchecks-deadman webhook contact points are failing, so the phone path or the deadman heartbeat is dark while Discord still delivers. A 429 from ntfy.sh is its free-tier daily quota: find the sender in the notification history (grafanacloud-alert-state-history, from=\"notify-history-events\") and cut the volume at the source. A 4xx on healthchecks.io is a stale ping URL (SSM in the core account, then `task tf:platform:apply`)."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.usage.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration!=\"discord\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
