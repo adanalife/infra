@@ -308,7 +308,7 @@
       "description": "Per date, distinct players with all five rounds recorded, split by the client that sent them: `web`, `ios`, `ipados`, `mac`, `app`. `unknown` is plays older than the client column. A player whose five rounds came from more than one client counts once, under one of them. This is the App Store against the web.",
       "gridPos": {
         "h": 9,
-        "w": 16,
+        "w": 12,
         "x": 0,
         "y": 22
       },
@@ -398,8 +398,8 @@
       "description": "Distinct players with at least one guess in the last seven days, per client. A player who played on two clients counts under both, so the tiles can sum past the real number of people.",
       "gridPos": {
         "h": 9,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 22
       },
       "datasource": {
@@ -436,6 +436,95 @@
             "body_type": "raw",
             "body_content_type": "application/json",
             "data": "{\"sql\":\"SELECT COUNT(DISTINCT CASE WHEN client = 'web' THEN player_id END) AS web, COUNT(DISTINCT CASE WHEN client = 'ios' THEN player_id END) AS ios, COUNT(DISTINCT CASE WHEN client = 'ipados' THEN player_id END) AS ipados, COUNT(DISTINCT CASE WHEN client = 'mac' THEN player_id END) AS mac, COUNT(DISTINCT CASE WHEN client = 'app' THEN player_id END) AS app, COUNT(DISTINCT CASE WHEN client IS NULL THEN player_id END) AS unknown FROM plays WHERE date > date('now', '-7 days') AND date <= date('now')\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            {
+              "selector": "web",
+              "text": "web",
+              "type": "number"
+            },
+            {
+              "selector": "ios",
+              "text": "ios",
+              "type": "number"
+            },
+            {
+              "selector": "ipados",
+              "text": "ipados",
+              "type": "number"
+            },
+            {
+              "selector": "mac",
+              "text": "mac",
+              "type": "number"
+            },
+            {
+              "selector": "app",
+              "text": "app",
+              "type": "number"
+            },
+            {
+              "selector": "unknown",
+              "text": "unknown",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Median points per guess, by client",
+      "description": "The middle guess's points for each client, over every guess ever recorded — do app players score differently from the web? Median for the same reason as the error tile: one lucky or absurd guess moves a mean and not this. `unknown` is plays older than the client column. A client with no plays yet shows nothing.",
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 22
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "guessr-d1"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "guessr-d1"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT MAX(CASE WHEN c = 'web' THEN points END) AS web, MAX(CASE WHEN c = 'ios' THEN points END) AS ios, MAX(CASE WHEN c = 'ipados' THEN points END) AS ipados, MAX(CASE WHEN c = 'mac' THEN points END) AS mac, MAX(CASE WHEN c = 'app' THEN points END) AS app, MAX(CASE WHEN c = 'unknown' THEN points END) AS unknown FROM (SELECT c, points, ROW_NUMBER() OVER (PARTITION BY c ORDER BY points) AS rn, COUNT(*) OVER (PARTITION BY c) AS n FROM (SELECT COALESCE(client, 'unknown') AS c, points FROM plays)) WHERE rn = (n + 1) / 2\"}"
           },
           "root_selector": "result.0.results",
           "columns": [
