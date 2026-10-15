@@ -4,13 +4,19 @@
 #
 # The gates run as steps of a single `gates` job: one runner, one check in the
 # PR's list, and a step that is inapplicable is skipped rather than absent, so
-# the job always reports and is safe to require in a ruleset. A repo's own
-# checks (its tests, a synth variant this job doesn't cover) go in a second job
-# of the caller, not here.
+# the job always reports and is safe to require in a ruleset. Each gate that
+# ran also posts its own commit status (`gates/<gate>`), so the checks tab
+# names the gate that failed; those are for reading, `gates / gates` stays the
+# one to require. A repo's own checks (its tests, a synth variant this job
+# doesn't cover) go in a second job of the caller, not here.
 #
-# Deliberately NOT folded in: anything needing `contents: write` (a re-synth
-# push, for instance) — job-level permissions apply to every step, so it
-# would put a write token in scope for the read-only gates.
+# Permissions are the caller's: a called workflow can only narrow what its
+# caller grants, so the block lives in each repo's pr-gates.yml — `contents`,
+# `pull-requests`, `actions` and `packages` read, plus `statuses: write` for
+# the per-gate statuses (without it they are skipped with a warning, the job's
+# verdict unchanged). Deliberately NOT folded in: anything needing `contents:
+# write` (a re-synth push, for instance) — job-level permissions apply to every
+# step, so it would put a write token in scope for the read-only gates.
 name: gates
 
 on:
@@ -84,13 +90,6 @@ on:
         description: The org automation app's key, for reading the private platform-gateway repo. Needed with `platforms`.
         required: false
 
-permissions:
-  contents: read
-  pull-requests: read
-  actions: read
-  # GHCR token exchange for `ghcr-image`.
-  packages: read
-
 jobs:
   gates:
     runs-on: ${{ inputs.runs-on }}
@@ -103,6 +102,7 @@ jobs:
       # release-please's standing release PR is titled `chore(main): release
       # X.Y.Z`, itself a conventional subject, so it passes with no exemption.
       - name: Conventional PR title
+        id: title
         uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -141,6 +141,7 @@ jobs:
       # release-please's own release PR is exempt by head branch — it collates
       # the fragments, it doesn't add one.
       - name: Require a changelog fragment
+        id: changelog
         if: ${{ inputs.changelog && !contains(github.event.pull_request.labels.*.name, 'skip-changelog') && !startsWith(github.head_ref, 'release-please--') }}
         env:
           BASE: ${{ github.base_ref }}
@@ -180,6 +181,7 @@ jobs:
           repositories: platform-gateway
 
       - name: Assert platforms.json matches platform-gateway/main
+        id: platforms
         if: inputs.platforms && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -201,6 +203,7 @@ jobs:
       # platforms.json. tripbot is public, so GITHUB_TOKEN reads it; no app
       # token to mint means no Dependabot skip either.
       - name: Assert the tripbot contracts match tripbot/main
+        id: contracts
         if: inputs.contracts != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -226,6 +229,7 @@ jobs:
           fi
 
       - name: Assert vendored assets match their pinned releases
+        id: vendor
         if: inputs.vendor-script != ''
         env:
           VENDOR: ${{ inputs.vendor-script }}
@@ -248,18 +252,22 @@ jobs:
         if: steps.changed.outputs.cdk8s == 'true'
 
       - name: Synth
+        id: synth
         if: steps.changed.outputs.cdk8s == 'true'
         run: task cdk8s:synth
 
       - name: Verify cdk8s/dist/ is committed in sync
+        id: dist
         if: steps.changed.outputs.cdk8s == 'true'
         run: git diff --exit-code -- cdk8s/dist/
 
       - name: Synth-time checks
+        id: cdk8s-tests
         if: steps.changed.outputs.cdk8s == 'true' && inputs.cdk8s-tests
         run: task cdk8s:test
 
       - name: Validate manifests (kubeconform)
+        id: kubeconform
         if: steps.changed.outputs.cdk8s == 'true' && inputs.kubeconform
         run: task cdk8s:validate
 
@@ -273,6 +281,7 @@ jobs:
       # both single-manifest ones, since a bare manifest 404s a request that
       # only accepts an index.
       - name: Assert the pinned image tags exist in GHCR
+        id: ghcr-tags
         if: steps.changed.outputs.cdk8s == 'true' && inputs.ghcr-image != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -299,6 +308,7 @@ jobs:
       # The repo's own gates, in the order given. Each is a command from the
       # repo root; the first failure ends the step with its name in the log.
       - name: Repo self-checks
+        id: checks
         if: inputs.checks != ''
         env:
           CHECKS: ${{ inputs.checks }}
@@ -313,44 +323,56 @@ jobs:
 
       # The gates run as steps of one job (see the header), so a red reads
       # `gates` in the checks list with nothing saying which gate died. This step
-      # reads the job's own step verdicts back and reports them: a gate/verdict
-      # table on the run summary, and one error annotation per failed gate,
-      # which is what the PR's checks tab shows under the check. Reporting only.
-      - name: Name the failing gate
-        if: failure()
+      # reads each gate's outcome from the job's own `steps` context and
+      # reports it three ways: a gate/verdict table on the run summary, one
+      # error annotation per failed gate, and one commit status per gate that
+      # ran (`gates/<gate>`, on the PR head), which is what the checks tab
+      # lists. A gate that was skipped posts nothing, so the list stays short.
+      # Reporting only: the status post is best-effort, since a Dependabot
+      # PR's token is read-only.
+      - name: Report each gate
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          JOB: ${{ github.job }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERDICTS: |
+            title=${{ steps.title.outcome }}
+            changelog=${{ steps.changelog.outcome }}
+            platforms=${{ steps.platforms.outcome }}
+            contracts=${{ steps.contracts.outcome }}
+            vendor=${{ steps.vendor.outcome }}
+            synth=${{ steps.synth.outcome }}
+            dist=${{ steps.dist.outcome }}
+            cdk8s-tests=${{ steps.cdk8s-tests.outcome }}
+            kubeconform=${{ steps.kubeconform.outcome }}
+            ghcr-tags=${{ steps.ghcr-tags.outcome }}
+            checks=${{ steps.checks.outcome }}
         run: |
-          # A step's verdict lands in the API a beat after the step ends.
-          for _ in 1 2; do
-            curl -fsSL \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
-              > "${RUNNER_TEMP}/jobs.json" \
-              || { echo "::warning::could not read this job's step verdicts"; exit 0; }
-            # A called workflow's job is listed as "<caller job> / <this job>".
-            jq -r --arg job "$JOB" '
-              .jobs[] | select(.name == $job or (.name | endswith(" / " + $job))) | .steps[]
-              | select(.conclusion != null)
-              | select(.name | test("^(Set up job|Complete job|Post )") | not)
-              | "\(.conclusion)\t\(.name)"' "${RUNNER_TEMP}/jobs.json" > "${RUNNER_TEMP}/verdicts"
-            grep -q '^failure' "${RUNNER_TEMP}/verdicts" && break
-            sleep 5
-          done
           {
             echo "## gates"
             echo
             echo "| Gate | Verdict |"
             echo "|---|---|"
-            awk -F'\t' '{
-              v = $1 == "success" ? "✅ pass" : $1 == "failure" ? "❌ **fail**" : $1 == "skipped" ? "⏭️ skipped" : $1
-              printf "| %s | %s |\n", $2, v
-            }' "${RUNNER_TEMP}/verdicts"
           } >> "$GITHUB_STEP_SUMMARY"
-          awk -F'\t' '$1 == "failure" {
-            printf "::error title=gates: %s failed::Open the \"%s\" step in this run'\''s log.\n", $2, $2
-          }' "${RUNNER_TEMP}/verdicts"
+          while IFS='=' read -r gate outcome; do
+            [ -z "$gate" ] && continue
+            case "$outcome" in
+              success)   verdict="✅ pass";      state=success; desc="passed" ;;
+              failure)   verdict="❌ **fail**";  state=failure; desc="failed — open the step in the run log" ;;
+              skipped)   verdict="⏭️ skipped";  state="" ;;
+              *)         verdict="$outcome";     state=error;   desc="$outcome" ;;
+            esac
+            echo "| $gate | $verdict |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$outcome" = failure ]; then
+              echo "::error title=gates: $gate failed::Open the \"$gate\" step in this run's log."
+            fi
+            [ -z "$state" ] && continue
+            curl -fsS -o /dev/null -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GH_REPO}/statuses/${SHA}" \
+              -d "{\"state\":\"${state}\",\"context\":\"gates/${gate}\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}" \
+              || echo "::warning::could not post the gates/${gate} status (the caller grants no statuses: write, or the token is read-only)"
+          done <<< "$VERDICTS"
