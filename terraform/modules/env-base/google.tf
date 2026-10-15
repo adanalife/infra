@@ -106,17 +106,26 @@ resource "google_project_service" "apis" {
 #   gcloud services api-keys get-key-string <name> --format='value(keyString)'
 # and seed it into the env's /k8s/tripbot/google-maps-api-key parameter
 # (secrets.tf in the calling root), which is what ESO hands the pods.
+data "google_project" "this" {
+  project_id = var.gcp_project
+}
+
 resource "google_apikeys_key" "maps" {
-  project      = var.gcp_project
+  # The API answers with the project *number*, and project forces
+  # replacement, so the number is what must be in config or every plan
+  # proposes a new key.
+  project      = data.google_project.this.number
   name         = var.maps_api_key_name
-  display_name = var.maps_api_key_name
+  display_name = "${var.gcp_project}-1"
 
   restrictions {
     api_targets {
       service = "geocoding-backend.googleapis.com"
+      methods = []
     }
     api_targets {
       service = "maps-backend.googleapis.com"
+      methods = []
     }
   }
 
