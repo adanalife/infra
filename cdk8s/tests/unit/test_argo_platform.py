@@ -91,6 +91,36 @@ def test_kyverno_delivers_its_policies():
     assert raw["directory"] == {"include": "policies.yml"}
 
 
+def test_argo_workflows_delivers_the_console_grant():
+    (app,) = [a for a in _apps(_synth()) if _release(a) == "argo-workflows"]
+    raw = app["spec"]["sources"][2]
+    assert raw["path"] == "k8s/argo-workflows"
+    assert raw["directory"] == {"include": "console-rbac.yml"}
+
+
+def test_console_workflows_grant_is_read_only_in_stage_1():
+    path = Path(__file__).resolve().parents[3] / "k8s/argo-workflows/console-rbac.yml"
+    docs = {d["kind"]: d for d in yaml.safe_load_all(path.read_text()) if d}
+    role, binding = docs["Role"], docs["RoleBinding"]
+    assert role["metadata"] == {
+        "name": "tripbot-console-workflows",
+        "namespace": "stage-1",
+    }
+    assert role["rules"] == [
+        {
+            "apiGroups": ["argoproj.io"],
+            "resources": ["workflows", "workflowtemplates", "cronworkflows"],
+            "verbs": ["get", "list", "watch"],
+        }
+    ]
+    assert binding["metadata"] == role["metadata"]
+    assert binding["roleRef"]["name"] == "tripbot-console-workflows"
+    assert {(s["name"], s["namespace"]) for s in binding["subjects"]} == {
+        ("tripbot-console", "prod-1"),
+        ("tripbot-console", "stage-1"),
+    }
+
+
 def test_kyverno_policies_audit_only_and_fail_open():
     # Moving a policy to Deny is a deliberate per-policy change once its
     # PolicyReports read clean; this makes that change show up here too. A

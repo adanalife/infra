@@ -210,6 +210,11 @@ spec:
     - repoURL: git@github.com:adanalife/infra.git
       targetRevision: main
       ref: values
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      path: k8s/argo-workflows
+      directory:
+        include: console-rbac.yml
   destination:
     server: https://kubernetes.default.svc
     namespace: argo-workflows

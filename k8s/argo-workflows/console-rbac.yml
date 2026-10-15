@@ -1,0 +1,40 @@
+# Read-only access for each env's tripbot-console to the video pipeline's
+# Argo Workflows objects in stage-1, where they run — the console's workflow
+# status panel. Delivered by the `argo-workflows` Argo Application alongside
+# the chart that ships these CRDs. Read-only on purpose: the console never
+# submits, retries, or deletes a workflow. Same shape as the console's Argo CD,
+# Burrito and ARC grants (cdk8s constructs argocd.py, burrito.py, arc.py); the
+# prod console reads across namespaces into stage-1.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tripbot-console-workflows
+  namespace: stage-1
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - workflows
+      - workflowtemplates
+      - cronworkflows
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tripbot-console-workflows
+  namespace: stage-1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tripbot-console-workflows
+subjects:
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: prod-1
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: stage-1

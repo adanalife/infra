@@ -265,7 +265,8 @@ def cluster_components(
     # Runs one workflow at a time at the most-preemptible priority, so a queue of
     # them yields to the stream. Cleanly Argo-manageable (no host-coupled values).
     # The CRs it runs are Workflows, submitted by hand or by the video-pipeline
-    # repo — nothing in this repo declares one.
+    # repo — nothing in this repo declares one. The raw manifest is the
+    # console's read-only grant on them in stage-1.
     if minipc:
         components.append(
             HelmComponent(
@@ -275,6 +276,7 @@ def cluster_components(
                 "argo-workflows",
                 "argo-workflows",
                 value_files=("argo-workflows/values.yml",),
+                manifests="argo-workflows/console-rbac.yml",
             )
         )
 
