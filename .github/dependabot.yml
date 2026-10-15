@@ -42,8 +42,10 @@ updates:
   # normally a runner or Node version bump rather than an API break, so the
   # attributability that keeps majors solo elsewhere buys little here — and
   # holding them out produced a standing queue of one-line PRs nobody merged.
+  # The composite actions under .github/actions/ pin actions of their own, which
+  # a scan of `/` alone never sees.
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
       day: monday
