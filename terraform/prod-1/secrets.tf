@@ -25,7 +25,6 @@ locals {
   # parameter name (sans leading /) => description
   ssm_parameters = {
     "prod-1/cloudflare-api-token"          = "Cloudflare API token used by the cloudflare provider."
-    "prod-1/grafana-cloud-api"             = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
     "k8s/grafana-pdc-agent"                = "Grafana Cloud Private Data Source Connect agent credentials, for the in-cluster pdc-agent."
     "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
