@@ -69,6 +69,27 @@ resource "github_actions_secret" "automation_app_private_key" {
   value       = data.aws_ssm_parameter.github_automation_app_key.value
 }
 
+# The Discord webhooks every repo's release and alert jobs post to. Seeded here
+# rather than by hand per repo because the posting steps skip or
+# continue-on-error on an empty secret, so a repo without one ships silent
+# alerts and nothing says so. The alerts URL is the Grafana contact point's;
+# the release URL is read off the managed parameter (not a data source), so a
+# plan succeeds before the parameter is seeded — the secret carries the
+# placeholder until the apply after seeding.
+resource "github_actions_secret" "discord_webhook_alerts" {
+  for_each    = local.automation_repos
+  repository  = each.value
+  secret_name = "DISCORD_WEBHOOK_ALERTS"
+  value       = data.aws_ssm_parameter.discord_alerts_webhook.value
+}
+
+resource "github_actions_secret" "discord_webhook" {
+  for_each    = local.automation_repos
+  repository  = each.value
+  secret_name = "DISCORD_WEBHOOK"
+  value       = aws_ssm_parameter.grafana["platform/discord-release-webhook"].value
+}
+
 # Dependabot keeps a secret store of its own, and nothing here writes to it.
 #
 # Worth knowing before adding it back: a Dependabot-authored `pull_request` event
