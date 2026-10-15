@@ -54,6 +54,12 @@ data "aws_ssm_parameter" "github_automation_app_key" {
 #   - platform/discord-alerts-webhook — the Grafana contact-point webhook URL.
 #     Same value as /k8s/tripbot/discord-alerts-webhook in the env accounts,
 #     which stays there for its ESO consumers (tripbot's !report, guessr).
+#     Also fanned out to every repo as the DISCORD_WEBHOOK_ALERTS Actions
+#     secret (github.tf).
+#   - platform/discord-release-webhook — the release-announcement channel's
+#     webhook URL, fanned out as the DISCORD_WEBHOOK Actions secret. Seed it
+#     after the first apply creates the placeholder; the next apply pushes the
+#     value to the repos.
 #   - platform/ntfy-critical-webhook — ntfy webhook URL for the independent
 #     critical-alert contact point.
 #   - platform/healthchecks-deadman-ping — healthchecks.io ping URL for the
@@ -67,6 +73,7 @@ locals {
     "platform/cloudflare-d1-read"        = "Cloudflare API token, D1 read only, for the Grafana Infinity datasource over guessr's play data."
     "platform/cloudflare-analytics-read" = "Cloudflare API token, Account Analytics read only, for the Grafana Infinity datasource over Worker invocation counts."
     "platform/discord-alerts-webhook"    = "Discord webhook URL for the Grafana discord-alerts contact point."
+    "platform/discord-release-webhook"   = "Discord webhook URL for release announcements, fanned out to the repos' DISCORD_WEBHOOK secret."
     "platform/ntfy-critical-webhook"     = "ntfy webhook URL for the Grafana independent critical-alert contact point."
     "platform/healthchecks-deadman-ping" = "healthchecks.io ping URL for the Grafana alerting deadman switch."
   }
