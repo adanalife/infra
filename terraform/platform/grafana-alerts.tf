@@ -93,6 +93,10 @@ locals {
   // the runner pool against node reboots. The alert says CI is stuck; this is
   // where you see whether the box bounced underneath it.
   ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
+  # Dashboard 12's "DB latency p95 by operation" and "Command latency p95 by
+  # command" panels, for the app-latency rules.
+  db_latency_panel_link      = "[db latency](${local.grafana_url}/d/app-latency/?viewPanel=16)"
+  command_latency_panel_link = "[command latency](${local.grafana_url}/d/app-latency/?viewPanel=6)"
 
   // The output frame-rate panel on the stream-health board, beside the
   // stream-state and encoder panels the encoder-wedged rule reads alongside.
@@ -5171,6 +5175,132 @@ resource "grafana_rule_group" "error_rate" {
 // console sends on a first knock is the fast path — this rule is the durable
 // one: it keeps saying so while the login is still waiting, and it catches a
 // login the owner already denied coming back.
+# Application latency, read off tripbot's two OTel histograms. Both panels
+# live on dashboard 12 (app-latency); these are the rules the item that
+# built the panels left for later. Thresholds come from a week of prod
+# (2026-10-07 → 10-14, VictoriaMetrics):
+#   - DB: the worst 5-minute p95 across every operation was 14 ms, and the
+#     per-operation 7-day p95s sit at 1–8 ms. 100 ms is 7× the weekly worst
+#     and still well under what a viewer would feel on a command.
+#   - Commands: a p95 threshold does not work here — most commands run a
+#     handful of times an hour, so a 5-minute p95 is one sample, and the
+#     designed latencies differ by command (!find's model hop is ~5 s,
+#     !state ~0.25 s). What never happens by design is a command past the
+#     histogram's top bucket: one in the whole week. So the rule counts those.
+resource "grafana_rule_group" "app_latency" {
+  name             = "app-latency"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Tripbot: database calls slow (p95 over 100 ms)"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "tripbot's Postgres p95 is {{ printf \"%.0f\" (index $values \"A\").Value }} ms over the last 5 min (normal is under 10)"
+      link        = "${local.db_latency_panel_link}"
+      description = "p95 of db_client_operation_duration_seconds across every operation has sat above 100 ms for 10 minutes. Normal prod is 1–8 ms per operation. The usual cause is the minipc NVMe (20–340 ms per write op when it degrades — cnpg and cilium-operator restart in lockstep when it does), then a lock pile-up or a missing index after a migration. Check the DB latency row on dashboard 12 for which operation moved, then the host-storage alerts and `kubectl -n prod-1-data get pods` for a cnpg restart."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m]))) * 1000"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [100] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name           = "Tripbot: a chat command took over 10 s"
+    for            = "1m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.command }} ran past 10 s ({{ printf \"%.0f\" (index $values \"A\").Value }} time(s) in the last 10 min)"
+      link        = "${local.command_latency_panel_link}"
+      description = "A command landed in the +Inf bucket of tripbot_command_duration_seconds — past 10 s, which no command is designed to take (!find's model hop is ~5 s, everything else well under 1 s). Prod sees about one a week. A run of them means the responder, the database or the gateway's chat send is hanging; the command row on dashboard 12 shows which."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (command) (increase(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=\"prod-1\", le=\"+Inf\"}[10m])) - sum by (command) (increase(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=\"prod-1\", le=\"10\"}[10m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 resource "grafana_rule_group" "console_access" {
   name             = "console-access"
   folder_uid       = grafana_folder.tripbot.uid
