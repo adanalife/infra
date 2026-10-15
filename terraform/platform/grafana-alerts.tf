@@ -5186,7 +5186,9 @@ resource "grafana_rule_group" "error_rate" {
 #     handful of times an hour, so a 5-minute p95 is one sample, and the
 #     designed latencies differ by command (!find's model hop is ~5 s,
 #     !state ~0.25 s). What never happens by design is a command past the
-#     histogram's top bucket: one in the whole week. So the rule counts those.
+#     histogram's top bucket: three in the week (!find twice, !state once).
+#     So the rule counts those, and fires on two or more in ten minutes so a
+#     lone straggler stays a dashboard fact rather than a push.
 resource "grafana_rule_group" "app_latency" {
   name             = "app-latency"
   folder_uid       = grafana_folder.tripbot.uid
@@ -5247,16 +5249,16 @@ resource "grafana_rule_group" "app_latency" {
   }
 
   rule {
-    name           = "Tripbot: a chat command took over 10 s"
+    name           = "Tripbot: chat commands running past 10 s"
     for            = "1m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "{{ $labels.command }} ran past 10 s ({{ printf \"%.0f\" (index $values \"A\").Value }} time(s) in the last 10 min)"
+      summary     = "{{ $labels.command }} ran past 10 s {{ printf \"%.0f\" (index $values \"A\").Value }} times in the last 10 min"
       link        = "${local.command_latency_panel_link}"
-      description = "A command landed in the +Inf bucket of tripbot_command_duration_seconds — past 10 s, which no command is designed to take (!find's model hop is ~5 s, everything else well under 1 s). Prod sees about one a week. A run of them means the responder, the database or the gateway's chat send is hanging; the command row on dashboard 12 shows which."
+      description = "Two or more runs of one command landed in the +Inf bucket of tripbot_command_duration_seconds within ten minutes — past 10 s, which no command is designed to take (!find's model hop is ~5 s, everything else well under 1 s). Prod sees about three lone stragglers a week, which this does not fire on. A cluster means the responder, the database or the gateway's chat send is hanging; the command row on dashboard 12 shows which."
     }
     labels = {
       severity = "warning"
@@ -5291,7 +5293,7 @@ resource "grafana_rule_group" "app_latency" {
         expression = "A"
         conditions = [{
           type      = "query"
-          evaluator = { type = "gt", params = [0.5] }
+          evaluator = { type = "gt", params = [1.5] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
