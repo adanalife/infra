@@ -15,4 +15,8 @@ module "env_base" {
   secondary_subdomain                = local.secondary_subdomain
   static_site_public_dir             = var.static_site_public_dir
   primary_acm_cert_alternative_names = var.primary_acm_cert_alternative_names
+
+  # The uuid gcloud gave the key when it was minted by hand on 2026-05-18
+  # (display name tripbot-prod-1); maps-api-key.tf imports it under this id.
+  maps_api_key_name = "2a87a600-38b5-4a5f-a6bb-d917206a286a"
 }

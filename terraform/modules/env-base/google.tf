@@ -75,16 +75,16 @@ resource "google_service_account_iam_member" "ci_workload_identity" {
 # API enablement
 # ---------------------------------------------------------------------------
 #
-# youtube/maps/geocoding are the app-facing APIs; the rest are the meta-APIs
-# terraform's own auth model (impersonation + WIF) depends on. The Maps *key*
-# itself stays on the gcloud Taskfile target for now; importing it into
-# google_apikeys_key is deferred.
+# youtube/maps/geocoding are the app-facing APIs; apikeys is what manages the
+# Maps key below; the rest are the meta-APIs terraform's own auth model
+# (impersonation + WIF) depends on.
 # disable_on_destroy=false — never tear an enabled API down on resource removal.
 resource "google_project_service" "apis" {
   for_each = toset([
     "youtube.googleapis.com",
     "maps-backend.googleapis.com",
     "geocoding-backend.googleapis.com",
+    "apikeys.googleapis.com",
     "serviceusage.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
@@ -95,6 +95,32 @@ resource "google_project_service" "apis" {
   project            = var.gcp_project
   service            = each.value
   disable_on_destroy = false
+}
+
+# ---------------------------------------------------------------------------
+# The Maps API key tripbot geocodes with
+# ---------------------------------------------------------------------------
+#
+# One key per env, restricted to the two Maps services the app calls. The key
+# string never passes through terraform output: read it with
+#   gcloud services api-keys get-key-string <name> --format='value(keyString)'
+# and seed it into the env's /k8s/tripbot/google-maps-api-key parameter
+# (secrets.tf in the calling root), which is what ESO hands the pods.
+resource "google_apikeys_key" "maps" {
+  project      = var.gcp_project
+  name         = var.maps_api_key_name
+  display_name = var.maps_api_key_name
+
+  restrictions {
+    api_targets {
+      service = "geocoding-backend.googleapis.com"
+    }
+    api_targets {
+      service = "maps-backend.googleapis.com"
+    }
+  }
+
+  depends_on = [google_project_service.apis]
 }
 
 # ---------------------------------------------------------------------------
