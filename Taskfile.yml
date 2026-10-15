@@ -806,6 +806,10 @@ tasks:
         msg: "unknown workspace {{.WS}} — one of stage, prod, prod-data, core, platform"
       - sh: 'case "{{.VERB}}" in plan|apply|init|destroy|import) ;; *) exit 1 ;; esac'
         msg: "unknown verb {{.VERB}} — one of plan, apply, init, destroy, import"
+      # prod-1-data holds the data stores; a resource arrives there by `terraform
+      # state mv` from the workspace that created it, never by import.
+      - sh: '! { [ "{{.WS}}" = prod-data ] && [ "{{.VERB}}" = import ]; }'
+        msg: "prod-1-data takes resources by `terraform state mv` only, never import"
     dir: terraform/{{.DIR}}
     cmds:
       - aws-vault exec {{.PROFILE}} -- mise exec -- terraform {{.VERB}} {{.CLI_ARGS}}
