@@ -267,6 +267,18 @@ destinations:
         action = "drop"
       }
       write_relabel_config {
+        // The same rule for the OTLP-pushed app series: a pod's push carries
+        // deployment_environment (promoted from its resource attributes) and
+        // no namespace label, so the drop above never sees it — stage's
+        // console series were reaching the cloud through that gap. Stage
+        // tripbot and onscreens export too, and their families sit on the
+        // keep-list below; this is what keeps them local-VM-only.
+        source_labels = ["deployment_environment", "__tmp_cloud_keep"]
+        separator = "/"
+        regex = "stage-1/"
+        action = "drop"
+      }
+      write_relabel_config {
         // Drop the marker rather than trusting remote-write to strip __-prefixed
         // labels for us. One rule, one less assumption.
         regex = "__tmp_cloud_keep"
