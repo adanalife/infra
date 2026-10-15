@@ -50,3 +50,12 @@ reportsController:
       extraResources:
         - apiGroups: [""]
           resources: [persistentvolumes]
+
+# The kyverno-api subchart (the policies.kyverno.io CRDs) renders its labels
+# map verbatim, and its default is empty. Server-side apply stores no empty
+# map, so a bare `labels: {}` leaves those CRDs permanently OutOfSync in Argo.
+# One real label keeps the rendered map non-empty; it matches the
+# kyverno.io CRDs' part-of label.
+kyverno-api:
+  labels:
+    app.kubernetes.io/part-of: kyverno-crds
