@@ -83,6 +83,16 @@ class EnvConfig:
     # on the same envs as the dashcam PV (dashcam_mode == "nfs").
     music_nfs_path: str = ""  # from $MUSIC_NFS_PATH at synth
     music_pv_name: str = "obs-music-nfs"  # stage needs its own (PVs bind 1:1)
+    # --- parked-clips share (stage only) ----------------------------------------
+    # The pipeline's output export (`_opt`), whose `<corpus>/clips/` hold the
+    # season-2 clips as they are rendered and ingested — stage's database, so
+    # stage is where the console previews them. Stage playout mounts the claim
+    # read-only beside its corpus so `/frame` and `/clip` can answer for a clip
+    # that doesn't air here yet; nothing in it reaches the playlist. Empty means
+    # no PV/PVC — prod never mounts the NAS in its stream path
+    # (decisions/prod-stream-path-no-nas-dependency).
+    parked_pv_name: str = ""
+    parked_nfs_path: str = ""  # from $PARKED_NFS_PATH at synth
     # --- node-local dashcam corpus (the NFS<->local serving toggle) -------------
     # When True, a node-local `vlc-dashcam-local` PVC (local-path, on the minipc)
     # is emitted beside the NFS PVC, and the one-shot copy Job (DashcamLocalizeChart)
@@ -182,6 +192,7 @@ ENVS: dict[str, EnvConfig] = {
         external_dns_role_arn=_STAGE_ROLE,
         nfs_pv_name="vlc-dashcam-nfs-stage",
         music_pv_name="obs-music-nfs-stage",
+        parked_pv_name="dashcam-parked-nfs-stage",
         # Stage reads the shared $NFS_PATH (= the canonical _opt/clips corpus),
         # same as prod, but keeps its own PV name (PVs bind 1:1).
         # postgres + its SecretStore land in stage-1-data, so a
@@ -249,5 +260,6 @@ def load_env(name: str) -> EnvConfig:
             nfs_server=os.environ.get("NFS_SERVER", "<NFS server address>"),
             nfs_path=nfs_path,
             music_nfs_path=os.environ.get("MUSIC_NFS_PATH", "<music export path>"),
+            parked_nfs_path=os.environ.get("PARKED_NFS_PATH", "<parked export path>"),
         )
     return env

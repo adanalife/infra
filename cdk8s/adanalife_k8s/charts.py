@@ -22,6 +22,8 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_localize_job,
     emit_dashcam_pv,
     emit_dashcam_pvc,
+    emit_parked_pv,
+    emit_parked_pvc,
 )
 from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.music import (
@@ -85,6 +87,8 @@ class SupportingChart(Chart):
             # the staging side it's mirrored from.
             emit_music_pvc(self, env)
             emit_music_local_pvc(self, env)
+            # The parked-clips claim stage playout mounts (no-op elsewhere).
+            emit_parked_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -182,6 +186,8 @@ class DataChart(Chart):
             # SupportingChart for the isolated-DB case).
             emit_music_pvc(self, env)
             emit_music_local_pvc(self, env)
+            # The parked-clips claim stage playout mounts (no-op elsewhere).
+            emit_parked_pvc(self, env)
 
 
 class MediamtxChart(Chart):
@@ -215,6 +221,7 @@ class NfsPVChart(Chart):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
         emit_music_pv(self, env)
+        emit_parked_pv(self, env)
 
 
 class DashcamLocalizeChart(Chart):

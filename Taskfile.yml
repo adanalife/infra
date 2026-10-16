@@ -209,7 +209,7 @@ tasks:
         sh: 'case "$(kubectl config current-context 2>/dev/null)" in *minipc*|tailscale-operator.*) true ;; *) false ;; esac'
         msg: "refusing: this task targets the minipc (stage/prod) cluster, but the current kube-context is not a minipc context. Run kubectl config use-context admin@adanalife-minipc first."
       - sh: test -f dashcam-nfs.local.env
-        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH/MUSIC_NFS_PATH"
+        msg: "cdk8s/dashcam-nfs.local.env missing — cp dashcam-nfs.local.env.example and fill in NFS_SERVER/NFS_PATH/MUSIC_NFS_PATH/PARKED_NFS_PATH"
     cmds:
       - |
         set -euo pipefail
@@ -217,6 +217,7 @@ tasks:
         : "${NFS_SERVER:?set NFS_SERVER in cdk8s/dashcam-nfs.local.env}"
         : "${NFS_PATH:?set NFS_PATH in cdk8s/dashcam-nfs.local.env}"
         : "${MUSIC_NFS_PATH:?set MUSIC_NFS_PATH in cdk8s/dashcam-nfs.local.env}"
+        : "${PARKED_NFS_PATH:?set PARKED_NFS_PATH in cdk8s/dashcam-nfs.local.env}"
         out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
         # Synth via main.py directly (NOT `cdk8s synth`, which forces output=dist
         # from cdk8s.yaml) so the real coords land in a throwaway dir, never the
@@ -226,7 +227,7 @@ tasks:
           # kubectl diff exits 1 when it finds differences; the diff itself is the answer.
           kubectl diff -f "$out/{{.ENV}}-nfs-pv.k8s.yaml" || [ $? -eq 1 ]
         else
-          echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (cluster-scoped, outside Argo)"
+          echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (+ parked on stage) (cluster-scoped, outside Argo)"
           kubectl apply -f "$out/{{.ENV}}-nfs-pv.k8s.yaml"
         fi
 
