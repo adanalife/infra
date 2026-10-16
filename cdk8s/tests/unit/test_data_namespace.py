@@ -14,7 +14,7 @@ from dataclasses import replace
 
 from cdk8s import Testing as K8sTesting
 
-from adanalife_k8s.charts import DataChart, SupportingChart
+from adanalife_k8s.charts import DataChart, NfsPVChart, SupportingChart
 from adanalife_k8s.config import EnvConfig, load_env
 
 
@@ -189,3 +189,39 @@ def test_colocated_data_unit_declares_no_namespace():
     assert not [
         o for o in _synth(DataChart, _COLOCATED_NFS) if o["kind"] == "Namespace"
     ]
+
+
+# --- the parked-clips share: stage only ---
+
+
+def test_stage_supporting_emits_the_parked_claim_bound_to_its_pv():
+    objs = _synth(SupportingChart, load_env("stage-1"))
+    pvc = _by(objs, "PersistentVolumeClaim", "dashcam-parked")[0]
+    assert _ns(pvc) == "stage-1"
+    assert pvc["spec"]["volumeName"] == "dashcam-parked-nfs-stage"
+    assert pvc["spec"]["accessModes"] == ["ReadOnlyMany"]
+
+
+def test_prod_has_no_parked_claim_or_pv():
+    # prod never mounts the NAS in its stream path; parked clips are a stage affair.
+    assert not _by(
+        _synth(SupportingChart, load_env("prod-1")),
+        "PersistentVolumeClaim",
+        "dashcam-parked",
+    )
+    assert not _by(
+        _synth(NfsPVChart, load_env("prod-1")),
+        "PersistentVolume",
+        "dashcam-parked-nfs",
+    )
+
+
+def test_stage_parked_pv_is_soft_mounted_off_the_parked_export():
+    pv = _by(
+        _synth(NfsPVChart, load_env("stage-1")),
+        "PersistentVolume",
+        "dashcam-parked-nfs-stage",
+    )[0]
+    assert pv["spec"]["mountOptions"] == ["soft", "timeo=150", "retrans=3"]
+    assert pv["spec"]["nfs"]["path"] == "<parked export path>"
+    assert pv["spec"]["nfs"]["readOnly"] is True

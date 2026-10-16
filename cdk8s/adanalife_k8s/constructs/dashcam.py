@@ -208,3 +208,52 @@ def emit_dashcam_localize_job(scope: Construct, env: EnvConfig) -> None:
             ),
         ),
     )
+
+
+def emit_parked_pvc(scope: Construct, env: EnvConfig) -> None:
+    """The parked-clips PVC — the pipeline's `_opt` output export, which stage
+    playout mounts read-only beside its corpus so the console can preview a
+    season-2 clip before it airs. Argo-managed like the dashcam PVC, in the app
+    namespace (playout mounts it), bound 1:1 to the out-of-band PV. No-op on
+    envs with no preview PV, which is every env but stage."""
+    if not env.parked_pv_name:
+        return
+    k8s.KubePersistentVolumeClaim(
+        scope,
+        "parked-pvc",
+        metadata=k8s.ObjectMeta(name="dashcam-parked", namespace=env.namespace or None),
+        spec=k8s.PersistentVolumeClaimSpec(
+            access_modes=["ReadOnlyMany"],
+            storage_class_name="",
+            volume_name=env.parked_pv_name,
+            resources=k8s.ResourceRequirements(
+                requests={"storage": k8s.Quantity.from_string("1Ti")}
+            ),
+        ),
+    )
+
+
+def emit_parked_pv(scope: Construct, env: EnvConfig) -> None:
+    """The parked-clips NFS PersistentVolume — the pipeline's `_opt` export,
+    cluster-scoped and provisioned out-of-band with the dashcam and music PVs
+    (`task k8s:<env>:nfs-pv`, coords from the gitignored dashcam-nfs.local.env;
+    the golden carries the `<parked export path>` placeholder). Soft-mounted
+    like the others, so a dead NAS costs a preview an I/O error rather than a
+    wedged thread. No-op on envs with no preview PV."""
+    if not env.parked_pv_name:
+        return
+    k8s.KubePersistentVolume(
+        scope,
+        "parked-pv",
+        metadata=k8s.ObjectMeta(name=env.parked_pv_name),
+        spec=k8s.PersistentVolumeSpec(
+            capacity={"storage": k8s.Quantity.from_string("1Ti")},
+            access_modes=["ReadOnlyMany"],
+            persistent_volume_reclaim_policy="Retain",
+            storage_class_name="",
+            mount_options=NFS_MOUNT_OPTIONS,
+            nfs=k8s.NfsVolumeSource(
+                server=env.nfs_server, path=env.parked_nfs_path, read_only=True
+            ),
+        ),
+    )
