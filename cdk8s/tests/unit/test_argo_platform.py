@@ -98,10 +98,19 @@ def test_argo_workflows_delivers_the_console_grant():
     assert raw["directory"] == {"include": "console-rbac.yml"}
 
 
-def test_console_workflows_grant_is_read_only_in_stage_1():
+def _console_rbac() -> dict[tuple[str, str], dict]:
     path = Path(__file__).resolve().parents[3] / "k8s/argo-workflows/console-rbac.yml"
-    docs = {d["kind"]: d for d in yaml.safe_load_all(path.read_text()) if d}
-    role, binding = docs["Role"], docs["RoleBinding"]
+    return {
+        (d["kind"], d["metadata"]["name"]): d
+        for d in yaml.safe_load_all(path.read_text())
+        if d
+    }
+
+
+def test_console_workflows_grant_is_read_only_in_stage_1():
+    docs = _console_rbac()
+    role = docs[("Role", "tripbot-console-workflows")]
+    binding = docs[("RoleBinding", "tripbot-console-workflows")]
     assert role["metadata"] == {
         "name": "tripbot-console-workflows",
         "namespace": "stage-1",
@@ -119,6 +128,29 @@ def test_console_workflows_grant_is_read_only_in_stage_1():
         ("tripbot-console", "prod-1"),
         ("tripbot-console", "stage-1"),
     }
+
+
+def test_only_the_stage_console_may_submit_a_workflow():
+    # The re-run button: create on workflows and nothing else, and never for
+    # the prod console — it cannot start work on the cluster.
+    docs = _console_rbac()
+    role = docs[("Role", "tripbot-console-workflows-submit")]
+    binding = docs[("RoleBinding", "tripbot-console-workflows-submit")]
+    assert role["metadata"]["namespace"] == "stage-1"
+    assert role["rules"] == [
+        {"apiGroups": ["argoproj.io"], "resources": ["workflows"], "verbs": ["create"]}
+    ]
+    assert binding["roleRef"]["name"] == "tripbot-console-workflows-submit"
+    assert [(s["name"], s["namespace"]) for s in binding["subjects"]] == [
+        ("tripbot-console", "stage-1")
+    ]
+    # Nothing grants the prod console a write verb on any workflows resource.
+    for (kind, _), doc in docs.items():
+        if kind != "Role":
+            continue
+        for rule in doc["rules"]:
+            if "create" in rule["verbs"]:
+                assert doc["metadata"]["name"] == "tripbot-console-workflows-submit"
 
 
 def test_kyverno_policies_audit_only_and_fail_open():
