@@ -1,10 +1,17 @@
-# Read-only access for each env's tripbot-console to the video pipeline's
-# Argo Workflows objects in stage-1, where they run — the console's workflow
-# status panel. Delivered by the `argo-workflows` Argo Application alongside
-# the chart that ships these CRDs. Read-only on purpose: the console never
-# submits, retries, or deletes a workflow. Same shape as the console's Argo CD,
-# Burrito and ARC grants (cdk8s constructs argocd.py, burrito.py, arc.py); the
-# prod console reads across namespaces into stage-1.
+# Each env's tripbot-console and the video pipeline's Argo Workflows objects
+# in stage-1, where they run. Two grants, delivered by the `argo-workflows`
+# Argo Application alongside the chart that ships these CRDs:
+#
+#   - read, for both consoles — the pipeline status page; the prod console
+#     reads across namespaces into stage-1. Same shape as the console's Argo
+#     CD, Burrito and ARC grants (cdk8s constructs argocd.py, burrito.py,
+#     arc.py).
+#   - create on `workflows`, for the stage console only — the re-run button
+#     on a source's page submits a Workflow from the per-source
+#     WorkflowTemplate. Create and nothing else: the console never retries,
+#     stops or deletes a run, and the templates stay read-only. The prod
+#     console cannot start work on the cluster; its page links to stage for
+#     the action.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -35,6 +42,33 @@ subjects:
   - kind: ServiceAccount
     name: tripbot-console
     namespace: prod-1
+  - kind: ServiceAccount
+    name: tripbot-console
+    namespace: stage-1
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tripbot-console-workflows-submit
+  namespace: stage-1
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - workflows
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tripbot-console-workflows-submit
+  namespace: stage-1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tripbot-console-workflows-submit
+subjects:
   - kind: ServiceAccount
     name: tripbot-console
     namespace: stage-1
