@@ -62,6 +62,21 @@ controller:
       url: https://adanalife.grafana.net/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22grafanacloud-logs%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22%7Bnamespace%3D%5C%22${metadata.namespace}%5C%22%2C%20instance%3D~%5C%22${metadata.namespace}%2F${metadata.name}-.%2A%5C%22%7D%22%2C%22queryType%22%3A%22range%22%2C%22datasource%22%3A%7B%22type%22%3A%22loki%22%2C%22uid%22%3A%22grafanacloud-logs%22%7D%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22${status.startedAtEpoch}%22%2C%22to%22%3A%22${status.finishedAtEpoch}%22%7D%7D%7D
   metricsConfig:
     enabled: true
+  # Workflow tracing: a `workflow` trace per run with a `node` span per DAG node
+  # (attributes `name` = the Workflow, `node_id`), pushed to the cluster's OTLP
+  # receiver and on to Tempo. The traces-only endpoint, not the generic
+  # OTEL_EXPORTER_OTLP_ENDPOINT: that one also turns on an OTLP metrics push,
+  # duplicating the scrape above. Argo marks tracing beta, and a span that
+  # outlives a controller restart is lost. Workload containers carry no OTEL_*
+  # (they get Argo's TRACEPARENT either way), so the per-pod executor spans stay
+  # off.
+  extraEnv:
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+      value: http://k8s-monitoring-alloy-receiver.monitoring.svc:4318/v1/traces
+    - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+      value: http/protobuf
+    - name: OTEL_SERVICE_NAME
+      value: argo-workflows
   podAnnotations:
     # What makes alloy-metrics scrape the controller (the fleet convention —
     # k8s/monitoring/prod-1/values.yml remaps the chart's k8s.grafana.com/*
