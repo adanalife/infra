@@ -1,0 +1,8 @@
+---
+# Labels of the self-hosted runners this repo's workflows target. actionlint
+# validates `runs-on` against GitHub's hosted-label list plus whatever is
+# declared here, so an undeclared label reads as a typo.
+self-hosted-runner:
+  labels:
+    # Org-level Actions Runner Controller scale set, amd64, on the k8s cluster.
+    - arc-amd64
