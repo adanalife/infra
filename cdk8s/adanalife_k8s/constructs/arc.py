@@ -39,6 +39,11 @@ from adanalife_k8s.eso import external_secret
 
 SYSTEMS_NS = "arc-systems"
 RUNNERS_NS = "arc-runners"
+# The ServiceAccount the chart gives runner pods with no containerMode:
+# `<runnerScaleSetName>-gha-rs-no-permission` (k8s/arc/runners/values.yml names
+# the set `arc-amd64`). It has no grants of its own; a Role elsewhere binds it
+# (supporting.py's stage-rollout grant).
+RUNNER_SA = "arc-amd64-gha-rs-no-permission"
 # Parent of the per-pod job workspaces (k8s/arc/runners/values.yml mounts this
 # hostPath with subPathExpr: $(POD_NAME)). On the T5, deliberately: /var is the
 # volume etcd fsyncs to and a CI write burst there stalls its lease.

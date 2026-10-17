@@ -62,3 +62,23 @@ def test_prod_supporting_owns_every_priority_class():
         "dashcam-cv-low": -10,
     }
     assert not [o for o in _synth("stage-1") if o["kind"] == "PriorityClass"]
+
+
+def test_stage_grants_the_ci_runners_a_rollout_restart():
+    # Stage runs :main and only a pod restart picks a merge up: the image
+    # workflow's roll-stage job patches the restart annotation from the ARC
+    # pool, with this Role. Prod rolls by sync and gets no such grant.
+    objs = _synth("stage-1")
+    (role,) = _by(objs, "Role", "ci-stage-rollout")
+    assert role["metadata"]["namespace"] == "stage-1"
+    rules = {(tuple(r["resources"]), tuple(r["verbs"])) for r in role["rules"]}
+    assert rules == {(("deployments",), ("get", "patch")), (("pods",), ("list",))}
+    (binding,) = _by(objs, "RoleBinding", "ci-stage-rollout")
+    assert binding["subjects"] == [
+        {
+            "kind": "ServiceAccount",
+            "name": "arc-amd64-gha-rs-no-permission",
+            "namespace": "arc-runners",
+        }
+    ]
+    assert not _by(_synth("prod-1"), "Role", "ci-stage-rollout")
