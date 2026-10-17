@@ -16,6 +16,10 @@ module "env_base" {
   static_site_public_dir             = var.static_site_public_dir
   primary_acm_cert_alternative_names = var.primary_acm_cert_alternative_names
 
+  # Stage's own key, restricted like prod's. The only other key in
+  # tripbot-stage is the unrestricted one Google creates on enablement.
+  maps_api_key_name = "tripbot-stage-1"
+
   # A deliberate divergence from the prod-1 sibling, not drift: stage is where
   # a broken trust policy is cheap to discover, so keyless CI auth proves out
   # here before prod-1 or core opt in. Mirror this line once the infra
