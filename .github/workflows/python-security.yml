@@ -17,6 +17,10 @@ on:
         description: The package directory bandit scans.
         type: string
         default: src
+    secrets:
+      DISCORD_WEBHOOK_ALERTS:
+        description: Where a failed scheduled run is reported. A cron run notifies nobody otherwise.
+        required: false
 
 permissions:
   contents: read
@@ -55,3 +59,21 @@ jobs:
         run: |
           uv sync --frozen --no-dev
           uv run --no-sync --with pip-audit pip-audit
+
+  # Scheduled runs only: a PR or push red already shows on the PR or commit.
+  alert:
+    needs: [bandit, pip-audit]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+    steps:
+      - name: Alert Discord on failure
+        if: env.DISCORD_WEBHOOK != ''
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Scheduled security scan (bandit/pip-audit) failed for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): [run log]({{ RUN_URL }})'

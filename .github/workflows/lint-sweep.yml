@@ -16,6 +16,10 @@ on:
         description: The repo's super-linter settings, one KEY=value per line; blank lines and `#` comments are dropped.
         type: string
         default: .github/super-linter.env
+    secrets:
+      DISCORD_WEBHOOK_ALERTS:
+        description: Where a failed scheduled run is reported. A cron run notifies nobody otherwise.
+        required: false
 
 # super-linter reports each linter as its own commit status (MULTI_STATUS is on
 # by default). Without statuses: write every one of those POSTs 403s — a WARN
@@ -55,3 +59,21 @@ jobs:
           VALIDATE_ALL_CODEBASE: true
           # The Actions step summary still carries the same content.
           ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
+
+  # Scheduled runs only: a PR or push red already shows on the PR or commit.
+  alert:
+    needs: [super-linter]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+    steps:
+      - name: Alert Discord on failure
+        if: env.DISCORD_WEBHOOK != ''
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Weekly super-linter sweep failed for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): [run log]({{ RUN_URL }})'
