@@ -107,19 +107,31 @@ jobs:
   # the only tell is a deploy behaving like an older commit. Points at the log
   # rather than naming a cause — a lost packages grant, a base-image tag that
   # moved, and a genuine build break all arrive here identically.
+  #
+  # A private caller alerts from arc-amd64: when an Actions budget stops GitHub
+  # starting its hosted build, the build job reports `failure` with no steps,
+  # and an alert on the hosted pool is refused the same way. A public caller
+  # stays hosted — its minutes are free, and the org's runner group excludes
+  # public repos.
   alert:
     needs: [build]
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'arc-amd64' || 'ubuntu-latest' }}
     timeout-minutes: 5
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
     steps:
+      # curl rather than Ilshidur/action-discord: that is a Docker container
+      # action, and the arc-amd64 pool has no Docker daemon. Both pools carry
+      # curl and jq.
       - name: Alert Discord on failure
         if: env.DISCORD_WEBHOOK != ''
         continue-on-error: true
-        uses: Ilshidur/action-discord@0.4.0
         env:
+          REPO: ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          args: 'Dev image :main failed to rebuild for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}) — whatever deploys :main still pulls the previous commit: [run log]({{ RUN_URL }})'
+        run: |
+          set -euo pipefail
+          jq -n --arg c "Dev image :main failed to rebuild for [${REPO}](${REPO_URL}) — whatever deploys :main still pulls the previous commit: [run log](${RUN_URL})" '{content: $c}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$DISCORD_WEBHOOK"
