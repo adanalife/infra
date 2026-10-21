@@ -46,3 +46,11 @@ def test_script_pushes_every_station_to_the_pod_local_icecast():
     for mount, folder, _ in STATIONS:
         assert f'mount = "{mount}"' in script
         assert f'"/music/{folder}"' in script
+
+
+def test_an_empty_station_drops_its_mount_instead_of_airing_silence():
+    # mksafe would serve silence, which tripbot's reachability probe reads as a
+    # healthy stream, so the watchdog would swap back to it every cooldown.
+    script = _script()
+    assert "mksafe" not in script
+    assert script.count("fallible = true") == len(STATIONS)
