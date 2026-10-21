@@ -24,6 +24,11 @@ variable "gcp_project" {
   description = "GCP project ID this environment manages, e.g. tripbot-stage"
 }
 
+variable "maps_api_key_name" {
+  type        = string
+  description = "Resource id of the env's Maps API key (google_apikeys_key.name): a slug for a key terraform creates, or the uuid of one it imported"
+}
+
 variable "external_dns_role" {
   type    = string
   default = "ExternalDNSRole"
