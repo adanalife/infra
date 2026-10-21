@@ -38,6 +38,7 @@ locals {
     "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
     "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
     "k8s/tripbot/discord-bot-token"        = "Discord bot token for the prod tripbot Discord session."
+    "k8s/tripbot/radio-stations"           = "Background-audio radio station list for tripbot."
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
