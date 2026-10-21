@@ -59,6 +59,24 @@ _ICECAST_UID = 1000
 _LIQUIDSOAP_UID = 100
 
 
+# Icecast's MP3 mounts default to ISO8859-1 metadata, so it transcodes the UTF-8
+# titles Liquidsoap sends and "Blue Öyster Cult" reaches tripbot as Latin-1
+# bytes that don't decode. A default <mount> charset keeps them UTF-8. The
+# config is rewritten through its contents because icecast owns the file but
+# not /etc, where `sed -i` would need to create its temp file. The image's
+# entrypoint then writes the password env vars into it before exec'ing icecast.
+_DEFAULT_MOUNT = '<mount type="default"><charset>UTF-8</charset></mount>'
+_ICECAST_START = (
+    f"c=\"$(sed 's|</icecast>|{_DEFAULT_MOUNT}</icecast>|' /etc/icecast.xml)\" "
+    "&& printf '%s\\n' \"$c\" > /etc/icecast.xml && "
+    f'p="$(cat {_PASSWORD_FILE})"; '
+    'export ICECAST_SOURCE_PASSWORD="$p" '
+    'ICECAST_ADMIN_PASSWORD="$p" '
+    'ICECAST_RELAY_PASSWORD="$p"; '
+    "exec docker-entrypoint icecast -c /etc/icecast.xml"
+)
+
+
 def _script() -> str:
     outputs = "\n".join(
         f"""output.icecast(
@@ -145,17 +163,7 @@ class Radio(Construct):
                             k8s.Container(
                                 name="icecast",
                                 image=ICECAST_IMAGE,
-                                # The image's entrypoint writes these env vars
-                                # into icecast.xml before exec'ing icecast.
-                                command=[
-                                    "sh",
-                                    "-c",
-                                    f'p="$(cat {_PASSWORD_FILE})"; '
-                                    'export ICECAST_SOURCE_PASSWORD="$p" '
-                                    'ICECAST_ADMIN_PASSWORD="$p" '
-                                    'ICECAST_RELAY_PASSWORD="$p"; '
-                                    "exec docker-entrypoint icecast -c /etc/icecast.xml",
-                                ],
+                                command=["sh", "-c", _ICECAST_START],
                                 ports=[
                                     k8s.ContainerPort(name="http", container_port=PORT)
                                 ],
