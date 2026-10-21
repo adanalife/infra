@@ -333,6 +333,7 @@ spec:
         kubernetes.io/hostname: adanalife-minipc
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
         seccompProfile:
           type: RuntimeDefault
       volumes:
