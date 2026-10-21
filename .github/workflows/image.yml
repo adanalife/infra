@@ -38,6 +38,10 @@ on:
         description: Docker build args, one `KEY=value` per line.
         type: string
         default: ""
+      stage-rollout:
+        description: stage-1 Deployments to restart once :main is pushed, whitespace-separated. Stage runs :main with imagePullPolicy Always, so a merge reaches it only when its pods restart.
+        type: string
+        default: ""
     secrets:
       DISCORD_WEBHOOK_ALERTS:
         description: Where a failed build is reported. A failed :main build otherwise says nothing — whatever deploys :main keeps pulling the previous commit.
@@ -49,6 +53,8 @@ permissions:
 
 jobs:
   build:
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     # GitHub-hosted, not the arc-amd64 pool: `docker build` layer writes land on
     # the minipc's /var, the volume etcd fsyncs to, and a burst there stalls etcd
     # past its lease deadline, dropping every leader election in the cluster. The
@@ -88,6 +94,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push
+        id: push
         uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
@@ -101,6 +108,86 @@ jobs:
           # authenticates to and pushes to.
           cache-from: type=registry,ref=${{ steps.refs.outputs.cache }}
           cache-to: type=registry,ref=${{ steps.refs.outputs.cache }},mode=max
+
+  # Stage runs :main and nothing else rolls it: this job restarts the named
+  # stage-1 Deployments from inside the cluster (the ARC pool's runner pods
+  # carry a ServiceAccount token; infra's supporting unit grants it get/patch on
+  # deployments and list on pods), waits for each rollout, and checks the new
+  # pods run the digest this run pushed — a :main the build raced would pass a
+  # plain restart and still be the previous commit. The restart is the same
+  # annotation patch as `kubectl rollout restart` and the console's restart
+  # button, which Argo's server-side apply leaves alone. A Deployment parked at
+  # zero replicas takes the annotation and rolls when next scaled up.
+  roll-stage:
+    needs: [build]
+    if: inputs.stage-rollout != ''
+    runs-on: arc-amd64
+    timeout-minutes: 15
+    env:
+      DEPLOYMENTS: ${{ inputs.stage-rollout }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+      NAMESPACE: stage-1
+    steps:
+      - name: Restart and verify
+        shell: python3 {0}
+        run: |
+          import json, os, ssl, sys, time, urllib.request
+          from datetime import datetime, timezone
+          from urllib.parse import urlencode
+
+          sa = "/var/run/secrets/kubernetes.io/serviceaccount"
+          api = "https://kubernetes.default.svc"
+          ns, digest = os.environ["NAMESPACE"], os.environ["DIGEST"]
+          ctx = ssl.create_default_context(cafile=f"{sa}/ca.crt")
+          token = open(f"{sa}/token").read()
+
+          def call(path, method="GET", body=None, content_type=None):
+              req = urllib.request.Request(api + path, method=method, data=body)
+              req.add_header("Authorization", f"Bearer {token}")
+              if content_type:
+                  req.add_header("Content-Type", content_type)
+              with urllib.request.urlopen(req, context=ctx, timeout=30) as r:
+                  return json.load(r)
+
+          names = os.environ["DEPLOYMENTS"].split()
+          now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          patch = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
+          for name in names:
+              call(f"/apis/apps/v1/namespaces/{ns}/deployments/{name}", "PATCH",
+                   json.dumps(patch).encode(), "application/merge-patch+json")
+              print(f"restarted {ns}/{name}")
+
+          failed = False
+          for name in names:
+              path = f"/apis/apps/v1/namespaces/{ns}/deployments/{name}"
+              for _ in range(60):
+                  d = call(path)
+                  st, want = d.get("status", {}), d["spec"].get("replicas", 0)
+                  if (st.get("observedGeneration", 0) >= d["metadata"]["generation"]
+                          and st.get("updatedReplicas", 0) == want
+                          and st.get("availableReplicas", 0) == want
+                          and not st.get("unavailableReplicas", 0)):
+                      break
+                  time.sleep(10)
+              else:
+                  print(f"::error::{name} did not roll out within 10 minutes")
+                  failed = True
+                  continue
+              if not want:
+                  print(f"{name}: parked at 0 replicas; rolls on the next scale-up")
+                  continue
+              selector = ",".join(f"{k}={v}" for k, v in d["spec"]["selector"]["matchLabels"].items())
+              pods = call(f"/api/v1/namespaces/{ns}/pods?" + urlencode({"labelSelector": selector}))["items"]
+              main = d["spec"]["template"]["spec"]["containers"][0]["name"]
+              running = {c["imageID"].rsplit("@", 1)[-1]
+                         for p in pods if p["status"].get("phase") == "Running"
+                         for c in p["status"].get("containerStatuses", []) if c["name"] == main}
+              if digest and running != {digest}:
+                  print(f"::error::{name} runs {sorted(running)}, this run pushed {digest}: :main points elsewhere")
+                  failed = True
+              else:
+                  print(f"{name}: {want} replica(s) on {digest or 'the new :main'}")
+          sys.exit(1 if failed else 0)
 
   # A failed build leaves :main frozen on the previous commit and says nothing:
   # the environment that pulls it keeps running the code it was built from, and
