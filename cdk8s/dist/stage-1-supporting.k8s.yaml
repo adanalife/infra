@@ -161,6 +161,159 @@ spec:
   storageClassName: local-path
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: radio
+    app.kubernetes.io/part-of: tripbot
+  name: radio-config
+  namespace: stage-1
+data:
+  radio.liq: |
+    settings.log.stdout := true
+    settings.log.file := false
+    password = string.trim(file.contents("/run/radio/password"))
+    output.icecast(
+      %mp3(bitrate = 128),
+      host = "127.0.0.1",
+      port = 8000,
+      password = password,
+      mount = "halloween",
+      name = "Halloween",
+      mksafe(playlist(mode = "randomize", reload_mode = "watch", "/music/halloween"))
+    )
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: radio
+    app.kubernetes.io/part-of: tripbot
+  name: radio
+  namespace: stage-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: radio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: f61e708fa7
+      labels:
+        app: radio
+    spec:
+      containers:
+        - command:
+            - sh
+            - -c
+            - p="$(cat /run/radio/password)"; export ICECAST_SOURCE_PASSWORD="$p" ICECAST_ADMIN_PASSWORD="$p" ICECAST_RELAY_PASSWORD="$p"; exec docker-entrypoint icecast -c /etc/icecast.xml
+          image: ghcr.io/libretime/icecast:2.5.0-alpine
+          name: icecast
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            periodSeconds: 10
+            tcpSocket:
+              port: http
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 20m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /run/radio
+              name: run
+        - args:
+            - /etc/radio/radio.liq
+          image: docker.io/savonet/liquidsoap:v2.4.6
+          name: liquidsoap
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsUser: 100
+          volumeMounts:
+            - mountPath: /run/radio
+              name: run
+            - mountPath: /etc/radio
+              name: config
+              readOnly: true
+            - mountPath: /music
+              name: music
+              readOnly: true
+      initContainers:
+        - command:
+            - sh
+            - -c
+            - head -c 24 /dev/urandom | base64 | tr -d '/+=' > /run/radio/password && chmod 444 /run/radio/password
+          image: ghcr.io/libretime/icecast:2.5.0-alpine
+          name: password
+          resources:
+            limits:
+              memory: 32Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /run/radio
+              name: run
+      nodeSelector:
+        kubernetes.io/hostname: adanalife-minipc
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - emptyDir:
+            medium: Memory
+          name: run
+        - configMap:
+            name: radio-config
+          name: config
+        - name: music
+          persistentVolumeClaim:
+            claimName: obs-music-local
+            readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: radio
+    app.kubernetes.io/part-of: tripbot
+  name: radio
+  namespace: stage-1
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+  selector:
+    app: radio
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: dashcam-parked
