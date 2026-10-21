@@ -34,6 +34,7 @@ from adanalife_k8s.constructs.music import (
     emit_music_pvc,
 )
 from adanalife_k8s.constructs.kmsg import KmsgShipper
+from adanalife_k8s.constructs.radio import Radio
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.t5_watchdog import T5Watchdog
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
@@ -87,6 +88,10 @@ class SupportingChart(Chart):
             # the staging side it's mirrored from.
             emit_music_pvc(self, env)
             emit_music_local_pvc(self, env)
+            # The Icecast station that plays a directory of that local music
+            # volume, so it has to sit in the same namespace as the claim.
+            if env.dashcam_mode == "nfs":
+                Radio(self, env=env)
             # The parked-clips claim stage playout mounts (no-op elsewhere).
             emit_parked_pvc(self, env)
 
