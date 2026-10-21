@@ -248,11 +248,12 @@ class Arc(Construct):
 
     def _console_rbac(self):
         """A Role + RoleBinding in the runners namespace letting each env's
-        `tripbot-console` ServiceAccount read the AutoscalingRunnerSets — the
-        console's runner panel, which reports how much self-hosted CI capacity
-        is up and how much of it is working. Read-only and scale-sets-only: the
-        pool sizes itself off GitHub's job queue, so there is nothing for the
-        console to mutate. Mirrors the console's Argo and Burrito grants
+        `tripbot-console` ServiceAccount read the AutoscalingRunnerSets and
+        their EphemeralRunners — the console's runner panel, which reports how
+        much self-hosted CI capacity is up and which job each busy runner is
+        executing. Read-only and CRs-only (no pods, no secrets): the pool sizes
+        itself off GitHub's job queue, so there is nothing for the console to
+        mutate. Mirrors the console's Argo and Burrito grants
         (argocd.py _console_argo_rbac, burrito.py _console_rbac), which the
         console can no more self-grant than this one — its AppProject permits
         only its own app and data namespaces, and this one is infra's.
@@ -265,7 +266,7 @@ class Arc(Construct):
             rules=[
                 k8s.PolicyRule(
                     api_groups=["actions.github.com"],
-                    resources=["autoscalingrunnersets"],
+                    resources=["autoscalingrunnersets", "ephemeralrunners"],
                     verbs=["get", "list", "watch"],
                 )
             ],
