@@ -114,7 +114,7 @@ spec:
               {
                 printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\ndata:\n  %s: |\n' "$CM" "$KEY"
                 cd "$DST"
-                find . -type f \( -name '*.mp3' -o -name '*.flac' -o -name '*.m4a' -o -name '*.ogg' \) |
+                find . -type f \( -name '*.mp3' -o -name '*.flac' -o -name '*.m4a' -o -name '*.ogg' -o -name '*.opus' \) |
                   sed 's|^\./||' |
                   grep / |
                   LC_ALL=C sort |
