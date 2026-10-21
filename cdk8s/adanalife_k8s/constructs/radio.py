@@ -120,6 +120,7 @@ class Radio(Construct):
                         node_selector={"kubernetes.io/hostname": MINIPC_NODE},
                         security_context=k8s.PodSecurityContext(
                             run_as_non_root=True,
+                            run_as_user=_ICECAST_UID,
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
                         ),
                         init_containers=[

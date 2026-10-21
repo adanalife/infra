@@ -54,3 +54,14 @@ def test_an_empty_station_drops_its_mount_instead_of_airing_silence():
     script = _script()
     assert "mksafe" not in script
     assert script.count("fallible = true") == len(STATIONS)
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_every_container_runs_as_a_numeric_uid(env_name):
+    # Both images declare a named USER, which runAsNonRoot can't verify: the
+    # kubelet refuses to start a container without a numeric uid to check.
+    spec = _deployment(_synth(env_name))["spec"]["template"]["spec"]
+    pod_uid = spec["securityContext"].get("runAsUser")
+    for c in spec["initContainers"] + spec["containers"]:
+        uid = c.get("securityContext", {}).get("runAsUser", pod_uid)
+        assert isinstance(uid, int) and uid > 0, c["name"]
