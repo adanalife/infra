@@ -229,7 +229,8 @@ data:
       password = password,
       mount = "halloween",
       name = "Halloween",
-      mksafe(playlist(mode = "randomize", reload_mode = "watch", "/music/halloween"))
+      fallible = true,
+      playlist(mode = "randomize", reload_mode = "watch", "/music/halloween")
     )
 ---
 apiVersion: apps/v1
@@ -250,7 +251,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: f61e708fa7
+        adanalife.dev/config-hash: 2ce21a8228
       labels:
         app: radio
     spec:
