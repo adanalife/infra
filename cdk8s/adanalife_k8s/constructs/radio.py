@@ -9,7 +9,9 @@ Icecast over the pod's loopback; Icecast serves it with in-band ICY metadata
 Plays off `obs-music-local`, the node-local mirror the album bed reads, never the
 NFS share (decisions/prod-stream-path-no-nas-dependency): a station is staged by
 putting a directory on the share and running `task k8s:<env>:music-localize`.
-A station whose directory is still empty plays silence rather than crashing.
+A station with no tracks takes its mount down rather than airing silence:
+Icecast then answers 404, which tripbot's audio watchdog treats as an outage
+and covers with a local bed, where silence would pass its probe and flap.
 
 The source/admin password is minted per pod by an initContainer onto a
 memory-backed emptyDir both containers read, so there is no credential to store
@@ -66,7 +68,8 @@ def _script() -> str:
   password = password,
   mount = "{mount}",
   name = "{title}",
-  mksafe(playlist(mode = "randomize", reload_mode = "watch", "{_MUSIC_DIR}/{folder}"))
+  fallible = true,
+  playlist(mode = "randomize", reload_mode = "watch", "{_MUSIC_DIR}/{folder}")
 )"""
         for mount, folder, title in STATIONS
     )
