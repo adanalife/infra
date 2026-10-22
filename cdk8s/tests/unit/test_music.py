@@ -149,11 +149,14 @@ def test_index_names_pod_paths_and_skips_what_is_not_a_track(tmp_path):
     (album / "01 Intro.mp3").write_text("track")
     (album / "cover.jpg").write_text("art")
     # The NAS is a Synology, which litters every directory with an @eaDir of
-    # sidecars named `<track>.mp3@SynoEAStream`. They copy across like anything
-    # else; what keeps them out of the index is that the extension test is on the
-    # whole name, so they match neither .mp3 nor anything else in _AUDIO_EXTS.
+    # sidecars named `<track>.mp3@SynoEAStream`. The mirror prunes those dirs,
+    # and removes one an earlier run copied, so liquidsoap's playlist scan never
+    # sees a file it can't decode.
     (album / "@eaDir").mkdir()
     (album / "@eaDir" / "01 Intro.mp3@SynoEAStream").write_text("junk")
+    stale = dst / "streambeats-synthwave-lone wolf" / "@eaDir"
+    stale.mkdir(parents=True)
+    (stale / "02 Old.mp3@SynoEAStream").write_text("junk")
     # The carhum lives at the share root, outside any album — it is the fallback
     # bed baked into the OBS image, not something the album bed should offer.
     (src / "carsounds.m4a").write_text("drone")
@@ -162,6 +165,7 @@ def test_index_names_pod_paths_and_skips_what_is_not_a_track(tmp_path):
     index = _index(src, dst, tmp_path)
 
     assert list(index) == ["streambeats-synthwave-lone wolf"]
+    assert not (dst / "streambeats-synthwave-lone wolf" / "@eaDir").exists()
     # Absolute paths as OBS sees them, not paths on the share or in this Job —
     # tripbot hands them to OBS, which resolves them against its own mount.
     assert index["streambeats-synthwave-lone wolf"] == [

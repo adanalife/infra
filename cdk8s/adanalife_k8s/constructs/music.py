@@ -68,8 +68,8 @@ _KUBECTL_IMAGE = "registry.k8s.io/kubectl:v1.36.0"
 _SA = "music-localize"
 
 # The audio extensions an album track can have. Same set as tripbot's
-# bin/stage-streambeats AUDIO_EXTS, and the reason the Synology `@eaDir` sidecar
-# files (`... .mp3@SynoEAStream`) never reach the index: they end in neither.
+# bin/stage-streambeats AUDIO_EXTS. (Synology `@eaDir` sidecar dirs never reach
+# the local copy at all — the mirror prunes them.)
 _AUDIO_EXTS = ("mp3", "flac", "m4a", "ogg", "opus")
 
 # Size of the node-local music PVC. The staged library is 6.3 GB across 11 albums
@@ -113,8 +113,12 @@ fsize() {
   fi
 }
 
-echo "music-localize: $(find . -type f | wc -l | tr -d ' ') file(s) on NFS -> $DST"
-find . -type f -print | while read -r f; do
+# Synology `@eaDir` sidecar dirs are pruned on both sides: liquidsoap's playlist
+# scans every file under an album and logs a decoder error for each
+# `<track>@SynoEAStream` it cannot decode, three times per playlist reload.
+find "$DST" -type d -name '@eaDir' -prune -exec rm -rf {} +
+echo "music-localize: $(find . -path '*/@eaDir' -prune -o -type f -print | wc -l | tr -d ' ') file(s) on NFS -> $DST"
+find . -path '*/@eaDir' -prune -o -type f -print | while read -r f; do
   if [ "$(fsize "$f")" = "$(fsize "$DST/$f")" ]; then
     continue
   fi
