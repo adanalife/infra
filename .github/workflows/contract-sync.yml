@@ -193,7 +193,7 @@ jobs:
             ${{ steps.fetch.outputs.paths }}
             ${{ inputs.generated }}
             ${{ inputs.cdk8s && 'cdk8s/dist' || '' }}
-            changelog.d/+contract-sync-*.misc.md
+            ${{ inputs.changelog && 'changelog.d/+contract-sync-*.misc.md' || '' }}
           commit-message: 'chore(contract): re-sync the generated contracts'
           title: 'chore(contract): re-sync the generated contracts'
           body: |
