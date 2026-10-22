@@ -173,6 +173,34 @@ data:
     settings.log.stdout := true
     settings.log.file := false
     password = string.trim(file.contents("/run/radio/password"))
+
+    # A shuffled playlist of every library track whose path matches `pattern`,
+    # reloaded when a rescan finds the set changed. With no tracks it is never
+    # ready, so its fallible output keeps the mount down.
+    def station(pattern) =
+      s = playlist.list(mode = "randomize", [])
+      known = ref([])
+      def rescan() =
+        tracks = list.filter(fun (f) -> pattern.test(f), playlist.files("/music"))
+        if tracks != known() then
+          known := tracks
+          s.reload(empty_queue = false, tracks)
+        end
+      end
+      thread.run(every = 60., rescan)
+      s
+    end
+
+    output.icecast(
+      %mp3(bitrate = 128),
+      host = "127.0.0.1",
+      port = 8000,
+      password = password,
+      mount = "adanalife",
+      name = "A Dana Life",
+      fallible = true,
+      station(r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\//)
+    )
     output.icecast(
       %mp3(bitrate = 128),
       host = "127.0.0.1",
@@ -181,7 +209,7 @@ data:
       mount = "halloween",
       name = "Halloween",
       fallible = true,
-      playlist(mode = "randomize", reload_mode = "watch", "/music/halloween")
+      station(r/^\/music\/(halloween)\//)
     )
 ---
 apiVersion: apps/v1
@@ -202,7 +230,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 2ce21a8228
+        adanalife.dev/config-hash: 08ce5ad634
       labels:
         app: radio
     spec:
