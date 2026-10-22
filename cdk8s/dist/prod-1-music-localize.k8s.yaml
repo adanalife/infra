@@ -90,8 +90,12 @@ spec:
                 fi
               }
 
-              echo "music-localize: $(find . -type f | wc -l | tr -d ' ') file(s) on NFS -> $DST"
-              find . -type f -print | while read -r f; do
+              # Synology `@eaDir` sidecar dirs are pruned on both sides: liquidsoap's playlist
+              # scans every file under an album and logs a decoder error for each
+              # `<track>@SynoEAStream` it cannot decode, three times per playlist reload.
+              find "$DST" -type d -name '@eaDir' -prune -exec rm -rf {} +
+              echo "music-localize: $(find . -path '*/@eaDir' -prune -o -type f -print | wc -l | tr -d ' ') file(s) on NFS -> $DST"
+              find . -path '*/@eaDir' -prune -o -type f -print | while read -r f; do
                 if [ "$(fsize "$f")" = "$(fsize "$DST/$f")" ]; then
                   continue
                 fi
