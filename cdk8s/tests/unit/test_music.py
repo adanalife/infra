@@ -154,13 +154,13 @@ def test_index_names_pod_paths_and_skips_what_is_not_a_track(tmp_path):
     # sees a file it can't decode.
     (album / "@eaDir").mkdir()
     (album / "@eaDir" / "01 Intro.mp3@SynoEAStream").write_text("junk")
-    stale = dst / "streambeats-synthwave-lone wolf" / "@eaDir"
-    stale.mkdir(parents=True)
-    (stale / "02 Old.mp3@SynoEAStream").write_text("junk")
     # The carhum lives at the share root, outside any album — it is the fallback
     # bed baked into the OBS image, not something the album bed should offer.
     (src / "carsounds.m4a").write_text("drone")
     dst.mkdir()
+    stale = dst / "streambeats-synthwave-lone wolf" / "@eaDir"
+    stale.mkdir(parents=True)
+    (stale / "02 Old.mp3@SynoEAStream").write_text("junk")
 
     index = _index(src, dst, tmp_path)
 
