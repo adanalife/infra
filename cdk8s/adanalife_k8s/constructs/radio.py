@@ -1,6 +1,6 @@
 """The fleet's own internet-radio station — an Icecast server fed by Liquidsoap,
-shuffling one directory of the music library, so tripbot's radio bed has a
-station of ours to play alongside the third-party ones in its station list.
+shuffling album directories of the music library, so tripbot's radio bed has
+stations of ours to play alongside the third-party ones in its station list.
 
 One pod, two containers: Liquidsoap encodes the playlist to MP3 and pushes it to
 Icecast over the pod's loopback; Icecast serves it with in-band ICY metadata
@@ -9,6 +9,9 @@ Icecast over the pod's loopback; Icecast serves it with in-band ICY metadata
 Plays off `obs-music-local`, the node-local mirror the album bed reads, never the
 NFS share (decisions/prod-stream-path-no-nas-dependency): a station is staged by
 putting a directory on the share and running `task k8s:<env>:music-localize`.
+Only tracks inside an album directory count, as for the album bed: the loose
+files at the library's root never play. Each station rescans the library every
+minute, so an album that lands in a directory it matches joins it unprompted.
 A station with no tracks takes its mount down rather than airing silence:
 Icecast then answers 404, which tripbot's audio watchdog treats as an outage
 and covers with a local bed, where silence would pass its probe and flap.
@@ -23,6 +26,8 @@ tripbot's station list (SSM /k8s/tripbot/radio-stations). ClusterIP only.
 """
 
 from __future__ import annotations
+
+import re
 
 import imports.k8s as k8s
 from constructs import Construct
@@ -50,8 +55,19 @@ _MUSIC_DIR = "/music"
 _RUN_DIR = "/run/radio"
 _PASSWORD_FILE = f"{_RUN_DIR}/password"
 
-# One mount per station: (mount, directory on the music share, display name).
-STATIONS = (("halloween", "halloween", "Halloween"),)
+# One mount per station: (mount, album directories, display name). A directory
+# is a name under the music share's root, where `*` matches within the name.
+# The station shuffles every track under all of them as one list, so each track
+# is equally likely whichever album it is on.
+STATIONS = (
+    (
+        "adanalife",
+        ("streambeats-*", "fifty-horizons", "wyoming-miles"),
+        "A Dana Life",
+    ),
+    ("halloween", ("halloween",), "Halloween"),
+)
+_RESCAN_SECONDS = 60
 
 # The images' own users (icecast owns /etc/icecast.xml, which its entrypoint
 # edits in place); runAsNonRoot needs them numeric.
@@ -77,6 +93,18 @@ _ICECAST_START = (
 )
 
 
+def _pattern(folders: tuple[str, ...]) -> str:
+    """A Liquidsoap regexp matching the files under any of `folders`."""
+    for f in folders:
+        # Names go into the regexp verbatim, so they are held to a safe alphabet.
+        if not re.fullmatch(r"[a-z0-9*-]+", f):
+            raise ValueError(f"radio directory {f!r}: use [a-z0-9-] and *")
+    names = "|".join(f.replace("*", r"[^\/]*") for f in folders)
+    # The trailing slash is what keeps loose root files out.
+    root = _MUSIC_DIR.replace("/", r"\/")
+    return rf"r/^{root}\/({names})\//"
+
+
 def _script() -> str:
     outputs = "\n".join(
         f"""output.icecast(
@@ -87,13 +115,31 @@ def _script() -> str:
   mount = "{mount}",
   name = "{title}",
   fallible = true,
-  playlist(mode = "randomize", reload_mode = "watch", "{_MUSIC_DIR}/{folder}")
+  station({_pattern(folders)})
 )"""
-        for mount, folder, title in STATIONS
+        for mount, folders, title in STATIONS
     )
     return f"""settings.log.stdout := true
 settings.log.file := false
 password = string.trim(file.contents("{_PASSWORD_FILE}"))
+
+# A shuffled playlist of every library track whose path matches `pattern`,
+# reloaded when a rescan finds the set changed. With no tracks it is never
+# ready, so its fallible output keeps the mount down.
+def station(pattern) =
+  s = playlist.list(mode = "randomize", [])
+  known = ref([])
+  def rescan() =
+    tracks = list.filter(fun (f) -> pattern.test(f), playlist.files("{_MUSIC_DIR}"))
+    if tracks != known() then
+      known := tracks
+      s.reload(empty_queue = false, tracks)
+    end
+  end
+  thread.run(every = {_RESCAN_SECONDS}., rescan)
+  s
+end
+
 {outputs}
 """
 

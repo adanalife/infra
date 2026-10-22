@@ -8,7 +8,7 @@ from cdk8s import Testing as K8sTesting
 from adanalife_k8s.charts import SupportingChart
 from adanalife_k8s.config import load_env
 from adanalife_k8s.constructs.music import LOCAL_CLAIM
-from adanalife_k8s.constructs.radio import NAME, PORT, STATIONS, _script
+from adanalife_k8s.constructs.radio import NAME, PORT, STATIONS, _pattern, _script
 
 
 def _synth(env_name):
@@ -43,9 +43,25 @@ def test_script_pushes_every_station_to_the_pod_local_icecast():
     script = _script()
     assert script.count("output.icecast(") == len(STATIONS)
     assert f'host = "127.0.0.1",\n  port = {PORT},' in script
-    for mount, folder, _ in STATIONS:
+    for mount, folders, _ in STATIONS:
         assert f'mount = "{mount}"' in script
-        assert f'"/music/{folder}"' in script
+        assert f"station({_pattern(folders)})" in script
+
+
+def test_the_stream_station_shuffles_streambeats_and_woodercz():
+    script = _script()
+    assert 'mount = "adanalife",\n  name = "A Dana Life",' in script
+    assert (
+        r"station(r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\//)"
+        in script
+    )
+    # The Halloween station stays as it was: one directory.
+    assert r"station(r/^\/music\/(halloween)\//)" in script
+
+
+def test_a_station_directory_outside_the_safe_alphabet_is_refused():
+    with pytest.raises(ValueError):
+        _pattern(("ok", "../etc"))
 
 
 def test_an_empty_station_drops_its_mount_instead_of_airing_silence():
