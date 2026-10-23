@@ -3,12 +3,9 @@
 # version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered by the
 # `argo-workflows` Argo Application (dist/platform-argo.k8s.yaml).
 #
-# Two things the install deliberately does NOT have yet, because neither is
-# needed to run a workflow and both cost an AWS resource: an artifact
-# repository (steps pass data through the PVCs they already share, not S3) and
-# the Postgres workflow archive (history is the Workflow objects themselves,
-# kept for the ttlStrategy below). Add the artifact repo the first time a
-# workflow needs to hand a file to a step that doesn't share its volume.
+# No artifact repository: steps pass data through the PVCs they already share,
+# not S3. Add one the first time a workflow needs to hand a file to a step that
+# doesn't share its volume.
 crds:
   # Templated CRDs applied as ordinary resources, reconciled by Argo CD like
   # every other manifest. The chart's default (full=true) installs them from a
@@ -38,13 +35,33 @@ controller:
       # Batch work yields to the stream: the same most-preemptible tier the
       # video-pipeline Jobs run at (cdk8s/adanalife_k8s/priority.py).
       podPriorityClassName: dashcam-cv-low
-      # No archive database, so the Workflow object IS the history — a week of
-      # it, which outlasts any pass worth reviewing.
+      # The Workflow object lives a week; the archive below keeps it after.
       ttlStrategy:
         secondsAfterCompletion: 604800
       # Keep failed pods for their logs; successful ones have nothing to say.
       podGC:
         strategy: OnWorkflowSuccess
+  # The argo-pg Cluster below. nodeStatusOffLoad moves a node map that is
+  # still over etcd's ~3MB object limit after compression into the database,
+  # so a wide fan-out (a video-pipeline batch over every original runs ~3600
+  # nodes) doesn't die on `Request entity too large`. The archive keeps a
+  # finished Workflow past the ttlStrategy; both read back through the server.
+  persistence:
+    nodeStatusOffLoad: true
+    archive: true
+    archiveTTL: 180d
+    postgresql:
+      host: argo-pg-rw
+      port: 5432
+      database: argo
+      tableName: argo_workflows
+      # CNPG generates this Secret for the initdb owner.
+      userNameSecret:
+        name: argo-pg-app
+        key: username
+      passwordSecret:
+        name: argo-pg-app
+        key: password
   # Grafana Explore deep links into Loki, so a workflow's logs stay reachable
   # after podGC deletes its pods and after the ttlStrategy deletes the Workflow
   # itself (Loki keeps them for its own retention). Alloy labels each stream
@@ -168,3 +185,29 @@ extraObjects:
       tls:
         - hosts:
             - argo-workflows-prod
+  # The database behind `controller.persistence`: a CNPG Cluster of its own
+  # rather than a database on an env's `pg`, since the controller is platform
+  # and serves every workflow namespace. No barman backups — losing it loses
+  # run history, never a running workflow (whose source of truth stays the
+  # Workflow object), so it isn't worth an S3 bucket.
+  - apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    metadata:
+      name: argo-pg
+    spec:
+      instances: 1
+      # The same pinned build as the env `pg` clusters (constructs/cnpg.py).
+      imageName: ghcr.io/cloudnative-pg/postgresql:18.6-202608240816-standard-bookworm
+      storage:
+        size: 5Gi
+        storageClass: local-path
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+      bootstrap:
+        initdb:
+          database: argo
+          owner: argo
