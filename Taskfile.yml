@@ -187,12 +187,19 @@ tasks:
       - |
         set -euo pipefail
         k() { kubectl --context '{{.CONTEXT}}' -n {{.ENV}} "$@"; }
-        want=$(k get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
-        echo "deployment image: $want"
-        sel=$(k get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+        deploy=$(k get deploy {{.APP}} -o json)
+        name=$(jq -r '.spec.template.spec.containers[0].name' <<<"$deploy")
+        echo "deployment image: $(jq -r '.spec.template.spec.containers[0].image' <<<"$deploy")"
+        sel=$(jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' <<<"$deploy")
         # Running only: a Completed pod the GC hasn't reaped yet carries the
         # digest it last ran, which reads as a mismatch that isn't one.
-        k get pods -l "$sel" --field-selector=status.phase=Running -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
+        # Status matched by name: the kubelet sorts containerStatuses by name,
+        # so index 0 is the sidecar on a pod like the console's.
+        k get pods -l "$sel" --field-selector=status.phase=Running -o json | jq -r --arg c "$name" '
+          ["POD","READY","IMAGE","IMAGE_ID","STARTED"],
+          (.items[] | (.status.containerStatuses[] | select(.name == $c)) as $s
+            | [.metadata.name, $s.ready, $s.image, $s.imageID, .status.startTime])
+          | @tsv' | column -t
 
   k8s:_nfs-pv:apply:
     internal: true
