@@ -15,6 +15,7 @@ from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
+from adanalife_k8s.constructs.node_event import NODE_EVENT_FILE
 from adanalife_k8s.constructs.t5_watchdog import (
     NAME,
     NAMESPACE,
@@ -117,3 +118,36 @@ def test_pod_template_carries_the_config_digest():
     cm = next(o for o in _by(objs, "ConfigMap") if o["metadata"]["name"] == NAME)
     annotations = _deploy(objs)["spec"]["template"]["metadata"]["annotations"]
     assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])
+
+
+def test_pod_can_write_events_and_nothing_else():
+    # The Event before a reboot is the record that survives it; the Role behind
+    # it grants exactly `create` on `events` in the watchdog's own namespace.
+    objs = _synth()
+    assert _pod(objs)["serviceAccountName"] == NAME
+    role = next(o for o in _by(objs, "Role"))
+    assert role["metadata"]["namespace"] == NAMESPACE
+    assert role["rules"] == [
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create"]}
+    ]
+    binding = next(o for o in _by(objs, "RoleBinding"))
+    assert binding["subjects"] == [
+        {"kind": "ServiceAccount", "name": NAME, "namespace": NAMESPACE}
+    ]
+
+
+def test_event_emit_never_raises_without_a_cluster():
+    # A failed Event must never stand between the watchdog and its action.
+    cm = next(o for o in _by(_synth(), "ConfigMap") if o["metadata"]["name"] == NAME)
+    r = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            cm["data"][NODE_EVENT_FILE]
+            + "\nassert emit('t5-watchdog', 'NodeReboot', 'x', timeout=1) is False\n",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "event not written" in r.stdout
