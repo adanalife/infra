@@ -2417,7 +2417,7 @@ tasks:
         msg: "plaintext Talos PKI not present in talos/adanalife-minipc — nothing to encrypt"
     cmds:
       # Sources the KMS key ARN from terraform output (key must already be
-      # applied via `task tf:prod:apply`). terraform runs under mise from the
+      # applied via `task tf:prod-data:apply`). terraform runs under mise from the
       # layer dir so its .terraform-version pin resolves; the repo root has no
       # pin, and a bare `terraform` here lands on an unversioned tfenv shim. --input-type binary treats each
       # file as one opaque blob, sidestepping the multi-doc-YAML limitation.
@@ -2430,7 +2430,8 @@ tasks:
           for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml" "tailscale.patch.yaml:tailscale.patch.sops.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
             [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
-            sops -e --input-type binary --output-type yaml --kms "$kms" "$src" > "$dst"
+            sops -e --input-type binary --output-type yaml --kms "$kms" "$src" > "$dst.tmp" || { rm -f "$dst.tmp"; exit 1; }
+            mv "$dst.tmp" "$dst"
           done
         '
       - 'echo "Talos secrets re-sealed to *.sops.yaml. Commit the updated encrypted files."'
