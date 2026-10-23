@@ -96,6 +96,10 @@ jobs:
 
       - name: Build & push
         uses: docker/build-push-action@v7
+        # The build record is an Actions artifact billed against the org storage
+        # quota; the default 90-day retention fills it.
+        env:
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
         with:
           context: ${{ inputs.context }}
           platforms: linux/amd64
