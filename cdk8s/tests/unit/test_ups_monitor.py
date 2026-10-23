@@ -226,3 +226,16 @@ def test_pod_template_carries_the_config_digest():
     cm = next(o for o in objs if o["kind"] == "ConfigMap")
     annotations = _deploy(objs)["spec"]["template"]["metadata"]["annotations"]
     assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])
+
+
+def test_shutdown_leaves_an_event_first():
+    # The Event names the trigger before the power-off; the pod runs as the
+    # ServiceAccount whose Role can create it.
+    objs = _synth()
+    assert 'emit("ups-monitor", "NodeShutdown"' in _script(objs)
+    pod = _deploy(objs)["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "ups-monitor"
+    role = next(o for o in objs if o["kind"] == "Role")
+    assert role["rules"] == [
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create"]}
+    ]

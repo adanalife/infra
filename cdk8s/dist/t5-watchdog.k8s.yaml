@@ -17,6 +17,60 @@ data:
     urllib.request.urlretrieve(url, dst)
     os.chmod(dst, 0o755)
     print(f"talosctl -> {dst}", flush=True)
+  nodeevent.py: |
+    import datetime
+    import json
+    import os
+    import ssl
+    import urllib.request
+
+    SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+
+    def emit(component, reason, message, timeout=5):
+        # True when the API accepted the Event. Never raises.
+        try:
+            with open(f"{SA}/token") as f:
+                token = f.read().strip()
+            with open(f"{SA}/namespace") as f:
+                ns = f.read().strip()
+            now = datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            body = {
+                "apiVersion": "v1",
+                "kind": "Event",
+                "metadata": {"generateName": f"{component}-", "namespace": ns},
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": ns,
+                    "name": os.environ.get("POD_NAME", component),
+                },
+                "reason": reason,
+                "message": message,
+                "type": "Warning",
+                "source": {"component": component},
+                "firstTimestamp": now,
+                "lastTimestamp": now,
+                "count": 1,
+            }
+            host = os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+            port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+            req = urllib.request.Request(
+                f"https://{host}:{port}/api/v1/namespaces/{ns}/events",
+                data=json.dumps(body).encode(),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            ctx = ssl.create_default_context(cafile=f"{SA}/ca.crt")
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx):
+                return True
+        except Exception as e:
+            print(f"event not written: {e}", flush=True)
+            return False
   t5probe.py: |
     import datetime
     import os
@@ -107,6 +161,9 @@ data:
             log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd}")
             return False
         log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd}")
+        from nodeevent import emit
+
+        emit("t5-watchdog", "NodeReboot", f"rebooting {NODE}: {reason}")
         try:
             r = talos("reboot", timeout=REBOOT_TIMEOUT)
             log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
@@ -187,6 +244,48 @@ data:
     else:
         main()
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t5-watchdog
+subjects:
+  - kind: ServiceAccount
+    name: t5-watchdog
+    namespace: node-watchdog
+---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -225,7 +324,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 3209f68f88
+        adanalife.dev/config-hash: 761284044a
       labels:
         app: t5-watchdog
     spec:
@@ -256,6 +355,10 @@ spec:
               value: "false"
             - name: HOME
               value: /tmp
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           image: python:3.14-alpine
           name: t5-watchdog
           resources:
@@ -313,6 +416,7 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
+      serviceAccountName: t5-watchdog
       volumes:
         - configMap:
             name: t5-watchdog

@@ -23,6 +23,10 @@ nor clears a fault streak. On 2026-10-15 a network loss reached the pod-to-node
 API path, and a probe that read its timeouts as a dead disk could reboot prod
 on a night when only the API is sick.
 
+Before the reboot it writes a Kubernetes Event naming the reason
+(`nodeevent.py`, see constructs/node_event.py), since its own last log lines
+are the ones least likely to reach Loki.
+
 **Two guards against a reboot loop**, both from a single source of truth — the
 process's own monotonic clock, which resets with the pod on every boot:
 
@@ -52,6 +56,12 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s import eso
+from adanalife_k8s.constructs.node_event import (
+    NODE_EVENT,
+    NODE_EVENT_FILE,
+    POD_NAME_ENV,
+    event_writer_rbac,
+)
 from adanalife_k8s.constructs.talosctl import (
     FETCH_TALOSCTL,
     TALOS_NODE,
@@ -181,6 +191,9 @@ def reboot(reason):
         log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd}")
         return False
     log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd}")
+    from nodeevent import emit
+
+    emit("t5-watchdog", "NodeReboot", f"rebooting {NODE}: {reason}")
     try:
         r = talos("reboot", timeout=REBOOT_TIMEOUT)
         log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
@@ -276,6 +289,7 @@ class T5Watchdog(Construct):
         scripts = {
             "t5probe.py": _PROBE,
             "fetch-talosctl.py": FETCH_TALOSCTL,
+            NODE_EVENT_FILE: NODE_EVENT,
         }
         k8s.KubeConfigMap(
             self,
@@ -283,6 +297,8 @@ class T5Watchdog(Construct):
             metadata=k8s.ObjectMeta(name=NAME, namespace=NAMESPACE, labels=labels),
             data=scripts,
         )
+
+        event_writer_rbac(self, NAME, NAMESPACE, labels)
 
         # The reboot credential. Cluster store (not a namespaced SecretStore):
         # this namespace has no eso-aws-credentials of its own, and one
@@ -341,6 +357,7 @@ class T5Watchdog(Construct):
                 # The single arming gate in the pod spec. "true" = log-only.
                 k8s.EnvVar(name="DRY_RUN", value=DRY_RUN),
                 k8s.EnvVar(name="HOME", value="/tmp"),
+                POD_NAME_ENV,
             ],
             security_context=secctx,
             resources=k8s.ResourceRequirements(
@@ -389,6 +406,7 @@ class T5Watchdog(Construct):
                             # write the fetched talosctl + $HOME.
                             fs_group=65534,
                         ),
+                        service_account_name=NAME,
                         init_containers=[init],
                         containers=[container],
                         volumes=[
