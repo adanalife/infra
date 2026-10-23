@@ -14,9 +14,14 @@ CONFIRM_POLLS consecutive reads, issue the reboot.
 **The probe goes over the Talos API, not a mount.** `talosctl list /var/mnt/data`
 does the readdir host-side, so this pod holds no hostPath and cannot itself land
 in the `CreateContainerError` that every T5-mounting pod hits during the exact
-fault it exists to catch. A failure is either the command erroring (EIO from a
+fault it exists to catch. A fault is either EIO in the command's error (a
 shut-down XFS) or an empty listing (the device re-enumerated and the mount is
-gone) — the two shapes the incidents produced.
+gone) — the two shapes the incidents produced. Anything else — a timeout, a
+refused or unavailable Talos API — means the probe couldn't ask, not that the
+disk is gone: it is logged as `UNKNOWN` and neither counts toward the reboot
+nor clears a fault streak. On 2026-10-15 a network loss reached the pod-to-node
+API path, and a probe that read its timeouts as a dead disk could reboot prod
+on a night when only the API is sick.
 
 **Two guards against a reboot loop**, both from a single source of truth — the
 process's own monotonic clock, which resets with the pod on every boot:
@@ -134,18 +139,33 @@ def entries(stdout):
     return [ln for ln in lines if ln.split()[-1] not in (".", "..", "NAME")]
 
 
+OK, FAULT, UNKNOWN = "ok", "FAULT", "UNKNOWN"
+
+
+def classify(rc, stdout, stderr):
+    # (state, detail). Only EIO and an empty listing are the disk; any other
+    # error is the probe failing to ask, which must never reboot the node.
+    if rc != 0:
+        err = stderr.strip()
+        state = FAULT if "input/output error" in err.lower() else UNKNOWN
+        return state, f"list rc={rc} err={err!r}"
+    found = entries(stdout)
+    if not found:
+        return FAULT, "list returned no entries — mount is gone"
+    return OK, f"{len(found)} entries"
+
+
 def probe():
-    # (healthy, detail). Unreadable and empty both count as a fault.
     try:
         r = talos("list", PATH, timeout=PROBE_TIMEOUT)
     except Exception as e:
-        return False, f"list FAILED: {e}"
-    if r.returncode != 0:
-        return False, f"list rc={r.returncode} err={r.stderr.strip()!r}"
-    found = entries(r.stdout)
-    if not found:
-        return False, "list returned no entries — mount is gone"
-    return True, f"{len(found)} entries"
+        return UNKNOWN, f"list FAILED: {e}"
+    return classify(r.returncode, r.stdout, r.stderr)
+
+
+def step(fails, state):
+    # The fault streak after one probe: an UNKNOWN holds it where it was.
+    return 0 if state == OK else fails + 1 if state == FAULT else fails
 
 
 def may_reboot(fails, elapsed, triggered):
@@ -178,6 +198,20 @@ def selftest():
     assert not may_reboot(CONFIRM, GRACE - 1, False), "fires inside the startup grace"
     assert not may_reboot(CONFIRM, GRACE + 1, True), "fires twice after latching"
     assert may_reboot(CONFIRM, GRACE + 1, False), "never fires"
+    # Failure classes: only EIO and an empty mount are the disk.
+    eio = "rpc error: open /var/mnt/data: input/output error"
+    assert classify(1, "", eio)[0] == FAULT
+    assert classify(0, ".\\n", "")[0] == FAULT
+    assert classify(0, ".\\npvc-abc\\n", "")[0] == OK
+    for err in ("rpc error: code = Unavailable desc = connection refused",
+                "rpc error: code = DeadlineExceeded desc = context deadline exceeded"):
+        assert classify(1, "", err)[0] == UNKNOWN, err
+    # An UNKNOWN neither counts toward the reboot nor clears a fault streak.
+    assert step(2, UNKNOWN) == 2 and step(2, FAULT) == 3 and step(2, OK) == 0
+    fails = 0
+    for _ in range(CONFIRM * 10):
+        fails = step(fails, UNKNOWN)
+    assert not may_reboot(fails, GRACE + 1, False), "API timeouts reboot the node"
     # The real single-node shape: no header, `.` first, then the dirents.
     assert entries(".\\narc-work\\nlocal-path-provisioner\\n") == [
         "arc-work",
@@ -203,14 +237,17 @@ def main():
         f"{GRACE:.0f}s of uptime). DRY_RUN={DRY_RUN}"
     )
     fails = 0
+    unknown = 0
     triggered = False
     while True:
-        healthy, detail = probe()
-        fails = 0 if healthy else fails + 1
+        state, detail = probe()
+        fails = step(fails, state)
+        unknown = unknown + 1 if state == UNKNOWN else 0
         elapsed = time.monotonic() - START
         log(
-            f"{PATH} {'ok' if healthy else 'FAULT'}: {detail}"
+            f"{PATH} {state}: {detail}"
             + (f" [{fails}/{CONFIRM}]" if fails else "")
+            + (f" [unknown x{unknown}, not counted]" if unknown else "")
         )
         if may_reboot(fails, elapsed, triggered):
             triggered = reboot(f"{PATH} unreadable x{fails}")
@@ -236,7 +273,10 @@ class T5Watchdog(Construct):
         labels = meta_labels(NAME, part_of="infra")
         sel = selector(NAME)
 
-        scripts = {"t5probe.py": _PROBE, "fetch-talosctl.py": FETCH_TALOSCTL}
+        scripts = {
+            "t5probe.py": _PROBE,
+            "fetch-talosctl.py": FETCH_TALOSCTL,
+        }
         k8s.KubeConfigMap(
             self,
             "probe",
