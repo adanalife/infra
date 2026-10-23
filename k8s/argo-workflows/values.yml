@@ -20,12 +20,15 @@ crds:
   full: false
 
 controller:
-  # One workflow at a time. The node also runs the live stream, and the passes
-  # this exists to run are model-heavy — serializing them is the same property
-  # video-pipeline's `wait-embed-redo` init-gate hand-rolls, except a queued
-  # workflow here holds no pod and therefore no quota. Raise it when a workload
-  # shows up that is genuinely cheap.
-  parallelism: 1
+  # Three workflows at a time. A video-pipeline batch holds two — itself and the
+  # per-source Workflow it is waiting on — so below 2 it deadlocks on its own
+  # child; the third slot lets a short run (a ruling, a flare render, one
+  # source) start while a multi-day batch is going. The stream stays safe
+  # because the workflow pods' CPU limits, the dashcam-cv-low priority class
+  # and video-pipeline's namespace-wide auto-trim/pieces locks are the
+  # isolation, not this count. A queued workflow holds no pod and therefore no
+  # quota.
+  parallelism: 3
   # Workflow pods land in the namespace holding the PVCs they mount, so the SA
   # + Role pair the chart creates has to exist there too. stage-1 is where the
   # dashcam corpus, models and output claims live.
@@ -102,6 +105,18 @@ workflow:
     name: argo-workflow
   rbac:
     create: true
+    # A video-pipeline batch creates each source's run as a Workflow of its own
+    # (a `resource` step) and watches its phase until it settles.
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - workflows
+        verbs:
+          - create
+          - get
+          - list
+          - watch
 
 server:
   # The server itself does not authenticate: `server` mode acts as the server's
