@@ -164,7 +164,6 @@ def test_per_repo_projects_scope_to_one_repo_each():
     # minipc default includes the UPS monitor, whose CreateNamespace=true sync
     # needs Namespace permitted here (see test_ups_monitor for the dev exclusion).
     assert kinds("infra") == {
-        "PersistentVolume",
         "StorageClass",
         "PriorityClass",
         "Namespace",

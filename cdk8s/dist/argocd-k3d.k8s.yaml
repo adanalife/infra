@@ -30,8 +30,6 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: development
   clusterResourceWhitelist:
-    - group: ""
-      kind: PersistentVolume
     - group: storage.k8s.io
       kind: StorageClass
     - group: scheduling.k8s.io

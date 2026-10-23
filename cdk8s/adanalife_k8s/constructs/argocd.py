@@ -60,9 +60,9 @@ VIDEO_PIPELINE_PROJECT = "video-pipeline"
 PLATFORM_GATEWAY_PROJECT = "platform-gateway"
 # The cluster-scoped kinds each project's apps create. Scoped per project from
 # the dist each repo emits: tripbot's identity unit + video-pipeline each declare
-# the prod-stream PriorityClass; infra's data/supporting use a StorageClass and
-# (dashcam) PersistentVolumes; the console creates nothing cluster-scoped.
-PV = {"group": "", "kind": "PersistentVolume"}
+# the prod-stream PriorityClass; infra's data/supporting use a StorageClass (its
+# NFS PersistentVolumes are applied out of band, never by Argo); the console
+# creates nothing cluster-scoped.
 STORAGE_CLASS = {"group": "storage.k8s.io", "kind": "StorageClass"}
 PRIORITY_CLASS = {"group": "scheduling.k8s.io", "kind": "PriorityClass"}
 NAMESPACE_KIND = {"group": "", "kind": "Namespace"}
@@ -336,7 +336,7 @@ class ArgoCD(Construct):
             # objects (owned by the unit, or via CreateNamespace=true) are
             # gated by this clusterResourceWhitelist, so a sync fails without
             # the entry.
-            cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
+            cluster_resources=[STORAGE_CLASS, PRIORITY_CLASS]
             + ([NAMESPACE_KIND] if (ups_monitor or t5_watchdog or arc or kmsg) else []),
         )
         if self.console_envs:
