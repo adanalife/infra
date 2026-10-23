@@ -115,7 +115,7 @@ class DataChart(Chart):
     Lands in env.data_ns — the app namespace by default (byte-identical render),
     or an isolated namespace (env.data_namespace, e.g. stage-1-data) so a
     `kubectl delete ns <app>` can't take the database. Apps reach it cross-
-    namespace via env.postgres_host (an FQDN when isolated).
+    namespace by the Service's FQDN when isolated.
 
     The ESO SecretStore is emitted here so this unit is self-sufficient (its
     postgres ExternalSecret doesn't depend on another unit landing the store

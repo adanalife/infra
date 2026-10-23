@@ -56,6 +56,8 @@ data "aws_iam_policy_document" "burrito_apply_deny_sensitive_parameters" {
     resources = [
       "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/obs/*",
       "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/external-dns/*",
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/burrito/*-secret-access-key",
     ]
   }
 }

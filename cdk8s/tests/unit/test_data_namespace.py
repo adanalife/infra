@@ -48,7 +48,6 @@ def test_isolated_env_properties():
         assert env.data_namespace == data_ns
         assert env.data_isolated is True
         assert env.data_ns == data_ns
-        assert env.postgres_host == f"postgres.{data_ns}.svc.cluster.local"
 
 
 def test_colocated_env_properties_unchanged():
@@ -59,7 +58,6 @@ def test_colocated_env_properties_unchanged():
         assert env.data_namespace == ""
         assert env.data_isolated is False
         assert env.data_ns == env.namespace
-        assert env.postgres_host == "postgres"
 
 
 # --- isolated: postgres + store -> data ns; PVC -> app ns ---

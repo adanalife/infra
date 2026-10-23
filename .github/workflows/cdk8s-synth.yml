@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - 'cdk8s/**'
+      - 'platforms.json'
       - '.github/workflows/cdk8s-synth.yml'
       - '.github/workflows/cdk8s.yml'
   push:
@@ -16,6 +17,7 @@ on:
       - main
     paths:
       - 'cdk8s/**'
+      - 'platforms.json'
       - '.github/workflows/cdk8s-synth.yml'
       - '.github/workflows/cdk8s.yml'
 

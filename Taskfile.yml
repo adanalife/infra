@@ -187,12 +187,19 @@ tasks:
       - |
         set -euo pipefail
         k() { kubectl --context '{{.CONTEXT}}' -n {{.ENV}} "$@"; }
-        want=$(k get deploy {{.APP}} -o jsonpath='{.spec.template.spec.containers[0].image}')
-        echo "deployment image: $want"
-        sel=$(k get deploy {{.APP}} -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')
+        deploy=$(k get deploy {{.APP}} -o json)
+        name=$(jq -r '.spec.template.spec.containers[0].name' <<<"$deploy")
+        echo "deployment image: $(jq -r '.spec.template.spec.containers[0].image' <<<"$deploy")"
+        sel=$(jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' <<<"$deploy")
         # Running only: a Completed pod the GC hasn't reaped yet carries the
         # digest it last ran, which reads as a mismatch that isn't one.
-        k get pods -l "$sel" --field-selector=status.phase=Running -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,STARTED:.status.startTime'
+        # Status matched by name: the kubelet sorts containerStatuses by name,
+        # so index 0 is the sidecar on a pod like the console's.
+        k get pods -l "$sel" --field-selector=status.phase=Running -o json | jq -r --arg c "$name" '
+          ["POD","READY","IMAGE","IMAGE_ID","STARTED"],
+          (.items[] | (.status.containerStatuses[] | select(.name == $c)) as $s
+            | [.metadata.name, $s.ready, $s.image, $s.imageID, .status.startTime])
+          | @tsv' | column -t
 
   k8s:_nfs-pv:apply:
     internal: true
@@ -646,15 +653,15 @@ tasks:
         fi
 
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
-  # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
-  # keeps Task from reading "there's a diff" as a failure.
+  # instead of apply. kubectl diff exits 1 when a diff exists and >1 on an
+  # error (unreachable API, bad manifest), so only 1 passes.
   gitops:diff:
     desc: "Preview what gitops:apply would change: kubectl diff the Argo config against the live cluster (read-only)"
     preconditions:
       - *minipc-context-guard
     cmds:
       - for: { var: GITOPS_MANIFESTS, split: ' ' }
-        cmd: kubectl diff -f {{.ITEM}} || true
+        cmd: kubectl diff -f {{.ITEM}} || [ $? -eq 1 ]
 
   gitops:apply:
     desc: Apply the Argo CD config (project + appsets + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md). Preview with gitops:diff.
@@ -2417,7 +2424,7 @@ tasks:
         msg: "plaintext Talos PKI not present in talos/adanalife-minipc — nothing to encrypt"
     cmds:
       # Sources the KMS key ARN from terraform output (key must already be
-      # applied via `task tf:prod:apply`). terraform runs under mise from the
+      # applied via `task tf:prod-data:apply`). terraform runs under mise from the
       # layer dir so its .terraform-version pin resolves; the repo root has no
       # pin, and a bare `terraform` here lands on an unversioned tfenv shim. --input-type binary treats each
       # file as one opaque blob, sidestepping the multi-doc-YAML limitation.
@@ -2430,7 +2437,8 @@ tasks:
           for pair in "controlplane.yaml:controlplane.sops.yaml" "worker.yaml:worker.sops.yaml" "talosconfig:talosconfig.sops.yaml" "tailscale.patch.yaml:tailscale.patch.sops.yaml"; do
             src=${pair%%:*}; dst=${pair##*:}
             [ -f "$src" ] || { echo "skip $src (not present)"; continue; }
-            sops -e --input-type binary --output-type yaml --kms "$kms" "$src" > "$dst"
+            sops -e --input-type binary --output-type yaml --kms "$kms" "$src" > "$dst.tmp" || { rm -f "$dst.tmp"; exit 1; }
+            mv "$dst.tmp" "$dst"
           done
         '
       - 'echo "Talos secrets re-sealed to *.sops.yaml. Commit the updated encrypted files."'
