@@ -21,6 +21,11 @@
 
 resource "aws_s3_bucket" "postgres_wal" {
   bucket = "${var.full_account_name}-postgres-wal"
+
+  lifecycle {
+    # The WAL archive is the PITR window; losing it leaves only the dumps.
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "postgres_wal" {
