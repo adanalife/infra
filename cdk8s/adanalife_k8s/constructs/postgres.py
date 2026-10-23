@@ -34,6 +34,7 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.naming import meta_labels, selector
+from adanalife_k8s.priority import PROD_STREAM
 
 NAME = "postgres"
 SECRET_NAME = "postgres-secret"  # materialized Secret the StatefulSet envFroms
@@ -230,6 +231,12 @@ class Postgres(Construct):
                 template=k8s.PodTemplateSpec(
                     metadata=k8s.ObjectMeta(labels=sel),
                     spec=k8s.PodSpec(
+                        # Prod's database sits under every prod-stream pod, so it
+                        # takes their tier; at 0 a pending prod pod could preempt
+                        # it. Stage stays default (the preemptible co-tenant).
+                        priority_class_name=(
+                            PROD_STREAM if env.name == "prod-1" else None
+                        ),
                         # PSA `restricted`: non-root (uid/gid 999 = postgres in
                         # the pgvector/pg16 Debian image — NOT 70, that's Alpine),
                         # seccomp RuntimeDefault, no-privesc + caps drop[ALL] on

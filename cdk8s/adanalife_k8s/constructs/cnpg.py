@@ -44,6 +44,7 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.naming import meta_labels
+from adanalife_k8s.priority import PROD_STREAM
 
 CLUSTER_NAME = "pg"  # services pg-rw / pg-ro; apps repoint DATABASE_HOST here
 APP_CREDS_SECRET = "pg-app-creds"
@@ -178,6 +179,13 @@ class CnpgCluster(Construct):
                 {
                     "instances": 1,
                     "imageName": _IMAGE,
+                    # Same tier as the legacy StatefulSet (postgres.py): prod's
+                    # database must not be preemptible by the prod pods on it.
+                    **(
+                        {"priorityClassName": PROD_STREAM}
+                        if env.name == "prod-1"
+                        else {}
+                    ),
                     # Inherited by the instance pods, where grafana-k8s-
                     # monitoring's annotationAutodiscovery picks them up. 9187
                     # is CNPG's built-in exporter (the postgres container's
