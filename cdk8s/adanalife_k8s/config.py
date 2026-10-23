@@ -50,8 +50,8 @@ class EnvConfig:
     # "" → postgres co-locates in the app namespace (default, byte-identical
     # render). Set to an isolated namespace (e.g. "stage-1-data") to move the DB
     # StatefulSet + its ESO SecretStore out of the app namespace, so deleting the
-    # app namespace can't drop the database. Apps reach it cross-namespace via the
-    # postgres_host FQDN. The dashcam PVC does NOT move (vlc mounts it; PVCs are
+    # app namespace can't drop the database. Apps reach it cross-namespace by the
+    # Service FQDN. The dashcam PVC does NOT move (vlc mounts it; PVCs are
     # namespace-local) — it shifts to SupportingChart in the app namespace.
     data_namespace: str = ""
     external_dns_role_arn: str = (
@@ -117,11 +117,6 @@ class EnvConfig:
     platforms: tuple[str, ...] = ("twitch",)
 
     @property
-    def tls(self) -> bool:
-        """Whether app ingresses get cert-manager TLS (minipc envs only)."""
-        return self.cluster == "minipc"
-
-    @property
     def data_ns(self) -> str:
         """Namespace the stateful data unit (postgres + its SecretStore) lands in:
         the app namespace by default, or the isolated one when data_namespace set."""
@@ -131,16 +126,6 @@ class EnvConfig:
     def data_isolated(self) -> bool:
         """True when postgres lives in its own namespace, split from the app ns."""
         return bool(self.data_namespace) and self.data_namespace != self.namespace
-
-    @property
-    def postgres_host(self) -> str:
-        """DATABASE_HOST apps connect to: the bare Service name when co-located
-        (parity), the cross-namespace FQDN when the DB is isolated."""
-        return (
-            f"postgres.{self.data_namespace}.svc.cluster.local"
-            if self.data_isolated
-            else "postgres"
-        )
 
 
 # Stage and dev share the adanalife-stage account → same ExternalDNSRole ARN.
