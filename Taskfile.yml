@@ -653,15 +653,15 @@ tasks:
         fi
 
   # The read-only preview for gitops:apply — same manifests, `kubectl diff`
-  # instead of apply. kubectl exits non-zero when a diff exists, so `|| true`
-  # keeps Task from reading "there's a diff" as a failure.
+  # instead of apply. kubectl diff exits 1 when a diff exists and >1 on an
+  # error (unreachable API, bad manifest), so only 1 passes.
   gitops:diff:
     desc: "Preview what gitops:apply would change: kubectl diff the Argo config against the live cluster (read-only)"
     preconditions:
       - *minipc-context-guard
     cmds:
       - for: { var: GITOPS_MANIFESTS, split: ' ' }
-        cmd: kubectl diff -f {{.ITEM}} || true
+        cmd: kubectl diff -f {{.ITEM}} || [ $? -eq 1 ]
 
   gitops:apply:
     desc: Apply the Argo CD config (project + appsets + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md). Preview with gitops:diff.
