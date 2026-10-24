@@ -23,6 +23,12 @@ anywhere and the Service's port is useless to anyone else as a source.
 Listeners address it as
 http://radio.<ns>.svc.cluster.local:8000/<mount> — the URL that goes in
 tripbot's station list (SSM /k8s/tripbot/radio-stations). ClusterIP only.
+
+Each station also airs a request queue ahead of its shuffle, driven over a JSON
+control API on port 8001 (`control`): `GET /stations/<mount>/queue` and
+`/tracks`, `POST .../skip`, `.../back`, `.../push` (`{"file": ...}`, a file of
+the station's own scan) and `.../drop/<rid>`. The console uses it to show and
+steer what each station plays.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ LIQUIDSOAP_IMAGE = "docker.io/savonet/liquidsoap:v2.4.6"
 
 NAME = "radio"
 PORT = 8000
+CONTROL_PORT = 8001
 _MUSIC_DIR = "/music"
 _RUN_DIR = "/run/radio"
 _PASSWORD_FILE = f"{_RUN_DIR}/password"
@@ -105,6 +112,199 @@ def _pattern(folders: tuple[str, ...]) -> str:
     return rf"r/^{root}\/({names})\//"
 
 
+# The control API: Liquidsoap's own HTTP server answers JSON about each
+# station's queue and takes skip/back/push/drop. It is unauthenticated, which is
+# why the Service is ClusterIP only and a push names a file of the station's
+# own scan, never an arbitrary URI.
+_CONTROL = """
+def entry(~requested = false, ~rid = null, filename, m) =
+  {
+    file = filename,
+    artist = m["artist"],
+    title = m["title"],
+    requested = requested,
+    rid = rid
+  }
+end
+
+def played_track(p) =
+  let (m, requested) = p
+  entry(requested = requested, m["filename"], m)
+end
+
+def pending_track(r) =
+  entry(requested = true, rid = request.id(r), request.uri(r), request.metadata(r))
+end
+
+# A source's loaded request that is not the one on air: the fallback leaves it
+# waiting while another source plays, and it airs when that source yields.
+def waiting(s, on_air) =
+  r = s.current()
+  if
+    null.defined(r) and string(request.id(null.get(r))) != on_air
+  then
+    [null.get(r)]
+  else
+    []
+  end
+end
+
+def requests(st, on_air) =
+  [
+    ...waiting(st.replay, on_air),
+    ...st.replay.queue(),
+    ...waiting(st.pending, on_air),
+    ...st.pending.queue()
+  ]
+end
+
+def queue_json(st) =
+  on_air =
+    list.case(
+      st.played(),
+      "",
+      fun (p, _) ->
+        begin
+          let (m, _) = p
+          m["rid"]
+        end
+    )
+  pending =
+    list.map(pending_track, requests(st, on_air))
+  upcoming = [
+    ...list.map(
+      request.uri,
+      [...waiting(st.shuffle, on_air), ...st.shuffle.queue()]
+    ),
+    ...st.shuffle.remaining_files()
+  ]
+  shuffle = list.map(fun (f) -> entry(f, []), upcoming)
+  played = list.map(played_track, st.played())
+  {
+    now = list.case(played, null, fun (t, _) -> t),
+    next = list.prefix(50, [...pending, ...shuffle]),
+    history = list.tl(played)
+  }
+end
+
+# Writes the body by hand rather than through `res.json`, which would pin `res`
+# to this one JSON shape for the handler sharing it.
+def fail(res, code, msg) =
+  res.status_code(code)
+  res.content_type("application/json; charset=utf-8")
+  res.data(json.stringify(compact = true, {error = msg}))
+end
+
+def route(method, suffix, handler) =
+  harbor.http.register(
+    port = control_port,
+    method = method,
+    "/stations/:mount" ^ suffix,
+    fun (req, res) ->
+      begin
+        st = list.assoc.nullable(req.query["mount"], stations())
+        if
+          null.defined(st)
+        then
+          handler(null.get(st), req, res)
+        else
+          fail(res, 404, "no such station")
+        end
+      end
+  )
+end
+
+route("GET", "/queue", fun (st, _, res) -> res.json(queue_json(st)))
+
+route(
+  "GET",
+  "/tracks",
+  fun (st, _, res) ->
+    res.json(
+      list.map(
+        fun (f) -> entry(f, []),
+        list.sort(fun (a, b) -> if a < b then -1 elsif a > b then 1 else 0 end, st.known())
+      )
+    )
+)
+
+route(
+  "POST",
+  "/skip",
+  fun (st, _, res) ->
+    begin
+      st.aired.skip()
+      res.status_code(204)
+    end
+)
+
+route(
+  "POST",
+  "/back",
+  fun (st, _, res) ->
+    begin
+      played = st.played()
+      if
+        list.length(played) < 2
+      then
+        fail(res, 409, "nothing to go back to")
+      else
+        let (previous, _) = list.nth(played, 1)
+        st.replay.push(request.create(previous["filename"]))
+        st.aired.skip()
+        res.status_code(204)
+      end
+    end
+)
+
+route(
+  "POST",
+  "/push",
+  fun (st, req, res) ->
+    begin
+      wanted =
+        try
+          let json.parse (body : {file: string}) = req.body()
+          body.file
+        catch _ do
+          ""
+        end
+      if
+        list.mem(wanted, st.known())
+      then
+        r = request.create(wanted)
+        st.pending.push(r)
+        res.json({rid = request.id(r)})
+      else
+        fail(res, 404, "not a track of this station")
+      end
+    end
+)
+
+route(
+  "POST",
+  "/drop/:rid",
+  fun (st, req, res) ->
+    begin
+      rid = int_of_string(default = -1, req.query["rid"])
+      if
+        list.exists(fun (r) -> request.id(r) == rid, requests(st, ""))
+      then
+        st.replay.remove_request_id(rid)
+        st.pending.remove_request_id(rid)
+        # Dropping the request a queue has loaded leaves it empty-handed until
+        # it fetches again, and a track ending in between would skip the queue.
+        st.replay.fetch()
+        st.pending.fetch()
+        res.status_code(204)
+      else
+        fail(res, 404, "no such request")
+      end
+    end
+)
+"""
+
+
 def _script() -> str:
     outputs = "\n".join(
         f"""output.icecast(
@@ -115,31 +315,71 @@ def _script() -> str:
   mount = "{mount}",
   name = "{title}",
   fallible = true,
-  station({_pattern(folders)})
+  station("{mount}", {_pattern(folders)})
 )"""
         for mount, folders, title in STATIONS
     )
     return f"""settings.log.stdout := true
 settings.log.file := false
 password = string.trim(file.contents("{_PASSWORD_FILE}"))
+control_port = {CONTROL_PORT}
+stations = ref([])
 
-# A shuffled playlist of every library track whose path matches `pattern`,
-# reloaded when a rescan finds the set changed. With no tracks it is never
-# ready, so its fallible output keeps the mount down.
-def station(pattern) =
-  s = playlist.list(mode = "randomize", [])
+# A station airs its request queue ahead of a shuffled playlist of every
+# library track whose path matches `pattern`, reloaded when a rescan finds the
+# set changed. With no tracks and no requests it is never ready, so its
+# fallible output keeps the mount down.
+def station(mount, pattern) =
+  shuffle = playlist.list(mode = "randomize", [])
   known = ref([])
   def rescan() =
     tracks = list.filter(fun (f) -> pattern.test(f), playlist.files("{_MUSIC_DIR}"))
     if tracks != known() then
       known := tracks
-      s.reload(empty_queue = false, tracks)
+      shuffle.reload(empty_queue = false, tracks)
     end
   end
   thread.run(every = {_RESCAN_SECONDS}., rescan)
-  s
+  pending = request.queue(id = "#{{mount}}-queue", interactive = false)
+  # `back` replays through a queue of its own, ahead of the pending one:
+  # request.queue's set_queue destroys the request it has already loaded, so
+  # pushing to the front of `pending` would lose that request.
+  replay = request.queue(id = "#{{mount}}-replay", interactive = false)
+  aired = fallback([replay, pending, shuffle])
+  # Newest first, each with whether the request queue supplied it: the head is
+  # what is on air, the rest is history.
+  played = ref([])
+  def from_queue(m) =
+    list.exists(
+      fun (q) ->
+        begin
+          r = q.current()
+          null.defined(r) and string(request.id(null.get(r))) == m["rid"]
+        end,
+      [replay, pending]
+    )
+  end
+  aired.on_track(
+    synchronous = true,
+    fun (m) -> played := list.prefix(11, [(m, from_queue(m)), ...played()])
+  )
+  stations := [
+    ...stations(),
+    (
+      mount,
+      {{
+        shuffle = shuffle,
+        known = known,
+        pending = pending,
+        replay = replay,
+        aired = aired,
+        played = played
+      }}
+    )
+  ]
+  aired
 end
-
+{_CONTROL}
 {outputs}
 """
 
