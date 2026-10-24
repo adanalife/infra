@@ -492,6 +492,9 @@ spec:
             - /etc/radio/radio.liq
           image: docker.io/savonet/liquidsoap:v2.4.6
           name: liquidsoap
+          ports:
+            - containerPort: 8001
+              name: control
           resources:
             limits:
               memory: 512Mi
@@ -566,6 +569,9 @@ spec:
     - name: http
       port: 8000
       targetPort: http
+    - name: control
+      port: 8001
+      targetPort: control
   selector:
     app: radio
 ---

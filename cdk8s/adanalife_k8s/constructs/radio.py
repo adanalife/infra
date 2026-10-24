@@ -470,6 +470,11 @@ class Radio(Construct):
                                 name="liquidsoap",
                                 image=LIQUIDSOAP_IMAGE,
                                 args=["/etc/radio/radio.liq"],
+                                ports=[
+                                    k8s.ContainerPort(
+                                        name="control", container_port=CONTROL_PORT
+                                    )
+                                ],
                                 security_context=k8s.SecurityContext(
                                     allow_privilege_escalation=False,
                                     capabilities=k8s.Capabilities(drop=["ALL"]),
@@ -529,7 +534,12 @@ class Radio(Construct):
                         name="http",
                         port=PORT,
                         target_port=k8s.IntOrString.from_string("http"),
-                    )
+                    ),
+                    k8s.ServicePort(
+                        name="control",
+                        port=CONTROL_PORT,
+                        target_port=k8s.IntOrString.from_string("control"),
+                    ),
                 ],
             ),
         )

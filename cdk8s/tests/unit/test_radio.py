@@ -134,3 +134,19 @@ def test_every_track_carries_the_full_shape():
     for key in ("file", "artist", "title", "requested", "rid"):
         assert f"    {key} = " in script
     assert "entry(f, [])" in script
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_the_service_exposes_the_control_port_inside_the_cluster(env_name):
+    objs = _synth(env_name)
+    (svc,) = [
+        o for o in objs if o["kind"] == "Service" and o["metadata"]["name"] == NAME
+    ]
+    assert svc["spec"].get("type", "ClusterIP") == "ClusterIP"
+    ports = {p["name"]: p for p in svc["spec"]["ports"]}
+    assert ports["control"]["port"] == CONTROL_PORT
+    assert ports["control"]["targetPort"] == "control"
+    assert not [o for o in objs if o["kind"] == "Ingress" and NAME in str(o)]
+    spec = _deployment(objs)["spec"]["template"]["spec"]
+    (liq,) = [c for c in spec["containers"] if c["name"] == "liquidsoap"]
+    assert liq["ports"] == [{"name": "control", "containerPort": CONTROL_PORT}]
