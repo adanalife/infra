@@ -5447,12 +5447,10 @@ resource "grafana_rule_group" "synthetic_health" {
   rule {
     name = "guessr: the admin login is broken"
     for  = "10m"
-    // The series is one terraform-managed check reporting every ten minutes,
-    // so it stopping is itself the failure this rule exists to catch — a
-    // check that quietly stops checking reports green through an outage the
-    // same way the paused UptimeRobot monitors did.
+    // no_data is OK: a check that stops reporting is the stopped-reporting
+    // rule's to name, so this one fires only on an answer that came back wrong.
     condition      = "C"
-    no_data_state  = "Alerting"
+    no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
@@ -5511,8 +5509,9 @@ resource "grafana_rule_group" "synthetic_health" {
     for  = "5m"
     // Covers every check but guessr-admin, which has its own rule above
     // because it alerts on a specific status code rather than on reachability.
+    // no_data is OK for the same reason as above.
     condition      = "C"
-    no_data_state  = "Alerting"
+    no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
@@ -5560,6 +5559,66 @@ resource "grafana_rule_group" "synthetic_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // A check that quietly stops checking reports green through an outage the
+  // same way the paused UptimeRobot monitors did, so silence pages too, but
+  // under its own name: on 2026-10-23 SM stopped scheduling guessr-admin while
+  // the endpoint still answered 401, and the rule above it fired as "the admin
+  // login is broken".
+  rule {
+    name           = "Synthetic Monitoring: a check has stopped reporting"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "the {{ $labels.job }} synthetic check has stopped reporting"
+      description = "{{ $labels.job }} reported probe results in the last week and none in the last 30 minutes, so its endpoint is unwatched, not known broken. Curl the target from terraform/platform/grafana-synthetic-monitoring.tf to see whether the endpoint itself is fine. If it is and terraform shows no drift, SM has stopped scheduling the check: `-replace` the grafana_synthetic_monitoring_check, or toggle it off and on in the Synthetic Monitoring UI. Also rule out the free-tier execution quota (grafanacloud_org_sm_billable_check_executions on the usage datasource). A check deleted on purpose fires this for up to a week until its last result ages out of the window."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 604800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // Jobs seen in the last week minus jobs seen in the last 30m. Thirty
+        // minutes spans three runs of the slowest (ten-minute) check.
+        expr          = "count by (job) (count_over_time(probe_success[7d])) unless count by (job) (count_over_time(probe_success[30m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
