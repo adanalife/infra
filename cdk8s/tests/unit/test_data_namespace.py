@@ -36,7 +36,8 @@ def _ns(obj):
 # dashcam PVC in play. Synthesized rather than taken from the env table because
 # both minipc envs (prod-1/stage-1) now isolate the DB — this pins the co-located
 # branch independent of which real envs happen to isolate.
-_COLOCATED_NFS = replace(load_env("stage-1"), data_namespace="")
+# cnpg off too: a co-located data unit is the dev/local shape, StatefulSet and all.
+_COLOCATED_NFS = replace(load_env("stage-1"), data_namespace="", cnpg=False)
 
 
 # --- EnvConfig derived properties ---
@@ -66,8 +67,7 @@ def test_colocated_env_properties_unchanged():
 def test_isolated_postgres_and_store_land_in_data_namespace():
     objs = _synth(DataChart, load_env("stage-1"))
     for kind, name in (
-        ("StatefulSet", "postgres"),
-        ("Service", "postgres"),
+        ("Cluster", "pg"),
         ("ExternalSecret", "postgres-credentials"),
         ("SecretStore", "aws-parameterstore"),
     ):

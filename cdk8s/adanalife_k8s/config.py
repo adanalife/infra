@@ -43,9 +43,8 @@ class EnvConfig:
     postgres_size: str = "5Gi"
     postgres_storage_class: str = ""  # "" = cluster default; local-path-retain on prod
     postgres_backup: bool = False
-    # Emit the CNPG `pg` cluster (PITR via barman-cloud → S3) alongside the
-    # legacy StatefulSet. Stage-1 first; prod-1 flips on after the stage PITR
-    # restore drill passes. dev/local keep the legacy StatefulSet only.
+    # Run the database as the CNPG `pg` cluster (PITR via barman-cloud → S3)
+    # instead of the postgres StatefulSet, which dev/local keep.
     cnpg: bool = False
     # "" → postgres co-locates in the app namespace (default, byte-identical
     # render). Set to an isolated namespace (e.g. "stage-1-data") to move the DB
@@ -152,8 +151,7 @@ ENVS: dict[str, EnvConfig] = {
         # The DB lives in its own namespace so a `kubectl delete ns prod-1` can't
         # take years of irreplaceable data.
         data_namespace="prod-1-data",
-        # CloudNativePG cluster `pg` alongside the legacy StatefulSet. Syncing
-        # prod-1-data with this set runs the one-shot import from `postgres`.
+        # The database is the CloudNativePG cluster `pg` (`pg-rw`).
         cnpg=True,
         # The full supported set gets a per-platform mediamtx relay here; a new
         # platform gets one automatically on the next sync. The gateway/obs/

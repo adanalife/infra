@@ -170,9 +170,9 @@ class DataChart(Chart):
         #     Lands in env.data_ns — the deletion boundary this unit protects. ---
         Postgres(self, env=env)
 
-        # --- CNPG `pg` cluster (PITR via barman-cloud → S3), side-by-side with
-        #     the legacy StatefulSet while the migration is in flight. Apps pick
-        #     which one via DATABASE_HOST (tripbot repo's postgres_host). ---
+        # --- CNPG `pg` cluster (PITR via barman-cloud → S3), in place of
+        #     Postgres' StatefulSet. Apps reach it via DATABASE_HOST (tripbot
+        #     repo's postgres_host). ---
         if env.cnpg:
             CnpgCluster(self, env=env)
 
