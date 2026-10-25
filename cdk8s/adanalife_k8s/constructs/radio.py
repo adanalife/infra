@@ -73,6 +73,7 @@ STATIONS = (
         "A Dana Life",
     ),
     ("halloween", ("halloween",), "Halloween"),
+    ("keep-it-spooky", ("keep-it-spooky",), "Keep it Spooky"),
 )
 _RESCAN_SECONDS = 60
 

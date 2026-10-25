@@ -486,6 +486,16 @@ data:
       fallible = true,
       station("halloween", r/^\/music\/(halloween)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
     )
+    output.icecast(
+      %mp3(bitrate = 128),
+      host = "127.0.0.1",
+      port = 8000,
+      password = password,
+      mount = "keep-it-spooky",
+      name = "Keep it Spooky",
+      fallible = true,
+      station("keep-it-spooky", r/^\/music\/(keep-it-spooky)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
+    )
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -505,7 +515,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: da254ba91a
+        adanalife.dev/config-hash: 29c6ee7431
       labels:
         app: radio
     spec:
