@@ -7,17 +7,13 @@ bounded by `archive_timeout` (5min); disaster recovery is a recovery-bootstrap
 manifest against the ObjectStore, not a dump restore. HA is a non-goal —
 one node, so `instances: 1`; the win is PITR.
 
-Runs SIDE-BY-SIDE with the legacy StatefulSet during migration (no name
-collision: cluster `pg` → services `pg-rw`/`pg-ro`). Data arrives via CNPG's
-native logical import (`bootstrap.initdb.import`, microservice) from the
-legacy `postgres` Service — a one-shot pg_dump/restore at bootstrap that
-carries every table, `frame_embeddings` included (the hourly dump CronJob
-excludes it). Apps must be scaled to 0 during the bootstrap window; rollback
-at any point is repointing DATABASE_HOST back at `postgres`, whose PVC is
-untouched.
+Apps reach it as `pg-rw`. Its data arrived via CNPG's native logical import
+(`bootstrap.initdb.import`, microservice) from the legacy `postgres`
+StatefulSet, which no cnpg env renders any more. The import spec is inert once
+the cluster exists, but a fresh bootstrap of this spec would fail on it: a
+rebuild needs a recovery bootstrap from the ObjectStore instead.
 
-Emitted only where `env.cnpg` is on (stage-1 first; prod-1 after the stage
-PITR restore drill passes). Objects:
+Emitted where `env.cnpg` is on (stage-1, prod-1). Objects:
 
   * ExternalSecret `pg-app-creds` — the same SSM credentials the legacy
     Secret renders, re-shaped as `kubernetes.io/basic-auth` (CNPG's app-user
@@ -179,8 +175,8 @@ class CnpgCluster(Construct):
                 {
                     "instances": 1,
                     "imageName": _IMAGE,
-                    # Same tier as the legacy StatefulSet (postgres.py): prod's
-                    # database must not be preemptible by the prod pods on it.
+                    # prod's database must not be preemptible by the prod
+                    # pods on it.
                     **(
                         {"priorityClassName": PROD_STREAM}
                         if env.name == "prod-1"
@@ -254,7 +250,8 @@ class CnpgCluster(Construct):
                             "secret": {"name": APP_CREDS_SECRET},
                             # One-shot logical import from the legacy Service
                             # at first bootstrap; inert once the cluster
-                            # exists. microservice type = just this database,
+                            # exists, and its source is gone, so a rebuild
+                            # replaces this with a recovery bootstrap. microservice type = just this database,
                             # dumped and restored with its owner's own creds.
                             "import": {
                                 "type": "microservice",

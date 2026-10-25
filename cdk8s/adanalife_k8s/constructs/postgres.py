@@ -1,10 +1,8 @@
-"""Postgres — the tripbot StatefulSet (pgvector/pg16) + headless Service.
+"""Postgres — the tripbot StatefulSet (pgvector/pg16) + headless Service, on
+envs without the CNPG `pg` Cluster (development, local), plus the credentials,
+backup CronJob and data-namespace guard every env shares.
 
-The StatefulSet is the
-*fidelity-critical* object here: on prod-1 it owns a 50Gi `local-path-retain`
-PVC holding years of irreplaceable data (chat history since 2019, miles,
-events). This construct is applied via SSA to ADOPT the live prod StatefulSet,
-so the immutable join keys MUST match the live spec byte-for-byte:
+The StatefulSet's immutable join keys:
 
   * `metadata.name` = postgres
   * `spec.serviceName` = postgres (the headless Service)
@@ -13,15 +11,16 @@ so the immutable join keys MUST match the live spec byte-for-byte:
   * `spec.volumeClaimTemplates[0]` — name `postgres-data`, accessModes
     [ReadWriteOnce], and the env's storage size / storageClassName.
 
-A mismatch on any of those would orphan the running pod or trigger a
-StatefulSet replacement → data loss. The volumeClaimTemplate is threaded from
-env.postgres_size / env.postgres_storage_class so prod stays 50Gi /
-local-path-retain.
+A change to any of those is a StatefulSet replacement, so a live volume would
+be orphaned. The volumeClaimTemplate is threaded from env.postgres_size /
+env.postgres_storage_class.
 
 Per-env shape:
-  * StatefulSet + headless Service everywhere.
+  * StatefulSet + headless Service where `env.cnpg` is off; cnpg envs run
+    cnpg.py's Cluster instead.
   * postgres-secret: ESO ExternalSecret (eso envs) or a local Secret built
-    from the on-disk secret.env placeholders (local laptop overlay).
+    from the on-disk secret.env placeholders (local laptop overlay). The
+    backup CronJob envFroms it on every env.
   * prod-1 only (env.postgres_backup): a local-path-retain StorageClass, a
     daily backup CronJob, and the postgres-backup-s3 ExternalSecret.
 """
@@ -142,144 +141,151 @@ class Postgres(Construct):
                 },
             )
 
-        # --- container ---
-        container = k8s.Container(
-            name=NAME,
-            # GHCR mirror, not Docker Hub — a cold dev (k3d) bringup pulled this
-            # node-side from Hub in ~10min under the account-wide rate limit
-            # (stage/prod cache it once so they never feel it; ephemeral dev eats
-            # it every bringup). The mirror is the weekly-refreshed copy from the
-            # ghcr-base-image-mirrors decision; GHCR isn't rate-limited.
-            image="ghcr.io/adanalife/mirror/pgvector:pg16",
-            security_context=k8s.SecurityContext(
-                allow_privilege_escalation=False,
-                capabilities=k8s.Capabilities(drop=["ALL"]),
-            ),
-            ports=[k8s.ContainerPort(name="postgres", container_port=PORT)],
-            env_from=[
-                k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))
-            ],
-            # PGDATA points one level below the mount so initdb owns its own
-            # directory: the local-path volume root arrives 0777 root:root and
-            # non-root postgres (uid 999) can't chmod it, but it can mkdir a
-            # subdir there, own it, and lock it down. A subPath mount can't do
-            # this — kubelet creates subPath dirs root:root 0755.
-            env=[k8s.EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata")],
-            # pg_isready answers protocol-level — catches "up but not serving".
-            # Run it through a shell so the role name comes from the container's
-            # runtime environment. kubelet's own $(VAR) substitution in a probe
-            # command only resolves *static* `env:` entries (literal `value:`) —
-            # never envFrom/valueFrom — and POSTGRES_USER arrives via envFrom on
-            # postgres-secret, so a bare $(POSTGRES_USER) reaches pg_isready as a
-            # literal and postgres logs a FATAL role lookup for it every period.
-            liveness_probe=k8s.Probe(
-                exec=k8s.ExecAction(
-                    command=["sh", "-c", 'exec pg_isready -U "$POSTGRES_USER"']
+        # The StatefulSet + headless Service run only where the CNPG `pg`
+        # Cluster (cnpg.py) doesn't; on a cnpg env the database is `pg-rw`.
+        if not env.cnpg:
+            # --- container ---
+            container = k8s.Container(
+                name=NAME,
+                # GHCR mirror, not Docker Hub — a cold dev (k3d) bringup pulled this
+                # node-side from Hub in ~10min under the account-wide rate limit
+                # (stage/prod cache it once so they never feel it; ephemeral dev eats
+                # it every bringup). The mirror is the weekly-refreshed copy from the
+                # ghcr-base-image-mirrors decision; GHCR isn't rate-limited.
+                image="ghcr.io/adanalife/mirror/pgvector:pg16",
+                security_context=k8s.SecurityContext(
+                    allow_privilege_escalation=False,
+                    capabilities=k8s.Capabilities(drop=["ALL"]),
                 ),
-                initial_delay_seconds=10,
-                period_seconds=30,
-                timeout_seconds=5,
-                failure_threshold=3,
-            ),
-            readiness_probe=k8s.Probe(
-                tcp_socket=k8s.TcpSocketAction(
-                    port=k8s.IntOrString.from_string("postgres")
-                ),
-                initial_delay_seconds=5,
-                period_seconds=5,
-            ),
-            resources=k8s.ResourceRequirements(
-                requests={
-                    "cpu": k8s.Quantity.from_string("100m"),
-                    "memory": k8s.Quantity.from_string("256Mi"),
-                },
-                # 1Gi was too low: the bulk HNSW index build on a
-                # frame_embeddings restore OOM-killed prod at 1Gi and lost the
-                # PVC (2026-06-15). The seed:vectors task now forces a bounded
-                # on-disk build so it fits, but give headroom on the SSD-backed
-                # minipc so a faster in-memory build is an option and steady
-                # state has breathing room.
-                limits={"memory": k8s.Quantity.from_string("2Gi")},
-            ),
-            volume_mounts=[
-                k8s.VolumeMount(
-                    name="postgres-data",
-                    mount_path="/var/lib/postgresql/data",
-                )
-            ],
-        )
-
-        # --- volumeClaimTemplate (the SSA-adoption-critical bit) ---
-        vct_spec = k8s.PersistentVolumeClaimSpec(
-            access_modes=["ReadWriteOnce"],
-            resources=k8s.ResourceRequirements(
-                requests={"storage": k8s.Quantity.from_string(env.postgres_size)}
-            ),
-            # "" → omit entirely (cluster default), matching the dev/local render.
-            storage_class_name=env.postgres_storage_class or None,
-        )
-
-        # --- StatefulSet ---
-        k8s.KubeStatefulSet(
-            self,
-            "statefulset",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
-            spec=k8s.StatefulSetSpec(
-                service_name=NAME,
-                replicas=1,
-                selector=k8s.LabelSelector(match_labels=sel),
-                template=k8s.PodTemplateSpec(
-                    metadata=k8s.ObjectMeta(labels=sel),
-                    spec=k8s.PodSpec(
-                        # Prod's database sits under every prod-stream pod, so it
-                        # takes their tier; at 0 a pending prod pod could preempt
-                        # it. Stage stays default (the preemptible co-tenant).
-                        priority_class_name=(
-                            PROD_STREAM if env.name == "prod-1" else None
-                        ),
-                        # PSA `restricted`: non-root (uid/gid 999 = postgres in
-                        # the pgvector/pg16 Debian image — NOT 70, that's Alpine),
-                        # seccomp RuntimeDefault, no-privesc + caps drop[ALL] on
-                        # the container. Note fsGroup does NOT apply to
-                        # hostPath-type volumes (which local-path provisions) —
-                        # write access comes from the PGDATA-below-the-mount
-                        # arrangement on the container, not from ownership of the
-                        # volume root.
-                        security_context=k8s.PodSecurityContext(
-                            run_as_non_root=True,
-                            run_as_user=999,
-                            run_as_group=999,
-                            fs_group=999,
-                            seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
-                        ),
-                        containers=[container],
+                ports=[k8s.ContainerPort(name="postgres", container_port=PORT)],
+                env_from=[
+                    k8s.EnvFromSource(secret_ref=k8s.SecretEnvSource(name=SECRET_NAME))
+                ],
+                # PGDATA points one level below the mount so initdb owns its own
+                # directory: the local-path volume root arrives 0777 root:root and
+                # non-root postgres (uid 999) can't chmod it, but it can mkdir a
+                # subdir there, own it, and lock it down. A subPath mount can't do
+                # this — kubelet creates subPath dirs root:root 0755.
+                env=[
+                    k8s.EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata")
+                ],
+                # pg_isready answers protocol-level — catches "up but not serving".
+                # Run it through a shell so the role name comes from the container's
+                # runtime environment. kubelet's own $(VAR) substitution in a probe
+                # command only resolves *static* `env:` entries (literal `value:`) —
+                # never envFrom/valueFrom — and POSTGRES_USER arrives via envFrom on
+                # postgres-secret, so a bare $(POSTGRES_USER) reaches pg_isready as a
+                # literal and postgres logs a FATAL role lookup for it every period.
+                liveness_probe=k8s.Probe(
+                    exec=k8s.ExecAction(
+                        command=["sh", "-c", 'exec pg_isready -U "$POSTGRES_USER"']
                     ),
+                    initial_delay_seconds=10,
+                    period_seconds=30,
+                    timeout_seconds=5,
+                    failure_threshold=3,
                 ),
-                volume_claim_templates=[
-                    k8s.KubePersistentVolumeClaimProps(
-                        metadata=k8s.ObjectMeta(name="postgres-data"), spec=vct_spec
+                readiness_probe=k8s.Probe(
+                    tcp_socket=k8s.TcpSocketAction(
+                        port=k8s.IntOrString.from_string("postgres")
+                    ),
+                    initial_delay_seconds=5,
+                    period_seconds=5,
+                ),
+                resources=k8s.ResourceRequirements(
+                    requests={
+                        "cpu": k8s.Quantity.from_string("100m"),
+                        "memory": k8s.Quantity.from_string("256Mi"),
+                    },
+                    # 1Gi was too low: the bulk HNSW index build on a
+                    # frame_embeddings restore OOM-killed prod at 1Gi and lost the
+                    # PVC (2026-06-15). The seed:vectors task now forces a bounded
+                    # on-disk build so it fits, but give headroom on the SSD-backed
+                    # minipc so a faster in-memory build is an option and steady
+                    # state has breathing room.
+                    limits={"memory": k8s.Quantity.from_string("2Gi")},
+                ),
+                volume_mounts=[
+                    k8s.VolumeMount(
+                        name="postgres-data",
+                        mount_path="/var/lib/postgresql/data",
                     )
                 ],
-            ),
-        )
+            )
 
-        # --- headless Service (clusterIP: None) — the StatefulSet's serviceName ---
-        k8s.KubeService(
-            self,
-            "service",
-            metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
-            spec=k8s.ServiceSpec(
-                cluster_ip="None",
-                selector=sel,
-                ports=[
-                    k8s.ServicePort(
-                        name="postgres",
-                        port=PORT,
-                        target_port=k8s.IntOrString.from_string("postgres"),
-                    )
-                ],
-            ),
-        )
+            # --- volumeClaimTemplate (the SSA-adoption-critical bit) ---
+            vct_spec = k8s.PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                resources=k8s.ResourceRequirements(
+                    requests={"storage": k8s.Quantity.from_string(env.postgres_size)}
+                ),
+                # "" → omit entirely (cluster default), matching the dev/local render.
+                storage_class_name=env.postgres_storage_class or None,
+            )
+
+            # --- StatefulSet ---
+            k8s.KubeStatefulSet(
+                self,
+                "statefulset",
+                metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+                spec=k8s.StatefulSetSpec(
+                    service_name=NAME,
+                    replicas=1,
+                    selector=k8s.LabelSelector(match_labels=sel),
+                    template=k8s.PodTemplateSpec(
+                        metadata=k8s.ObjectMeta(labels=sel),
+                        spec=k8s.PodSpec(
+                            # Prod's database sits under every prod-stream pod, so it
+                            # takes their tier; at 0 a pending prod pod could preempt
+                            # it. Stage stays default (the preemptible co-tenant).
+                            priority_class_name=(
+                                PROD_STREAM if env.name == "prod-1" else None
+                            ),
+                            # PSA `restricted`: non-root (uid/gid 999 = postgres in
+                            # the pgvector/pg16 Debian image — NOT 70, that's Alpine),
+                            # seccomp RuntimeDefault, no-privesc + caps drop[ALL] on
+                            # the container. Note fsGroup does NOT apply to
+                            # hostPath-type volumes (which local-path provisions) —
+                            # write access comes from the PGDATA-below-the-mount
+                            # arrangement on the container, not from ownership of the
+                            # volume root.
+                            security_context=k8s.PodSecurityContext(
+                                run_as_non_root=True,
+                                run_as_user=999,
+                                run_as_group=999,
+                                fs_group=999,
+                                seccomp_profile=k8s.SeccompProfile(
+                                    type="RuntimeDefault"
+                                ),
+                            ),
+                            containers=[container],
+                        ),
+                    ),
+                    volume_claim_templates=[
+                        k8s.KubePersistentVolumeClaimProps(
+                            metadata=k8s.ObjectMeta(name="postgres-data"), spec=vct_spec
+                        )
+                    ],
+                ),
+            )
+
+            # --- headless Service (clusterIP: None) — the StatefulSet's serviceName ---
+            k8s.KubeService(
+                self,
+                "service",
+                metadata=k8s.ObjectMeta(name=NAME, namespace=ns, labels=labels),
+                spec=k8s.ServiceSpec(
+                    cluster_ip="None",
+                    selector=sel,
+                    ports=[
+                        k8s.ServicePort(
+                            name="postgres",
+                            port=PORT,
+                            target_port=k8s.IntOrString.from_string("postgres"),
+                        )
+                    ],
+                ),
+            )
 
         # --- prod-only: backup StorageClass + CronJob + S3 ExternalSecret ---
         if env.postgres_backup:
