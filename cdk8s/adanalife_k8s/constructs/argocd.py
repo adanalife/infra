@@ -48,6 +48,30 @@ from constructs import Construct
 REPO_URL = "git@github.com:adanalife/infra.git"
 TARGET_REVISION = "main"
 ARGO_NS = "argocd"
+# ESO's ExternalSecret CRD stamps schema defaults our manifests omit
+# (target.deletionPolicy, and conversionStrategy/decodingStrategy/
+# metadataPolicy/nullBytePolicy under each data[].remoteRef and
+# dataFrom[].extract). They're API-server schema defaults with no
+# field-manager owner, so they can't be waived via managedFieldsManagers
+# and otherwise leave every ExternalSecret perpetually OutOfSync. Ignore
+# exactly those paths so they read Synced. Harmless no-op on a unit that
+# carries no ExternalSecrets.
+ESO_DEFAULTS_IGNORE = {
+    "group": "external-secrets.io",
+    "kind": "ExternalSecret",
+    "jqPathExpressions": [
+        ".spec.target.deletionPolicy",
+        ".spec.data[]?.remoteRef.conversionStrategy",
+        ".spec.data[]?.remoteRef.decodingStrategy",
+        ".spec.data[]?.remoteRef.metadataPolicy",
+        ".spec.data[]?.remoteRef.nullBytePolicy",
+        ".spec.dataFrom[]?.extract.conversionStrategy",
+        ".spec.dataFrom[]?.extract.decodingStrategy",
+        ".spec.dataFrom[]?.extract.metadataPolicy",
+        ".spec.dataFrom[]?.extract.nullBytePolicy",
+    ],
+}
+
 # One AppProject per source repo — a per-repo tenancy boundary so an Application
 # can only ever pull from its one repo and sync into its own namespaces (see the
 # module docstring). `tripbot` governs the app workloads + identity (tripbot
@@ -963,30 +987,8 @@ class ArgoCD(Construct):
                 # + Prune=false forever — that's its safety guarantee.
                 "syncOptions": sync_options,
             },
-            # ESO's ExternalSecret CRD stamps schema defaults our manifests omit
-            # (target.deletionPolicy, and conversionStrategy/decodingStrategy/
-            # metadataPolicy/nullBytePolicy under each data[].remoteRef and
-            # dataFrom[].extract). They're API-server schema defaults with no
-            # field-manager owner, so they can't be waived via managedFieldsManagers
-            # and otherwise leave every ExternalSecret perpetually OutOfSync. Ignore
-            # exactly those paths so they read Synced. Harmless no-op on the data
-            # unit (no ExternalSecrets there).
             "ignoreDifferences": [
-                {
-                    "group": "external-secrets.io",
-                    "kind": "ExternalSecret",
-                    "jqPathExpressions": [
-                        ".spec.target.deletionPolicy",
-                        ".spec.data[]?.remoteRef.conversionStrategy",
-                        ".spec.data[]?.remoteRef.decodingStrategy",
-                        ".spec.data[]?.remoteRef.metadataPolicy",
-                        ".spec.data[]?.remoteRef.nullBytePolicy",
-                        ".spec.dataFrom[]?.extract.conversionStrategy",
-                        ".spec.dataFrom[]?.extract.decodingStrategy",
-                        ".spec.dataFrom[]?.extract.metadataPolicy",
-                        ".spec.dataFrom[]?.extract.nullBytePolicy",
-                    ],
-                },
+                ESO_DEFAULTS_IGNORE,
                 # The apiserver defaults apiVersion: v1 / kind: PersistentVolumeClaim
                 # onto every StatefulSet volumeClaimTemplate at admission. The k8s
                 # schema's embedded-PVC props (KubePersistentVolumeClaimProps) have
