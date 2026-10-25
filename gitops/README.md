@@ -60,10 +60,12 @@ All the Argo config is authored in cdk8s (no hand-written YAML) and synthesized 
 - a **tailscale `Ingress`** — UI at `argocd-prod.<tailnet>.ts.net`.
 - a repo-registration **`ExternalSecret`** (IaC — see step 2).
 
-The dashcam **PV** is deliberately **not** in Argo — it's host-specific bootstrap
-infra synthed to `dist/<env>-nfs-pv.k8s.yaml` (which no ApplicationSet globs)
-and applied once per cluster via `task k8s:<env>:nfs-pv`. Only the matching PVC
-is Argo-managed (in the data unit); it binds to the named PV.
+The NFS **PVs** (dashcam corpus, music, parked) are host-specific bootstrap infra
+synthed to `dist/<env>-nfs-pv.k8s.yaml` (which no ApplicationSet globs) and
+applied once per cluster via `task k8s:<env>:nfs-pv`, which injects the real NFS
+coords the committed dist replaces with placeholders. Argo **watches** them (the
+`nfs-pv` Application, below) but never syncs or prunes them unasked. The matching
+PVCs are Argo-managed (in the data / supporting units) and bind to the PVs by name.
 
 Argo CD itself is installed by the **cdk8s platform layer** (`PlatformChart`,
 minipc) — chart pinned in `helm_platform.py`, Helm values in `k8s/argo-cd/values.yml`.
@@ -89,6 +91,28 @@ the two files `task gitops:apply` applies — `cdk8s/dist/argocd.k8s.yaml` and
 
 `task gitops:apply` still works and is how `gitops` itself is first created: it is
 the one object that needs a hand apply to bootstrap.
+
+## Watch-only Applications over hand-applied dist
+
+Two more Applications in `platform-argo.k8s.yaml` (created by a `gitops` sync)
+give the other hand-applied dist files the same treatment: drift reads OutOfSync
+in Argo and the console's Argo panel, and nothing changes until someone acts.
+Both are **manual sync + `Prune=false`**; their tasks stay the bootstrap and the
+apply.
+
+- **`nfs-pv`** tracks `prod-1-nfs-pv.k8s.yaml` and `stage-1-nfs-pv.k8s.yaml` (one
+  app for both envs; PVs are cluster-scoped). With prune off, Argo can never
+  delete a PV. `ignoreDifferences` covers `spec.nfs.server` / `spec.nfs.path`
+  (placeholders in the committed dist) and `spec.claimRef` (written by the
+  binder), and `RespectIgnoreDifferences=true` keeps a sync from writing the
+  placeholders over the real coords. A permanent OutOfSync here means a field
+  missing from that list; the Argo UI diff names it. The apply, including the
+  first one on a fresh cluster, stays `task k8s:<env>:nfs-pv`.
+- **`burrito-config`** tracks `burrito.k8s.yaml` (the TerraformRepository, every
+  TerraformLayer, the runner credentials, UI ingress). Its CRs need the CRDs the
+  `burrito` Application installs, so sync `burrito` first;
+  `SkipDryRunOnMissingResource=true` lets it render a diff before they exist.
+  The apply stays `task k8s:prod:burrito:apply`, which refuses without the CRDs.
 
 Nearly all of this is declarative. The only out-of-band step is seeding the repo
 deploy key into SM + adding its public half to GitHub (a one-time bootstrap, like
