@@ -74,8 +74,8 @@ resource "aws_ssm_parameter" "mirror" {
 #
 # Password rotation: set/bump `keepers.rotation_id` on random_pet, then
 # apply. After the parameter updates, ESO syncs (≤1h or force) and then
-# `kubectl exec postgres-0 -- psql -c "ALTER USER tripbot WITH PASSWORD
-# '<new>';"` to bring pg_authid in line.
+# `kubectl -n prod-1-data exec pg-1 -c postgres -- psql -U postgres -c
+# "ALTER USER tripbot WITH PASSWORD '<new>';"` to bring pg_authid in line.
 
 resource "random_pet" "tripbot_db_password" {
   length    = 4
