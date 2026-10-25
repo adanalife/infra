@@ -70,7 +70,7 @@ _SA = "music-localize"
 # The audio extensions an album track can have. Same set as tripbot's
 # bin/stage-streambeats AUDIO_EXTS. (Synology `@eaDir` sidecar dirs never reach
 # the local copy at all — the mirror prunes them.)
-_AUDIO_EXTS = ("mp3", "flac", "m4a", "ogg", "opus")
+AUDIO_EXTS = ("mp3", "flac", "m4a", "ogg", "opus")
 
 # Size of the node-local music PVC. The staged library is 6.3 GB across 11 albums
 # (measured 2026-08-05) and the full StreamBeats set is ~30, so ~20 GB covers the
