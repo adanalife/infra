@@ -16,6 +16,8 @@ Scope (minipc only — development is on the k3d cluster, with its own Argo):
   * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
   * the `gitops` root Application, which tracks the Argo config dist files
     (argocd.k8s.yaml + this file) so their drift reads OutOfSync in Argo.
+  * the watch-only `nfs-pv` Application over the hand-applied NFS
+    PersistentVolumes.
 
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
   * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
@@ -73,6 +75,16 @@ ROOT_APP = "gitops"
 # The dist files `task gitops:apply` applies (the Taskfile's GITOPS_MANIFESTS).
 # argocd-k3d.k8s.yaml targets the dev cluster's own Argo and stays out.
 GITOPS_MANIFESTS = ("argocd.k8s.yaml", "platform-argo.k8s.yaml")
+# The NFS PersistentVolumes `task k8s:<env>:nfs-pv` applies, both envs in one
+# app (PVs are cluster-scoped, so the env split buys nothing).
+NFS_PV_APP = "nfs-pv"
+NFS_PV_MANIFESTS = ("prod-1-nfs-pv.k8s.yaml", "stage-1-nfs-pv.k8s.yaml")
+# The committed dist carries placeholder NFS coords (the task injects the real
+# ones from a gitignored env file), and the binder writes claimRef on a bound PV.
+NFS_PV_IGNORE = {
+    "kind": "PersistentVolume",
+    "jsonPointers": ["/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"],
+}
 
 
 class ArgoPlatform(Construct):
@@ -80,7 +92,23 @@ class ArgoPlatform(Construct):
         super().__init__(scope, id)
         self._project()
         self._oci_registries()
-        self._root_application()
+        self._dist_application(
+            # The repo-registration ExternalSecrets carry ESO's schema defaults.
+            ROOT_APP,
+            GITOPS_MANIFESTS,
+            ARGO_NS,
+            ignore=[ESO_DEFAULTS_IGNORE],
+        )
+        # Watch-only: the apply stays the human gesture (manual sync), and with
+        # prune off Argo can never delete a PV. RespectIgnoreDifferences keeps
+        # a sync from writing the placeholder NFS coords over the real ones.
+        self._dist_application(
+            NFS_PV_APP,
+            NFS_PV_MANIFESTS,
+            "default",
+            ignore=[NFS_PV_IGNORE],
+            sync_options=("RespectIgnoreDifferences=true",),
+        )
 
         # Cluster-scoped releases (one install for the whole minipc), skipping the
         # bootstrap floor (cilium / argo-cd, argo=False).
@@ -97,9 +125,17 @@ class ArgoPlatform(Construct):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
 
-    def _root_application(self):
-        """The `gitops` root: tracks the Argo config dist files, this one
-        included, so the Argo config is itself an Application.
+    def _dist_application(
+        self,
+        name: str,
+        files: tuple[str, ...],
+        dest_ns: str,
+        *,
+        ignore: list[dict],
+        sync_options: tuple[str, ...] = (),
+    ):
+        """An Application over hand-applied dist files (the `gitops` root, which
+        tracks the Argo config this file included, and the watch-only units).
 
         Manual sync and Prune=false, the posture of the `*-data` units: a sync
         is the apply, and nothing is ever deleted by it. A synth bug that drops
@@ -108,10 +144,10 @@ class ArgoPlatform(Construct):
         """
         app = cdk8s.ApiObject(
             self,
-            ROOT_APP,
+            name,
             api_version="argoproj.io/v1alpha1",
             kind="Application",
-            metadata={"name": ROOT_APP, "namespace": ARGO_NS},
+            metadata={"name": name, "namespace": ARGO_NS},
         )
         app.add_json_patch(
             cdk8s.JsonPatch.add(
@@ -122,23 +158,24 @@ class ArgoPlatform(Construct):
                         "repoURL": REPO_URL,
                         "targetRevision": TARGET_REVISION,
                         "path": "cdk8s/dist",
-                        # Only the Argo config; every other dist file belongs to
-                        # an Application this config generates.
+                        # Only these files; every other dist file belongs to
+                        # an Application the Argo config generates.
                         "directory": {
-                            "include": "{" + ",".join(GITOPS_MANIFESTS) + "}"
+                            "include": files[0]
+                            if len(files) == 1
+                            else "{" + ",".join(files) + "}"
                         },
                     },
-                    "destination": {"server": IN_CLUSTER, "namespace": ARGO_NS},
+                    "destination": {"server": IN_CLUSTER, "namespace": dest_ns},
                     "syncPolicy": {
                         "syncOptions": [
                             "CreateNamespace=false",
                             "ServerSideApply=true",
                             "Prune=false",
+                            *sync_options,
                         ],
                     },
-                    # The repo-registration ExternalSecrets carry ESO's schema
-                    # defaults, same as in every app unit.
-                    "ignoreDifferences": [ESO_DEFAULTS_IGNORE],
+                    "ignoreDifferences": ignore,
                 },
             )
         )

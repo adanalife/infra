@@ -23,11 +23,9 @@ def _apps(objs):
     return [o for o in objs if o["kind"] == "Application" and "sources" in o["spec"]]
 
 
-def _root(objs):
+def _root(objs, name="gitops"):
     (app,) = [
-        o
-        for o in objs
-        if o["kind"] == "Application" and o["metadata"]["name"] == "gitops"
+        o for o in objs if o["kind"] == "Application" and o["metadata"]["name"] == name
     ]
     return app
 
@@ -104,6 +102,27 @@ def test_gitops_root_is_manual_and_never_prunes():
     policy = _root(_synth())["spec"]["syncPolicy"]
     assert "automated" not in policy
     assert "Prune=false" in policy["syncOptions"]
+
+
+def test_nfs_pv_app_watches_both_envs_pvs_and_never_prunes():
+    app = _root(_synth(), "nfs-pv")
+    assert app["spec"]["source"]["directory"] == {
+        "include": "{prod-1-nfs-pv.k8s.yaml,stage-1-nfs-pv.k8s.yaml}"
+    }
+    for env in ("prod-1", "stage-1"):
+        assert (
+            Path(__file__).resolve().parents[2] / f"dist/{env}-nfs-pv.k8s.yaml"
+        ).exists()
+    policy = app["spec"]["syncPolicy"]
+    assert "automated" not in policy
+    assert "Prune=false" in policy["syncOptions"]
+    # A sync must not write the committed placeholder NFS coords over the live ones.
+    assert "RespectIgnoreDifferences=true" in policy["syncOptions"]
+    (ignore,) = app["spec"]["ignoreDifferences"]
+    assert ignore["kind"] == "PersistentVolume"
+    assert {"/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"} <= set(
+        ignore["jsonPointers"]
+    )
 
 
 def test_per_env_apps_name_qualified():

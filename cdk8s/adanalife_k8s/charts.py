@@ -212,8 +212,8 @@ class MediamtxChart(Chart):
 
 class NfsPVChart(Chart):
     """The cluster-scoped NFS PersistentVolumes — the dashcam corpus and the
-    background-music share. Host-specific bootstrap infra deliberately kept OUT of
-    Argo. Synthed to its own dist/<env>-nfs-pv.k8s.yaml, which no ApplicationSet
+    background-music share. Host-specific bootstrap infra Argo watches (the
+    manual-sync `nfs-pv` Application) but never syncs or prunes. Synthed to its own dist/<env>-nfs-pv.k8s.yaml, which no ApplicationSet
     includes (the apps set matches `<env>-<component>-<platform>.k8s.yaml`;
     supporting/data match their own per-env files), and provisioned once per
     cluster via `task k8s:<env>:nfs-pv` with the real NFS coords from the
