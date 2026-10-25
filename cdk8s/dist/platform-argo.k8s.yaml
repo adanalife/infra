@@ -126,6 +126,42 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: burrito-config
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: git@github.com:adanalife/infra.git
+    targetRevision: main
+    path: cdk8s/dist
+    directory:
+      include: burrito.k8s.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: burrito
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - Prune=false
+      - SkipDryRunOnMissingResource=true
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.target.deletionPolicy
+        - .spec.data[]?.remoteRef.conversionStrategy
+        - .spec.data[]?.remoteRef.decodingStrategy
+        - .spec.data[]?.remoteRef.metadataPolicy
+        - .spec.data[]?.remoteRef.nullBytePolicy
+        - .spec.dataFrom[]?.extract.conversionStrategy
+        - .spec.dataFrom[]?.extract.decodingStrategy
+        - .spec.dataFrom[]?.extract.metadataPolicy
+        - .spec.dataFrom[]?.extract.nullBytePolicy
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: metrics-server
   namespace: argocd
 spec:

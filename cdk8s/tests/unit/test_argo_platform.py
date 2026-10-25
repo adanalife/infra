@@ -125,6 +125,17 @@ def test_nfs_pv_app_watches_both_envs_pvs_and_never_prunes():
     )
 
 
+def test_burrito_config_app_is_manual_and_tolerates_missing_crds():
+    app = _root(_synth(), "burrito-config")
+    assert app["spec"]["source"]["directory"] == {"include": "burrito.k8s.yaml"}
+    assert (Path(__file__).resolve().parents[2] / "dist/burrito.k8s.yaml").exists()
+    policy = app["spec"]["syncPolicy"]
+    assert "automated" not in policy
+    assert "Prune=false" in policy["syncOptions"]
+    # Its CRs need the CRDs the `burrito` Application installs.
+    assert "SkipDryRunOnMissingResource=true" in policy["syncOptions"]
+
+
 def test_per_env_apps_name_qualified():
     names = {a["metadata"]["name"] for a in _apps(_synth())}
     # NATS exists once per env, name-qualified so prod/stage don't collide.

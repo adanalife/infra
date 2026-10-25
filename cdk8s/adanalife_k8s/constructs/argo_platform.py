@@ -16,8 +16,8 @@ Scope (minipc only — development is on the k3d cluster, with its own Argo):
   * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
   * the `gitops` root Application, which tracks the Argo config dist files
     (argocd.k8s.yaml + this file) so their drift reads OutOfSync in Argo.
-  * the watch-only `nfs-pv` Application over the hand-applied NFS
-    PersistentVolumes.
+  * watch-only Applications over the other hand-applied dist files: `nfs-pv`
+    (the NFS PersistentVolumes) and `burrito-config` (the Burrito layer CRs).
 
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
   * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
@@ -85,6 +85,9 @@ NFS_PV_IGNORE = {
     "kind": "PersistentVolume",
     "jsonPointers": ["/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"],
 }
+# The Burrito config `task k8s:prod:burrito:apply` applies.
+BURRITO_APP = "burrito-config"
+BURRITO_MANIFESTS = ("burrito.k8s.yaml",)
 
 
 class ArgoPlatform(Construct):
@@ -108,6 +111,16 @@ class ArgoPlatform(Construct):
             "default",
             ignore=[NFS_PV_IGNORE],
             sync_options=("RespectIgnoreDifferences=true",),
+        )
+        # Its CRs need the CRDs the `burrito` Application installs, so sync
+        # that one first; SkipDryRunOnMissingResource lets the diff render
+        # before the CRDs exist.
+        self._dist_application(
+            BURRITO_APP,
+            BURRITO_MANIFESTS,
+            "burrito",
+            ignore=[ESO_DEFAULTS_IGNORE],
+            sync_options=("SkipDryRunOnMissingResource=true",),
         )
 
         # Cluster-scoped releases (one install for the whole minipc), skipping the

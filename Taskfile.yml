@@ -338,7 +338,8 @@ tasks:
 
   # Burrito's config unit is NOT in GITOPS_MANIFESTS: its CRs need the Burrito
   # CRDs, which only exist once the `burrito` Argo Application has synced — a
-  # blanket gitops:apply would fail on a cluster that hasn't installed it.
+  # blanket gitops:apply would fail on a cluster that hasn't installed it. The
+  # manual-sync `burrito-config` Application watches it for drift.
   k8s:prod:burrito:apply:
     desc: "Apply the Burrito config (TerraformRepository + every layer + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
     preconditions:
