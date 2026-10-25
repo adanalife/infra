@@ -15,7 +15,9 @@ vars:
   # wires it into the preview, the apply and the orphan report at once — and
   # missing one means gitops:prune reports its objects as orphaned.
   # argocd-k3d.k8s.yaml is deliberately absent: it targets the dev cluster,
-  # which the minipc context guard forbids.
+  # which the minipc context guard forbids. The `gitops` root Application
+  # tracks exactly these files (constructs/argo_platform.py GITOPS_MANIFESTS;
+  # test_argo_platform.py pins the two lists together).
   GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
   # Parent of the sibling checkouts (tripbot, platform-gateway, …) that the
   # *:sync tasks copy from. They sit next to this repo's *main* worktree, which
@@ -664,7 +666,7 @@ tasks:
         cmd: kubectl diff -f {{.ITEM}} || [ $? -eq 1 ]
 
   gitops:apply:
-    desc: Apply the Argo CD config (project + appsets + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md). Preview with gitops:diff.
+    desc: Apply the Argo CD config (projects + appsets + platform apps + the gitops root app + ingress + repo secret) reconciling cdk8s/dist (manual sync; see gitops/README.md). Preview with gitops:diff.
     preconditions:
       - *minipc-context-guard
     cmds:

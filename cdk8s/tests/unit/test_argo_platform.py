@@ -19,7 +19,17 @@ def _synth():
 
 
 def _apps(objs):
-    return [o for o in objs if o["kind"] == "Application"]
+    """The Helm Applications (multi-source); the gitops root has one plain source."""
+    return [o for o in objs if o["kind"] == "Application" and "sources" in o["spec"]]
+
+
+def _root(objs):
+    (app,) = [
+        o
+        for o in objs
+        if o["kind"] == "Application" and o["metadata"]["name"] == "gitops"
+    ]
+    return app
 
 
 def _release(app):
@@ -65,6 +75,35 @@ def test_single_broad_platform_project():
     # broad on purpose (platform installs CRDs/ClusterRoles); distinct from the
     # restrictive tripbot app project.
     assert {"group": "*", "kind": "*"} in proj["spec"]["clusterResourceWhitelist"]
+
+
+def test_gitops_root_tracks_exactly_the_argo_config():
+    app = _root(_synth())
+    assert app["metadata"]["namespace"] == "argocd"
+    assert app["spec"]["project"] == "platform"
+    src = app["spec"]["source"]
+    assert src["path"] == "cdk8s/dist"
+    # Only the files `task gitops:apply` applies — never the app units, which
+    # their own Applications deliver, nor the k3d dev cluster's Argo config.
+    assert src["directory"] == {"include": "{argocd.k8s.yaml,platform-argo.k8s.yaml}"}
+    taskfile = (Path(__file__).resolve().parents[3] / "Taskfile.yml").read_text()
+    (line,) = [
+        row
+        for row in taskfile.splitlines()
+        if row.strip().startswith("GITOPS_MANIFESTS:")
+    ]
+    assert line.split(":", 1)[1].split() == [
+        "cdk8s/dist/argocd.k8s.yaml",
+        "cdk8s/dist/platform-argo.k8s.yaml",
+    ]
+
+
+def test_gitops_root_is_manual_and_never_prunes():
+    # A sync must never delete: a synth bug dropping an ApplicationSet would
+    # cascade into the prod Applications it generates. Removal is gitops:prune.
+    policy = _root(_synth())["spec"]["syncPolicy"]
+    assert "automated" not in policy
+    assert "Prune=false" in policy["syncOptions"]
 
 
 def test_per_env_apps_name_qualified():
