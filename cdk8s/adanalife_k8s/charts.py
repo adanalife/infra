@@ -330,8 +330,8 @@ class BurritoChart(Chart):
     the core TerraformLayer + runner-creds ExternalSecret + tailnet UI
     Ingress) — the objects the controller plans from, applied after the
     Burrito install (the `burrito` HelmComponent, Argo-delivered). Offline +
-    deterministic → dist/burrito.k8s.yaml, applied via
-    `task k8s:prod:burrito:apply`. See constructs/burrito.py."""
+    deterministic → dist/burrito.k8s.yaml, delivered by a manual sync of the
+    `burrito-config` Argo Application. See constructs/burrito.py."""
 
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)

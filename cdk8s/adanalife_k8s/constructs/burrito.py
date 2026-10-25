@@ -1,6 +1,6 @@
 """Burrito trial config, authored in cdk8s. Synthesizes to dist/burrito.k8s.yaml
-— a committed, golden-gated deploy unit applied (task k8s:prod:burrito:apply)
-after the Burrito install (the `burrito` HelmComponent in helm_platform.py,
+— a committed, golden-gated deploy unit the manual-sync `burrito-config` Argo
+Application delivers after the Burrito install (the `burrito` HelmComponent in helm_platform.py,
 Argo-delivered via platform-argo). Burrito is the controller; these are the
 objects that tell it what to plan:
 

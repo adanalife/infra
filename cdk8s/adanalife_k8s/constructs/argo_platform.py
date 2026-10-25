@@ -85,7 +85,7 @@ NFS_PV_IGNORE = {
     "kind": "PersistentVolume",
     "jsonPointers": ["/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"],
 }
-# The Burrito config `task k8s:prod:burrito:apply` applies.
+# The Burrito config: watched and, on a manual sync, delivered by this app.
 BURRITO_APP = "burrito-config"
 BURRITO_MANIFESTS = ("burrito.k8s.yaml",)
 

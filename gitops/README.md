@@ -112,7 +112,8 @@ apply.
   TerraformLayer, the runner credentials, UI ingress). Its CRs need the CRDs the
   `burrito` Application installs, so sync `burrito` first;
   `SkipDryRunOnMissingResource=true` lets it render a diff before they exist.
-  The apply stays `task k8s:prod:burrito:apply`, which refuses without the CRDs.
+  The apply is a sync of this app (`argocd app sync burrito-config --core` or
+  the console's sync button); there is no task for it.
 
 Nearly all of this is declarative. The only out-of-band step is seeding the repo
 deploy key into SM + adding its public half to GitHub (a one-time bootstrap, like
