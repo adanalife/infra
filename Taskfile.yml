@@ -339,15 +339,8 @@ tasks:
   # Burrito's config unit is NOT in GITOPS_MANIFESTS: its CRs need the Burrito
   # CRDs, which only exist once the `burrito` Argo Application has synced — a
   # blanket gitops:apply would fail on a cluster that hasn't installed it. The
-  # manual-sync `burrito-config` Application watches it for drift.
-  k8s:prod:burrito:apply:
-    desc: "Apply the Burrito config (TerraformRepository + every layer + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
-    preconditions:
-      - *minipc-context-guard
-      - sh: kubectl get crd terraformlayers.config.terraform.padok.cloud >/dev/null 2>&1
-        msg: "Burrito CRDs missing — sync the `burrito` Application first (it ships them with the chart): argocd app sync burrito --core"
-    cmds:
-      - kubectl apply -f cdk8s/dist/burrito.k8s.yaml
+  # manual-sync `burrito-config` Application watches it for drift and delivers
+  # it: `argocd app sync burrito-config --core`, after `burrito` has synced.
 
   # Run `terraform apply` for one layer, once. Named per ENV, not per cluster:
   # every burrito layer lives on the one prod cluster, so the old
