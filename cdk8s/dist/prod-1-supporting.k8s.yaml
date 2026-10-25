@@ -474,7 +474,7 @@ data:
       mount = "adanalife",
       name = "A Dana Life",
       fallible = true,
-      station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\//)
+      station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
     )
     output.icecast(
       %mp3(bitrate = 128),
@@ -484,7 +484,7 @@ data:
       mount = "halloween",
       name = "Halloween",
       fallible = true,
-      station("halloween", r/^\/music\/(halloween)\//)
+      station("halloween", r/^\/music\/(halloween)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
     )
 ---
 apiVersion: apps/v1
@@ -505,7 +505,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: d84c61afae
+        adanalife.dev/config-hash: da254ba91a
       labels:
         app: radio
     spec:

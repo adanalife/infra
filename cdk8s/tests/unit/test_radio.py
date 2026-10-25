@@ -2,6 +2,8 @@
 album bed uses (never the NFS one), and every station mount the Liquidsoap
 script declares is pushed to the Icecast container in the same pod."""
 
+import re
+
 import pytest
 from cdk8s import Testing as K8sTesting
 
@@ -59,11 +61,14 @@ def test_the_stream_station_shuffles_streambeats_and_woodercz():
     script = _script()
     assert 'mount = "adanalife",\n  name = "A Dana Life",' in script
     assert (
-        r'station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\//)'
+        r'station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)'
         in script
     )
     # The Halloween station stays as it was: one directory.
-    assert r'station("halloween", r/^\/music\/(halloween)\//)' in script
+    assert (
+        r'station("halloween", r/^\/music\/(halloween)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)'
+        in script
+    )
 
 
 def test_a_station_directory_outside_the_safe_alphabet_is_refused():
@@ -150,3 +155,18 @@ def test_the_service_exposes_the_control_port_inside_the_cluster(env_name):
     spec = _deployment(objs)["spec"]["template"]["spec"]
     (liq,) = [c for c in spec["containers"] if c["name"] == "liquidsoap"]
     assert liq["ports"] == [{"name": "control", "containerPort": CONTROL_PORT}]
+
+
+def test_a_station_plays_only_audio_files_inside_its_albums():
+    pattern = _pattern(("streambeats-*", "fifty-horizons"))
+    # Liquidsoap's r/…/i literal → Python's re, closely enough for these paths.
+    rx = re.compile(pattern[2:-2].replace(r"\/", "/"), re.IGNORECASE)
+    assert rx.search("/music/fifty-horizons/001 Maine - Atlantic Dawn.mp3")
+    assert rx.search("/music/streambeats-synthwave-rose/Rose - 17 Rad Panda.FLAC")
+    for skipped in (
+        "/music/fifty-horizons/cover.jpg",
+        "/music/streambeats-synthwave-rose/@eaDir/Rose - 17 Rad Panda.mp3@SynoEAStream",
+        "/music/loose.mp3",
+        "/music/halloween/spooky.mp3",
+    ):
+        assert not rx.search(skipped), skipped

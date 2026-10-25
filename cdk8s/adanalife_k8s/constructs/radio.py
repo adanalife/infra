@@ -40,7 +40,7 @@ from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
 from adanalife_k8s.constructs.dashcam import MINIPC_NODE
-from adanalife_k8s.constructs.music import LOCAL_CLAIM
+from adanalife_k8s.constructs.music import AUDIO_EXTS, LOCAL_CLAIM
 from adanalife_k8s.naming import (
     CONFIG_HASH_ANNOTATION,
     config_hash,
@@ -107,9 +107,11 @@ def _pattern(folders: tuple[str, ...]) -> str:
         if not re.fullmatch(r"[a-z0-9*-]+", f):
             raise ValueError(f"radio directory {f!r}: use [a-z0-9-] and *")
     names = "|".join(f.replace("*", r"[^\/]*") for f in folders)
-    # The trailing slash is what keeps loose root files out.
+    # The slash after the album keeps loose root files out; the extension keeps
+    # out cover art and Synology's `@eaDir/<track>@SynoEAStream` sidecars.
     root = _MUSIC_DIR.replace("/", r"\/")
-    return rf"r/^{root}\/({names})\//"
+    exts = "|".join(AUDIO_EXTS)
+    return rf"r/^{root}\/({names})\/.*\.({exts})$/i"
 
 
 # The control API: Liquidsoap's own HTTP server answers JSON about each

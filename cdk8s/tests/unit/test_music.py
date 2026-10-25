@@ -18,7 +18,7 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import MusicLocalizeChart, SupportingChart
 from adanalife_k8s.constructs.music import (
-    _AUDIO_EXTS,
+    AUDIO_EXTS,
     _LOCALIZE_SCRIPT,
     INDEX_CONFIGMAP,
     INDEX_KEY,
@@ -192,7 +192,7 @@ def test_index_covers_every_audio_extension_the_bed_plays(tmp_path):
     src, dst = tmp_path / "nfs", tmp_path / "local"
     album = src / "mixed"
     album.mkdir(parents=True)
-    for i, ext in enumerate(_AUDIO_EXTS):
+    for i, ext in enumerate(AUDIO_EXTS):
         (album / f"{i:02d} track.{ext}").write_text("track")
     dst.mkdir()
 
@@ -200,7 +200,7 @@ def test_index_covers_every_audio_extension_the_bed_plays(tmp_path):
 
     # The find expression is written out in the script; this is what stops it
     # drifting from the constant tripbot's bin/stage-streambeats agrees with.
-    assert len(index["mixed"]) == len(_AUDIO_EXTS)
+    assert len(index["mixed"]) == len(AUDIO_EXTS)
 
 
 def test_index_is_rebuilt_from_the_local_copy_not_the_share(tmp_path):
