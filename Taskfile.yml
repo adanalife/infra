@@ -89,26 +89,27 @@ tasks:
       - rm -rf dist && mv .dist.tmp dist
 
   # The NFS PersistentVolumes (dashcam corpus + background-music share) are
-  # host-specific bootstrap infra kept OUT of Argo (their own NfsPVChart ->
-  # dist/<env>-nfs-pv.k8s.yaml, not globbed by the apps/data ApplicationSets).
+  # host-specific bootstrap infra Argo watches but never syncs (their own
+  # NfsPVChart -> dist/<env>-nfs-pv.k8s.yaml, not globbed by the apps/data
+  # ApplicationSets; the manual-sync `nfs-pv` Application tracks it).
   # These tasks synth them with the real NFS coords from the gitignored
   # cdk8s/dashcam-nfs.local.env and apply just the PVs — a once-per-cluster
   # bootstrap, like seeding secrets. The matching PVCs are Argo's (in the data /
   # supporting unit) and bind to these PVs by name.
   k8s:stage:nfs-pv:
-    desc: provision the stage-1 NFS PVs (dashcam + music; cluster-scoped, outside Argo) from cdk8s with real coords
+    desc: provision the stage-1 NFS PVs (dashcam + music; cluster-scoped, Argo-watched) from cdk8s with real coords
     cmds:
       - task: k8s:_nfs-pv:apply
         vars: { ENV: stage-1 }
 
   k8s:prod:nfs-pv:
-    desc: provision the prod-1 NFS PVs (dashcam + music; cluster-scoped, outside Argo) from cdk8s with real coords
+    desc: provision the prod-1 NFS PVs (dashcam + music; cluster-scoped, Argo-watched) from cdk8s with real coords
     cmds:
       - task: k8s:_nfs-pv:apply
         vars: { ENV: prod-1 }
 
-  # Read-only twin of the two above: nothing else notices when a merged change to
-  # the PV constructs never reached the cluster, since Argo doesn't own them.
+  # Read-only twin of the two above, with the real coords (the `nfs-pv`
+  # Application diffs against the placeholder dist and ignores them).
   # Exits 0 with no output when the live PVs match.
   k8s:stage:nfs-pv:diff:
     desc: "Preview what k8s:stage:nfs-pv would change: kubectl diff the stage-1 NFS PVs against the live cluster (read-only)"
@@ -236,7 +237,7 @@ tasks:
           # kubectl diff exits 1 when it finds differences; the diff itself is the answer.
           kubectl diff -f "$out/{{.ENV}}-nfs-pv.k8s.yaml" || [ $? -eq 1 ]
         else
-          echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (+ parked on stage) (cluster-scoped, outside Argo)"
+          echo "Applying {{.ENV}} NFS PersistentVolumes: dashcam + music (+ parked on stage) (cluster-scoped, Argo-watched)"
           kubectl apply -f "$out/{{.ENV}}-nfs-pv.k8s.yaml"
         fi
 
@@ -337,7 +338,8 @@ tasks:
 
   # Burrito's config unit is NOT in GITOPS_MANIFESTS: its CRs need the Burrito
   # CRDs, which only exist once the `burrito` Argo Application has synced — a
-  # blanket gitops:apply would fail on a cluster that hasn't installed it.
+  # blanket gitops:apply would fail on a cluster that hasn't installed it. The
+  # manual-sync `burrito-config` Application watches it for drift.
   k8s:prod:burrito:apply:
     desc: "Apply the Burrito config (TerraformRepository + every layer + runner creds + OIDC secret + UI ingress) reconciling cdk8s/dist/burrito.k8s.yaml. Preview with kubectl diff -f."
     preconditions:
