@@ -62,6 +62,41 @@ stringData:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: gitops
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: git@github.com:adanalife/infra.git
+    targetRevision: main
+    path: cdk8s/dist
+    directory:
+      include: "{argocd.k8s.yaml,platform-argo.k8s.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - Prune=false
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.target.deletionPolicy
+        - .spec.data[]?.remoteRef.conversionStrategy
+        - .spec.data[]?.remoteRef.decodingStrategy
+        - .spec.data[]?.remoteRef.metadataPolicy
+        - .spec.data[]?.remoteRef.nullBytePolicy
+        - .spec.dataFrom[]?.extract.conversionStrategy
+        - .spec.dataFrom[]?.extract.decodingStrategy
+        - .spec.dataFrom[]?.extract.metadataPolicy
+        - .spec.dataFrom[]?.extract.nullBytePolicy
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: metrics-server
   namespace: argocd
 spec:

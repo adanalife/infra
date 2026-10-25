@@ -14,6 +14,8 @@ Scope (minipc only — development is on the k3d cluster, with its own Argo):
     k8s-monitoring, tailscale-operator, kyverno) — installed once; values from prod-1
     (stage rides prod's cluster-scoped platform).
   * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
+  * the `gitops` root Application, which tracks the Argo config dist files
+    (argocd.k8s.yaml + this file) so their drift reads OutOfSync in Argo.
 
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
   * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
@@ -44,6 +46,7 @@ from constructs import Construct
 from adanalife_k8s.config import load_env
 from adanalife_k8s.constructs.argocd import (
     ARGO_NS,
+    ESO_DEFAULTS_IGNORE,
     IN_CLUSTER,
     REPO_URL,
     TARGET_REVISION,
@@ -63,6 +66,13 @@ PLATFORM_ENVS = ("prod-1", "stage-1")
 # Cluster-scoped platform releases install once with prod-1's values (stage rides
 # prod's cluster-scoped platform — see stage-prod-cotenancy).
 CLUSTER_VALUES_ENV = "prod-1"
+# The app-of-apps root: one Application watching the Argo config itself, so
+# drift between the live AppProjects/ApplicationSets/Applications and the
+# committed dist reads OutOfSync instead of waiting for a `task gitops:diff`.
+ROOT_APP = "gitops"
+# The dist files `task gitops:apply` applies (the Taskfile's GITOPS_MANIFESTS).
+# argocd-k3d.k8s.yaml targets the dev cluster's own Argo and stays out.
+GITOPS_MANIFESTS = ("argocd.k8s.yaml", "platform-argo.k8s.yaml")
 
 
 class ArgoPlatform(Construct):
@@ -70,6 +80,7 @@ class ArgoPlatform(Construct):
         super().__init__(scope, id)
         self._project()
         self._oci_registries()
+        self._root_application()
 
         # Cluster-scoped releases (one install for the whole minipc), skipping the
         # bootstrap floor (cilium / argo-cd, argo=False).
@@ -85,6 +96,52 @@ class ArgoPlatform(Construct):
             for comp in env_components(load_env(env_name)):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+
+    def _root_application(self):
+        """The `gitops` root: tracks the Argo config dist files, this one
+        included, so the Argo config is itself an Application.
+
+        Manual sync and Prune=false, the posture of the `*-data` units: a sync
+        is the apply, and nothing is ever deleted by it. A synth bug that drops
+        an ApplicationSet must not cascade-delete the Applications (and prod
+        workloads) it generates, so removal stays `task gitops:prune`.
+        """
+        app = cdk8s.ApiObject(
+            self,
+            ROOT_APP,
+            api_version="argoproj.io/v1alpha1",
+            kind="Application",
+            metadata={"name": ROOT_APP, "namespace": ARGO_NS},
+        )
+        app.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "project": PROJECT,
+                    "source": {
+                        "repoURL": REPO_URL,
+                        "targetRevision": TARGET_REVISION,
+                        "path": "cdk8s/dist",
+                        # Only the Argo config; every other dist file belongs to
+                        # an Application this config generates.
+                        "directory": {
+                            "include": "{" + ",".join(GITOPS_MANIFESTS) + "}"
+                        },
+                    },
+                    "destination": {"server": IN_CLUSTER, "namespace": ARGO_NS},
+                    "syncPolicy": {
+                        "syncOptions": [
+                            "CreateNamespace=false",
+                            "ServerSideApply=true",
+                            "Prune=false",
+                        ],
+                    },
+                    # The repo-registration ExternalSecrets carry ESO's schema
+                    # defaults, same as in every app unit.
+                    "ignoreDifferences": [ESO_DEFAULTS_IGNORE],
+                },
+            )
+        )
 
     def _oci_registries(self):
         # Anonymous HTTP(S) chart repos need no Argo registration, but an OCI
