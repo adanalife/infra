@@ -35,6 +35,18 @@ configs:
     # which forwards plain HTTP to argocd-server:80. Required to sit behind a proxy.
     server.insecure: true
 
+# Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's
+# annotationAutodiscovery scrape the application controller's metrics port
+# (:8082, served whether or not the chart's metrics Service is enabled). The
+# alert that reads from it is the stale-OutOfSync rule in
+# terraform/platform/grafana-alerts.tf: argocd_app_info is the one family on the
+# cloud keep-list, so the rest of the controller's series stay local-VM-only.
+controller:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8082"
+    prometheus.io/path: "/metrics"
+
 # UI/API access is via the Tailscale Ingress (argocd-prod.<tailnet>.ts.net).
 # `kubectl -n argocd port-forward svc/argocd-server` also works as a fallback.
 
