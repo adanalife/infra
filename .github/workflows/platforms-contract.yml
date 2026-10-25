@@ -35,6 +35,8 @@ jobs:
       runs-on: ubuntu-latest
       # No towncrier here: this repo ships no releases, so the sync PR needs no fragment.
       changelog: false
+      # cdk8s/ reads the synced contracts, so the sync PR carries a re-synthed dist/.
+      cdk8s: true
       platforms: true
       tripbot: contract.json metrics.json
       tripbot-dir: cdk8s
