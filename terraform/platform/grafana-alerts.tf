@@ -4504,6 +4504,82 @@ resource "grafana_rule_group" "burrito_health" {
   }
 }
 
+# Argo CD health — an Application that has sat OutOfSync for a day. Many of
+# the Applications on the minipc Argo are manual-sync (the data and supporting
+# units, the prod obs/playout holdouts, and most of the platform charts), so a
+# merged, CI-green change to one of them stays undelivered until someone clicks
+# Sync, and nothing else reports it: Argo's own notifications fire on a failed
+# sync or degraded health, and an undelivered change is neither. An autosynced
+# app that cannot converge lands here too, which is the other reason nothing is
+# excluded.
+#
+# A day rather than minutes because a manual-sync change waiting for its apply
+# is normal for hours; this is the "it has been forgotten" signal, not the
+# "a sync is pending" one. Grouped by name only, so a health_status flip on the
+# same app does not reset the pending clock.
+#
+# argocd_app_info reaches the cloud only because the keep-regex in
+# k8s/monitoring/prod-1/values.yml names it, and is scraped only because
+# k8s/argo-cd/values.yml annotates the application controller pod.
+resource "grafana_rule_group" "argocd_health" {
+  name             = "argocd-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Argo CD app OutOfSync for over a day"
+    for            = "24h"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "Argo CD app {{ $labels.name }} has been OutOfSync for 24h — a merged change is not live"
+      description = "argocd_app_info{name=\"{{ $labels.name }}\", sync_status=\"OutOfSync\"} has held for 24h: what git declares for this Application differs from what runs in the cluster. On a manual-sync app (no `automated` block) this is a merged change nobody synced — read the diff with `argocd app diff {{ $labels.name }} --core` (or the UI at https://argocd-prod.tail020deb.ts.net/applications/{{ $labels.name }}), then sync it. On an autosynced app it is a sync that keeps failing or a benign diff that wants an ignoreDifferences entry so OutOfSync keeps meaning real drift. no_data is OK: the series is absent until the application controller is scraped, and a controller restart resets the 24h clock rather than firing."
+    }
+    labels = {
+      severity = "warning"
+      service  = "argocd"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (name) (argocd_app_info{sync_status=\"OutOfSync\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // Control-plane restart-churn alerts — the breadth signal that separates "one
 // operator is crashlooping" from "the API server is dropping out from under
 // every leader-elected controller at once".
