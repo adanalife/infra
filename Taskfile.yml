@@ -2487,7 +2487,7 @@ tasks:
         fi
 
   tripbot:stage:db:up:
-    desc: start a kubectl port-forward to the stage-1 cluster Postgres at localhost:5433 (5433 to avoid colliding with a dev/prod forward on 5432)
+    desc: start a kubectl port-forward to the stage-1-data CNPG primary at localhost:5433 (5433 to avoid colliding with a dev/prod forward on 5432)
     cmds:
       - mkdir -p /tmp/adanalife-tasks
       # Task's shell interpreter reports a job id (`g1`) for `$!`, not a PID, so
@@ -2495,19 +2495,19 @@ tasks:
       # :down needs. The forward outlives that short-lived bash.
       - |
         bash -eu -c '
-          kubectl port-forward -n stage-1 svc/postgres 5433:5432 >/dev/null 2>&1 &
+          kubectl port-forward -n stage-1-data svc/pg-rw 5433:5432 >/dev/null 2>&1 &
           echo $! > /tmp/adanalife-tasks/tripbot-stage-db.pid
         '
-      - 'echo "stage-1 Postgres port-forward started — psql at localhost:5433 (PID $(cat /tmp/adanalife-tasks/tripbot-stage-db.pid))"'
+      - 'echo "stage-1-data Postgres port-forward started — psql at localhost:5433 (PID $(cat /tmp/adanalife-tasks/tripbot-stage-db.pid))"'
 
   tripbot:stage:db:down:
-    desc: stop the kubectl port-forward to the stage-1 cluster Postgres
+    desc: stop the kubectl port-forward to the stage-1-data CNPG primary
     cmds:
       - |
         if [ -f /tmp/adanalife-tasks/tripbot-stage-db.pid ]; then
           kill "$(cat /tmp/adanalife-tasks/tripbot-stage-db.pid)" 2>/dev/null || true
           rm -f /tmp/adanalife-tasks/tripbot-stage-db.pid
-          echo "stage-1 Postgres port-forward stopped"
+          echo "stage-1-data Postgres port-forward stopped"
         else
           echo "No stage-1 Postgres port-forward PID file found — nothing to stop"
         fi
