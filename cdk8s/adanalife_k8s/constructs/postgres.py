@@ -22,7 +22,7 @@ Per-env shape:
     from the on-disk secret.env placeholders (local laptop overlay). The
     backup CronJob envFroms it on every env.
   * prod-1 only (env.postgres_backup): a local-path-retain StorageClass, a
-    daily backup CronJob, and the postgres-backup-s3 ExternalSecret.
+    hourly backup CronJob, and the postgres-backup-s3 ExternalSecret.
 """
 
 from __future__ import annotations
