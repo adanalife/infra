@@ -332,6 +332,9 @@ settings.log.file := false
 password = string.trim(file.contents("{_PASSWORD_FILE}"))
 control_port = {CONTROL_PORT}
 stations = ref([])
+# Measures each track's integrated loudness as it is prepared, off air, into
+# the `lufs_track_gain` that normalize_track_gain applies.
+enable_lufs_track_gain_metadata()
 
 # A station airs its request queue ahead of a shuffled playlist of every
 # library track whose path matches `pattern`, reloaded when a rescan finds the
@@ -388,7 +391,11 @@ def station(mount, pattern) =
   # A track's silent tail or intro airs at most 5s of silence: the ~20s some
   # tracks carry reads to tripbot's audio watchdog as an outage, and it swaps
   # the stream onto its fallback bed.
-  blank.eat(max_blank = 5., threshold = -50., aired)
+  quiet_gaps_cut = blank.eat(max_blank = 5., threshold = -50., aired)
+  # Every track lands at the same loudness (settings.lufs.track_gain_target,
+  # -16 LUFS), so albums mastered years apart sit level; the limiter catches
+  # the peaks a quiet track's gain-up pushes toward clipping.
+  limit(normalize_track_gain(quiet_gaps_cut))
 end
 {_CONTROL}
 {outputs}
