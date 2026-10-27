@@ -515,6 +515,10 @@ spec:
           ports:
             - containerPort: 8001
               name: control
+          readinessProbe:
+            periodSeconds: 10
+            tcpSocket:
+              port: control
           resources:
             limits:
               memory: 512Mi

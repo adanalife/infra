@@ -493,6 +493,14 @@ class Radio(Construct):
                                         name="control", container_port=CONTROL_PORT
                                     )
                                 ],
+                                # The console drives each station through this port, so
+                                # a pod without it isn't ready, however well Icecast is.
+                                readiness_probe=k8s.Probe(
+                                    tcp_socket=k8s.TcpSocketAction(
+                                        port=k8s.IntOrString.from_string("control")
+                                    ),
+                                    period_seconds=10,
+                                ),
                                 security_context=k8s.SecurityContext(
                                     allow_privilege_escalation=False,
                                     capabilities=k8s.Capabilities(drop=["ALL"]),
