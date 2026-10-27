@@ -1,7 +1,7 @@
 {
-  "title": "00 — Launch / Stream at a Glance",
+  "title": "00 — Stream at a Glance",
   "uid": "stream-at-a-glance",
-  "tags": ["tripbot", "obs", "stream", "launch"],
+  "tags": ["tripbot", "obs", "stream"],
   "schemaVersion": 39,
   "timezone": "browser",
   "editable": true,
