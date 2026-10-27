@@ -228,7 +228,10 @@ data:
           }
         )
       ]
-      aired
+      # A track's silent tail or intro airs at most 5s of silence: the ~20s some
+      # tracks carry reads to tripbot's audio watchdog as an outage, and it swaps
+      # the stream onto its fallback bed.
+      blank.eat(max_blank = 5., threshold = -50., aired)
     end
 
     def entry(~requested = false, ~rid = null, filename, m) =
@@ -466,7 +469,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 29c6ee7431
+        adanalife.dev/config-hash: d800f110d0
       labels:
         app: radio
     spec:

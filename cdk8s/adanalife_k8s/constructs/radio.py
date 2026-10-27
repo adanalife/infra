@@ -385,7 +385,10 @@ def station(mount, pattern) =
       }}
     )
   ]
-  aired
+  # A track's silent tail or intro airs at most 5s of silence: the ~20s some
+  # tracks carry reads to tripbot's audio watchdog as an outage, and it swaps
+  # the stream onto its fallback bed.
+  blank.eat(max_blank = 5., threshold = -50., aired)
 end
 {_CONTROL}
 {outputs}
