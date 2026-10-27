@@ -89,9 +89,14 @@ _LIQUIDSOAP_UID = 100
 # config is rewritten through its contents because icecast owns the file but
 # not /etc, where `sed -i` would need to create its temp file. The image's
 # entrypoint then writes the password env vars into it before exec'ing icecast.
+# The image's config also caps sources at 2, and each station is one source, so
+# the cap is raised to the station count or the mounts past it are refused.
 _DEFAULT_MOUNT = '<mount type="default"><charset>UTF-8</charset></mount>'
 _ICECAST_START = (
-    f"c=\"$(sed 's|</icecast>|{_DEFAULT_MOUNT}</icecast>|' /etc/icecast.xml)\" "
+    'c="$(sed '
+    f"-e 's|</icecast>|{_DEFAULT_MOUNT}</icecast>|' "
+    f"-e 's|<sources>[0-9]*</sources>|<sources>{len(STATIONS)}</sources>|' "
+    '/etc/icecast.xml)" '
     "&& printf '%s\\n' \"$c\" > /etc/icecast.xml && "
     f'p="$(cat {_PASSWORD_FILE})"; '
     'export ICECAST_SOURCE_PASSWORD="$p" '

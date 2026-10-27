@@ -106,6 +106,14 @@ def test_icecast_serves_utf8_titles():
     )
 
 
+def test_icecast_takes_a_source_per_station():
+    # The image caps Icecast at 2 sources; past that a station's mount is
+    # refused with a 503 and that station goes silent.
+    spec = _deployment(_synth("prod-1"))["spec"]["template"]["spec"]
+    (icecast,) = [c for c in spec["containers"] if c["name"] == "icecast"]
+    assert f"<sources>{len(STATIONS)}</sources>" in icecast["command"][-1]
+
+
 def test_the_control_api_registers_every_verb_on_its_own_port():
     script = _script()
     assert f"control_port = {CONTROL_PORT}" in script
