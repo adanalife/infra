@@ -474,7 +474,7 @@ spec:
         - command:
             - sh
             - -c
-            - c="$(sed 's|</icecast>|<mount type="default"><charset>UTF-8</charset></mount></icecast>|' /etc/icecast.xml)" && printf '%s\n' "$c" > /etc/icecast.xml && p="$(cat /run/radio/password)"; export ICECAST_SOURCE_PASSWORD="$p" ICECAST_ADMIN_PASSWORD="$p" ICECAST_RELAY_PASSWORD="$p"; exec docker-entrypoint icecast -c /etc/icecast.xml
+            - c="$(sed -e 's|</icecast>|<mount type="default"><charset>UTF-8</charset></mount></icecast>|' -e 's|<sources>[0-9]*</sources>|<sources>3</sources>|' /etc/icecast.xml)" && printf '%s\n' "$c" > /etc/icecast.xml && p="$(cat /run/radio/password)"; export ICECAST_SOURCE_PASSWORD="$p" ICECAST_ADMIN_PASSWORD="$p" ICECAST_RELAY_PASSWORD="$p"; exec docker-entrypoint icecast -c /etc/icecast.xml
           image: ghcr.io/libretime/icecast:2.5.0-alpine
           name: icecast
           ports:
