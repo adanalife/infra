@@ -344,27 +344,27 @@ enable_lufs_track_gain_metadata()
 settings.prometheus.server := true
 settings.prometheus.server.port := {METRICS_PORT}
 station_ready = prometheus.gauge(
-  namespace = "radio", labels = ["station"],
+  namespace = "liquidsoap", labels = ["station"],
   help = "1 while the station has something to air, so its mount is up",
   "station_ready"
 )
 station_tracks = prometheus.gauge(
-  namespace = "radio", labels = ["station"],
+  namespace = "liquidsoap", labels = ["station"],
   help = "Library tracks the station's last rescan matched",
   "station_tracks"
 )
 tracks_played = prometheus.counter(
-  namespace = "radio", labels = ["station"],
+  namespace = "liquidsoap", labels = ["station"],
   help = "Tracks the station has started airing",
   "tracks_played_total"
 )
 track_gain = prometheus.gauge(
-  namespace = "radio", labels = ["station"],
+  namespace = "liquidsoap", labels = ["station"],
   help = "Loudness gain applied to the track on air, in dB",
   "track_gain_db"
 )
 station_listeners = prometheus.gauge(
-  namespace = "radio", labels = ["station"],
+  namespace = "liquidsoap", labels = ["station"],
   help = "Icecast listeners on the station's mount, OBS and probes included",
   "station_listeners"
 )
@@ -528,7 +528,7 @@ class Radio(Construct):
                 template=k8s.PodTemplateSpec(
                     metadata=k8s.ObjectMeta(
                         labels=sel,
-                        # Liquidsoap serves the `radio_*` series on its metrics
+                        # Liquidsoap serves the `liquidsoap_*` series on its metrics
                         # port, Icecast's listener counts included.
                         annotations={
                             "prometheus.io/scrape": "true",
