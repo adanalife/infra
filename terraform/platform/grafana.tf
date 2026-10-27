@@ -102,6 +102,7 @@ locals {
     "application-latency-commands-and-db",
     "platform-services",
     "miles-leaderboard", # all-time per-viewer miles, read from tripbot's /api/stats/community over the tripbot-api datasource rather than from a metric (grafana-tripbot-api.tf)
+    "radio",             # the fleet's own Icecast/Liquidsoap stations: on air, listeners, library, per-track loudness gain, and the stream's fallback beside them
     # The vlc-server graveyard (titled 90/92 so they sort below everything).
     # vlc-server was deleted 2026-07-17 (tripbot#1135) and emits nothing;
     # these two chart only vlc-server-labeled series and are permanently dark.
