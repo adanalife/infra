@@ -5796,3 +5796,80 @@ resource "grafana_rule_group" "guessr_api" {
     }
   }
 }
+
+// The fleet's own radio (cdk8s/adanalife_k8s/constructs/radio.py). It is the
+// stream's music bed and what the TV app and the console play, so a station off
+// air is silent everywhere at once. tripbot's audio watchdog covers the stream
+// with a local bed, which is why this is a warning and not critical: the stream
+// keeps music, but the station itself needs a look.
+//
+// Two arms, either one fires:
+//   - a station that has tracks yet is not on air (its mount is down while it
+//     has something to play). A station with an empty library takes its mount
+//     down on purpose, so liquidsoap_station_tracks > 0 keeps that quiet.
+//   - the radio Deployment has no available pod. The liquidsoap_* series go stale
+//     with the pod, so the station arm alone would read NoData; the readiness
+//     probes on both Icecast and Liquidsoap's control port make this arm cover
+//     a pod that runs without the console's control API, too.
+//
+// liquidsoap_station_{ready,tracks} are allowlisted into the cloud for this rule
+// (k8s/monitoring/prod-1/values.yml). `for = 5m` rides out a Recreate rollout,
+// which drops every station for under a minute.
+resource "grafana_rule_group" "radio_health" {
+  name             = "radio-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Radio: a station is off air"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Radio {{ $labels.station }}{{ $labels.deployment }} has been off air for 5m"
+      description = "Either a station with tracks in its library has had no mount up for 5 minutes, or the radio Deployment in prod-1 has no available pod. The stream stays on music (tripbot's audio watchdog swaps to a local bed), but the TV app and the console's /radio page have nothing to play. Start with `kubectl --context admin@adanalife-minipc -n prod-1 get pod -l app=radio` and the liquidsoap container's logs. A pod that is Running but not Ready means Icecast or Liquidsoap's control port (8001) never came up. If the pod is healthy but the station is not, the station's source failed; check its library is on the node with `task k8s:prod:music-localize`. If prod-1-supporting is OutOfSync in Argo, the running radio is older than the merged config. The 15 — Radio dashboard shows each station's state, library and listeners."
+    }
+    labels = {
+      severity = "warning"
+      service  = "radio"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "((1 - max by (station) (liquidsoap_station_ready{namespace=\"prod-1\"})) and on (station) (max by (station) (liquidsoap_station_tracks{namespace=\"prod-1\"}) > 0)) or (max by (deployment) (kube_deployment_status_replicas_available{namespace=\"prod-1\", deployment=\"radio\"}) == bool 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
