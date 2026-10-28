@@ -228,6 +228,76 @@ data:
     # the `lufs_track_gain` that normalize_track_gain applies.
     enable_lufs_track_gain_metadata()
 
+    settings.prometheus.server := true
+    settings.prometheus.server.port := 9599
+    station_ready = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "1 while the station has something to air, so its mount is up",
+      "station_ready"
+    )
+    station_tracks = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Library tracks the station's last rescan matched",
+      "station_tracks"
+    )
+    tracks_played = prometheus.counter(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Tracks the station has started airing",
+      "tracks_played_total"
+    )
+    track_gain = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Loudness gain applied to the track on air, in dB",
+      "track_gain_db"
+    )
+    station_listeners = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Icecast listeners on the station's mount, OBS and probes included",
+      "station_listeners"
+    )
+    # Sets (gauge) or adds to (counter) one station's series.
+    def put(metric, station, value) =
+      set = metric(label_values = [station])
+      set(value)
+    end
+
+    # Icecast has no metrics endpoint of its own, so its status page is read here.
+    # It lists the mounts that are up: an array of them, a bare object when only one
+    # is, and no `source` at all when none are. A mount that is down reads 0.
+    def mounts(body) =
+      try
+        let json.parse (status : {
+          icestats: {source: [{listenurl: string, listeners: int}]}
+        }) = body
+        status.icestats.source
+      catch _ do
+        try
+          let json.parse (status : {
+            icestats: {source: {listenurl: string, listeners: int}}
+          }) = body
+          [status.icestats.source]
+        catch _ do
+          []
+        end
+      end
+    end
+    def poll_listeners() =
+      try
+        body = http.get("http://127.0.0.1:8000/status-json.xsl")
+        counts = list.map(
+          fun (s) -> (path.basename(s.listenurl), s.listeners),
+          mounts(body)
+        )
+        list.iter(
+          fun (st) -> put(station_listeners, fst(st), float(list.assoc(default = 0, fst(st), counts))),
+          stations()
+        )
+      catch err do
+        log.info("listener poll failed: #{err}")
+      end
+    end
+    thread.run(every = 15., poll_listeners)
+
     # A station airs its request queue ahead of a shuffled playlist of every
     # library track whose path matches `pattern`, reloaded when a rescan finds the
     # set changed. With no tracks and no requests it is never ready, so its
@@ -237,6 +307,7 @@ data:
       known = ref([])
       def rescan() =
         tracks = list.filter(fun (f) -> pattern.test(f), playlist.files("/music"))
+        put(station_tracks, mount, float(list.length(tracks)))
         if tracks != known() then
           known := tracks
           shuffle.reload(empty_queue = false, tracks)
@@ -266,6 +337,18 @@ data:
         synchronous = true,
         fun (m) -> played := list.prefix(11, [(m, from_queue(m)), ...played()])
       )
+      # The gain normalize_track_gain applies reads like "15.15 dB"; a track the
+      # resolver couldn't measure has none.
+      aired.on_track(
+        synchronous = true,
+        fun (m) ->
+          begin
+            put(tracks_played, mount, 1.)
+            gain_tag = m[settings.normalize_track_gain_metadata()]
+            gain = list.hd(default = "", string.split(separator = " ", gain_tag))
+            if gain != "" then put(track_gain, mount, float_of_string(default = 0., gain)) end
+          end
+      )
       stations := [
         ...stations(),
         (
@@ -287,7 +370,12 @@ data:
       # Every track lands at the same loudness (settings.lufs.track_gain_target,
       # -16 LUFS), so albums mastered years apart sit level; the limiter catches
       # the peaks a quiet track's gain-up pushes toward clipping.
-      limit(normalize_track_gain(quiet_gaps_cut))
+      on_air = limit(normalize_track_gain(quiet_gaps_cut))
+      thread.run(
+        every = 15.,
+        fun () -> put(station_ready, mount, if on_air.is_ready() then 1. else 0. end)
+      )
+      on_air
     end
 
     def entry(~requested = false, ~rid = null, filename, m) =
@@ -525,7 +613,9 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: c826da900d
+        adanalife.dev/config-hash: cc5eababd3
+        prometheus.io/port: "9599"
+        prometheus.io/scrape: "true"
       labels:
         app: radio
     spec:
@@ -564,6 +654,8 @@ spec:
           ports:
             - containerPort: 8001
               name: control
+            - containerPort: 9599
+              name: metrics
           readinessProbe:
             periodSeconds: 10
             tcpSocket:

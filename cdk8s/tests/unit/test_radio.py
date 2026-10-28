@@ -12,6 +12,7 @@ from adanalife_k8s.config import load_env
 from adanalife_k8s.constructs.music import LOCAL_CLAIM
 from adanalife_k8s.constructs.radio import (
     CONTROL_PORT,
+    METRICS_PORT,
     NAME,
     PORT,
     STATIONS,
@@ -162,7 +163,18 @@ def test_the_service_exposes_the_control_port_inside_the_cluster(env_name):
     assert not [o for o in objs if o["kind"] == "Ingress" and NAME in str(o)]
     spec = _deployment(objs)["spec"]["template"]["spec"]
     (liq,) = [c for c in spec["containers"] if c["name"] == "liquidsoap"]
-    assert liq["ports"] == [{"name": "control", "containerPort": CONTROL_PORT}]
+    assert liq["ports"] == [
+        {"name": "control", "containerPort": CONTROL_PORT},
+        {"name": "metrics", "containerPort": METRICS_PORT},
+    ]
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_the_pod_is_scraped_on_liquidsoaps_metrics_port(env_name):
+    meta = _deployment(_synth(env_name))["spec"]["template"]["metadata"]
+    assert meta["annotations"]["prometheus.io/scrape"] == "true"
+    assert meta["annotations"]["prometheus.io/port"] == str(METRICS_PORT)
+    assert f"settings.prometheus.server.port := {METRICS_PORT}" in _script()
 
 
 def test_a_station_plays_only_audio_files_inside_its_albums():

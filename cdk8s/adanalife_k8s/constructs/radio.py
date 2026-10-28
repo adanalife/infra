@@ -29,6 +29,10 @@ control API on port 8001 (`control`): `GET /stations/<mount>/queue` and
 `/tracks`, `POST .../skip`, `.../back`, `.../push` (`{"file": ...}`, a file of
 the station's own scan) and `.../drop/<rid>`. The console uses it to show and
 steer what each station plays.
+
+Liquidsoap also serves Prometheus metrics on port 9599 (`metrics`), scraped by
+annotation: per station, whether it's on air, its library size, tracks played,
+the loudness gain on the current track, and Icecast's listener count.
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ LIQUIDSOAP_IMAGE = "docker.io/savonet/liquidsoap:v2.4.6"
 NAME = "radio"
 PORT = 8000
 CONTROL_PORT = 8001
+METRICS_PORT = 9599
 _MUSIC_DIR = "/music"
 _RUN_DIR = "/run/radio"
 _PASSWORD_FILE = f"{_RUN_DIR}/password"
@@ -336,6 +341,76 @@ stations = ref([])
 # the `lufs_track_gain` that normalize_track_gain applies.
 enable_lufs_track_gain_metadata()
 
+settings.prometheus.server := true
+settings.prometheus.server.port := {METRICS_PORT}
+station_ready = prometheus.gauge(
+  namespace = "liquidsoap", labels = ["station"],
+  help = "1 while the station has something to air, so its mount is up",
+  "station_ready"
+)
+station_tracks = prometheus.gauge(
+  namespace = "liquidsoap", labels = ["station"],
+  help = "Library tracks the station's last rescan matched",
+  "station_tracks"
+)
+tracks_played = prometheus.counter(
+  namespace = "liquidsoap", labels = ["station"],
+  help = "Tracks the station has started airing",
+  "tracks_played_total"
+)
+track_gain = prometheus.gauge(
+  namespace = "liquidsoap", labels = ["station"],
+  help = "Loudness gain applied to the track on air, in dB",
+  "track_gain_db"
+)
+station_listeners = prometheus.gauge(
+  namespace = "liquidsoap", labels = ["station"],
+  help = "Icecast listeners on the station's mount, OBS and probes included",
+  "station_listeners"
+)
+# Sets (gauge) or adds to (counter) one station's series.
+def put(metric, station, value) =
+  set = metric(label_values = [station])
+  set(value)
+end
+
+# Icecast has no metrics endpoint of its own, so its status page is read here.
+# It lists the mounts that are up: an array of them, a bare object when only one
+# is, and no `source` at all when none are. A mount that is down reads 0.
+def mounts(body) =
+  try
+    let json.parse (status : {{
+      icestats: {{source: [{{listenurl: string, listeners: int}}]}}
+    }}) = body
+    status.icestats.source
+  catch _ do
+    try
+      let json.parse (status : {{
+        icestats: {{source: {{listenurl: string, listeners: int}}}}
+      }}) = body
+      [status.icestats.source]
+    catch _ do
+      []
+    end
+  end
+end
+def poll_listeners() =
+  try
+    body = http.get("http://127.0.0.1:{PORT}/status-json.xsl")
+    counts = list.map(
+      fun (s) -> (path.basename(s.listenurl), s.listeners),
+      mounts(body)
+    )
+    list.iter(
+      fun (st) -> put(station_listeners, fst(st), float(list.assoc(default = 0, fst(st), counts))),
+      stations()
+    )
+  catch err do
+    log.info("listener poll failed: #{{err}}")
+  end
+end
+thread.run(every = 15., poll_listeners)
+
 # A station airs its request queue ahead of a shuffled playlist of every
 # library track whose path matches `pattern`, reloaded when a rescan finds the
 # set changed. With no tracks and no requests it is never ready, so its
@@ -345,6 +420,7 @@ def station(mount, pattern) =
   known = ref([])
   def rescan() =
     tracks = list.filter(fun (f) -> pattern.test(f), playlist.files("{_MUSIC_DIR}"))
+    put(station_tracks, mount, float(list.length(tracks)))
     if tracks != known() then
       known := tracks
       shuffle.reload(empty_queue = false, tracks)
@@ -374,6 +450,18 @@ def station(mount, pattern) =
     synchronous = true,
     fun (m) -> played := list.prefix(11, [(m, from_queue(m)), ...played()])
   )
+  # The gain normalize_track_gain applies reads like "15.15 dB"; a track the
+  # resolver couldn't measure has none.
+  aired.on_track(
+    synchronous = true,
+    fun (m) ->
+      begin
+        put(tracks_played, mount, 1.)
+        gain_tag = m[settings.normalize_track_gain_metadata()]
+        gain = list.hd(default = "", string.split(separator = " ", gain_tag))
+        if gain != "" then put(track_gain, mount, float_of_string(default = 0., gain)) end
+      end
+  )
   stations := [
     ...stations(),
     (
@@ -395,7 +483,12 @@ def station(mount, pattern) =
   # Every track lands at the same loudness (settings.lufs.track_gain_target,
   # -16 LUFS), so albums mastered years apart sit level; the limiter catches
   # the peaks a quiet track's gain-up pushes toward clipping.
-  limit(normalize_track_gain(quiet_gaps_cut))
+  on_air = limit(normalize_track_gain(quiet_gaps_cut))
+  thread.run(
+    every = 15.,
+    fun () -> put(station_ready, mount, if on_air.is_ready() then 1. else 0. end)
+  )
+  on_air
 end
 {_CONTROL}
 {outputs}
@@ -435,7 +528,13 @@ class Radio(Construct):
                 template=k8s.PodTemplateSpec(
                     metadata=k8s.ObjectMeta(
                         labels=sel,
-                        annotations={CONFIG_HASH_ANNOTATION: config_hash(config)},
+                        # Liquidsoap serves the `liquidsoap_*` series on its metrics
+                        # port, Icecast's listener counts included.
+                        annotations={
+                            "prometheus.io/scrape": "true",
+                            "prometheus.io/port": str(METRICS_PORT),
+                            CONFIG_HASH_ANNOTATION: config_hash(config),
+                        },
                     ),
                     spec=k8s.PodSpec(
                         # The music claim is local-path, so it only exists here.
@@ -491,7 +590,10 @@ class Radio(Construct):
                                 ports=[
                                     k8s.ContainerPort(
                                         name="control", container_port=CONTROL_PORT
-                                    )
+                                    ),
+                                    k8s.ContainerPort(
+                                        name="metrics", container_port=METRICS_PORT
+                                    ),
                                 ],
                                 # The console drives each station through this port, so
                                 # a pod without it isn't ready, however well Icecast is.
