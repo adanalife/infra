@@ -496,6 +496,12 @@ podLogsViaKubernetesApi:
   # ArgoCD's per-reconcile "Reconciliation completed" lines and Alloy's
   # per-stream "opened log stream" lines are most of those two services'
   # volume and carry no signal; warn and error still ship.
+  # The Argo Workflows controller echoes an INFO "Event occurred" line for
+  # every node transition, so one fanned-out video-pipeline batch logs
+  # ~6 GB/day — enough to exhaust the monthly cap in a week.
+  # The console's access log carries one line per LL-HLS part and playlist
+  # poll (~5/s per viewer); its successful /hls/ lines are dropped, every
+  # other request and status still ships. `kubectl logs` keeps all of it.
   extraLogProcessingStages: |-
     stage.match {
       selector = "{namespace=\"argocd\"} |= \"level=info\""
@@ -503,6 +509,14 @@ podLogsViaKubernetesApi:
     }
     stage.match {
       selector = "{namespace=\"monitoring\", service_name=\"alloy-logs\"} |= \"level=info\""
+      action   = "drop"
+    }
+    stage.match {
+      selector = "{namespace=\"argo-workflows\"} |= \"level=INFO\""
+      action   = "drop"
+    }
+    stage.match {
+      selector = "{service_name=\"tripbot-console\"} |= \"GET /hls/\" |~ \"HTTP/1.1.. 200[^0-9]\""
       action   = "drop"
     }
 
