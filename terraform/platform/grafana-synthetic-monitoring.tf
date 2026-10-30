@@ -26,10 +26,9 @@ locals {
 }
 
 # Quota. The free tier covers 100k API test executions/month and bills per
-# probe per execution, so one probe costs 21.9k/month at a 120s pace and
-# 4.4k at 600s; three probes cost 65.7k and 13.1k. The checks below come to
-# ~96k. Another check wants a slower pace on all of them rather than more on
-# top; past 100k it is $5/10k.
+# probe per execution, so one probe costs 14.6k/month at a 180s pace, 8.8k at
+# 300s and 4.4k at 600s. The checks below come to ~92k. Another check wants a
+# slower pace on all of them rather than more on top; past 100k it is $5/10k.
 
 # The target is the leaderboard endpoint and not the page, because it is the
 # one request that exercises both halves at once: Pages serving the deploy, and
@@ -42,14 +41,14 @@ locals {
 # deployment that is missing the whole API -- which is not hypothetical:
 # production answers /api/day exactly that way today, having never had it.
 #
-# Two minutes rather than one: the game is the endpoint a visitor is most
-# likely to be sitting in front of, so it gets the fastest pace the quota above
-# will carry.
+# Three minutes: the game is the endpoint a visitor is most likely to be
+# sitting in front of, so it gets the fastest pace the quota above will carry
+# alongside the channel-live checks.
 resource "grafana_synthetic_monitoring_check" "guessr" {
   job       = "guessr"
   target    = "https://guessr.dana.lol/api/leaderboard?board=daily"
   enabled   = true
-  frequency = 120000
+  frequency = 180000
   timeout   = 10000
   probes    = local.sm_probes
   labels = {
@@ -154,6 +153,64 @@ resource "grafana_synthetic_monitoring_check" "guessr_admin" {
       ip_version                      = "V4"
       valid_status_codes              = [401]
       fail_if_body_not_matches_regexp = ["sign in with Twitch"]
+    }
+  }
+}
+
+# Is the channel live, asked the way a viewer would. The in-cluster stream
+# rules read series the minipc pushes, so a minipc that cannot reach Grafana
+# Cloud reads as no data, and no data is OK on those rules -- both streams were
+# dark for 74 minutes on 2026-10-15 without `OBS: stream is down` firing. These
+# two depend on nothing in the house. The rule that pages on them is
+# "Every platform is off-air" in grafana-alerts.tf.
+#
+# Neither needs a credential. Twitch serves a channel's preview thumbnail with
+# 200 while it is live and 302s to a placeholder image while it is not, so the
+# check refuses redirects and wants the 200. YouTube's /live path renders the
+# live video while there is one, with a canonical link to its watch page, and
+# the channel page otherwise.
+#
+# One probe each, in the US: the answer is the same from every region, and
+# YouTube can put a consent page in front of a European probe. Five minutes,
+# which the off-air rule's window is sized against.
+resource "grafana_synthetic_monitoring_check" "twitch_live" {
+  job       = "twitch-live"
+  target    = "https://static-cdn.jtvnw.net/previews-ttv/live_user_adanalife_-80x45.jpg"
+  enabled   = true
+  frequency = 300000
+  timeout   = 10000
+  probes    = [data.grafana_synthetic_monitoring_probes.main.probes["NorthVirginia"]]
+  labels = {
+    tier = "production"
+  }
+
+  settings {
+    http {
+      method              = "GET"
+      ip_version          = "V4"
+      no_follow_redirects = true
+      valid_status_codes  = [200]
+    }
+  }
+}
+
+resource "grafana_synthetic_monitoring_check" "youtube_live" {
+  job       = "youtube-live"
+  target    = "https://www.youtube.com/channel/UC8Q7uFC1Xyr2ZnTWOk9Aizg/live"
+  enabled   = true
+  frequency = 300000
+  timeout   = 10000
+  probes    = [data.grafana_synthetic_monitoring_probes.main.probes["NorthVirginia"]]
+  labels = {
+    tier = "production"
+  }
+
+  settings {
+    http {
+      method                          = "GET"
+      ip_version                      = "V4"
+      valid_status_codes              = [200]
+      fail_if_body_not_matches_regexp = ["<link rel=\"canonical\" href=\"https://www\\.youtube\\.com/watch\\?v="]
     }
   }
 }
