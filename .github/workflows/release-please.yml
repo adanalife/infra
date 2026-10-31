@@ -99,8 +99,7 @@ jobs:
       # and a push that leaves it empty skips the staging pass — so the PR
       # merges with a stale dist / unbuilt changelog and, because the app-token
       # push is what fires its pull_request events, no CI at all
-      # (platform-gateway 1.27.1). curl rather than `gh`: the ARC runner image
-      # ships no gh CLI.
+      # (platform-gateway 1.27.1).
       - name: Check for an open release PR branch
         if: ${{ !steps.release.outputs.release_created && (inputs.changelog || inputs.stage != '') }}
         id: release-branch

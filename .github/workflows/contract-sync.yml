@@ -93,8 +93,7 @@ jobs:
           permission-pull-requests: write
 
       # Overwrites each copy with its owner's main, so the working tree diff is
-      # the drift. tripbot is public, so GITHUB_TOKEN reads it. curl rather
-      # than `gh api`: the ARC runner image ships no gh CLI.
+      # the drift. tripbot is public, so GITHUB_TOKEN reads it.
       - name: Fetch the owners' copies
         id: fetch
         env:
