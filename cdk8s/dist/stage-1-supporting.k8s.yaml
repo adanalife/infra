@@ -100,6 +100,40 @@ spec:
               key: secret-access-key
               name: cert-manager-aws-credentials
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-stage-rollout
+  namespace: stage-1
+rules:
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-stage-rollout
+  namespace: stage-1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-stage-rollout
+subjects:
+  - kind: ServiceAccount
+    name: arc-amd64-gha-rs-no-permission
+    namespace: arc-runners
+---
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
