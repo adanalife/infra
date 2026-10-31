@@ -62,8 +62,9 @@ for name in targets:
                 app, f"{name}-mediamtx-{platform}", env=env, platform=platform
             )
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
-    # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
-    # don't glob it). Applied via `task k8s:<env>:nfs-pv`. Committed dist
+    # infra, its own deploy unit the apps/data ApplicationSets don't glob (the
+    # manual-sync `nfs-pv` Application only watches it). Applied via
+    # `task k8s:<env>:nfs-pv`. Committed dist
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
         NfsPVChart(app, f"{name}-nfs-pv", env=env)

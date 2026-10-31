@@ -102,6 +102,7 @@ locals {
     "application-latency-commands-and-db",
     "platform-services",
     "miles-leaderboard", # all-time per-viewer miles, read from tripbot's /api/stats/community over the tripbot-api datasource rather than from a metric (grafana-tripbot-api.tf)
+    "radio",             # the fleet's own Icecast/Liquidsoap stations: on air, listeners, library, per-track loudness gain, and the stream's fallback beside them
     # Community dashboards from grafana.com, vendored as JSON so the
     # version is pinned and diffable. Pre-processing applied at vendor
     # time: __inputs/__requires stripped, ${datasource} / ${DS_PROMETHEUS}

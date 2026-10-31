@@ -32,6 +32,11 @@
 
 resource "aws_s3_bucket" "postgres_backups" {
   bucket = "${local.full_account_name}-postgres-backups"
+
+  lifecycle {
+    # weekly/ and archive/ are kept forever; nothing else holds them.
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "postgres_backups" {

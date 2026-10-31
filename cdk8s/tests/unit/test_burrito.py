@@ -82,7 +82,7 @@ def test_oci_chart_registry_is_registered():
     (burrito_app,) = [
         o
         for o in _kind(objs, "Application")
-        if o["spec"]["sources"][0].get("chart") == "burrito"
+        if o["spec"].get("sources", [{}])[0].get("chart") == "burrito"
     ]
     repo_url = burrito_app["spec"]["sources"][0]["repoURL"]
     assert "://" not in repo_url  # Argo's OCI repoURL form is scheme-less

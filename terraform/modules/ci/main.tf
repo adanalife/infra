@@ -165,15 +165,13 @@ variable "managed_iam_policies_for_terraform" {
   ]
 }
 
-data "aws_iam_policy" "managed_aws_iam_policies" {
-  for_each = toset(var.managed_iam_policies_for_terraform)
-  name     = each.value
-}
-
+# AWS-managed policy ARNs are fixed, so they are spelled out rather than looked
+# up: a data lookup downloads the whole policy document, and ReadOnlyAccess is
+# large enough to break the provider's response decoding.
 resource "aws_iam_role_policy_attachment" "ci_terraform_managed_policy" {
   for_each   = toset(var.managed_iam_policies_for_terraform)
   role       = aws_iam_role.ci_terraform.name
-  policy_arn = data.aws_iam_policy.managed_aws_iam_policies[each.key].arn
+  policy_arn = "arn:aws:iam::aws:policy/${each.value}"
 }
 
 # Carries the count-era state address over to the for_each key, so the

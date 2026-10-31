@@ -146,8 +146,9 @@ def test_arc_github_app_secret_reads_the_cluster_store():
     assert es["spec"]["dataFrom"][0]["extract"]["key"] == "/k8s/arc/github-app"
 
 
-def test_console_reads_the_scale_sets_and_nothing_else():
-    # The console's runner panel reads the scale sets to report CI capacity. It
+def test_console_reads_the_runner_crs_and_nothing_else():
+    # The console's runner panel reads the scale sets to report CI capacity and
+    # the ephemeral runners to name the job each one is running. It
     # must stay read-only and must not reach the runner pods or the GitHub App
     # credential sharing this namespace — the panel has no button, and this is
     # the grant that guarantees it can't grow one.
@@ -158,7 +159,7 @@ def test_console_reads_the_scale_sets_and_nothing_else():
     assert role["metadata"]["namespace"] == "arc-runners"
     for rule in role["rules"]:
         assert rule["apiGroups"] == ["actions.github.com"]
-        assert rule["resources"] == ["autoscalingrunnersets"]
+        assert rule["resources"] == ["autoscalingrunnersets", "ephemeralrunners"]
         assert set(rule["verbs"]) <= {"get", "list", "watch"}
     binding = next(
         rb

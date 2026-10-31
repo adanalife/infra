@@ -11,9 +11,13 @@ committed + golden-gated like the app units).
 
 Scope (minipc only — development is on the k3d cluster, with its own Argo):
   * cluster-scoped releases (ESO, cert-manager, node-exporter, victoria-metrics,
-    k8s-monitoring, tailscale-operator) — installed once; values from prod-1
+    k8s-monitoring, tailscale-operator, kyverno) — installed once; values from prod-1
     (stage rides prod's cluster-scoped platform).
   * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
+  * the `gitops` root Application, which tracks the Argo config dist files
+    (argocd.k8s.yaml + this file) so their drift reads OutOfSync in Argo.
+  * watch-only Applications over the other hand-applied dist files: `nfs-pv`
+    (the NFS PersistentVolumes) and `burrito-config` (the Burrito layer CRs).
 
 Excluded — not Argo-manageable (`HelmComponent.argo = False`):
   * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
@@ -44,6 +48,7 @@ from constructs import Construct
 from adanalife_k8s.config import load_env
 from adanalife_k8s.constructs.argocd import (
     ARGO_NS,
+    ESO_DEFAULTS_IGNORE,
     IN_CLUSTER,
     REPO_URL,
     TARGET_REVISION,
@@ -63,6 +68,26 @@ PLATFORM_ENVS = ("prod-1", "stage-1")
 # Cluster-scoped platform releases install once with prod-1's values (stage rides
 # prod's cluster-scoped platform — see stage-prod-cotenancy).
 CLUSTER_VALUES_ENV = "prod-1"
+# The app-of-apps root: one Application watching the Argo config itself, so
+# drift between the live AppProjects/ApplicationSets/Applications and the
+# committed dist reads OutOfSync instead of waiting for a `task gitops:diff`.
+ROOT_APP = "gitops"
+# The dist files `task gitops:apply` applies (the Taskfile's GITOPS_MANIFESTS).
+# argocd-k3d.k8s.yaml targets the dev cluster's own Argo and stays out.
+GITOPS_MANIFESTS = ("argocd.k8s.yaml", "platform-argo.k8s.yaml")
+# The NFS PersistentVolumes `task k8s:<env>:nfs-pv` applies, both envs in one
+# app (PVs are cluster-scoped, so the env split buys nothing).
+NFS_PV_APP = "nfs-pv"
+NFS_PV_MANIFESTS = ("prod-1-nfs-pv.k8s.yaml", "stage-1-nfs-pv.k8s.yaml")
+# The committed dist carries placeholder NFS coords (the task injects the real
+# ones from a gitignored env file), and the binder writes claimRef on a bound PV.
+NFS_PV_IGNORE = {
+    "kind": "PersistentVolume",
+    "jsonPointers": ["/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"],
+}
+# The Burrito config: watched and, on a manual sync, delivered by this app.
+BURRITO_APP = "burrito-config"
+BURRITO_MANIFESTS = ("burrito.k8s.yaml",)
 
 
 class ArgoPlatform(Construct):
@@ -70,6 +95,33 @@ class ArgoPlatform(Construct):
         super().__init__(scope, id)
         self._project()
         self._oci_registries()
+        self._dist_application(
+            # The repo-registration ExternalSecrets carry ESO's schema defaults.
+            ROOT_APP,
+            GITOPS_MANIFESTS,
+            ARGO_NS,
+            ignore=[ESO_DEFAULTS_IGNORE],
+        )
+        # Watch-only: the apply stays the human gesture (manual sync), and with
+        # prune off Argo can never delete a PV. RespectIgnoreDifferences keeps
+        # a sync from writing the placeholder NFS coords over the real ones.
+        self._dist_application(
+            NFS_PV_APP,
+            NFS_PV_MANIFESTS,
+            "default",
+            ignore=[NFS_PV_IGNORE],
+            sync_options=("RespectIgnoreDifferences=true",),
+        )
+        # Its CRs need the CRDs the `burrito` Application installs, so sync
+        # that one first; SkipDryRunOnMissingResource lets the diff render
+        # before the CRDs exist.
+        self._dist_application(
+            BURRITO_APP,
+            BURRITO_MANIFESTS,
+            "burrito",
+            ignore=[ESO_DEFAULTS_IGNORE],
+            sync_options=("SkipDryRunOnMissingResource=true",),
+        )
 
         # Cluster-scoped releases (one install for the whole minipc), skipping the
         # bootstrap floor (cilium / argo-cd, argo=False).
@@ -85,6 +137,61 @@ class ArgoPlatform(Construct):
             for comp in env_components(load_env(env_name)):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+
+    def _dist_application(
+        self,
+        name: str,
+        files: tuple[str, ...],
+        dest_ns: str,
+        *,
+        ignore: list[dict],
+        sync_options: tuple[str, ...] = (),
+    ):
+        """An Application over hand-applied dist files (the `gitops` root, which
+        tracks the Argo config this file included, and the watch-only units).
+
+        Manual sync and Prune=false, the posture of the `*-data` units: a sync
+        is the apply, and nothing is ever deleted by it. A synth bug that drops
+        an ApplicationSet must not cascade-delete the Applications (and prod
+        workloads) it generates, so removal stays `task gitops:prune`.
+        """
+        app = cdk8s.ApiObject(
+            self,
+            name,
+            api_version="argoproj.io/v1alpha1",
+            kind="Application",
+            metadata={"name": name, "namespace": ARGO_NS},
+        )
+        app.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "project": PROJECT,
+                    "source": {
+                        "repoURL": REPO_URL,
+                        "targetRevision": TARGET_REVISION,
+                        "path": "cdk8s/dist",
+                        # Only these files; every other dist file belongs to
+                        # an Application the Argo config generates.
+                        "directory": {
+                            "include": files[0]
+                            if len(files) == 1
+                            else "{" + ",".join(files) + "}"
+                        },
+                    },
+                    "destination": {"server": IN_CLUSTER, "namespace": dest_ns},
+                    "syncPolicy": {
+                        "syncOptions": [
+                            "CreateNamespace=false",
+                            "ServerSideApply=true",
+                            "Prune=false",
+                            *sync_options,
+                        ],
+                    },
+                    "ignoreDifferences": ignore,
+                },
+            )
+        )
 
     def _oci_registries(self):
         # Anonymous HTTP(S) chart repos need no Argo registration, but an OCI
@@ -167,19 +274,20 @@ class ArgoPlatform(Construct):
         }
         sources = [chart_source, values_source]
 
-        if comp.release == "tailscale-operator":
-            # The ingress ProxyGroup is a custom resource of a CRD the operator
-            # chart ships, so it rides the operator's own Application as a third,
-            # raw-manifest source: Argo applies CRDs ahead of custom resources
-            # within one sync, and syncing the operator syncs its proxy fleet with
-            # it. `include` scopes the directory to the manifest, leaving the
-            # chart's values.yml (fed to the chart source above) out of it.
+        if comp.manifests:
+            # Custom resources of a CRD the chart ships (tailscale's ingress
+            # ProxyGroup, Kyverno's policies) ride the chart's own Application as
+            # a raw-manifest source: Argo applies CRDs ahead of custom resources
+            # within one sync, so syncing the operator syncs what it reconciles.
+            # `include` scopes the directory to the one file, leaving the chart's
+            # values.yml (fed to the chart source above) out of it.
+            directory, _, include = f"k8s/{comp.manifests}".rpartition("/")
             sources.append(
                 {
                     "repoURL": REPO_URL,
                     "targetRevision": TARGET_REVISION,
-                    "path": "k8s/tailscale-operator",
-                    "directory": {"include": "proxygroup.yml"},
+                    "path": directory,
+                    "directory": {"include": include},
                 }
             )
 

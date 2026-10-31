@@ -32,6 +32,10 @@ so the node powers off cleanly before the battery dies:
    rather than ride an unseen battery to a hard crash. A blip while on utility
    power never triggers this (the last-known state must be on-battery).
 
+Before the shutdown it writes a Kubernetes Event naming the trigger
+(`nodeevent.py`, see constructs/node_event.py) — the record that survives the
+power-off its own last log lines may not.
+
 If the shutdown command errors or returns non-zero, the trigger does NOT latch —
 the next poll retries — so a single timed-out `talosctl` (what happened in the
 2026-07-19 outage, fired too late with 81s of runtime left) can't leave the node
@@ -63,6 +67,12 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s import eso
+from adanalife_k8s.constructs.node_event import (
+    NODE_EVENT,
+    NODE_EVENT_FILE,
+    POD_NAME_ENV,
+    event_writer_rbac,
+)
 from adanalife_k8s.constructs.talosctl import (
     FETCH_TALOSCTL,
     TALOS_NODE,
@@ -182,6 +192,9 @@ def trigger_shutdown(reason):
         log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd_str}")
         return False  # never latch in dry-run: keep observing
     log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd_str}")
+    from nodeevent import emit
+
+    emit("ups-monitor", "NodeShutdown", f"shutting down {NODE}: {reason}")
     try:
         r = subprocess.run(
             shutdown_cmd(), capture_output=True, text=True, timeout=SHUTDOWN_TIMEOUT
@@ -261,13 +274,19 @@ class UpsMonitor(Construct):
         labels = meta_labels(NAME, part_of="infra")
         sel = selector(NAME)
 
-        scripts = {"nutread.py": _READER, "fetch-talosctl.py": FETCH_TALOSCTL}
+        scripts = {
+            "nutread.py": _READER,
+            "fetch-talosctl.py": FETCH_TALOSCTL,
+            NODE_EVENT_FILE: NODE_EVENT,
+        }
         k8s.KubeConfigMap(
             self,
             "reader",
             metadata=k8s.ObjectMeta(name=NAME, namespace=NAMESPACE, labels=labels),
             data=scripts,
         )
+
+        event_writer_rbac(self, NAME, NAMESPACE, labels)
 
         # The shutdown credential. Cluster store (not a namespaced SecretStore):
         # the ups namespace has no eso-aws-credentials of its own, and one
@@ -331,6 +350,7 @@ class UpsMonitor(Construct):
                 # The single arming gate in the pod spec. "true" = log-only.
                 k8s.EnvVar(name="DRY_RUN", value=DRY_RUN),
                 k8s.EnvVar(name="HOME", value="/tmp"),
+                POD_NAME_ENV,
             ],
             security_context=secctx,
             resources=k8s.ResourceRequirements(
@@ -379,6 +399,7 @@ class UpsMonitor(Construct):
                             # the fetched talosctl + $HOME.
                             fs_group=65534,
                         ),
+                        service_account_name=NAME,
                         init_containers=[init],
                         containers=[container],
                         volumes=[

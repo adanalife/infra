@@ -22,6 +22,8 @@ from adanalife_k8s.constructs.dashcam import (
     emit_dashcam_localize_job,
     emit_dashcam_pv,
     emit_dashcam_pvc,
+    emit_parked_pv,
+    emit_parked_pvc,
 )
 from adanalife_k8s.constructs.mediamtx import Mediamtx
 from adanalife_k8s.constructs.music import (
@@ -32,6 +34,7 @@ from adanalife_k8s.constructs.music import (
     emit_music_pvc,
 )
 from adanalife_k8s.constructs.kmsg import KmsgShipper
+from adanalife_k8s.constructs.radio import Radio
 from adanalife_k8s.constructs.postgres import Postgres
 from adanalife_k8s.constructs.t5_watchdog import T5Watchdog
 from adanalife_k8s.constructs.ups_monitor import UpsMonitor
@@ -85,6 +88,12 @@ class SupportingChart(Chart):
             # the staging side it's mirrored from.
             emit_music_pvc(self, env)
             emit_music_local_pvc(self, env)
+            # The Icecast station that plays a directory of that local music
+            # volume, so it has to sit in the same namespace as the claim.
+            if env.dashcam_mode == "nfs":
+                Radio(self, env=env)
+            # The parked-clips claim stage playout mounts (no-op elsewhere).
+            emit_parked_pvc(self, env)
 
 
 class DataChart(Chart):
@@ -106,7 +115,7 @@ class DataChart(Chart):
     Lands in env.data_ns — the app namespace by default (byte-identical render),
     or an isolated namespace (env.data_namespace, e.g. stage-1-data) so a
     `kubectl delete ns <app>` can't take the database. Apps reach it cross-
-    namespace via env.postgres_host (an FQDN when isolated).
+    namespace by the Service's FQDN when isolated.
 
     The ESO SecretStore is emitted here so this unit is self-sufficient (its
     postgres ExternalSecret doesn't depend on another unit landing the store
@@ -161,9 +170,9 @@ class DataChart(Chart):
         #     Lands in env.data_ns — the deletion boundary this unit protects. ---
         Postgres(self, env=env)
 
-        # --- CNPG `pg` cluster (PITR via barman-cloud → S3), side-by-side with
-        #     the legacy StatefulSet while the migration is in flight. Apps pick
-        #     which one via DATABASE_HOST (tripbot repo's postgres_host). ---
+        # --- CNPG `pg` cluster (PITR via barman-cloud → S3), in place of
+        #     Postgres' StatefulSet. Apps reach it via DATABASE_HOST (tripbot
+        #     repo's postgres_host). ---
         if env.cnpg:
             CnpgCluster(self, env=env)
 
@@ -182,6 +191,8 @@ class DataChart(Chart):
             # SupportingChart for the isolated-DB case).
             emit_music_pvc(self, env)
             emit_music_local_pvc(self, env)
+            # The parked-clips claim stage playout mounts (no-op elsewhere).
+            emit_parked_pvc(self, env)
 
 
 class MediamtxChart(Chart):
@@ -201,8 +212,8 @@ class MediamtxChart(Chart):
 
 class NfsPVChart(Chart):
     """The cluster-scoped NFS PersistentVolumes — the dashcam corpus and the
-    background-music share. Host-specific bootstrap infra deliberately kept OUT of
-    Argo. Synthed to its own dist/<env>-nfs-pv.k8s.yaml, which no ApplicationSet
+    background-music share. Host-specific bootstrap infra Argo watches (the
+    manual-sync `nfs-pv` Application) but never syncs or prunes. Synthed to its own dist/<env>-nfs-pv.k8s.yaml, which no ApplicationSet
     includes (the apps set matches `<env>-<component>-<platform>.k8s.yaml`;
     supporting/data match their own per-env files), and provisioned once per
     cluster via `task k8s:<env>:nfs-pv` with the real NFS coords from the
@@ -215,6 +226,7 @@ class NfsPVChart(Chart):
         super().__init__(scope, id)  # cluster-scoped — no namespace
         emit_dashcam_pv(self, env)
         emit_music_pv(self, env)
+        emit_parked_pv(self, env)
 
 
 class DashcamLocalizeChart(Chart):
@@ -318,8 +330,8 @@ class BurritoChart(Chart):
     the core TerraformLayer + runner-creds ExternalSecret + tailnet UI
     Ingress) — the objects the controller plans from, applied after the
     Burrito install (the `burrito` HelmComponent, Argo-delivered). Offline +
-    deterministic → dist/burrito.k8s.yaml, applied via
-    `task k8s:prod:burrito:apply`. See constructs/burrito.py."""
+    deterministic → dist/burrito.k8s.yaml, delivered by a manual sync of the
+    `burrito-config` Argo Application. See constructs/burrito.py."""
 
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)

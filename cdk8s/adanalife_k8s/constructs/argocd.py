@@ -48,6 +48,30 @@ from constructs import Construct
 REPO_URL = "git@github.com:adanalife/infra.git"
 TARGET_REVISION = "main"
 ARGO_NS = "argocd"
+# ESO's ExternalSecret CRD stamps schema defaults our manifests omit
+# (target.deletionPolicy, and conversionStrategy/decodingStrategy/
+# metadataPolicy/nullBytePolicy under each data[].remoteRef and
+# dataFrom[].extract). They're API-server schema defaults with no
+# field-manager owner, so they can't be waived via managedFieldsManagers
+# and otherwise leave every ExternalSecret perpetually OutOfSync. Ignore
+# exactly those paths so they read Synced. Harmless no-op on a unit that
+# carries no ExternalSecrets.
+ESO_DEFAULTS_IGNORE = {
+    "group": "external-secrets.io",
+    "kind": "ExternalSecret",
+    "jqPathExpressions": [
+        ".spec.target.deletionPolicy",
+        ".spec.data[]?.remoteRef.conversionStrategy",
+        ".spec.data[]?.remoteRef.decodingStrategy",
+        ".spec.data[]?.remoteRef.metadataPolicy",
+        ".spec.data[]?.remoteRef.nullBytePolicy",
+        ".spec.dataFrom[]?.extract.conversionStrategy",
+        ".spec.dataFrom[]?.extract.decodingStrategy",
+        ".spec.dataFrom[]?.extract.metadataPolicy",
+        ".spec.dataFrom[]?.extract.nullBytePolicy",
+    ],
+}
+
 # One AppProject per source repo — a per-repo tenancy boundary so an Application
 # can only ever pull from its one repo and sync into its own namespaces (see the
 # module docstring). `tripbot` governs the app workloads + identity (tripbot
@@ -60,9 +84,9 @@ VIDEO_PIPELINE_PROJECT = "video-pipeline"
 PLATFORM_GATEWAY_PROJECT = "platform-gateway"
 # The cluster-scoped kinds each project's apps create. Scoped per project from
 # the dist each repo emits: tripbot's identity unit + video-pipeline each declare
-# the prod-stream PriorityClass; infra's data/supporting use a StorageClass and
-# (dashcam) PersistentVolumes; the console creates nothing cluster-scoped.
-PV = {"group": "", "kind": "PersistentVolume"}
+# the prod-stream PriorityClass; infra's data/supporting use a StorageClass (its
+# NFS PersistentVolumes are applied out of band, never by Argo); the console
+# creates nothing cluster-scoped.
 STORAGE_CLASS = {"group": "storage.k8s.io", "kind": "StorageClass"}
 PRIORITY_CLASS = {"group": "scheduling.k8s.io", "kind": "PriorityClass"}
 NAMESPACE_KIND = {"group": "", "kind": "Namespace"}
@@ -89,7 +113,7 @@ AUTOSYNC_HOLDOUTS: tuple[tuple[str, str], ...] = ()
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
 # Argo is a prod-only install (it governs both prod-1 + stage-1), so the host
-# lives under the prod subdomain alongside the apps (vlc-twitch.prod...) and the
+# lives under the prod subdomain alongside the apps (console.prod...) and the
 # traefik dashboard.
 LAN_HOST = "argocd.prod.whereisdana.today"
 REPO_SM_KEY = "/k8s/argocd/repo-ssh-key"
@@ -314,7 +338,7 @@ class ArgoCD(Construct):
         self._app_project(
             id="project-tripbot",
             name=TRIPBOT_PROJECT,
-            description="tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo",
+            description="tripbot app workloads (tripbot/onscreens + identity), from the tripbot repo",
             source_repos=[TRIPBOT_REPO_URL],
             namespaces=list(self.envs),
             cluster_resources=[PRIORITY_CLASS],
@@ -336,7 +360,7 @@ class ArgoCD(Construct):
             # objects (owned by the unit, or via CreateNamespace=true) are
             # gated by this clusterResourceWhitelist, so a sync fails without
             # the entry.
-            cluster_resources=[PV, STORAGE_CLASS, PRIORITY_CLASS]
+            cluster_resources=[STORAGE_CLASS, PRIORITY_CLASS]
             + ([NAMESPACE_KIND] if (ups_monitor or t5_watchdog or arc or kmsg) else []),
         )
         if self.console_envs:
@@ -963,30 +987,8 @@ class ArgoCD(Construct):
                 # + Prune=false forever — that's its safety guarantee.
                 "syncOptions": sync_options,
             },
-            # ESO's ExternalSecret CRD stamps schema defaults our manifests omit
-            # (target.deletionPolicy, and conversionStrategy/decodingStrategy/
-            # metadataPolicy/nullBytePolicy under each data[].remoteRef and
-            # dataFrom[].extract). They're API-server schema defaults with no
-            # field-manager owner, so they can't be waived via managedFieldsManagers
-            # and otherwise leave every ExternalSecret perpetually OutOfSync. Ignore
-            # exactly those paths so they read Synced. Harmless no-op on the data
-            # unit (no ExternalSecrets there).
             "ignoreDifferences": [
-                {
-                    "group": "external-secrets.io",
-                    "kind": "ExternalSecret",
-                    "jqPathExpressions": [
-                        ".spec.target.deletionPolicy",
-                        ".spec.data[]?.remoteRef.conversionStrategy",
-                        ".spec.data[]?.remoteRef.decodingStrategy",
-                        ".spec.data[]?.remoteRef.metadataPolicy",
-                        ".spec.data[]?.remoteRef.nullBytePolicy",
-                        ".spec.dataFrom[]?.extract.conversionStrategy",
-                        ".spec.dataFrom[]?.extract.decodingStrategy",
-                        ".spec.dataFrom[]?.extract.metadataPolicy",
-                        ".spec.dataFrom[]?.extract.nullBytePolicy",
-                    ],
-                },
+                ESO_DEFAULTS_IGNORE,
                 # The apiserver defaults apiVersion: v1 / kind: PersistentVolumeClaim
                 # onto every StatefulSet volumeClaimTemplate at admission. The k8s
                 # schema's embedded-PVC props (KubePersistentVolumeClaimProps) have

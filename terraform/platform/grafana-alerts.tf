@@ -93,6 +93,10 @@ locals {
   // the runner pool against node reboots. The alert says CI is stuck; this is
   // where you see whether the box bounced underneath it.
   ci_runners_panel_link = "[runners](${local.grafana_url}/d/platform-services/?viewPanel=601)"
+  # Dashboard 12's "DB latency p95 by operation" and "Command latency p95 by
+  # command" panels, for the app-latency rules.
+  db_latency_panel_link      = "[db latency](${local.grafana_url}/d/app-latency/?viewPanel=16)"
+  command_latency_panel_link = "[command latency](${local.grafana_url}/d/app-latency/?viewPanel=6)"
 
   // The output frame-rate panel on the stream-health board, beside the
   // stream-state and encoder panels the encoder-wedged rule reads alongside.
@@ -1359,13 +1363,16 @@ resource "grafana_rule_group" "alerting_self" {
     }
   }
 
-  // Notification-delivery failure: fires when Grafana Cloud reports it's failing
-  // to push notifications to ANY contact point. This is the exact 2026-06-15
-  // failure — the Discord webhook was stale and every push 4xx'd while the rules
-  // fired into the void. Sourced from the Grafana Cloud usage datasource (the
-  // org's own internal alertmanager metrics), and labelled critical so it routes
-  // to the independent ntfy path — it must NOT depend on the very delivery path
-  // that's broken.
+  // Notification-delivery failure, split by which path is broken so each one
+  // pages over the path that still works. Grafana Cloud's usage datasource (the
+  // org's own internal alertmanager metrics) breaks failures down by
+  // `integration`: `discord` is the discord-alerts contact point, `webhook` is
+  // the ntfy and healthchecks.io ones.
+  //
+  // Discord dead: the exact 2026-06-15 failure — the webhook was stale and every
+  // push 4xx'd while the rules fired into the void. Critical, so it routes to the
+  // independent ntfy path; it must NOT depend on the very delivery path that's
+  // broken.
   rule {
     name           = "Grafana: alert notifications failing to deliver"
     for            = "5m"
@@ -1374,8 +1381,8 @@ resource "grafana_rule_group" "alerting_self" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Grafana is failing to deliver alert notifications to a contact point"
-      description = "grafanacloud_instance_alertmanager_notifications_failed_per_second is above zero — alert pushes to one or more contact points are failing, so firings are silently not reaching their channel. Most likely a stale webhook URL. The discord-alerts contact point reads SSM /platform/discord-alerts-webhook in the core account — not the /k8s/tripbot/discord-alerts-webhook copies in stage-1/prod-1, which only feed ESO consumers. Rotate the core parameter, then run `task tf:platform:apply` so the contact point picks up the new value, and re-test. This rule is delivered via the independent ntfy path so it survives a dead Discord webhook."
+      summary     = "Grafana is failing to deliver alert notifications to Discord"
+      description = "grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration=\"discord\"} is above zero — alert pushes to the discord-alerts contact point are failing, so firings are silently not reaching their channel. Most likely a stale webhook URL. The discord-alerts contact point reads SSM /platform/discord-alerts-webhook in the core account — not the /k8s/tripbot/discord-alerts-webhook copies in stage-1/prod-1, which only feed ESO consumers. Rotate the core parameter, then run `task tf:platform:apply` so the contact point picks up the new value, and re-test. This rule is delivered via the independent ntfy path so it survives a dead Discord webhook."
     }
     labels = {
       severity = "critical"
@@ -1391,7 +1398,65 @@ resource "grafana_rule_group" "alerting_self" {
       datasource_uid = data.grafana_data_source.usage.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(grafanacloud_instance_alertmanager_notifications_failed_per_second)"
+        expr          = "sum(grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration=\"discord\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // ntfy / healthchecks.io dead: a warning, Discord only. This must never be
+  // critical — a critical routes to ntfy, so ntfy's own refusals would page
+  // through ntfy and fail again, and that loop is what burned ntfy.sh's free
+  // daily quota on 2026-09-29 (206 of ~830 pushes in 30 days were this rule
+  // reporting its own delivery failures). Discord delivered throughout.
+  rule {
+    name           = "Grafana: webhook notifications failing to deliver"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Grafana is failing to deliver alert notifications to ntfy or healthchecks.io"
+      description = "grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration!=\"discord\"} is above zero — pushes to the ntfy-critical or healthchecks-deadman webhook contact points are failing, so the phone path or the deadman heartbeat is dark while Discord still delivers. A 429 from ntfy.sh is its free-tier daily quota: find the sender in the notification history (grafanacloud-alert-state-history, from=\"notify-history-events\") and cut the volume at the source. A 4xx on healthchecks.io is a stale ping URL (SSM in the core account, then `task tf:platform:apply`)."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.usage.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum(grafanacloud_instance_alertmanager_notifications_failed_per_integration_per_second{integration!=\"discord\"})"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -2754,9 +2819,9 @@ resource "grafana_rule_group" "stream_health" {
   }
 
   // Background-audio dead air — a platform's music bed is not playing. tripbot's
-  // audio-fallback watchdog swaps the source onto a local bed when SomaFM drops,
+  // audio-fallback watchdog swaps the source onto a local bed when the radio stream drops,
   // and the local file plays immediately, so obs_background_audio_playing
-  // returns to 1 within ~1m of any SomaFM blip. Sustained 0 for 5m therefore
+  // returns to 1 within ~1m of any radio blip. Sustained 0 for 5m therefore
   // means the source is genuinely silent AND the fallback didn't restore it
   // (fallback file missing, OBS WebSocket wedged, watchdog dead) — real dead air
   // on a 24/7 stream, so critical.
@@ -2820,30 +2885,30 @@ resource "grafana_rule_group" "stream_health" {
     }
   }
 
-  // SomaFM unreachable a while — informational. The fallback keeps audible
+  // Radio unreachable a while — informational. The fallback keeps audible
   // music on air, so this isn't dead air (the dead-air rule above covers that);
   // it's a heads-up that a stream has been on a local bed instead of the
-  // intended music for 20m, i.e. SomaFM's edge has been unreachable *from here*
-  // for a sustained stretch. Warning → Discord, not a page. for=20m so a brief
-  // SomaFM blip the fallback rides through doesn't notify.
+  // intended music for 20m, i.e. the radio station has been unreachable *from
+  // here* for a sustained stretch. Warning → Discord, not a page. for=20m so a
+  // brief radio blip the fallback rides through doesn't notify.
   //
-  // Titled for what is true when it fires — SomaFM unreachable, the stream on
+  // Titled for what is true when it fires — radio unreachable, the stream on
   // its local bed — rather than for the fallback mechanism: "on the fallback
   // bed" reads as a fault in the fallback, when the fallback is the part working.
   //
   // Grouped by service_platform for the same reason as the dead-air rule: only
-  // a platform that selected the SomaFM bed can be on its fallback, so an
+  // a platform that selected the radio bed can be on its fallback, so an
   // ungrouped max() reports "something is on the fallback" without saying what.
   rule {
-    name           = "OBS: SomaFM unreachable, stream on its local bed for 20m"
+    name           = "OBS: Radio unreachable, stream on its local bed for 20m"
     for            = "20m"
     condition      = "C"
     no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "SomaFM unreachable — {{ $labels.service_platform }} has been on its local bed for 20m"
-      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — SomaFM's edge has been unreachable, so the stream is on a local bed instead of the SomaFM music: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays somafm throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Unreachable from here is not the same as down: a probe from this network cannot tell a SomaFM outage from SomaFM refusing this network's address, so compare against an outside vantage (Globalping, or a phone off wifi) streaming a few bytes with a plain GET — curl -s https://ice.somafm.com/gsclassic-128-mp3 | head -c 1000 | wc -c should be >0. Down everywhere: wait for the watchdog to swap back. Up everywhere else: the block is on this network or its address, and waiting will not fix it — re-select a local bed from the console so the watchdog stops retrying."
+      summary     = "Radio unreachable — {{ $labels.service_platform }} has been on its local bed for 20m"
+      description = "obs_background_audio_on_fallback{deployment_environment=\"prod-1\"} has been 1 for 20m on {{ $labels.service_platform }} — the radio station has been unreachable, so the stream is on a local bed instead of the radio: the album when the music share has tracks, the car-hum drone when it doesn't. Read tripbot_background_audio_bed for the *selected* bed, which stays radio throughout — that is what lets the watchdog swap back. Audio is fine (not dead air); this is a heads-up. Unreachable from here is not the same as down: a probe from this network cannot tell a station outage from the station refusing this network's address, so compare against an outside vantage (Globalping, or a phone off wifi) streaming a few bytes of the configured station URL with a plain GET — curl -s <station-url> | head -c 1000 | wc -c should be >0. Down everywhere: wait for the watchdog to swap back. Up everywhere else: the block is on this network or its address, and waiting will not fix it — re-select a local bed from the console so the watchdog stops retrying."
     }
     labels = {
       severity = "warning"
@@ -2888,7 +2953,7 @@ resource "grafana_rule_group" "stream_health" {
   }
 
   // Album bed dead air — the album is the live bed and its play order is empty.
-  // This is a different failure from the two SomaFM rules above, which watch
+  // This is a different failure from the two radio rules above, which watch
   // obs_background_audio_playing: that gauge is OBS's view of the *source*, and
   // here it reads perfectly healthy — OBS is playing a track. What's broken is
   // that nothing queues the next one, so the stream goes silent the instant the
@@ -2906,7 +2971,7 @@ resource "grafana_rule_group" "stream_health" {
   // and reports a bed it cannot actually play, so gating per-platform on
   // console_platform_component_up is what keeps those instances quiet.
   //
-  // for=2m, shorter than the 5m SomaFM rule: silence starts the moment a track
+  // for=2m, shorter than the 5m dead-air rule: silence starts the moment a track
   // ends, so the wait exists only to ride out a switch caught mid-write, not to
   // confirm a sustained condition. critical for the same reason dead air is — a
   // music-led slow-TV stream with no music is off the air.
@@ -4439,6 +4504,82 @@ resource "grafana_rule_group" "burrito_health" {
   }
 }
 
+# Argo CD health — an Application that has sat OutOfSync for a day. Many of
+# the Applications on the minipc Argo are manual-sync (the data and supporting
+# units, the prod obs/playout holdouts, and most of the platform charts), so a
+# merged, CI-green change to one of them stays undelivered until someone clicks
+# Sync, and nothing else reports it: Argo's own notifications fire on a failed
+# sync or degraded health, and an undelivered change is neither. An autosynced
+# app that cannot converge lands here too, which is the other reason nothing is
+# excluded.
+#
+# A day rather than minutes because a manual-sync change waiting for its apply
+# is normal for hours; this is the "it has been forgotten" signal, not the
+# "a sync is pending" one. Grouped by name only, so a health_status flip on the
+# same app does not reset the pending clock.
+#
+# argocd_app_info reaches the cloud only because the keep-regex in
+# k8s/monitoring/prod-1/values.yml names it, and is scraped only because
+# k8s/argo-cd/values.yml annotates the application controller pod.
+resource "grafana_rule_group" "argocd_health" {
+  name             = "argocd-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Argo CD app OutOfSync for over a day"
+    for            = "24h"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Alerting"
+
+    annotations = {
+      summary     = "Argo CD app {{ $labels.name }} has been OutOfSync for 24h — a merged change is not live"
+      description = "argocd_app_info{name=\"{{ $labels.name }}\", sync_status=\"OutOfSync\"} has held for 24h: what git declares for this Application differs from what runs in the cluster. On a manual-sync app (no `automated` block) this is a merged change nobody synced — read the diff with `argocd app diff {{ $labels.name }} --core` (or the UI at https://argocd-prod.tail020deb.ts.net/applications/{{ $labels.name }}), then sync it. On an autosynced app it is a sync that keeps failing or a benign diff that wants an ignoreDifferences entry so OutOfSync keeps meaning real drift. no_data is OK: the series is absent until the application controller is scraped, and a controller restart resets the 24h clock rather than firing."
+    }
+    labels = {
+      severity = "warning"
+      service  = "argocd"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "max by (name) (argocd_app_info{sync_status=\"OutOfSync\"})"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 // Control-plane restart-churn alerts — the breadth signal that separates "one
 // operator is crashlooping" from "the API server is dropping out from under
 // every leader-elected controller at once".
@@ -5110,6 +5251,134 @@ resource "grafana_rule_group" "error_rate" {
 // console sends on a first knock is the fast path — this rule is the durable
 // one: it keeps saying so while the login is still waiting, and it catches a
 // login the owner already denied coming back.
+# Application latency, read off tripbot's two OTel histograms. Both panels
+# live on dashboard 12 (app-latency); these are the rules the item that
+# built the panels left for later. Thresholds come from a week of prod
+# (2026-10-07 → 10-14, VictoriaMetrics):
+#   - DB: the worst 5-minute p95 across every operation was 14 ms, and the
+#     per-operation 7-day p95s sit at 1–8 ms. 100 ms is 7× the weekly worst
+#     and still well under what a viewer would feel on a command.
+#   - Commands: a p95 threshold does not work here — most commands run a
+#     handful of times an hour, so a 5-minute p95 is one sample, and the
+#     designed latencies differ by command (!find's model hop is ~5 s,
+#     !state ~0.25 s). What never happens by design is a command past the
+#     histogram's top bucket: three in the week (!find twice, !state once).
+#     So the rule counts those, and fires on two or more in ten minutes so a
+#     lone straggler stays a dashboard fact rather than a push.
+resource "grafana_rule_group" "app_latency" {
+  name             = "app-latency"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Tripbot: database calls slow (p95 over 100 ms)"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "tripbot's Postgres p95 is {{ printf \"%.0f\" (index $values \"A\").Value }} ms over the last 5 min (normal is under 10)"
+      link        = "${local.db_latency_panel_link}"
+      description = "p95 of db_client_operation_duration_seconds across every operation has sat above 100 ms for 10 minutes. Normal prod is 1–8 ms per operation. The usual cause is the minipc NVMe (20–340 ms per write op when it degrades — cnpg and cilium-operator restart in lockstep when it does), then a lock pile-up or a missing index after a migration. Check the DB latency row on dashboard 12 for which operation moved, then the host-storage alerts and `kubectl -n prod-1-data get pods` for a cnpg restart."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m]))) * 1000"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [100] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  rule {
+    name           = "Tripbot: chat commands running past 10 s"
+    for            = "1m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "{{ $labels.command }} ran past 10 s {{ printf \"%.0f\" (index $values \"A\").Value }} times in the last 10 min"
+      link        = "${local.command_latency_panel_link}"
+      description = "Two or more runs of one command landed in the +Inf bucket of tripbot_command_duration_seconds within ten minutes — past 10 s, which no command is designed to take (!find's model hop is ~5 s, everything else well under 1 s). Prod sees about three lone stragglers a week, which this does not fire on. A cluster means the responder, the database or the gateway's chat send is hanging; the command row on dashboard 12 shows which."
+    }
+    labels = {
+      severity = "warning"
+      service  = "tripbot"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "sum by (command) (increase(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=\"prod-1\", le=\"+Inf\"}[10m])) - sum by (command) (increase(tripbot_command_duration_seconds_bucket{service_name=\"tripbot\", deployment_environment=\"prod-1\", le=\"10\"}[10m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [1.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
 resource "grafana_rule_group" "console_access" {
   name             = "console-access"
   folder_uid       = grafana_folder.tripbot.uid
@@ -5254,12 +5523,10 @@ resource "grafana_rule_group" "synthetic_health" {
   rule {
     name = "guessr: the admin login is broken"
     for  = "10m"
-    // The series is one terraform-managed check reporting every ten minutes,
-    // so it stopping is itself the failure this rule exists to catch — a
-    // check that quietly stops checking reports green through an outage the
-    // same way the paused UptimeRobot monitors did.
+    // no_data is OK: a check that stops reporting is the stopped-reporting
+    // rule's to name, so this one fires only on an answer that came back wrong.
     condition      = "C"
-    no_data_state  = "Alerting"
+    no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
@@ -5316,10 +5583,12 @@ resource "grafana_rule_group" "synthetic_health" {
   rule {
     name = "A public endpoint is failing its synthetic probes"
     for  = "5m"
-    // Covers every check but guessr-admin, which has its own rule above
-    // because it alerts on a specific status code rather than on reachability.
+    // Covers every check but guessr-admin and the channel-live checks, which
+    // have their own rules: guessr-admin alerts on a specific status code, and
+    // one platform off-air is the in-cluster stream rules' to name.
+    // no_data is OK for the same reason as above.
     condition      = "C"
-    no_data_state  = "Alerting"
+    no_data_state  = "OK"
     exec_err_state = "Error"
 
     annotations = {
@@ -5347,7 +5616,7 @@ resource "grafana_rule_group" "synthetic_health" {
         // latching the rule for the whole window, and taking the min across
         // jobs-by-region still catches the regional edge failure the three
         // probe locations exist to find.
-        expr          = "min by (job) (avg_over_time(probe_success{job!=\"guessr-admin\"}[15m]))"
+        expr          = "min by (job) (avg_over_time(probe_success{job!~\"guessr-admin|.+-live\"}[15m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -5367,6 +5636,127 @@ resource "grafana_rule_group" "synthetic_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The outside view of "is anyone watching anything": the twitch-live and
+  // youtube-live checks ask the platforms themselves, so this keeps working
+  // when the minipc cannot reach Grafana Cloud and every in-cluster stream rule
+  // reads no data.
+  rule {
+    name = "Every platform is off-air, seen from outside"
+    for  = "5m"
+    // no_data is OK: both checks silent is the stopped-reporting rule's to name.
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Neither Twitch nor YouTube shows the channel live"
+      description = "No twitch-live or youtube-live probe has seen the channel live in the last ten minutes. These checks ask Twitch (the preview thumbnail answers 200 only while live) and YouTube (/live carries a watch-page canonical link only while live) from a Synthetic Monitoring probe in North Virginia, so they see what a viewer sees and do not depend on the minipc reaching Grafana Cloud. If the in-cluster OBS rules are quiet at the same time, suspect the minipc's network first: the 2026-10-15 outage looked exactly like this, with only the metrics-absent rules firing. Check `console --env prod doctor`, then the node. When every platform is parked on purpose, add a Grafana silence."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // Ten minutes spans two runs of the five-minute checks, so a single
+        // failed probe on one platform never trips it and one live answer
+        // anywhere in the window holds it off.
+        expr          = "max(max_over_time(probe_success{job=~\".+-live\"}[10m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // A check that quietly stops checking reports green through an outage the
+  // same way the paused UptimeRobot monitors did, so silence pages too, but
+  // under its own name: on 2026-10-23 SM stopped scheduling guessr-admin while
+  // the endpoint still answered 401, and the rule above it fired as "the admin
+  // login is broken".
+  rule {
+    name           = "Synthetic Monitoring: a check has stopped reporting"
+    for            = "10m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "the {{ $labels.job }} synthetic check has stopped reporting"
+      description = "{{ $labels.job }} reported probe results in the last week and none in the last 30 minutes, so its endpoint is unwatched, not known broken. Curl the target from terraform/platform/grafana-synthetic-monitoring.tf to see whether the endpoint itself is fine. If it is and terraform shows no drift, SM has stopped scheduling the check: `-replace` the grafana_synthetic_monitoring_check, or toggle it off and on in the Synthetic Monitoring UI. Also rule out the free-tier execution quota (grafanacloud_org_sm_billable_check_executions on the usage datasource). A check deleted on purpose fires this for up to a week until its last result ages out of the window."
+    }
+    labels = {
+      severity = "warning"
+      service  = "monitoring"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 604800
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // Jobs seen in the last week minus jobs seen in the last 30m. Thirty
+        // minutes spans three runs of the slowest (ten-minute) check.
+        expr          = "count by (job) (count_over_time(probe_success[7d])) unless count by (job) (count_over_time(probe_success[30m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
@@ -5409,7 +5799,7 @@ resource "grafana_rule_group" "guessr_api" {
 
     annotations = {
       summary     = "guessr's API Worker failed more than 5 requests in 15 minutes"
-      description = "adanalife-guessr-api returned an error on more than 5 invocations in the last 15 minutes; its baseline is under 2 an hour. Players see this as a 500 with `error code: 1101` on scoring, the day's rounds and the leaderboards, and the iOS app as \"Could not reach the scorer\". The Worker's own record is Workers Logs in the Cloudflare dashboard (Workers & Pages → adanalife-guessr-api → Observability), where each failed invocation carries its outcome — `exceededResources` for the CPU or memory limit, `exception` with a stack trace for a throw. Fastest mitigation: remove the `API` service binding on the adanalife-guessr Pages project (Settings → Bindings) and redeploy, which hands /api/* back to the JS Functions — the guessr-admin probe will fire while it is off, since only the Worker answers /admin."
+      description = "adanalife-guessr-api returned an error on more than 5 invocations in the last 15 minutes; its baseline is under 2 an hour. Players see this as a 500 with `error code: 1101` on scoring, the day's rounds and the leaderboards, and the iOS app as \"Could not reach the scorer\". The Worker's own record is Workers Logs in the Cloudflare dashboard (Workers & Pages → adanalife-guessr-api → Observability), where each failed invocation carries its outcome — `exceededResources` for the CPU or memory limit, `exception` with a stack trace for a throw. If it started at a deploy, roll the Worker back to its previous version (Workers & Pages → adanalife-guessr-api → Deployments). Leave the Pages project's `API` service binding in place: it is the only route to /api/ and /admin/, and removing it fails every one of those requests rather than handing them to a fallback."
     }
     labels = {
       severity = "critical"
@@ -5460,6 +5850,83 @@ resource "grafana_rule_group" "guessr_api" {
         conditions = [{
           type      = "query"
           evaluator = { type = "gt", params = [5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}
+
+// The fleet's own radio (cdk8s/adanalife_k8s/constructs/radio.py). It is the
+// stream's music bed and what the TV app and the console play, so a station off
+// air is silent everywhere at once. tripbot's audio watchdog covers the stream
+// with a local bed, which is why this is a warning and not critical: the stream
+// keeps music, but the station itself needs a look.
+//
+// Two arms, either one fires:
+//   - a station that has tracks yet is not on air (its mount is down while it
+//     has something to play). A station with an empty library takes its mount
+//     down on purpose, so liquidsoap_station_tracks > 0 keeps that quiet.
+//   - the radio Deployment has no available pod. The liquidsoap_* series go stale
+//     with the pod, so the station arm alone would read NoData; the readiness
+//     probes on both Icecast and Liquidsoap's control port make this arm cover
+//     a pod that runs without the console's control API, too.
+//
+// liquidsoap_station_{ready,tracks} are allowlisted into the cloud for this rule
+// (k8s/monitoring/prod-1/values.yml). `for = 5m` rides out a Recreate rollout,
+// which drops every station for under a minute.
+resource "grafana_rule_group" "radio_health" {
+  name             = "radio-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Radio: a station is off air"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Radio {{ $labels.station }}{{ $labels.deployment }} has been off air for 5m"
+      description = "Either a station with tracks in its library has had no mount up for 5 minutes, or the radio Deployment in prod-1 has no available pod. The stream stays on music (tripbot's audio watchdog swaps to a local bed), but the TV app and the console's /radio page have nothing to play. Start with `kubectl --context admin@adanalife-minipc -n prod-1 get pod -l app=radio` and the liquidsoap container's logs. A pod that is Running but not Ready means Icecast or Liquidsoap's control port (8001) never came up. If the pod is healthy but the station is not, the station's source failed; check its library is on the node with `task k8s:prod:music-localize`. If prod-1-supporting is OutOfSync in Argo, the running radio is older than the merged config. The 15 — Radio dashboard shows each station's state, library and listeners."
+    }
+    labels = {
+      severity = "warning"
+      service  = "radio"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "((1 - max by (station) (liquidsoap_station_ready{namespace=\"prod-1\"})) and on (station) (max by (station) (liquidsoap_station_tracks{namespace=\"prod-1\"}) > 0)) or (max by (deployment) (kube_deployment_status_replicas_available{namespace=\"prod-1\", deployment=\"radio\"}) == bool 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }

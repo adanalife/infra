@@ -2,7 +2,7 @@
 # trial. Chart version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered
 # by the `burrito` Argo Application (platform-argo.k8s.yaml). The
 # TerraformRepository/TerraformLayer CRs it reconciles live in
-# cdk8s/dist/burrito.k8s.yaml (task k8s:prod:burrito:apply).
+# cdk8s/dist/burrito.k8s.yaml (the manual-sync `burrito-config` Application).
 config:
   burrito:
     controller:

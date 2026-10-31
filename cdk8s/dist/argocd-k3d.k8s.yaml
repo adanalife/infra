@@ -4,7 +4,7 @@ metadata:
   name: tripbot
   namespace: argocd
 spec:
-  description: tripbot app workloads (tripbot/vlc/onscreens/obs + identity), from the tripbot repo
+  description: tripbot app workloads (tripbot/onscreens + identity), from the tripbot repo
   sourceRepos:
     - https://github.com/adanalife/tripbot.git
   destinations:
@@ -30,8 +30,6 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: development
   clusterResourceWhitelist:
-    - group: ""
-      kind: PersistentVolume
     - group: storage.k8s.io
       kind: StorageClass
     - group: scheduling.k8s.io

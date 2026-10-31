@@ -18,13 +18,9 @@ resource "aws_iam_access_key" "burrito" {
   pgp_key = "keybase:adanalife"
 }
 
-data "aws_iam_policy" "read_only" {
-  name = "ReadOnlyAccess"
-}
-
 resource "aws_iam_user_policy_attachment" "burrito_read_only" {
   user       = aws_iam_user.burrito.name
-  policy_arn = data.aws_iam_policy.read_only.arn
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
 # ReadOnlyAccess includes broad ssm:Get*, and the core workspace reads no SSM
@@ -95,7 +91,7 @@ resource "aws_iam_access_key" "burrito_platform" {
 
 resource "aws_iam_user_policy_attachment" "burrito_platform_read_only" {
   user       = aws_iam_user.burrito_platform.name
-  policy_arn = data.aws_iam_policy.read_only.arn
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
 output "burrito_platform_access_key" {

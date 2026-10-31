@@ -198,7 +198,7 @@
     {
       "id": 40,
       "type": "row",
-      "title": "Background audio (SomaFM → Car Hum fallback)",
+      "title": "Background audio (radio → local fallback)",
       "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
       "collapsed": false
     },
@@ -206,7 +206,7 @@
       "id": 41,
       "type": "stat",
       "title": "Background audio",
-      "description": "1 when the music bed (Groove Salad Classic) is playing, 0 when its OBS media state is ended/stopped/errored.",
+      "description": "1 when the music bed is playing, 0 when its OBS media state is ended/stopped/errored.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
       "targets": [
@@ -235,7 +235,7 @@
       "id": 42,
       "type": "stat",
       "title": "Source",
-      "description": "Which bed is on air: the normal SomaFM source, or the local Car Hum fallback the watchdog swaps in when SomaFM is unreachable.",
+      "description": "Which bed is on air: the selected radio source, or the local fallback bed the watchdog swaps in when the radio is unreachable.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 28, "w": 6, "h": 4 },
       "targets": [
@@ -254,7 +254,7 @@
             { "color": "yellow", "value": 1 }
           ]},
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "SomaFM", "color": "green" }, "1": { "text": "CAR HUM (fallback)", "color": "yellow" } } }
+            { "type": "value", "options": { "0": { "text": "RADIO", "color": "green" }, "1": { "text": "LOCAL (fallback)", "color": "yellow" } } }
           ]
         },
         "overrides": []
@@ -263,12 +263,12 @@
     {
       "id": 43,
       "type": "stat",
-      "title": "SomaFM edge",
-      "description": "Result of the watchdog's last SomaFM edge probe (ice.somafm.com round-robin) — UP when an edge served stream bytes, DOWN when it timed out / sent nothing. The probe only runs while a bot is stranded on the local fallback bed, so \"not probing\" is the healthy steady state.",
+      "title": "Radio station",
+      "description": "Result of the watchdog's last radio station probe — UP when the station served stream bytes, DOWN when it timed out / sent nothing. The probe only runs while a bot is stranded on the local fallback bed, so \"not probing\" is the healthy steady state.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (somafm_reachable{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
+        { "refId": "A", "expr": "max by (deployment_environment, service_platform) (radio_reachable{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "[{{deployment_environment}} / {{service_platform}}]" }
       ],
       "options": {
         "colorMode": "background",
@@ -295,7 +295,7 @@
       "id": 44,
       "type": "stat",
       "title": "Source swaps (1h)",
-      "description": "Background-audio source swaps in the last hour (to_fallback + to_somafm). Any to_fallback swap means SomaFM dropped.",
+      "description": "Background-audio source swaps in the last hour (to_fallback + to_radio). Any to_fallback swap means the radio dropped.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 28, "w": 6, "h": 4 },
       "targets": [
@@ -344,14 +344,14 @@
     {
       "id": 46,
       "type": "timeseries",
-      "title": "Background audio state (playing / fallback / SomaFM reachable)",
-      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means SomaFM has been down and we're on the local Car Hum bed. The somafm reachable line only exists while the probe runs (i.e. while on fallback), so a gap there means not probing rather than unreachable.",
+      "title": "Background audio state (playing / fallback / radio reachable)",
+      "description": "History of the three 0/1 signals driving the fallback. playing=0 is dead air; on fallback=1 means the radio has been down and the stream is on a local bed. The radio reachable line only exists while the probe runs (i.e. while on fallback), so a gap there means not probing rather than unreachable.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
       "targets": [
         { "refId": "A", "expr": "max by (deployment_environment, service_platform) (obs_background_audio_playing{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "playing [{{deployment_environment}} / {{service_platform}}]" },
         { "refId": "B", "expr": "max by (deployment_environment, service_platform) (obs_background_audio_on_fallback{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "on fallback [{{deployment_environment}} / {{service_platform}}]" },
-        { "refId": "C", "expr": "max by (deployment_environment, service_platform) (somafm_reachable{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "somafm reachable [{{deployment_environment}} / {{service_platform}}]" }
+        { "refId": "C", "expr": "max by (deployment_environment, service_platform) (radio_reachable{service_name=\"tripbot\", service_platform=~\"$platform\", deployment_environment=~\"$deployment_environment\"})", "legendFormat": "radio reachable [{{deployment_environment}} / {{service_platform}}]" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10 } },
@@ -365,7 +365,7 @@
       "id": 47,
       "type": "timeseries",
       "title": "Background audio bed (one-hot, per platform)",
-      "description": "Which of the three beds is feeding the stream, as a one-hot gauge: exactly one bed reads 1 per platform and the rest read 0, so a switch shows as one line handing off to another. The 'Source' stat above this only distinguishes SomaFM from fallback, which collapses carhum and album into one state — this is what tells them apart. Two platforms sitting on different beds is normal, not drift.",
+      "description": "Which of the three beds is feeding the stream, as a one-hot gauge: exactly one bed reads 1 per platform and the rest read 0, so a switch shows as one line handing off to another. The 'Source' stat above this only distinguishes radio from fallback, which collapses carhum and album into one state — this is what tells them apart. Two platforms sitting on different beds is normal, not drift.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 40, "w": 12, "h": 8 },
       "targets": [

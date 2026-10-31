@@ -60,13 +60,60 @@ All the Argo config is authored in cdk8s (no hand-written YAML) and synthesized 
 - a **tailscale `Ingress`** — UI at `argocd-prod.<tailnet>.ts.net`.
 - a repo-registration **`ExternalSecret`** (IaC — see step 2).
 
-The dashcam **PV** is deliberately **not** in Argo — it's host-specific bootstrap
-infra synthed to `dist/<env>-nfs-pv.k8s.yaml` (which no ApplicationSet globs)
-and applied once per cluster via `task k8s:<env>:nfs-pv`. Only the matching PVC
-is Argo-managed (in the data unit); it binds to the named PV.
+The NFS **PVs** (dashcam corpus, music, parked) are host-specific bootstrap infra
+synthed to `dist/<env>-nfs-pv.k8s.yaml` (which no ApplicationSet globs) and
+applied once per cluster via `task k8s:<env>:nfs-pv`, which injects the real NFS
+coords the committed dist replaces with placeholders. Argo **watches** them (the
+`nfs-pv` Application, below) but never syncs or prunes them unasked. The matching
+PVCs are Argo-managed (in the data / supporting units) and bind to the PVs by name.
 
 Argo CD itself is installed by the **cdk8s platform layer** (`PlatformChart`,
 minipc) — chart pinned in `helm_platform.py`, Helm values in `k8s/argo-cd/values.yml`.
+
+## The `gitops` root Application (app of apps)
+
+The Argo config is itself an Argo Application. **`gitops`** (project `platform`,
+in `platform-argo.k8s.yaml`, source `constructs/argo_platform.py`) tracks exactly
+the two files `task gitops:apply` applies — `cdk8s/dist/argocd.k8s.yaml` and
+`cdk8s/dist/platform-argo.k8s.yaml`, its own manifest included — via a
+`directory.include`, so no app unit's dist is picked up.
+
+- **Drift reads OutOfSync.** A merged change to either file, or a live object
+  edited by hand, shows as `gitops` OutOfSync in the Argo UI and the console's
+  Argo panel, with the diff — no `task gitops:diff` needed to notice it.
+- **A sync is the apply.** Syncing `gitops` from the Argo UI or the console's sync
+  button does what `task gitops:apply` does. It is **manual sync + `Prune=false`**,
+  the `*-data` posture: a sync never deletes, so a synth bug that drops an
+  ApplicationSet can't cascade into the prod Applications it generates. Removal
+  stays `task gitops:prune` (below).
+- It carries the ESO-defaults `ignoreDifferences` the app units use, for the
+  repo-registration ExternalSecrets.
+
+`task gitops:apply` still works and is how `gitops` itself is first created: it is
+the one object that needs a hand apply to bootstrap.
+
+## Watch-only Applications over hand-applied dist
+
+Two more Applications in `platform-argo.k8s.yaml` (created by a `gitops` sync)
+give the other hand-applied dist files the same treatment: drift reads OutOfSync
+in Argo and the console's Argo panel, and nothing changes until someone acts.
+Both are **manual sync + `Prune=false`**; their tasks stay the bootstrap and the
+apply.
+
+- **`nfs-pv`** tracks `prod-1-nfs-pv.k8s.yaml` and `stage-1-nfs-pv.k8s.yaml` (one
+  app for both envs; PVs are cluster-scoped). With prune off, Argo can never
+  delete a PV. `ignoreDifferences` covers `spec.nfs.server` / `spec.nfs.path`
+  (placeholders in the committed dist) and `spec.claimRef` (written by the
+  binder), and `RespectIgnoreDifferences=true` keeps a sync from writing the
+  placeholders over the real coords. A permanent OutOfSync here means a field
+  missing from that list; the Argo UI diff names it. The apply, including the
+  first one on a fresh cluster, stays `task k8s:<env>:nfs-pv`.
+- **`burrito-config`** tracks `burrito.k8s.yaml` (the TerraformRepository, every
+  TerraformLayer, the runner credentials, UI ingress). Its CRs need the CRDs the
+  `burrito` Application installs, so sync `burrito` first;
+  `SkipDryRunOnMissingResource=true` lets it render a diff before they exist.
+  The apply is a sync of this app (`argocd app sync burrito-config --core` or
+  the console's sync button); there is no task for it.
 
 Nearly all of this is declarative. The only out-of-band step is seeding the repo
 deploy key into SM + adding its public half to GitHub (a one-time bootstrap, like
@@ -99,7 +146,8 @@ every other ESO-backed secret).
 
    The ApplicationSets fan out into the per-unit Applications for each cutover
    env, all reconciling from git. New ones come up
-   **OutOfSync** until synced — safe under manual sync.
+   **OutOfSync** until synced — safe under manual sync. The apply also creates
+   the `gitops` root, so from then on a config change is a sync of `gitops`.
 
 ## Cutover status
 
@@ -118,7 +166,8 @@ there; prod-1 is held out deliberately. The **data** units stay manual forever.
 
 ## Removing an AppProject or ApplicationSet
 
-`task gitops:apply` is a plain `kubectl apply`, so it **never deletes**. Dropping
+`task gitops:apply` is a plain `kubectl apply` and a `gitops` sync runs with
+`Prune=false`, so neither **ever deletes**. Dropping
 a top-level Argo object from `cdk8s/dist` leaves the live one running, and an
 orphaned ApplicationSet keeps regenerating its Applications — deleting the child
 looks like it silently fails, because the generator puts it straight back.
@@ -182,7 +231,7 @@ merged `dist/` describes the state you want *before* turning Argo back on.
 
 The git-declarable platform charts (ESO, cert-manager, node-exporter,
 victoria-metrics, k8s-monitoring, tailscale-operator, NATS, CNPG, ARC,
-metrics-server) are authored as **Argo Applications with
+metrics-server, Kyverno) are authored as **Argo Applications with
 a multi-source Helm source** — the upstream chart (version-pinned) + the in-repo
 `k8s/<component>/values.yml` via a `$values` ref. Argo runs `helm template`
 in-cluster, so **no rendered charts land in git** — only the small Application
@@ -195,7 +244,9 @@ intentionally broad **`platform` AppProject** governs them (platform installs CR
 An Application can carry in-repo raw manifests as an extra source when they are
 custom resources of a CRD its chart ships: `tailscale-operator` also delivers
 `k8s/tailscale-operator/proxygroup.yml` (the `ingress-proxies` ProxyGroup), so the
-proxy fleet syncs with the operator that reconciles it.
+proxy fleet syncs with the operator that reconciles it, and `kyverno` delivers
+`k8s/kyverno/policies.yml` (its admission policies, Audit-only). The file is the
+component's `manifests` field in `helm_platform.py`.
 
 **Not Argo-managed — they stay task-installed (`task k8s:<env>:platform:up`):**
 
@@ -214,8 +265,8 @@ proxy fleet syncs with the operator that reconciles it.
 **Argo is the delivery path for everything in the list above** — adoption of the
 live helm releases completed 2026-07-16. Day-2 changes (values edits, chart
 bumps, new platform charts) go: edit `helm_platform.py` / the values files →
-merge → `task gitops:apply` (if the Application specs changed; preview with
-`task gitops:diff`) → sync in Argo. Do **not** `helm upgrade --install`
+merge → sync `gitops` (if the Application specs changed; its diff is the
+preview, and `task gitops:apply` does the same) → sync the component in Argo. Do **not** `helm upgrade --install`
 an adopted release against the live cluster: Argo owns the objects via
 server-side apply, and helm's apply fails with `argocd-controller`
 field-manager conflicts. The remaining `helm upgrade --install` steps in

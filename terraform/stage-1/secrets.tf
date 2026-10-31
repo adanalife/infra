@@ -82,6 +82,7 @@ locals {
     "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
     "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
     "k8s/tripbot/discord-bot-token"        = "Discord bot token for the staging tripbot Discord session."
+    "k8s/tripbot/radio-stations"           = "Background-audio radio station list for tripbot."
     "k8s/guessr/cloudflare-publish"        = "Cloudflare token pair for the guessr round-generation CronJob (video-pipeline cdk8s). Keys: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID."
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
@@ -214,6 +215,8 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
     resources = [
       "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/obs/*",
       "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/external-dns/*",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/burrito/*-secret-access-key",
     ]
   }
 }

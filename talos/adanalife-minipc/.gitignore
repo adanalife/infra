@@ -2,7 +2,7 @@
 # bootstrap token, encryption secrets) — never commit them as plaintext.
 #
 # These are SOPS-encrypted (prod-1 KMS key alias/sops-talos-pki) and the
-# encrypted *.sops.yaml versions ARE committed — see terraform/prod-1/sops.tf
+# encrypted *.sops.yaml versions ARE committed — see terraform/prod-1-data/sops.tf
 # and `task talos:minipc:secrets:{encrypt,decrypt}`. The plaintext below stays
 # local-only; regenerate it on a fresh checkout with
 # `task talos:minipc:secrets:decrypt`.

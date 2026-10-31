@@ -14,7 +14,7 @@ from dataclasses import replace
 
 from cdk8s import Testing as K8sTesting
 
-from adanalife_k8s.charts import DataChart, SupportingChart
+from adanalife_k8s.charts import DataChart, NfsPVChart, SupportingChart
 from adanalife_k8s.config import EnvConfig, load_env
 
 
@@ -36,7 +36,8 @@ def _ns(obj):
 # dashcam PVC in play. Synthesized rather than taken from the env table because
 # both minipc envs (prod-1/stage-1) now isolate the DB — this pins the co-located
 # branch independent of which real envs happen to isolate.
-_COLOCATED_NFS = replace(load_env("stage-1"), data_namespace="")
+# cnpg off too: a co-located data unit is the dev/local shape, StatefulSet and all.
+_COLOCATED_NFS = replace(load_env("stage-1"), data_namespace="", cnpg=False)
 
 
 # --- EnvConfig derived properties ---
@@ -48,7 +49,6 @@ def test_isolated_env_properties():
         assert env.data_namespace == data_ns
         assert env.data_isolated is True
         assert env.data_ns == data_ns
-        assert env.postgres_host == f"postgres.{data_ns}.svc.cluster.local"
 
 
 def test_colocated_env_properties_unchanged():
@@ -59,7 +59,6 @@ def test_colocated_env_properties_unchanged():
         assert env.data_namespace == ""
         assert env.data_isolated is False
         assert env.data_ns == env.namespace
-        assert env.postgres_host == "postgres"
 
 
 # --- isolated: postgres + store -> data ns; PVC -> app ns ---
@@ -68,8 +67,7 @@ def test_colocated_env_properties_unchanged():
 def test_isolated_postgres_and_store_land_in_data_namespace():
     objs = _synth(DataChart, load_env("stage-1"))
     for kind, name in (
-        ("StatefulSet", "postgres"),
-        ("Service", "postgres"),
+        ("Cluster", "pg"),
         ("ExternalSecret", "postgres-credentials"),
         ("SecretStore", "aws-parameterstore"),
     ):
@@ -189,3 +187,39 @@ def test_colocated_data_unit_declares_no_namespace():
     assert not [
         o for o in _synth(DataChart, _COLOCATED_NFS) if o["kind"] == "Namespace"
     ]
+
+
+# --- the parked-clips share: stage only ---
+
+
+def test_stage_supporting_emits_the_parked_claim_bound_to_its_pv():
+    objs = _synth(SupportingChart, load_env("stage-1"))
+    pvc = _by(objs, "PersistentVolumeClaim", "dashcam-parked")[0]
+    assert _ns(pvc) == "stage-1"
+    assert pvc["spec"]["volumeName"] == "dashcam-parked-nfs-stage"
+    assert pvc["spec"]["accessModes"] == ["ReadOnlyMany"]
+
+
+def test_prod_has_no_parked_claim_or_pv():
+    # prod never mounts the NAS in its stream path; parked clips are a stage affair.
+    assert not _by(
+        _synth(SupportingChart, load_env("prod-1")),
+        "PersistentVolumeClaim",
+        "dashcam-parked",
+    )
+    assert not _by(
+        _synth(NfsPVChart, load_env("prod-1")),
+        "PersistentVolume",
+        "dashcam-parked-nfs",
+    )
+
+
+def test_stage_parked_pv_is_soft_mounted_off_the_parked_export():
+    pv = _by(
+        _synth(NfsPVChart, load_env("stage-1")),
+        "PersistentVolume",
+        "dashcam-parked-nfs-stage",
+    )[0]
+    assert pv["spec"]["mountOptions"] == ["soft", "timeo=150", "retrans=3"]
+    assert pv["spec"]["nfs"]["path"] == "<parked export path>"
+    assert pv["spec"]["nfs"]["readOnly"] is True
