@@ -1,0 +1,27 @@
+# Middleware that rewrites the bare-root request (`/`) to `/dashboard/` before
+# the request reaches Traefik's api/dashboard handler. Without this, hitting
+# traefik.prod.whereisdana.today/ returns a 301 → /dashboard/ (the dashboard
+# handler is strict about the trailing-slash path), making the user-visible URL
+# uglier than it needs to be.
+#
+# `replacePathRegex` with `^/$` (anchored, exact match) only touches the bare
+# root — `/dashboard/...` and `/api/...` requests pass through unchanged, so
+# the dashboard's own JS (which calls absolute `/api/...` URLs) keeps working.
+#
+# Attached to both dashboard Ingresses (LAN + tailscale) via the
+# `traefik.ingress.kubernetes.io/router.middlewares` annotation. The
+# `kube-system-traefik-dashboard-root@kubernetescrd` reference matches the
+# format Traefik builds for Middleware CRDs:
+# `<namespace>-<name>@kubernetescrd`.
+#
+# Applied by `task k8s:prod:platform:up` (kubectl apply -f) alongside the
+# sibling dashboard-ingress.yaml.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: traefik-dashboard-root
+  namespace: kube-system
+spec:
+  replacePathRegex:
+    regex: "^/$"
+    replacement: "/dashboard/"
