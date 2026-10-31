@@ -1,0 +1,38 @@
+name: cdk8s-synth
+
+# Synth + the unit/contract tests + kubeconform over the Python cdk8s authoring
+# layer, via the shared cdk8s workflow. dist/ (the GitOps source Argo reads) is
+# kept in sync by CI itself: on PRs a stale dist/ is re-synthed and pushed back
+# to the branch, so nobody has to run `task cdk8s:synth` locally; on main the
+# run is verify-only.
+on:
+  pull_request:
+    paths:
+      - 'cdk8s/**'
+      - 'platforms.json'
+      - '.github/workflows/cdk8s-synth.yml'
+      - '.github/workflows/cdk8s.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'cdk8s/**'
+      - 'platforms.json'
+      - '.github/workflows/cdk8s-synth.yml'
+      - '.github/workflows/cdk8s.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  synth:
+    uses: ./.github/workflows/cdk8s.yml
+    with:
+      tests: true
+      resynth: true
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}

@@ -1,0 +1,18 @@
+# Helm values for the metrics-server/metrics-server chart on adanalife-minipc
+# (Talos). metrics-server backs `kubectl top nodes/pods` and the HPA metrics
+# API — Talos does NOT bundle it (unlike k3s, which ships it on the dev k3d
+# cluster), so without this `kubectl top` fails on stage-1/prod-1 and node/pod
+# CPU has to be read by hand from cgroup cpu.stat or /proc/stat. Installed into
+# kube-system by `task k8s:prod:platform:up`. prod-1 + stage-1 only — dev k3d
+# already has metrics-server from k3s, so this is deliberately not in the dev
+# platform:up sibling.
+#
+# Talos specific:
+#   --kubelet-insecure-tls — metrics-server scrapes each kubelet's
+#     /metrics/resource endpoint over TLS. Talos kubelet serving certs are
+#     self-signed (not signed by the cluster CA) unless serving-cert rotation
+#     is enabled, so metrics-server x509-fails to verify them out of the box.
+#     Skipping verification is the standard Talos answer; the scrape stays on
+#     the in-cluster network to the node's own kubelet.
+args:
+  - --kubelet-insecure-tls

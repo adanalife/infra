@@ -1,0 +1,31 @@
+# Tailnet-native exposure of the Traefik dashboard via the Tailscale operator.
+# Additive to the dashboard-ingress.yaml sibling (traefik.prod.whereisdana.today,
+# on-LAN). Gives https://traefik-prod.<tailnet>.ts.net, reachable from
+# ANY network (CGNAT name, no LAN-subnet collision). Auto HTTPS via the tailnet
+# cert. Same `traefik` port (api/dashboard) the LAN dashboard ingress uses.
+#
+# NO auth on the dashboard itself (--api.insecure=true) — reachability is gated
+# by the tailnet ACL alone. Add a traefik basic-auth middleware before sharing
+# the URL beyond your own tailnet devices.
+#
+# Applied by `task k8s:prod:platform:up` (kubectl apply -f) right after the
+# sibling dashboard-ingress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: traefik-dashboard-tailscale
+  namespace: kube-system
+  annotations:
+    # Served by the shared HA proxy fleet (k8s/tailscale-operator/proxygroup.yml)
+    # instead of a dedicated per-Ingress proxy pod.
+    tailscale.com/proxy-group: ingress-proxies
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: traefik
+      port:
+        name: traefik
+  tls:
+    - hosts:
+        - traefik-prod

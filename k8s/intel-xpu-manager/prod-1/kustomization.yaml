@@ -1,0 +1,50 @@
+# Intel XPU Manager DaemonSet for adanalife-minipc (prod-1).
+#
+# Reads telemetry off the iGPU (engine utilization, power, temperature,
+# frequency, memory) and exposes Prometheus metrics on port 29999 with
+# the `xpum_` prefix. Claims the `gpu.intel.com/i915_monitoring`
+# resource registered by the sibling intel-gpu-plugin DaemonSet.
+#
+# Lives in kube-system because xpumd needs SYS_ADMIN + hostNetwork +
+# hostPath (/var/lib/kubelet/pod-resources, /dev/dri) — all blocked by
+# PSS baseline. kube-system is exempt per Talos's PodSecurity config.
+#
+# Patches:
+#   - prometheus.io/scrape annotation so Grafana Alloy (annotation
+#     auto-discovery enabled in k8s/monitoring/prod-1/values.yml) picks
+#     up the metrics endpoint without needing a ServiceMonitor.
+#   - Drop the upstream's imagePullSecrets reference: intel/xpumanager
+#     is public on Docker Hub; pulling doesn't need creds.
+#   - Pin both container images by digest. Intel publishes Docker Hub
+#     tags on a separate cadence from GitHub releases (the v1.3.6
+#     GitHub manifest references `intel/xpumanager` unpinned, but no
+#     v1.3.6 image was ever pushed to Docker Hub; current published
+#     tags top out at v1.2.27 + `latest`). Pinning by digest gives
+#     reproducibility without coupling to a fictional tag.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kube-system
+
+resources:
+  - github.com/intel/xpumanager/deployment/kubernetes/daemonset/base?ref=v1.3.6
+
+patches:
+  - target:
+      kind: DaemonSet
+      name: intel-xpumanager
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "29999"
+          prometheus.io/path: /metrics
+      - op: remove
+        path: /spec/template/spec/imagePullSecrets
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: intel/xpumanager@sha256:7c2123abfdf87ba97fce3865e0db86a8728a8fefdebe96961ab066b2aabcbc86
+      - op: replace
+        path: /spec/template/spec/containers/1/image
+        value: intel/xpumanager@sha256:7c2123abfdf87ba97fce3865e0db86a8728a8fefdebe96961ab066b2aabcbc86

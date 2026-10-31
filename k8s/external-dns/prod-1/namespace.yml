@@ -1,0 +1,10 @@
+# prod-1-platform — the env-specific platform namespace. Holds prod's
+# env-scoped platform workloads (currently just external-dns) so the
+# prod-1 app namespace shows only application pods (tripbot/vlc/obs/
+# postgres). Mirrored by stage-1-platform; the shared cluster-singletons
+# (cilium, traefik, ESO operator, cert-manager controller, monitoring)
+# stay in kube-system.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod-1-platform

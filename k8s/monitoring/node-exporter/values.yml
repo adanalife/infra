@@ -1,0 +1,48 @@
+# Helm values for prometheus-community/prometheus-node-exporter.
+# Shared across development + prod-1 — same chart, same values, only the
+# install namespace differs (always monitoring-host).
+#
+# Why isolated: node-exporter is the one workload in the monitoring
+# stack that genuinely needs hostPath + hostNetwork. Talos enforces
+# PodSecurity `baseline:latest` cluster-wide, which forbids both.
+# The grafana/k8s-monitoring chart's default bundled node-exporter
+# lives in the main `monitoring` namespace, which is why this is
+# installed separately into `monitoring-host` (labeled `privileged`).
+#
+# Discovery: grafana-k8s-monitoring's hostMetrics feature scrapes this
+# pod via labelMatchers (app.kubernetes.io/name=prometheus-node-exporter,
+# see k8s/monitoring/prod-1/values.yml) with the curated integration
+# allowlist. Deliberately NOT annotation-discovered: prometheus.io/*
+# podAnnotations here would make annotationAutodiscovery scrape the
+# FULL exposition (~3600 series) alongside hostMetrics' allowlisted
+# ~700 — a duplicate that on its own eats a quarter of the Grafana
+# Cloud active-series cap.
+
+# Bind to :9101 instead of the chart default :9100 — traefik in
+# prod-1 runs with hostNetwork: true and already binds host port
+# 9100 for its own metrics endpoint (k8s/traefik/values.yml).
+# Node-exporter also runs hostNetwork (chart default), so the two
+# would collide on the host port without this override. Stage-1's
+# traefik isn't hostNetwork, but keeping the port consistent
+# across envs is simpler than env-specific values files.
+service:
+  port: 9101
+  targetPort: 9101
+
+# Cardinality controls. node-exporter is ~45% of all active series in
+# Grafana Cloud — most of that from per-interface metrics (one veth per
+# pod, plus Cilium tunnel devices) and per-filesystem metrics on tmpfs/
+# overlay/fuse mounts that grow with container count.
+#
+# Devices we KEEP: physical NICs (enp*, eno*, bond*), tailscale0, lo.
+# Devices we DROP: lxc* (Cilium pod veths), cilium_* (vxlan/host/net),
+# lxc_health, ip-tunnel devices (tunl0/sit0/ip6tnl0/teql0), kubespan,
+# dummy*, veth*. Roughly 7 real interfaces vs. ~45 ephemeral on prod.
+#
+# Filesystems we DROP: tmpfs/overlay/fuse/cgroup/proc/sys and friends —
+# they grow with container count and don't represent real storage.
+extraArgs:
+  - --collector.netclass.ignored-devices=^(lxc[0-9a-f]+|cilium_.+|lxc_health|tunl0|sit0|ip6tnl0|teql0|kubespan|dummy.+|veth.+|ip6_vti.+|ip_vti.+)$
+  - --collector.netdev.device-exclude=^(lxc[0-9a-f]+|cilium_.+|lxc_health|tunl0|sit0|ip6tnl0|teql0|kubespan|dummy.+|veth.+|ip6_vti.+|ip_vti.+)$
+  - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|fuse\.lxcfs|tmpfs|ramfs)$
+  - --no-collector.arp

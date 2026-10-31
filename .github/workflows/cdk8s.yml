@@ -1,0 +1,110 @@
+# The fleet's cdk8s sweep, as one reusable workflow: re-synth through the
+# repo's own `task cdk8s:synth` and check the committed cdk8s/dist/ (the GitOps
+# source Argo reads) matches. Each repo's cdk8s-synth.yml calls this on pushes
+# to main, the backstop behind the PR-time check in gates.yml, catching a
+# desync that lands some way other than a PR.
+#
+# With `resynth`, a pull_request run pushes a stale dist/ back to the branch as
+# a follow-up commit instead of failing, so nobody has to synth locally. The
+# push authenticates as the automation app, not GITHUB_TOKEN — commits pushed
+# with GITHUB_TOKEN don't trigger workflows, so checks would never run on the
+# synth commit. Where the app key is unavailable (a Dependabot PR) the run
+# falls back to verify-only.
+name: cdk8s
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label. Private repos use the self-hosted pool, where hosted minutes would be metered.
+        type: string
+        default: ubuntu-latest
+      tests:
+        description: Also run `task cdk8s:test`.
+        type: boolean
+        default: false
+      kubeconform:
+        description: Also run `task cdk8s:validate`, the repo's kubeconform pass.
+        type: boolean
+        default: true
+      resynth:
+        description: On a pull_request run, push a re-synthed cdk8s/dist/ back to the branch rather than failing on a stale one.
+        type: boolean
+        default: false
+    secrets:
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: The org automation app's key, which pushes the re-synth commit. Needed with `resynth`.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  synth:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    steps:
+      # continue-on-error: Dependabot PRs can't read repo secrets, so the mint
+      # fails there and the run verifies instead of pushing.
+      - name: Mint automation app token
+        id: app-token
+        if: inputs.resynth && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      # A re-synth run checks out the branch tip (not the merge ref) so its
+      # commit can be pushed straight back to the branch.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.app-token.outputs.token && github.head_ref || '' }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          persist-credentials: ${{ steps.app-token.outputs.token != '' }}
+
+      - uses: jdx/mise-action@v4
+
+      # A cdk8s/ layer with its own mise config pins its own toolchain.
+      - name: Install the cdk8s/ toolchain
+        if: hashFiles('cdk8s/.mise.toml', 'cdk8s/.tool-versions') != ''
+        working-directory: cdk8s
+        run: mise trust && mise install
+
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+      - uses: arduino/setup-task@v3
+
+      - name: Synth
+        run: task cdk8s:synth
+
+      - name: Synth-time checks
+        if: inputs.tests
+        run: task cdk8s:test
+
+      - name: Validate manifests (kubeconform)
+        if: inputs.kubeconform
+        run: task cdk8s:validate
+
+      # Synth is deterministic, so the run this commit triggers finds dist/
+      # clean and does not push again.
+      - name: Push the re-synthed cdk8s/dist/
+        if: steps.app-token.outputs.token != ''
+        run: |
+          if git diff --quiet -- cdk8s/dist/; then
+            echo "cdk8s/dist/ is in sync"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cdk8s/dist/
+          git commit -m "Re-synth cdk8s dist/"
+          git push
+          echo "::notice::cdk8s/dist/ was stale — pushed a re-synth commit; checks re-run on it."
+
+      - name: Verify cdk8s/dist/ is committed in sync
+        if: steps.app-token.outputs.token == ''
+        run: |
+          if ! git diff --exit-code -- cdk8s/dist/; then
+            echo "::error::cdk8s/dist/ is stale — run 'task cdk8s:synth' and commit the result."
+            exit 1
+          fi

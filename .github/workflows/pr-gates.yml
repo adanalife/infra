@@ -1,0 +1,43 @@
+# The per-PR gates. The job itself is gates.yml, the reusable workflow every
+# repo in the org calls; this repo calls its own copy so a change to it is
+# exercised by the PR that makes it.
+#
+# Deliberately NOT folded in: cdk8s-synth.yml, which pushes a re-synthed dist/
+# back to the PR branch with the automation app's write token. There is no
+# changelog-fragment gate here — this repo ships no releases and has no
+# towncrier setup.
+name: pr-gates
+
+on:
+  pull_request:
+    # Every PR, whatever it targets. Filtering to `branches: [main]` would leave a
+    # PR stacked on another feature branch running no gates at all — the review
+    # that most wants them, since its diff is against a branch nobody has looked
+    # at rather than against main.
+    #
+    # `edited` re-runs the title check when a title is fixed; `labeled` /
+    # `unlabeled` the same for the skip-changelog escape hatch.
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# What the shared gates job reads: the checkout, the PR (title check) and GHCR
+# (the pinned-tag check); `statuses: write` is for the per-gate commit statuses
+# it posts on the PR head. Without a block every job here would get the repo's
+# default token.
+permissions:
+  contents: read
+  pull-requests: read
+  packages: read
+  statuses: write
+
+jobs:
+  gates:
+    uses: ./.github/workflows/gates.yml
+    with:
+      changelog: false
+      platforms: true
+      contracts: cdk8s/contract.json
+    secrets: inherit

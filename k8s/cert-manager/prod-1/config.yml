@@ -1,4 +1,4 @@
-# KEEP-IN-SYNC: k8s/cert-manager/{stage-1,prod-1}/config.yml
+# KEEP-IN-SYNC: k8s/cert-manager/{development,prod-1}/config.yml
 # https://artifacthub.io/packages/helm/jetstack/cert-manager
 
 crds:
@@ -25,3 +25,11 @@ ingressShim:
 # clusterissuer` after install instead.
 startupapicheck:
   enabled: false
+
+# Enable Prometheus metrics on the controller and webhook. With
+# `enabled: true` the chart adds `prometheus.io/*` pod annotations
+# automatically, which grafana-k8s-monitoring's annotationAutodiscovery
+# picks up. servicemonitor stays off — that requires the Prometheus
+# Operator CRD we don't run; pod annotations are the alternate path.
+prometheus:
+  enabled: true

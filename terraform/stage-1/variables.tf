@@ -1,9 +1,8 @@
 # KEEP-IN-SYNC: terraform/{stage-1,prod-1}/variables.tf
 #
-# De-symlinked 2026-05-11. Stage-1 and prod-1 are intentionally near-identical
-# until the modules refactor lands (vault/infra/TODO.md). Any structural
-# change here SHOULD be mirrored to the sibling file unless the divergence
-# is the whole point of the change.
+# Stage-1 and prod-1 are intentionally near-identical until they're refactored
+# into shared modules. Any structural change here SHOULD be mirrored to the
+# sibling file unless the divergence is the whole point of the change.
 
 # prod, stage, dev
 variable "environment" {
@@ -36,11 +35,6 @@ variable "secondary_domain" {
   description = "The domain name used for secondary DNS"
 }
 
-variable "external_dns_role" {
-  type    = string
-  default = "ExternalDNSRole"
-}
-
 
 variable "static_site_public_dir" {
   description = "Directory in S3 Bucket from which to serve public files (no leading or trailing slashes)"
@@ -52,13 +46,19 @@ variable "primary_acm_cert_alternative_names" {
   default = []
 }
 
-# Cloudflare-related variables live in cloudflare-pages.tf so that
-# prod-1 (which symlinks this file) doesn't see them as required
-# inputs without having any cloudflare resources to use them on.
+# GCP project this environment manages (tripbot-stage / tripbot-prod). Per-env
+# value in terraform.tfvars; google.tf is otherwise identical across envs.
+variable "gcp_project" {
+  type        = string
+  description = "GCP project ID this environment manages"
+}
 
-# a secret string between CloudFront and S3 to control access
-resource "random_password" "static_site_secret" {
-  length = 32
+# When true (steady state) the google provider impersonates the terraform SA.
+# Set false for the one-time bootstrap apply (owner ADC must create the SA
+# before it can be impersonated) and in CI (which auths AS the SA via WIF).
+variable "gcp_impersonate" {
+  type    = bool
+  default = true
 }
 
 locals {
@@ -68,5 +68,4 @@ locals {
   full_account_name   = "${local.org_name}-${var.environment}-${var.label}"
   primary_subdomain   = "${var.environment}.${var.primary_domain}"
   secondary_subdomain = "${var.environment}.${var.secondary_domain}"
-  primary_static_site = "static.${local.primary_subdomain}"
 }

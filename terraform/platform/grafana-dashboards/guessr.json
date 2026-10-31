@@ -1,0 +1,722 @@
+{
+  "uid": "guessr-play",
+  "title": "Guessr — how it is being played",
+  "description": "Queries production D1 over Cloudflare's REST API through the guessr-d1 Infinity datasource. Every D1 panel is one SQL statement against `plays`, which holds one row per guess: date, opaque player id, clip, distance, points, client. The API Worker panels read Cloudflare's Workers invocation analytics through the cloudflare-analytics datasource.",
+  "tags": ["guessr"],
+  "timezone": "utc",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Players, all time",
+      "description": "Distinct player ids that have ever recorded a daily guess. A player who cleared their browser counts twice; there is no account to tell you otherwise.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT COUNT(DISTINCT player_id) AS players FROM plays\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "players", "text": "players", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Guesses, all time",
+      "description": "One row per guess, so five per completed game.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT COUNT(*) AS guesses FROM plays\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "guesses", "text": "guesses", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Median guess error",
+      "description": "Kilometres, over every guess ever recorded. The median rather than the mean: one player who clicks Antarctica moves a mean and not this.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": { "defaults": { "unit": "lengthkm", "decimals": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT km AS median_km FROM plays ORDER BY km LIMIT 1 OFFSET (SELECT COUNT(*) / 2 FROM plays)\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "median_km", "text": "median_km", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Days with a player",
+      "description": "Dates that recorded at least one guess. Against the number of dates the schedule has covered, this is whether anyone turned up.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT COUNT(DISTINCT date) AS days FROM plays\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [{ "selector": "days", "text": "days", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Who showed up, and who finished",
+      "description": "Per date. `finished` counts distinct players with all five rounds recorded -- not rows, which is five per finisher.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT date, COUNT(DISTINCT player_id) AS players, COUNT(DISTINCT CASE WHEN rounds = 5 THEN player_id END) AS finished FROM (SELECT date, player_id, COUNT(*) OVER (PARTITION BY date, player_id) AS rounds FROM plays WHERE date <= date('now')) GROUP BY date ORDER BY date\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "date", "text": "date", "type": "timestamp", "timestampFormat": "2006-01-02" },
+            { "selector": "players", "text": "players", "type": "number" },
+            { "selector": "finished", "text": "finished", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "How close they got",
+      "description": "Mean distance and mean points per guess, by date. A day that jumps is a day whose five rounds were badly matched to the ramp, not a day of worse players.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8 }, "min": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_km" },
+            "properties": [{ "id": "unit", "value": "lengthkm" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT date, ROUND(AVG(km), 1) AS avg_km, ROUND(AVG(points), 0) AS avg_points FROM plays WHERE date <= date('now') GROUP BY date ORDER BY date\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "date", "text": "date", "type": "timestamp", "timestampFormat": "2006-01-02" },
+            { "selector": "avg_km", "text": "avg_km", "type": "number" },
+            { "selector": "avg_points", "text": "avg_points", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Drop-off — rounds reached",
+      "description": "Player-days by how many of the five they got through, all time. Round 1 to round 2 is the steepest cliff a puzzle game has; if the 1 bar dwarfs the 5 bar the game is too long or the first round is too hard.",
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 13 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 80 }, "min": 0 }, "overrides": [] },
+      "options": { "xField": "reached" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT rounds AS reached, COUNT(*) AS player_days FROM (SELECT date, player_id, COUNT(*) AS rounds FROM plays WHERE date <= date('now') GROUP BY date, player_id) GROUP BY rounds ORDER BY rounds\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "reached", "text": "reached", "type": "string" },
+            { "selector": "player_days", "text": "player_days", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Retention — days played",
+      "description": "Players by how many separate dates they have played. The 1 bar is everyone who tried it once and never came back, which is the number that decides whether a daily game is a daily game.",
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 13 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 80 }, "min": 0 }, "overrides": [] },
+      "options": { "xField": "days_played" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT days_played, COUNT(*) AS players FROM (SELECT player_id, COUNT(DISTINCT date) AS days_played FROM plays WHERE date <= date('now') GROUP BY player_id) GROUP BY days_played ORDER BY days_played\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "days_played", "text": "days_played", "type": "string" },
+            { "selector": "players", "text": "players", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Clips nobody can place",
+      "description": "Ranked by mean guess error, minimum three guesses. This is the difficulty ramp marked by the people playing it rather than by the locatability score that picked the clip -- a round everyone misses by a thousand kilometres is a bad round, not a hard one, and it is the only signal that says which.",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 13 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_km" },
+            "properties": [{ "id": "unit", "value": "lengthkm" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "guessr-d1" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT image, COUNT(*) AS guesses, ROUND(AVG(km), 0) AS avg_km, ROUND(AVG(points), 0) AS avg_points FROM plays WHERE date <= date('now') GROUP BY image HAVING guesses >= 3 ORDER BY avg_km DESC LIMIT 15\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            { "selector": "image", "text": "clip", "type": "string" },
+            { "selector": "guesses", "text": "guesses", "type": "number" },
+            { "selector": "avg_km", "text": "avg_km", "type": "number" },
+            { "selector": "avg_points", "text": "avg_points", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Finishers by client",
+      "description": "Per date, distinct players with all five rounds recorded, split by the client that sent them: `web`, `ios`, `ipados`, `mac`, `app`. `unknown` is plays older than the client column. A player whose five rounds came from more than one client counts once, under one of them. This is the App Store against the web.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "guessr-d1"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "guessr-d1"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\":\"SELECT date, SUM(c = 'web') AS web, SUM(c = 'ios') AS ios, SUM(c = 'ipados') AS ipados, SUM(c = 'mac') AS mac, SUM(c = 'app') AS app, SUM(c = 'unknown') AS unknown FROM (SELECT date, player_id, COALESCE(MAX(client), 'unknown') AS c FROM plays WHERE date <= date('now') GROUP BY date, player_id HAVING COUNT(*) = 5) GROUP BY date ORDER BY date\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp",
+              "timestampFormat": "2006-01-02"
+            },
+            {
+              "selector": "web",
+              "text": "web",
+              "type": "number"
+            },
+            {
+              "selector": "ios",
+              "text": "ios",
+              "type": "number"
+            },
+            {
+              "selector": "ipados",
+              "text": "ipados",
+              "type": "number"
+            },
+            {
+              "selector": "mac",
+              "text": "mac",
+              "type": "number"
+            },
+            {
+              "selector": "app",
+              "text": "app",
+              "type": "number"
+            },
+            {
+              "selector": "unknown",
+              "text": "unknown",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Players by client, last 7 days",
+      "description": "Distinct players with at least one guess in the last seven days, per client. A player who played on two clients counts under both, so the tiles can sum past the real number of people.",
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 22
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "guessr-d1"
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "guessr-d1"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\":\"SELECT COUNT(DISTINCT CASE WHEN client = 'web' THEN player_id END) AS web, COUNT(DISTINCT CASE WHEN client = 'ios' THEN player_id END) AS ios, COUNT(DISTINCT CASE WHEN client = 'ipados' THEN player_id END) AS ipados, COUNT(DISTINCT CASE WHEN client = 'mac' THEN player_id END) AS mac, COUNT(DISTINCT CASE WHEN client = 'app' THEN player_id END) AS app, COUNT(DISTINCT CASE WHEN client IS NULL THEN player_id END) AS unknown FROM plays WHERE date > date('now', '-7 days') AND date <= date('now')\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            {
+              "selector": "web",
+              "text": "web",
+              "type": "number"
+            },
+            {
+              "selector": "ios",
+              "text": "ios",
+              "type": "number"
+            },
+            {
+              "selector": "ipados",
+              "text": "ipados",
+              "type": "number"
+            },
+            {
+              "selector": "mac",
+              "text": "mac",
+              "type": "number"
+            },
+            {
+              "selector": "app",
+              "text": "app",
+              "type": "number"
+            },
+            {
+              "selector": "unknown",
+              "text": "unknown",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Median points per guess, by client",
+      "description": "The middle guess's points for each client, over every guess ever recorded — do app players score differently from the web? Median for the same reason as the error tile: one lucky or absurd guess moves a mean and not this. `unknown` is plays older than the client column. A client with no plays yet shows nothing.",
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 22
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "guessr-d1"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "guessr-d1"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/__D1_PRODUCTION__/query",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"sql\": \"SELECT MAX(CASE WHEN c = 'web' THEN points END) AS web, MAX(CASE WHEN c = 'ios' THEN points END) AS ios, MAX(CASE WHEN c = 'ipados' THEN points END) AS ipados, MAX(CASE WHEN c = 'mac' THEN points END) AS mac, MAX(CASE WHEN c = 'app' THEN points END) AS app, MAX(CASE WHEN c = 'unknown' THEN points END) AS unknown FROM (SELECT c, points, ROW_NUMBER() OVER (PARTITION BY c ORDER BY points) AS rn, COUNT(*) OVER (PARTITION BY c) AS n FROM (SELECT COALESCE(client, 'unknown') AS c, points FROM plays)) WHERE rn = (n + 1) / 2\"}"
+          },
+          "root_selector": "result.0.results",
+          "columns": [
+            {
+              "selector": "web",
+              "text": "web",
+              "type": "number"
+            },
+            {
+              "selector": "ios",
+              "text": "ios",
+              "type": "number"
+            },
+            {
+              "selector": "ipados",
+              "text": "ipados",
+              "type": "number"
+            },
+            {
+              "selector": "mac",
+              "text": "mac",
+              "type": "number"
+            },
+            {
+              "selector": "app",
+              "text": "app",
+              "type": "number"
+            },
+            {
+              "selector": "unknown",
+              "text": "unknown",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "API Worker — requests and errors",
+      "description": "Per hour, invocations of the adanalife-guessr-api Worker that serves every /api/* request, and how many of them failed. Cloudflare's invocation analytics are the only record of an invocation that threw past the app or died over its CPU or memory limit; players see one as a 500 with `error code: 1101`. Errors read on the right axis. The alert `guessr: the API Worker is failing requests` fires on more than 5 errors in 15 minutes.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "cloudflare-analytics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "cloudflare-analytics"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/graphql",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"query\":\"{viewer{accounts(filter:{accountTag:\\\"__CLOUDFLARE_ACCOUNT__\\\"}){workersInvocationsAdaptive(limit:10000,filter:{scriptName:\\\"adanalife-guessr-api\\\",datetime_geq:\\\"${__from:date:iso}\\\",datetime_leq:\\\"${__to:date:iso}\\\"},orderBy:[datetimeHour_ASC]){dimensions{datetimeHour} sum{requests errors}}}}}\"}"
+          },
+          "root_selector": "data.viewer.accounts.0.workersInvocationsAdaptive",
+          "columns": [
+            {
+              "selector": "dimensions.datetimeHour",
+              "text": "hour",
+              "type": "timestamp"
+            },
+            {
+              "selector": "sum.requests",
+              "text": "requests",
+              "type": "number"
+            },
+            {
+              "selector": "sum.errors",
+              "text": "errors",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "API Worker — CPU and wall time",
+      "description": "Per hour, the median and 99th-percentile CPU time and wall time of an adanalife-guessr-api invocation. CPU time is what counts against the Worker's limit; wall time includes waiting on D1.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "cloudflare-analytics"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "cloudflare-analytics"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/graphql",
+          "url_options": {
+            "method": "POST",
+            "body_type": "raw",
+            "body_content_type": "application/json",
+            "data": "{\"query\":\"{viewer{accounts(filter:{accountTag:\\\"__CLOUDFLARE_ACCOUNT__\\\"}){workersInvocationsAdaptive(limit:10000,filter:{scriptName:\\\"adanalife-guessr-api\\\",datetime_geq:\\\"${__from:date:iso}\\\",datetime_leq:\\\"${__to:date:iso}\\\"},orderBy:[datetimeHour_ASC]){dimensions{datetimeHour} quantiles{cpuTimeP50 cpuTimeP99 wallTimeP50 wallTimeP99}}}}}\"}"
+          },
+          "root_selector": "data.viewer.accounts.0.workersInvocationsAdaptive",
+          "columns": [
+            {
+              "selector": "dimensions.datetimeHour",
+              "text": "hour",
+              "type": "timestamp"
+            },
+            {
+              "selector": "quantiles.cpuTimeP50",
+              "text": "cpu p50",
+              "type": "number"
+            },
+            {
+              "selector": "quantiles.cpuTimeP99",
+              "text": "cpu p99",
+              "type": "number"
+            },
+            {
+              "selector": "quantiles.wallTimeP50",
+              "text": "wall p50",
+              "type": "number"
+            },
+            {
+              "selector": "quantiles.wallTimeP99",
+              "text": "wall p99",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

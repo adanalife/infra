@@ -1,0 +1,866 @@
+{
+  "title": "13 — Platform Services",
+  "uid": "platform-services",
+  "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium", "traefik"],
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+        "query": "label_values(kube_pod_info, cluster)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "external-dns",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }
+    },
+    {
+      "id": 101,
+      "type": "stat",
+      "title": "Registry endpoints (records in Route53)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(external_dns_registry_endpoints_total{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 102,
+      "type": "stat",
+      "title": "Source endpoints (Ingress targets)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(external_dns_source_endpoints_total{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 103,
+      "type": "stat",
+      "title": "Last reconcile",
+      "description": "Seconds since the external-dns controller last reconciled. High = controller wedged.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(external_dns_controller_last_reconcile_timestamp_seconds{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 120 },
+              { "color": "red", "value": 600 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 104,
+      "type": "stat",
+      "title": "Errors (last 1h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(external_dns_source_errors_total{cluster=~\"$cluster\"}[1h])) + sum(increase(external_dns_registry_errors_total{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 105,
+      "type": "timeseries",
+      "title": "Endpoints over time — source vs registry",
+      "description": "Source = what Ingresses ask for. Registry = what Route53 currently has. Persistent gap = external-dns isn't keeping up.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum(external_dns_source_endpoints_total{cluster=~\"$cluster\"})", "legendFormat": "source" },
+        { "refId": "B", "expr": "sum(external_dns_registry_endpoints_total{cluster=~\"$cluster\"})", "legendFormat": "registry" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 106,
+      "type": "timeseries",
+      "title": "Error rate (per minute)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(external_dns_source_errors_total{cluster=~\"$cluster\"}[5m])) * 60", "legendFormat": "source" },
+        { "refId": "B", "expr": "sum(rate(external_dns_registry_errors_total{cluster=~\"$cluster\"}[5m])) * 60", "legendFormat": "registry" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+
+    {
+      "id": 200,
+      "type": "row",
+      "title": "cert-manager",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 1 }
+    },
+    {
+      "id": 201,
+      "type": "stat",
+      "title": "Ready certificates",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 13, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(certmanager_certificate_ready_status{cluster=~\"$cluster\", condition=\"True\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 202,
+      "type": "stat",
+      "title": "Not-ready certificates",
+      "description": "Should be 0. A cert stuck not-ready usually means the issuer can't reach the ACME challenge target (DNS or HTTP).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 13, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(certmanager_certificate_ready_status{cluster=~\"$cluster\", condition=\"False\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 203,
+      "type": "stat",
+      "title": "Days until soonest expiry",
+      "description": "Lowest certmanager_certificate_expiration_timestamp_seconds across all certs. LE auto-renews at 30 days remaining; alert if it dips below ~14.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 13, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "(min(certmanager_certificate_expiration_timestamp_seconds{cluster=~\"$cluster\"}) - time()) / 86400" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 14 },
+              { "color": "green", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 204,
+      "type": "stat",
+      "title": "ACME errors (last 1h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 13, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(certmanager_http_acme_client_request_count{cluster=~\"$cluster\", status!~\"2..\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 205,
+      "type": "table",
+      "title": "Per-certificate days-to-expiry",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "(certmanager_certificate_expiration_timestamp_seconds{cluster=~\"$cluster\"} - time()) / 86400", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "service": true, "endpoint": true, "container": true, "pod": true, "prometheus": true },
+            "indexByName": {},
+            "renameByName": { "name": "Certificate", "namespace": "Namespace", "issuer_name": "Issuer", "Value": "Days remaining" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 14 },
+              { "color": "green", "value": 30 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Days remaining" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "decimals", "value": 0 }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 206,
+      "type": "timeseries",
+      "title": "ACME request rate by status",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(certmanager_http_acme_client_request_count{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+
+    {
+      "id": 300,
+      "type": "row",
+      "title": "external-secrets",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 1 }
+    },
+    {
+      "id": 301,
+      "type": "stat",
+      "title": "Sync success (last 1h)",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(externalsecret_sync_calls_total{cluster=~\"$cluster\", status=\"success\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 302,
+      "type": "stat",
+      "title": "Sync errors (last 1h)",
+      "description": "ESO sync failures — most often SM access denied (IAM) or a missing secret container.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(externalsecret_sync_calls_error{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 303,
+      "type": "stat",
+      "title": "ExternalSecrets ready",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(externalsecret_status_condition{cluster=~\"$cluster\", condition=\"Ready\", status=\"true\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 304,
+      "type": "stat",
+      "title": "ClusterSecretStore ready",
+      "description": "Should be 1 (the aws-parameterstore-cluster store). 0 = ESO can't auth to AWS SSM — check eso-aws-credentials Secret.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 26, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(clustersecretstore_status_condition{cluster=~\"$cluster\", condition=\"Ready\", status=\"true\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 305,
+      "type": "timeseries",
+      "title": "Sync rate by status",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 30, "w": 24, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(externalsecret_sync_calls_total{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 400,
+      "type": "row",
+      "title": "cilium (datapath + agent)",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 37, "w": 24, "h": 1 }
+    },
+    {
+      "id": 401,
+      "type": "stat",
+      "title": "Endpoints ready",
+      "description": "Cilium-managed endpoints in the ready state — roughly one per running pod on the node.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(cilium_endpoint_state{cluster=~\"$cluster\", endpoint_state=\"ready\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 402,
+      "type": "stat",
+      "title": "Endpoints not ready",
+      "description": "Endpoints stuck out of the ready state (waiting-for-identity, regenerating, etc.). Steady non-zero values point at identity/policy churn.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(cilium_endpoint_state{cluster=~\"$cluster\", endpoint_state!=\"ready\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 403,
+      "type": "stat",
+      "title": "Policy import errors (last 1h)",
+      "description": "Failed CiliumNetworkPolicy imports. Non-zero = a policy the agent couldn't compile/apply.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(cilium_policy_import_errors_total{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 404,
+      "type": "stat",
+      "title": "Packet drops (last 1h)",
+      "description": "Datapath drops across all reasons. A baseline of policy-deny drops is normal; sudden spikes are the signal.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 38, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(cilium_drop_count_total{cluster=~\"$cluster\"}[1h]))" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 405,
+      "type": "timeseries",
+      "title": "Drop rate by reason",
+      "description": "Datapath drops/sec broken down by reason — distinguishes expected policy denies from datapath errors (CT full, no route, etc.).",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 42, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (reason) (rate(cilium_drop_count_total{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{reason}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] }
+    },
+    {
+      "id": 406,
+      "type": "timeseries",
+      "title": "BPF map pressure",
+      "description": "Per-map fill ratio (0–1). Approaching 1 means a BPF map is near capacity and entries may start getting evicted/rejected.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 42, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "max by (map_name) (cilium_bpf_map_pressure{cluster=~\"$cluster\"})", "legendFormat": "{{map_name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] }
+    }
+    ,
+    {
+      "id": 500,
+      "type": "row",
+      "title": "burrito (terraform drift)",
+      "gridPos": { "x": 0, "y": 49, "w": 24, "h": 1 }
+    },
+    {
+      "id": 501,
+      "type": "stat",
+      "title": "Layers with a failed plan",
+      "description": "Layers whose last completed run reported a terraform failure — the state the \"Burrito layer plan or apply failed\" alert watches. Zero is the normal reading; nonzero means that workspace's real drift is unknown until it plans clean again. It deliberately does not count status=\"warning\": burrito sets that for every layer whose plan is merely *due* (PlanNeeded), which over a measured 24h was ~86% of samples on all four layers while every lastResult read zero changes. Drift itself is only in lastResult, which burrito does not export, so no stat on this row can show it — the table beside this one names the current status per layer, and the panel next door watches whether planning is happening at all.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(burrito_terraform_layer_status{cluster=~\"$cluster\", status=\"error\"} == 1) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 502,
+      "type": "stat",
+      "title": "Oldest plan",
+      "description": "Age of the least recently completed plan across all layers. Burrito plans hourly, so anything past an hour means a round was missed and past 3h means drift has gone unreported long enough to alert (\"Burrito: a layer's last plan has gone stale\"). This is the console's gauge rather than burrito's own, which is the point: it is the one number that still moves when burrito itself is what died. A layer wedged mid-run keeps reporting the status of its last COMPLETED plan forever, so the status panels beside this one cannot see a stalled loop — only the age can.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 50, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max(console_terraform_plan_age_seconds{cluster=~\"$cluster\"})" }
+      ],
+      "options": {
+        "colorMode": "background", "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 3600 },
+            { "color": "red", "value": 10800 }
+          ]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 503,
+      "type": "table",
+      "title": "Terraform layer status",
+      "description": "One row per layer burrito tracks, showing the status it currently reports. The metric is one-hot across the status label, so the ==1 filter is what reduces it to the single current status per layer.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "burrito_terraform_layer_status{cluster=~\"$cluster\"} == 1", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "container": true, "pod": true, "prometheus": true, "namespace": true, "k8s_cluster_name": true, "Value": true },
+            "indexByName": {},
+            "renameByName": { "layer_name": "Layer", "status": "Status", "repository_name": "Repository", "cluster": "Cluster" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "success": { "color": "green", "index": 0 }, "warning": { "color": "orange", "index": 1 }, "error": { "color": "red", "index": 2 }, "failed": { "color": "red", "index": 3 } } }
+              ]},
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 504,
+      "type": "timeseries",
+      "title": "Layer status over time (one-hot by status)",
+      "description": "Each layer's status as a stepped 0/1 line, so a layer moving from success to warning shows as one line handing off to another at the moment burrito noticed. Reads the same series the table above collapses to a snapshot — use this to tell a layer that has been drifted for days from one that just changed.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 54, "w": 12, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "max by (layer_name, status) (burrito_terraform_layer_status{cluster=~\"$cluster\"})", "legendFormat": "{{layer_name}} · {{status}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 600,
+      "type": "row",
+      "title": "CI runners (ARC)",
+      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 1 }
+    },
+    {
+      "id": 601,
+      "type": "timeseries",
+      "title": "Runner jobs vs node reboots",
+      "description": "The self-hosted runner scale set's queue and pool, with a red bar on the right axis at every node boot — so a CI job that died mid-run reads as a job that was in flight when the mini-PC bounced, rather than as a mystery. Assigned sitting above running is the stuck-queue shape the \"CI queued with nothing running\" alert fires on; registered runners can read healthy right through it, which is why both lines are here.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (job) (gha_assigned_jobs{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · assigned jobs" },
+        { "refId": "B", "expr": "sum by (job) (gha_running_jobs{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · running jobs" },
+        { "refId": "C", "expr": "sum by (job) (gha_registered_runners{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · registered runners" },
+        { "refId": "D", "expr": "sum by (job) (gha_busy_runners{cluster=~\"$cluster\"})", "legendFormat": "{{job}} · busy runners" },
+        { "refId": "E", "expr": "max(changes(node_boot_time_seconds{job=\"integrations/node_exporter\", cluster=~\"$cluster\"}[5m])) > 0", "legendFormat": "node reboot" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": false }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "node reboot" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "max", "value": 1 },
+              { "id": "custom.drawStyle", "value": "bars" },
+              { "id": "custom.lineWidth", "value": 0 },
+              { "id": "custom.fillOpacity", "value": 60 },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "boot" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 700,
+      "type": "row",
+      "title": "kyverno (admission policy audit)",
+      "gridPos": { "x": 0, "y": 66, "w": 24, "h": 1 }
+    },
+    {
+      "id": 701,
+      "type": "stat",
+      "title": "Policies with failures (last 2h)",
+      "description": "Policies whose background scan failed at least one resource in the last 2h. The reports controller rescans every resource hourly (--backgroundScanInterval=1h), so a 2h window always spans a full scan. In Audit mode a failure only reports; a policy that holds at zero is a candidate for Enforce. Which resources failed is in `kubectl get polr -A` — the metric carries the resource kind, not its name.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 67, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(sum by (policy_name) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"fail\"}[2h])) > 0) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 702,
+      "type": "stat",
+      "title": "Admission requests denied (last 1h)",
+      "description": "Requests a policy in Enforce mode refused. Zero while every policy is in Audit; once one is flipped, a nonzero reading is a workload being blocked from rolling out.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 71, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(kyverno_admission_requests_total{cluster=~\"$cluster\", request_allowed=\"false\"}[1h])) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 703,
+      "type": "table",
+      "title": "Background-scan results by policy (last 2h)",
+      "description": "Pass and fail evaluations per policy across the scans in the window. These count evaluations, not distinct resources — one or two hourly scans land in 2h — so read Fail as zero / nonzero. Mode is Audit or Enforce.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 67, "w": 9, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"pass\"}[2h]))", "format": "table", "instant": true },
+        { "refId": "B", "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"fail\"}[2h]))", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "indexByName": { "policy_name": 0, "policy_validation_mode": 1, "Value #A": 2, "Value #B": 3 },
+            "renameByName": { "policy_name": "Policy", "policy_validation_mode": "Mode", "Value #A": "Pass", "Value #B": "Fail" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Fail" },
+            "properties": [
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 704,
+      "type": "timeseries",
+      "title": "Admission webhook latency (p95)",
+      "description": "How long Kyverno takes to answer the apiserver. Its webhooks are fail-open with a 10s timeout, so latency approaching that is every pod create and update in the cluster waiting on it — the cost of the policy engine, independent of any verdict.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 15, "y": 67, "w": 9, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, request_webhook) (rate(kyverno_admission_review_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))", "legendFormat": "{{request_webhook}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 800,
+      "type": "row",
+      "title": "traefik (ingress)",
+      "gridPos": { "x": 0, "y": 75, "w": 24, "h": 1 }
+    },
+    {
+      "id": 801,
+      "type": "stat",
+      "title": "Request rate (5m)",
+      "description": "Everything arriving on the websecure entrypoint — every Ingress in the cluster fronts through it. The web entrypoint only redirects to https and the traefik entrypoint is the dashboard, so websecure is the number that matters.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 802,
+      "type": "stat",
+      "title": "5xx share (5m)",
+      "description": "Fraction of websecure responses that were 5xx. A 502/503/504 here is traefik failing to reach a backend pod (rollout gap, readiness flap, playout/OBS parked), not an app error — the app's own 5xx counts live on its service dashboard.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\", code=~\"5..\"}[5m])) / sum(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 }]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 803,
+      "type": "stat",
+      "title": "p95 latency (5m)",
+      "description": "Entrypoint-level, so it includes the backend's own time. The console's long-polling and the gateway's EventSub callbacks sit in this histogram too, which is why it is a trend to watch rather than a threshold to page on.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(traefik_entrypoint_request_duration_seconds_bucket{cluster=~\"$cluster\", entrypoint=\"websecure\"}[5m])))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 2 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 804,
+      "type": "stat",
+      "title": "Last config reload",
+      "description": "Age of traefik's last successful dynamic-config reload (an Ingress, Service or cert change). It only moves when something changes, so hours is normal; a reload that keeps failing shows as the age climbing while Ingresses are being edited.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(traefik_config_last_reload_success{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 805,
+      "type": "timeseries",
+      "title": "Requests by status class",
+      "description": "websecure requests per second, bucketed by the first digit of the status code. code=\"0\" is a connection that closed before any response was written (client hang-ups, aborted TLS handshakes) and is left out.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 80, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (class) (label_replace(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\", code=~\"[1-5]..\"}[5m]), \"class\", \"${1}xx\", \"code\", \"(.)..\"))", "legendFormat": "{{class}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0, "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "3xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      }
+    },
+    {
+      "id": 806,
+      "type": "timeseries",
+      "title": "Request rate by router (top 8)",
+      "description": "One router per Ingress host; the name is traefik's own (entrypoint-namespace-ingress-host). The console dominates by two orders of magnitude because its pages poll, so the others only read on a log scale.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 80, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "topk(8, sum by (router) (rate(traefik_router_requests_total{cluster=~\"$cluster\"}[5m])))", "legendFormat": "{{router}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0, "custom": { "scaleDistribution": { "type": "log", "log": 10 } } },
+        "overrides": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,431 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+data:
+  fetch-talosctl.py: |
+    import os
+    import urllib.request
+
+    url = os.environ["TALOSCTL_URL"]
+    dst = os.environ["TALOSCTL_PATH"]
+    print(f"fetching {url}", flush=True)
+    urllib.request.urlretrieve(url, dst)
+    os.chmod(dst, 0o755)
+    print(f"talosctl -> {dst}", flush=True)
+  nodeevent.py: |
+    import datetime
+    import json
+    import os
+    import ssl
+    import urllib.request
+
+    SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+
+    def emit(component, reason, message, timeout=5):
+        # True when the API accepted the Event. Never raises.
+        try:
+            with open(f"{SA}/token") as f:
+                token = f.read().strip()
+            with open(f"{SA}/namespace") as f:
+                ns = f.read().strip()
+            now = datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            body = {
+                "apiVersion": "v1",
+                "kind": "Event",
+                "metadata": {"generateName": f"{component}-", "namespace": ns},
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": ns,
+                    "name": os.environ.get("POD_NAME", component),
+                },
+                "reason": reason,
+                "message": message,
+                "type": "Warning",
+                "source": {"component": component},
+                "firstTimestamp": now,
+                "lastTimestamp": now,
+                "count": 1,
+            }
+            host = os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+            port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+            req = urllib.request.Request(
+                f"https://{host}:{port}/api/v1/namespaces/{ns}/events",
+                data=json.dumps(body).encode(),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            ctx = ssl.create_default_context(cafile=f"{SA}/ca.crt")
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx):
+                return True
+        except Exception as e:
+            print(f"event not written: {e}", flush=True)
+            return False
+  t5probe.py: |
+    import datetime
+    import os
+    import subprocess
+    import sys
+    import time
+
+    NODE = os.environ.get("TALOS_NODE", "")
+    PATH = os.environ.get("PROBE_PATH", "/var/mnt/data")
+    POLL = int(os.environ.get("POLL_INTERVAL", "20"))
+    CONFIRM = int(os.environ.get("CONFIRM_POLLS", "3"))
+    GRACE = float(os.environ.get("STARTUP_GRACE", "900"))
+    PROBE_TIMEOUT = int(os.environ.get("PROBE_TIMEOUT", "30"))
+    REBOOT_TIMEOUT = int(os.environ.get("REBOOT_TIMEOUT", "120"))
+    TALOSCONFIG = os.environ.get("TALOSCONFIG", "/talos/talosconfig")
+    TALOSCTL = os.environ.get("TALOSCTL", "/opt/talos/talosctl")
+    DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
+    START = time.monotonic()
+
+
+    def log(msg):
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        print(f"{ts} {msg}", flush=True)
+
+
+    def talos(*args, timeout):
+        return subprocess.run(
+            [TALOSCTL, "--talosconfig", TALOSCONFIG, "--nodes", NODE, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+
+    def entries(stdout):
+        # One line per dirent, including `.` for the directory itself. A live
+        # UserVolume always holds the local-path PV directories, so a listing with
+        # nothing but `.` means the mount is gone — the shape the 2026-09-13
+        # re-enumeration produced, which reads as success to a returncode-only check.
+        #
+        # Filter by content, never by position: `talosctl list` prints the NODE/NAME
+        # header only when asked for more than one node, and this probe asks for one.
+        # Dropping a fixed first line would undercount a headerless listing by one,
+        # and at one entry that reads as an empty mount — i.e. it reboots prod.
+        lines = (ln.strip() for ln in stdout.splitlines() if ln.strip())
+        return [ln for ln in lines if ln.split()[-1] not in (".", "..", "NAME")]
+
+
+    OK, FAULT, UNKNOWN = "ok", "FAULT", "UNKNOWN"
+
+
+    def classify(rc, stdout, stderr):
+        # (state, detail). Only EIO and an empty listing are the disk; any other
+        # error is the probe failing to ask, which must never reboot the node.
+        if rc != 0:
+            err = stderr.strip()
+            state = FAULT if "input/output error" in err.lower() else UNKNOWN
+            return state, f"list rc={rc} err={err!r}"
+        found = entries(stdout)
+        if not found:
+            return FAULT, "list returned no entries — mount is gone"
+        return OK, f"{len(found)} entries"
+
+
+    def probe():
+        try:
+            r = talos("list", PATH, timeout=PROBE_TIMEOUT)
+        except Exception as e:
+            return UNKNOWN, f"list FAILED: {e}"
+        return classify(r.returncode, r.stdout, r.stderr)
+
+
+    def step(fails, state):
+        # The fault streak after one probe: an UNKNOWN holds it where it was.
+        return 0 if state == OK else fails + 1 if state == FAULT else fails
+
+
+    def may_reboot(fails, elapsed, triggered):
+        # The whole trigger decision, in one place so the self-check can pin it.
+        return fails >= CONFIRM and elapsed >= GRACE and not triggered
+
+
+    def reboot(reason):
+        # True only on success — a failure leaves the trigger UNLATCHED so the next
+        # poll retries rather than leaving the node wedged.
+        cmd = f"{TALOSCTL} --talosconfig {TALOSCONFIG} --nodes {NODE} reboot"
+        if DRY_RUN or not NODE:
+            log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd}")
+            return False
+        log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd}")
+        from nodeevent import emit
+
+        emit("t5-watchdog", "NodeReboot", f"rebooting {NODE}: {reason}")
+        try:
+            r = talos("reboot", timeout=REBOOT_TIMEOUT)
+            log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
+            if r.returncode == 0:
+                return True
+            log("talosctl returned non-zero — will retry next poll")
+        except Exception as e:
+            log(f"talosctl FAILED: {e} — will retry next poll")
+        return False
+
+
+    def selftest():
+        # Trigger boundaries, no node required.
+        assert not may_reboot(CONFIRM - 1, GRACE + 1, False), "fires below CONFIRM"
+        assert not may_reboot(CONFIRM, GRACE - 1, False), "fires inside the startup grace"
+        assert not may_reboot(CONFIRM, GRACE + 1, True), "fires twice after latching"
+        assert may_reboot(CONFIRM, GRACE + 1, False), "never fires"
+        # Failure classes: only EIO and an empty mount are the disk.
+        eio = "rpc error: open /var/mnt/data: input/output error"
+        assert classify(1, "", eio)[0] == FAULT
+        assert classify(0, ".\n", "")[0] == FAULT
+        assert classify(0, ".\npvc-abc\n", "")[0] == OK
+        for err in ("rpc error: code = Unavailable desc = connection refused",
+                    "rpc error: code = DeadlineExceeded desc = context deadline exceeded"):
+            assert classify(1, "", err)[0] == UNKNOWN, err
+        # An UNKNOWN neither counts toward the reboot nor clears a fault streak.
+        assert step(2, UNKNOWN) == 2 and step(2, FAULT) == 3 and step(2, OK) == 0
+        fails = 0
+        for _ in range(CONFIRM * 10):
+            fails = step(fails, UNKNOWN)
+        assert not may_reboot(fails, GRACE + 1, False), "API timeouts reboot the node"
+        # The real single-node shape: no header, `.` first, then the dirents.
+        assert entries(".\narc-work\nlocal-path-provisioner\n") == [
+            "arc-work",
+            "local-path-provisioner",
+        ]
+        # A single real entry must not be eaten as a header — that reads as an empty
+        # mount and reboots prod.
+        assert entries(".\nlocal-path-provisioner\n") == ["local-path-provisioner"]
+        # The multi-node shape, header and all, in case --nodes ever grows.
+        assert entries("NODE   NAME\n1.2.3.4   .\n1.2.3.4   pvc-abc\n") == [
+            "1.2.3.4   pvc-abc"
+        ]
+        # A dead mount: the directory itself and nothing under it.
+        assert entries(".\n") == []
+        assert entries("") == []
+        print("selftest ok", flush=True)
+
+
+    def main():
+        log(
+            f"t5-watchdog — reboot {NODE or '(unset)'} after {CONFIRM} consecutive "
+            f"unreadable probes of {PATH} (every {POLL}s, no action for the first "
+            f"{GRACE:.0f}s of uptime). DRY_RUN={DRY_RUN}"
+        )
+        fails = 0
+        unknown = 0
+        triggered = False
+        while True:
+            state, detail = probe()
+            fails = step(fails, state)
+            unknown = unknown + 1 if state == UNKNOWN else 0
+            elapsed = time.monotonic() - START
+            log(
+                f"{PATH} {state}: {detail}"
+                + (f" [{fails}/{CONFIRM}]" if fails else "")
+                + (f" [unknown x{unknown}, not counted]" if unknown else "")
+            )
+            if may_reboot(fails, elapsed, triggered):
+                triggered = reboot(f"{PATH} unreadable x{fails}")
+            elif fails >= CONFIRM and elapsed < GRACE:
+                log(f"holding: {elapsed:.0f}s uptime is inside the {GRACE:.0f}s grace")
+            time.sleep(POLL)
+
+
+    if "--selftest" in sys.argv:
+        selftest()
+    else:
+        main()
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t5-watchdog
+subjects:
+  - kind: ServiceAccount
+    name: t5-watchdog
+    namespace: node-watchdog
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog-talosconfig
+  namespace: node-watchdog
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/ups/talosconfig
+      secretKey: talosconfig
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    name: t5-watchdog-talosconfig
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: t5-watchdog
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: 761284044a
+      labels:
+        app: t5-watchdog
+    spec:
+      containers:
+        - command:
+            - python3
+            - /app/t5probe.py
+          env:
+            - name: TALOS_NODE
+              value: 192.168.40.111
+            - name: PROBE_PATH
+              value: /var/mnt/data
+            - name: POLL_INTERVAL
+              value: "20"
+            - name: CONFIRM_POLLS
+              value: "3"
+            - name: STARTUP_GRACE
+              value: "900"
+            - name: PROBE_TIMEOUT
+              value: "30"
+            - name: REBOOT_TIMEOUT
+              value: "120"
+            - name: TALOSCONFIG
+              value: /talos/talosconfig
+            - name: TALOSCTL
+              value: /opt/talos/talosctl
+            - name: DRY_RUN
+              value: "false"
+            - name: HOME
+              value: /tmp
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          image: python:3.14-alpine
+          name: t5-watchdog
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+          volumeMounts:
+            - mountPath: /app
+              name: script
+              readOnly: true
+            - mountPath: /opt/talos
+              name: talosctl
+              readOnly: true
+            - mountPath: /talos
+              name: talosconfig
+              readOnly: true
+            - mountPath: /tmp
+              name: home
+      initContainers:
+        - command:
+            - python3
+            - /app/fetch-talosctl.py
+          env:
+            - name: TALOSCTL_URL
+              value: https://github.com/siderolabs/talos/releases/download/v1.14.0/talosctl-linux-amd64
+            - name: TALOSCTL_PATH
+              value: /opt/talos/talosctl
+          image: python:3.14-alpine
+          name: fetch-talosctl
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+          volumeMounts:
+            - mountPath: /app
+              name: script
+              readOnly: true
+            - mountPath: /opt/talos
+              name: talosctl
+      securityContext:
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: t5-watchdog
+      volumes:
+        - configMap:
+            name: t5-watchdog
+          name: script
+        - emptyDir: {}
+          name: talosctl
+        - emptyDir: {}
+          name: home
+        - name: talosconfig
+          secret:
+            optional: true
+            secretName: t5-watchdog-talosconfig

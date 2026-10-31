@@ -1,0 +1,223 @@
+resource "aws_iam_user" "ci" {
+  name = "CIUser"
+  path = "/bots/"
+  tags = {
+    Name = "CIUser"
+  }
+  force_destroy = false
+}
+
+# create an access key so we can use it in k8s
+resource "aws_iam_access_key" "ci" {
+  user = aws_iam_user.ci.name
+  # encrypt it using the @adanalife keybase key
+  pgp_key = "keybase:adanalife"
+}
+
+data "aws_iam_policy_document" "ci_service_account_policy" {
+
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+
+    principals {
+      identifiers = [
+        aws_iam_user.ci.arn
+      ]
+      type = "AWS"
+    }
+  }
+}
+
+resource "aws_iam_role" "ci" {
+  name               = "CIRole"
+  assume_role_policy = data.aws_iam_policy_document.ci_service_account_policy.json
+}
+
+data "aws_iam_policy_document" "ci" {
+  dynamic "statement" {
+    # the core account doesnt have a static website bucket
+    for_each = var.static_website_bucket_arn != null ? [1] : []
+    content {
+      sid    = "S3ReadWriteAccess"
+      effect = "Allow"
+
+      resources = [
+        var.static_website_bucket_arn,
+        "${var.static_website_bucket_arn}/*",
+      ]
+
+      actions = [
+        "s3:*Object",
+        "s3:ListBucket",
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.cdn_arn != null ? [1] : []
+    content {
+      sid    = "CloudFrontInvalidation"
+      effect = "Allow"
+
+      resources = [
+        var.cdn_arn,
+      ]
+
+      actions = [
+        "cloudfront:CreateInvalidation",
+      ]
+    }
+  }
+
+  statement {
+    sid       = "SessionManagement"
+    effect    = "Allow"
+    resources = ["*"]
+    actions   = ["sts:TagSession"]
+  }
+}
+
+resource "aws_iam_policy" "ci" {
+  name   = "AllowAccessForContinuousIntegration"
+  policy = data.aws_iam_policy_document.ci.json
+}
+
+# give the CI user access to the policy
+resource "aws_iam_user_policy_attachment" "ci" {
+  policy_arn = aws_iam_policy.ci.arn
+  user       = aws_iam_user.ci.name
+}
+
+# give the CI role access to the policy
+resource "aws_iam_role_policy_attachment" "ci_role_access" {
+  role       = aws_iam_role.ci.name
+  policy_arn = aws_iam_policy.ci.arn
+}
+
+
+## ci-terraform
+# a read-only terraform role for CI plans and drift detection
+resource "aws_iam_role" "ci_terraform" {
+  name               = "CITerraformRole"
+  assume_role_policy = data.aws_iam_policy_document.ci_terraform_trust_policy.json
+}
+
+# Trust policy for the CI Terraform Role
+data "aws_iam_policy_document" "ci_terraform_trust_policy" {
+  statement {
+    actions = [
+      "sts:AssumeRole",
+      "sts:TagSession"
+    ]
+
+    principals {
+      type = "AWS"
+      identifiers = [
+        # be mindful of who you give access to!
+        aws_iam_user.ci.arn
+      ]
+    }
+  }
+
+  # The keyless path, alongside the CIUser principal above rather than
+  # replacing it, so the access-key path keeps working until the workflows
+  # move. Present only in accounts that opted in (see oidc.tf).
+  dynamic "statement" {
+    for_each = length(var.github_oidc_subjects) > 0 ? [1] : []
+
+    content {
+      actions = ["sts:AssumeRoleWithWebIdentity"]
+
+      principals {
+        type        = "Federated"
+        identifiers = [aws_iam_openid_connect_provider.github_actions[0].arn]
+      }
+
+      # Both conditions are load-bearing. Without the aud check any GitHub
+      # token would be accepted; without the sub check any *repository* on
+      # GitHub could assume the role, which is the classic misconfiguration.
+      condition {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:aud"
+        values   = ["sts.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringLike"
+        variable = "token.actions.githubusercontent.com:sub"
+        values   = var.github_oidc_subjects
+      }
+    }
+  }
+}
+
+# Read-only on purpose: CI only ever plans (terraform.yml + the drift cron) —
+# applies are operator-driven from a workstation with their own credentials.
+# ReadOnlyAccess covers every provider read a plan needs, including the state
+# bucket objects; per-env write-shaped grants that plans need (none today)
+# belong in the env's own attached policies, not here.
+variable "managed_iam_policies_for_terraform" {
+  description = "List of AWS-managed IAM policies to attach to the CI role"
+  type        = list(string)
+  default = [
+    "ReadOnlyAccess",
+  ]
+}
+
+# AWS-managed policy ARNs are fixed, so they are spelled out rather than looked
+# up: a data lookup downloads the whole policy document, and ReadOnlyAccess is
+# large enough to break the provider's response decoding.
+resource "aws_iam_role_policy_attachment" "ci_terraform_managed_policy" {
+  for_each   = toset(var.managed_iam_policies_for_terraform)
+  role       = aws_iam_role.ci_terraform.name
+  policy_arn = "arn:aws:iam::aws:policy/${each.value}"
+}
+
+# Carries the count-era state address over to the for_each key, so the
+# attachment is relabeled in place rather than detached and re-attached.
+moved {
+  from = aws_iam_role_policy_attachment.ci_terraform_managed_policy[0]
+  to   = aws_iam_role_policy_attachment.ci_terraform_managed_policy["ReadOnlyAccess"]
+}
+
+
+# add Policy to allow CI User to Assume Terraform Role
+resource "aws_iam_policy" "ci_terraform_assume_role" {
+  name   = "AllowCIUserToAssumeTerraformRole"
+  policy = data.aws_iam_policy_document.ci_terraform_assume_role.json
+}
+
+# Attach the assume_role policy to the CI user
+resource "aws_iam_user_policy_attachment" "ci_terraform" {
+  policy_arn = aws_iam_policy.ci_terraform_assume_role.arn
+  user       = aws_iam_user.ci.name
+}
+
+# Policy document to allow the CI User to Assume Terraform Role
+data "aws_iam_policy_document" "ci_terraform_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    resources = [aws_iam_role.ci_terraform.arn]
+  }
+}
+
+output "ci_user_access_key" {
+  value     = aws_iam_access_key.ci.id
+  sensitive = true
+}
+
+# the PGP-encrypted secret
+output "ci_user_secret" {
+  value     = aws_iam_access_key.ci.encrypted_secret
+  sensitive = true
+}
+
+output "ci_role_arn" {
+  value = aws_iam_role.ci.arn
+}
+
+output "ci_terraform_role_name" {
+  value = aws_iam_role.ci_terraform.name
+}

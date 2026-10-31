@@ -33,6 +33,15 @@ secondary_stage_nameservers = [
   "ns-816.awsdns-38.net",
 ]
 
+# dev.whereisdana.today — obtained from `terraform output dev_route53_name_servers`
+# in terraform/stage-1 after applying the dev zone.
+secondary_dev_nameservers = [
+  "ns-1426.awsdns-50.org",
+  "ns-1886.awsdns-43.co.uk",
+  "ns-73.awsdns-09.com",
+  "ns-940.awsdns-53.net",
+]
+
 # these are obtained after running Terraform on prod
 primary_prod_nameservers = [
   "ns-1301.awsdns-34.org",

@@ -1,0 +1,35 @@
+# Helm values for external-secrets/external-secrets chart. Bootstrap
+# CRDs (ClusterSecretStore, ExternalSecret, etc.) are installed by
+# default — no installCRDs flag required on this chart.
+#
+# Shared across development + prod-1 — the prod-1 Taskfile target uses
+# this same file. Per-env config (like the ClusterSecretStore) lives
+# under {development,prod-1}/.
+#
+# Defaults are fine for a single-node k3d. Override resource limits
+# if/when this gets ported to a real cluster.
+replicaCount: 1
+
+# Pod-level prometheus.io/* annotations let grafana-k8s-monitoring's
+# annotationAutodiscovery feature scrape the controller's metrics endpoint
+# (:8080 /metrics). The chart's serviceMonitor path isn't usable for us — it
+# needs the Prometheus Operator CRD we don't run. Same pattern as
+# k8s/traefik/values.yml.
+#
+# Only the controller is scraped: it emits the externalsecret_* /
+# clustersecretstore_* series the platform-services dashboard reads. The
+# webhook and cert-controller expose controller-runtime self-metrics only.
+# None of this reaches Grafana Cloud — the metrics destination's keep-list
+# in k8s/monitoring/prod-1/values.yml doesn't name it — so it costs local
+# VictoriaMetrics series, not Mimir's active-series cap.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+# Webhook + cert-controller need their own deployments by default;
+# fine to keep on a learning cluster but worth disabling on tiny nodes.
+webhook:
+  create: true
+certController:
+  create: true

@@ -1,0 +1,11 @@
+# ruff config for super-linter (PYTHON_RUFF + PYTHON_RUFF_FORMAT).
+#
+# Without this, super-linter uses its bundled default which sets line-length=120;
+# the cdk8s Python is formatted to ruff's standard 88, so the two disagreed and
+# PYTHON_RUFF_FORMAT failed. This pins line-length=88 so super-linter matches a
+# plain `ruff format` (run from infra/cdk8s/). Keep the code in sync with it.
+cache-dir = "/tmp/.ruff_cache"
+line-length = 88
+
+[lint]
+ignore = ["E203"]

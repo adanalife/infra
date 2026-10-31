@@ -1,0 +1,332 @@
+# Helm values for grafana/k8s-monitoring (chart v4.x). Ships the
+# in-cluster collectors that fill the dashboards defined in
+# terraform/platform/grafana-dashboards/:
+#
+#   - Alloy collectors → scrape pods + ship logs (via kube API) + cluster events
+#   - kube-state-metrics → cluster/pod state metrics to Mimir
+#   - kubelet + cAdvisor scrape (built into clusterMetrics)
+#
+# Host-level metrics (node-exporter) are installed separately into the
+# `monitoring-host` namespace — Talos enforces PodSecurity baseline
+# cluster-wide and node-exporter needs hostPath + hostNetwork, so it
+# gets its own ns labeled `privileged`. This chart's workloads all stay
+# under baseline.
+#
+# Credentials come from the grafana-cloud-metrics-write Secret in this
+# namespace, materialized by the ExternalSecret in external-secret.yaml.
+# All four keys are read at runtime via Alloy's `remote.kubernetes.secret`
+# expression, so rotating the SM value + force-syncing the ExternalSecret
+# is enough to pick up new tokens without redeploying the chart.
+
+# Cluster label for the local development env. Env-based and
+# machine-independent (any laptop running `task k8s:dev:cluster:up`), the
+# adanalife- prefix matching adanalife-minipc.
+cluster:
+  name: adanalife-dev
+
+destinations:
+  metrics:
+    type: prometheus
+    # PROMETHEUS_HOST in SM already includes the /api/prom path
+    # (Grafana Cloud's "Prometheus" connection URL form). Only the
+    # /push suffix needs adding.
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.metrics.data["PROMETHEUS_HOST"]) + "/push"
+    auth:
+      type: basic
+      usernameKey: PROMETHEUS_USERNAME
+      passwordKey: TOKEN
+    secret:
+      create: false
+      name: grafana-cloud-metrics-write
+      namespace: monitoring
+
+  logs:
+    type: loki
+    urlFrom: convert.nonsensitive(remote.kubernetes.secret.logs.data["LOKI_HOST"]) + "/loki/api/v1/push"
+    auth:
+      type: basic
+      usernameKey: LOKI_USERNAME
+      passwordKey: TOKEN
+    secret:
+      create: false
+      name: grafana-cloud-metrics-write
+      namespace: monitoring
+
+# Metrics shipping disabled in development — only logs (podLogsViaKubernetesApi)
+# and cluster events (clusterEvents, log-shaped → Loki) ship to Grafana Cloud.
+# Mimir/Prometheus metrics from the dev cluster aren't useful enough to justify
+# the series count. Flip these back to `enabled: true` if dev metrics are needed.
+clusterMetrics:
+  enabled: false
+  collector: alloy-metrics
+  # The chart's default cAdvisor + KSM allow lists are conservative —
+  # enough for the basic Grafana Cloud Kubernetes views but missing
+  # several metrics queried by the modern community dashboards we
+  # vendored (kubernetes-views-global, kubernetes-views-pods). Extra series listed
+  # below; checked against the dashboard JSON queries.
+  cadvisor:
+    metricsTuning:
+      includeMetrics:
+        # CPU throttle time (seconds) — for "CPU Throttled seconds by
+        # container/namespace" panels. Default allow list has
+        # _periods_total but not _seconds_total.
+        - container_cpu_cfs_throttled_seconds_total
+        # OOM events — for "OOM Events by container/namespace" panels.
+        - container_oom_events_total
+        # Network errors — for "Network errors" panel.
+        - container_network_receive_errors_total
+        - container_network_transmit_errors_total
+    # Drop high-cardinality identifier labels that change on every container
+    # restart (container_id) or are duplicates of pod/container (id, image_id).
+    # Mimir merges series that differ only by dropped labels — saves the
+    # restart-churn cardinality.
+    extraMetricProcessingRules: |-
+      rule {
+        action = "labeldrop"
+        regex = "id|container_id|image_id"
+      }
+  kube-state-metrics:
+    metricsTuning:
+      includeMetrics:
+        # Last terminated exit code — for the "Last Terminated Exit Code"
+        # panel. Default allow list has _reason and _timestamp but not
+        # _exitcode.
+        - kube_pod_container_status_last_terminated_exitcode
+        # Pod scheduled status — for "Unscheduled Pods" panel.
+        - kube_pod_status_scheduled
+        # Namespace creation timestamp — used as a 0-fallback in some
+        # "by namespace" panel queries to ensure namespaces with no
+        # pods still appear.
+        - kube_namespace_created
+      # Both overlap with cheaper metrics already in the default allowlist:
+      # kube_pod_status_reason (~210 series) overlaps with kube_pod_status_phase;
+      # kube_deployment_status_condition (~144 series) is rarely queried directly
+      # vs. the cluster-overview dashboards that use kube_deployment_status_replicas_*.
+      excludeMetrics:
+        - kube_pod_status_reason
+        - kube_deployment_status_condition
+        # ReplicaSet metrics: zero dashboard/alert references; workload
+        # state is charted via kube_deployment_*.
+        - kube_replicaset_created
+        - kube_replicaset_metadata_generation
+        - kube_replicaset_owner
+        - kube_replicaset_spec_replicas
+        - kube_replicaset_status_fully_labeled_replicas
+        - kube_replicaset_status_observed_generation
+        - kube_replicaset_status_ready_replicas
+        - kube_replicaset_status_replicas
+        - kube_replicaset_status_terminating_replicas
+        # Per-secret resource-version gauge, unreferenced (kube_secret_info,
+        # which the global view uses, stays).
+        - kube_secret_metadata_resource_version
+        # Neither is referenced by any dashboard or alert (~270 series
+        # combined): completion_time is a per-finished-pod timestamp,
+        # restart_policy is a static per-pod constant.
+        - kube_pod_completion_time
+        - kube_pod_restart_policy
+    # Drop pod UID — changes on every pod rebuild and creates a fresh series
+    # set each rollout. Dashboards query by pod name, not uid.
+    extraMetricProcessingRules: |-
+      rule {
+        action = "labeldrop"
+        regex = "uid"
+      }
+
+# hostMetrics scrapes node-exporter — which is installed separately
+# in the `monitoring-host` namespace (see Taskfile k8s:dev:platform:up
+# and k8s/monitoring/host-namespace.yml). hostMetrics's annotation-based
+# discovery picks up the prometheus.io/scrape-annotated node-exporter
+# pods across namespaces.
+#
+# Without this, node-exporter runs but its /metrics never reaches Mimir,
+# so node-level panels (Node Exporter Full + CPU/memory/disk on cluster
+# overview) stay empty. clusterMetrics only covers kubelet/cAdvisor/KSM.
+#
+# `linuxHosts.enabled: true` is the per-source switch in the feature-
+# host-metrics subchart (parent chart aliases it under `hostMetrics:`).
+hostMetrics:
+  enabled: false
+  collector: alloy-metrics
+  linuxHosts:
+    enabled: true
+    # Point hostMetrics at the externally-deployed node-exporter
+    # (prometheus-community chart in the `monitoring-host` namespace
+    # — see k8s/monitoring/node-exporter/). Without these, the chart
+    # refuses to render: "The Linux host configuration requires a
+    # connection to Node Exporter". The default would scrape the
+    # chart's bundled node-exporter (which we disabled to keep this
+    # namespace under baseline PSA).
+    namespace: monitoring-host
+    labelMatchers:
+      app.kubernetes.io/name: prometheus-node-exporter
+    # The chart's default-allow-list keeps only a minimal subset of
+    # node-exporter metrics — enough for the basic Kubernetes views
+    # but missing node_uname_info, node_load*, node_disk_*,
+    # node_network_*errs_total, and most of what Node Exporter Full
+    # queries. The integration allowlist is the richer set that
+    # covers these.
+    metricsTuning:
+      useIntegrationAllowList: true
+
+clusterEvents:
+  enabled: true
+  collector: alloy-singleton
+
+# Pod logs via the Kubernetes API instead of tailing /var/log on the
+# host. Trade-off: a tiny bit slower than reading log files directly,
+# but doesn't require hostPath (and therefore namespace-privileged PSA).
+# Keeps every collector under PodSecurity baseline.
+podLogsViaKubernetesApi:
+  enabled: true
+  collector: alloy-logs
+
+# annotationAutodiscovery scrapes any pod tagged with prometheus.io/scrape
+# annotations. Used by helm-installed traefik / external-dns / cert-manager /
+# external-secrets (each chart's values.yml sets podAnnotations), plus the
+# externally-deployed node-exporter in the monitoring-host namespace.
+# Avoids needing kube-prometheus-stack CRDs + ServiceMonitor.
+annotationAutodiscovery:
+  enabled: false
+  collector: alloy-metrics
+  # Override the chart's default annotation keys (k8s.grafana.com/*)
+  # to the standard prometheus.io/* convention used by upstream charts
+  # (traefik, external-dns, cert-manager, external-secrets,
+  # prometheus-community/prometheus-node-exporter, and almost any
+  # future scrape target we'd add).
+  annotations:
+    scrape: "prometheus.io/scrape"
+    metricsPath: "prometheus.io/path"
+    metricsPortNumber: "prometheus.io/port"
+    metricsScheme: "prometheus.io/scheme"
+  # Cardinality controls (Alloy River syntax). Applied to every series
+  # scraped via annotation-autodiscovery — covers Cilium, traefik, ESO,
+  # cert-manager, external-dns, node-exporter, and any future prometheus.io-
+  # annotated pod. Rules execute top-to-bottom; first matching action wins.
+  extraMetricProcessingRules: |-
+    rule {
+      // Drop Cilium's internal scheduler / k8s-client histograms — high
+      // cardinality (~700 series combined), zero operational signal for
+      // adanalife. Network/policy/endpoint counters are preserved.
+      source_labels = ["__name__"]
+      regex = "cilium_hive_jobs_.+|cilium_identity_updater_timer_.+|cilium_k8s_workqueue_.+_bucket|cilium_k8s_client_api_latency_.+_bucket|cilium_act_processing_time_seconds_bucket"
+      action = "drop"
+    }
+    rule {
+      // Drop _bucket suffix on controller_runtime + workqueue histograms
+      // (cert-manager / ESO / external-dns reconcile loops). We don't
+      // chart p99 latency on these — _count and _sum are kept so rate
+      // and average panels still work. ~500 series.
+      source_labels = ["__name__"]
+      regex = "controller_runtime_reconcile_time_seconds_bucket|workqueue_(queue|work|unfinished_work|longest_running_processor)_duration_seconds_bucket"
+      action = "drop"
+    }
+    rule {
+      // Drop rollout-churn labels from annotation-scraped series. Both
+      // change on every Deployment/DaemonSet rev, so without this each
+      // rollout doubles the active series for ~20min (Mimir lookback).
+      action = "labeldrop"
+      regex = "pod_template_hash|controller_revision_hash"
+    }
+    rule {
+      // Launch-day trim: drop "cool but not essential" series to keep
+      // headroom under the 15K hard cap as live traffic grows. See the
+      // matching rule in prod-1/values.yml for the rationale per family.
+      source_labels = ["__name__"]
+      regex = "cilium_feature_.+|cilium_bpf_.+|cilium_fqdn_.+|cilium_drift_.+|cilium_hive_status|cilium_controllers_(group_runs_total|runs_duration_seconds_.+|runs_total)|cilium_endpoint(_state|_regenerations_total)?|external_dns_.+|externaldns_.+|certmanager_(http_acme_client_.+|acme_client_.+|clock_time_seconds.*|clusterissuer_.+|controller_.+|certificate_challenge_status)|coredns_.+_bucket"
+      action = "drop"
+    }
+    // No xpum_* drop rule, matching prod-1/values.yml — see that file for why
+    // the duplicate-emission warning is preferable to losing the metrics.
+    // Moot in development regardless: no Intel iGPU on the dev cluster.
+
+# kube-state-metrics is off by default in v4.x; deploying it here, then
+# clusterMetrics scrapes it. cAdvisor scrape is built into clusterMetrics's
+# kubelet target — no extra deploy needed.
+#
+# node-exporter is the only workload in monitoring that genuinely needs
+# hostPath + hostNetwork (which violates Talos's cluster-default
+# baseline PSA). It's installed separately via
+# prometheus-community/prometheus-node-exporter into the
+# monitoring-host namespace (labeled `privileged`), so the rest of
+# `monitoring` stays under baseline.
+# kube-state-metrics is off — clusterMetrics (its only consumer) is disabled
+# in dev, so deploying KSM would just emit unscraped metrics.
+telemetryServices:
+  kube-state-metrics:
+    deploy: false
+  node-exporter:
+    deploy: false
+
+# Alloy collector deployments. Defaults are fine for a single-node k3d;
+# revisit on a real multi-node cluster.
+collectors:
+  # dev ships only logs + cluster events — every metrics feature above
+  # (clusterMetrics / hostMetrics / annotationAutodiscovery) is disabled, so
+  # alloy-metrics has no consumer. Chart >=4.x validation rejects an enabled
+  # collector with no enabled feature using it, so turn it off explicitly. Flip
+  # back to `presets: [clustered, statefulset]` if dev metrics are re-enabled.
+  alloy-metrics:
+    enabled: false
+  alloy-logs:
+    # `clustered` lets replicas partition pods between themselves so
+    # podLogsViaKubernetesApi doesn't N-multiply kube-API log fetches.
+    # `daemonset` keeps one collector per node for locality.
+    presets: [clustered, daemonset]
+  alloy-singleton:
+    presets: [singleton]
+
+# `collectorCommon.alloy` passes through to the underlying grafana/alloy
+# subchart, which uses two distinct securityContext keys (the doubled
+# `alloy.alloy` path is the container-level block — load-bearing for
+# PSA, which reads capabilities from there).
+#
+# The chart's container default re-adds the full Docker capability set
+# after dropping ALL, including NET_RAW — which is what fails Talos's
+# baseline PSA enforcement. Alloy needs none of those caps for HTTP
+# scrape + push, so we wipe the add list entirely. `add: []` is
+# required explicitly because helm deep-merges the capabilities map
+# (omitting `add` would inherit the chart default).
+collectorCommon:
+  alloy:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 4242
+      seccompProfile:
+        type: RuntimeDefault
+    alloy:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          add: []
+          drop: [ALL]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 4242
+        seccompProfile:
+          type: RuntimeDefault
+      # Writable working dir for alloy's storagePath (default
+      # /tmp/alloy) — needed because readOnlyRootFilesystem locks /.
+      mounts:
+        extra:
+          - name: tmp-alloy
+            mountPath: /tmp/alloy
+    # The operator injects a config-reloader sidecar next to alloy; it takes
+    # its own securityContext, so the container-level block above doesn't
+    # cover it and restricted PSA flags it separately. Same posture as alloy,
+    # minus the cap `add: []` wipe — the reloader has no chart-side default
+    # capability set to undo.
+    configReloader:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 4242
+        seccompProfile:
+          type: RuntimeDefault
+    controller:
+      volumes:
+        extra:
+          - name: tmp-alloy
+            emptyDir: {}

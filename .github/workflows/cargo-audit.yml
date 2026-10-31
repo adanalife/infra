@@ -1,0 +1,53 @@
+name: cargo-audit
+
+# RustSec advisory scan of a Cargo.lock. Each Rust repo's audit.yml calls this
+# on PRs, main, and a weekly cron, because advisories land against
+# already-pinned versions independent of any commit. Scheduled failures file
+# an issue instead of failing a check.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label.
+        type: string
+        default: ubuntu-latest
+      working-directory:
+        description: The directory holding Cargo.toml.
+        type: string
+        default: .
+
+# checks: write lets audit-check publish its findings as an annotated check
+# run. Without it the create-check API 403s, the action guesses it must be
+# running on a fork, and falls back to printing the report into the job log —
+# where the reason the job failed is thirty lines below the failure. A caller
+# has to grant both write scopes too.
+permissions:
+  contents: read
+  issues: write
+  checks: write
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The self-hosted image ships no Rust; audit-check shells out to cargo,
+      # so the repo-pinned toolchain goes on PATH first. Hosted runners carry
+      # one already.
+      - if: startsWith(inputs.runs-on, 'arc-')
+        uses: adanalife/infra/.github/actions/rust-toolchain@main
+      # audit-check runs `cargo install cargo-audit` unless the binary is
+      # already on PATH, and that source build is ~470 MB of disk writes and
+      # several minutes per run. The prebuilt release binary skips both.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: ${{ inputs.working-directory }}

@@ -1,0 +1,225 @@
+"""Data-namespace isolation: the opt-in `data_namespace` knob moves postgres (+
+its ESO SecretStore) into its own namespace so deleting the app namespace can't
+drop the database, while keeping the dashcam PVC in the app namespace (vlc mounts
+it — PVCs are namespace-local).
+
+prod-1 + stage-1 isolate the DB (prod-1-data / stage-1-data); development + local
+stay co-located (data_namespace=""), where the render is the pre-knob shape. These
+tests pin both the isolated and the co-located paths — the co-located+nfs branch
+via a synthetic env, so it stays covered even though no real env is currently both
+co-located and nfs.
+"""
+
+from dataclasses import replace
+
+from cdk8s import Testing as K8sTesting
+
+from adanalife_k8s.charts import DataChart, NfsPVChart, SupportingChart
+from adanalife_k8s.config import EnvConfig, load_env
+
+
+def _synth(chart_cls, env: EnvConfig):
+    app = K8sTesting.app()
+    chart = chart_cls(app, "t", env=env)
+    return K8sTesting.synth(chart)
+
+
+def _by(objs, kind, name):
+    return [o for o in objs if o["kind"] == kind and o["metadata"]["name"] == name]
+
+
+def _ns(obj):
+    return obj["metadata"].get("namespace")
+
+
+# A co-located + nfs + eso env: postgres stays in the app namespace AND there's a
+# dashcam PVC in play. Synthesized rather than taken from the env table because
+# both minipc envs (prod-1/stage-1) now isolate the DB — this pins the co-located
+# branch independent of which real envs happen to isolate.
+# cnpg off too: a co-located data unit is the dev/local shape, StatefulSet and all.
+_COLOCATED_NFS = replace(load_env("stage-1"), data_namespace="", cnpg=False)
+
+
+# --- EnvConfig derived properties ---
+
+
+def test_isolated_env_properties():
+    for name, data_ns in (("prod-1", "prod-1-data"), ("stage-1", "stage-1-data")):
+        env = load_env(name)
+        assert env.data_namespace == data_ns
+        assert env.data_isolated is True
+        assert env.data_ns == data_ns
+
+
+def test_colocated_env_properties_unchanged():
+    # dev + local keep the DB in the app namespace with a bare host — the
+    # pre-knob behavior, so their render stays byte-identical.
+    for name in ("development", "local"):
+        env = load_env(name)
+        assert env.data_namespace == ""
+        assert env.data_isolated is False
+        assert env.data_ns == env.namespace
+
+
+# --- isolated: postgres + store -> data ns; PVC -> app ns ---
+
+
+def test_isolated_postgres_and_store_land_in_data_namespace():
+    objs = _synth(DataChart, load_env("stage-1"))
+    for kind, name in (
+        ("Cluster", "pg"),
+        ("ExternalSecret", "postgres-credentials"),
+        ("SecretStore", "aws-parameterstore"),
+    ):
+        assert _ns(_by(objs, kind, name)[0]) == "stage-1-data"
+    # the dashcam PVC must NOT ride along into the data namespace (vlc mounts it)
+    assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")
+
+
+def test_isolated_supporting_gains_app_ns_store_and_dashcam_pvc():
+    objs = _synth(SupportingChart, load_env("stage-1"))
+    # the app namespace needs its OWN store (postgres' moved to the data ns)
+    store = _by(objs, "SecretStore", "aws-parameterstore")[0]
+    assert _ns(store) == "stage-1"
+    # ...and the dashcam PVC lands here, in the app namespace, bound to its PV
+    pvc = _by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]
+    assert _ns(pvc) == "stage-1"
+    assert pvc["spec"]["volumeName"] == "vlc-dashcam-nfs-stage"
+
+
+# --- co-located: everything stays put, no duplicate store ---
+
+
+def test_colocated_keeps_postgres_store_and_pvc_in_data_unit():
+    objs = _synth(DataChart, _COLOCATED_NFS)
+    # postgres, its store, AND the dashcam PVC all stay in the (app) data unit
+    assert _ns(_by(objs, "StatefulSet", "postgres")[0]) == "stage-1"
+    assert _ns(_by(objs, "SecretStore", "aws-parameterstore")[0]) == "stage-1"
+    assert _ns(_by(objs, "PersistentVolumeClaim", "vlc-dashcam")[0]) == "stage-1"
+
+
+def test_colocated_supporting_has_no_duplicate_store_or_pvc():
+    # the single same-namespace store in DataChart serves the app ES too, so
+    # SupportingChart must NOT emit a second one (which would collide), nor the PVC.
+    objs = _synth(SupportingChart, _COLOCATED_NFS)
+    assert not _by(objs, "SecretStore", "aws-parameterstore")
+    assert not _by(objs, "PersistentVolumeClaim", "vlc-dashcam")
+
+
+# --- ingress guard: default-deny on the isolated data namespace ---
+
+
+def test_isolated_data_ns_gets_ingress_policy_scoped_to_own_app_ns():
+    for name in ("prod-1", "stage-1"):
+        env = load_env(name)
+        objs = _synth(DataChart, env)
+        pol = _by(objs, "NetworkPolicy", "postgres-ingress")[0]
+        assert _ns(pol) == env.data_namespace
+        spec = pol["spec"]
+        # default-deny: selects every pod, Ingress-typed
+        assert spec["podSelector"] == {}
+        assert spec["policyTypes"] == ["Ingress"]
+        # rule 1: same-namespace traffic (the backup CronJob)
+        assert spec["ingress"][0] == {"from": [{"podSelector": {}}]}
+        # rule 2: only the env's OWN app namespace, and only on 5432 — this is
+        # what makes stage-1 -> prod-1-data (and vice versa) a default deny
+        rule = spec["ingress"][1]
+        assert rule["from"] == [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": env.namespace}
+                }
+            }
+        ]
+        assert rule["ports"] == [{"port": 5432, "protocol": "TCP"}]
+
+
+def test_isolated_data_ns_allows_monitoring_to_scrape_metrics():
+    # Without this rule alloy's scrape is dropped, every cnpg_* series is
+    # absent, and the pitr-health alerts fire on NoData against a healthy
+    # database — a failure that looks exactly like a real WAL stall.
+    for name in ("prod-1", "stage-1"):
+        env = load_env(name)
+        objs = _synth(DataChart, env)
+        pol = _by(objs, "NetworkPolicy", "postgres-ingress")[0]
+        scrape = [
+            r
+            for r in pol["spec"]["ingress"]
+            if r.get("from")
+            == [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "monitoring"}
+                    }
+                }
+            ]
+        ]
+        assert len(scrape) == 1, f"{env.data_namespace} has no monitoring scrape rule"
+        assert scrape[0]["ports"] == [{"port": 9187, "protocol": "TCP"}]
+
+
+def test_colocated_data_ns_gets_no_ingress_policy():
+    # a default-deny in the shared app namespace would black-hole every other
+    # workload there — co-located envs must not emit the policy
+    objs = _synth(DataChart, _COLOCATED_NFS)
+    assert not _by(objs, "NetworkPolicy", "postgres-ingress")
+
+
+# --- the isolated data Namespace is declared, PodSecurity-labeled, protected ---
+
+
+def test_isolated_data_unit_declares_its_namespace():
+    for name in ("prod-1", "stage-1"):
+        env = load_env(name)
+        ns = _by(_synth(DataChart, env), "Namespace", env.data_namespace)[0]
+        # cluster-scoped: the chart's default namespace must not leak onto it
+        assert "namespace" not in ns["metadata"]
+        labels = ns["metadata"]["labels"]
+        assert labels["pod-security.kubernetes.io/enforce"] == "restricted"
+        assert labels["adanalife.dev/protected"] == "true"
+        # survives a cascading delete of the Argo Application
+        opts = ns["metadata"]["annotations"]["argocd.argoproj.io/sync-options"]
+        assert "Delete=false" in opts.split(",")
+
+
+def test_colocated_data_unit_declares_no_namespace():
+    # the shared app namespace is bootstrap's; the data unit must not claim it
+    assert not [
+        o for o in _synth(DataChart, _COLOCATED_NFS) if o["kind"] == "Namespace"
+    ]
+
+
+# --- the parked-clips share: stage only ---
+
+
+def test_stage_supporting_emits_the_parked_claim_bound_to_its_pv():
+    objs = _synth(SupportingChart, load_env("stage-1"))
+    pvc = _by(objs, "PersistentVolumeClaim", "dashcam-parked")[0]
+    assert _ns(pvc) == "stage-1"
+    assert pvc["spec"]["volumeName"] == "dashcam-parked-nfs-stage"
+    assert pvc["spec"]["accessModes"] == ["ReadOnlyMany"]
+
+
+def test_prod_has_no_parked_claim_or_pv():
+    # prod never mounts the NAS in its stream path; parked clips are a stage affair.
+    assert not _by(
+        _synth(SupportingChart, load_env("prod-1")),
+        "PersistentVolumeClaim",
+        "dashcam-parked",
+    )
+    assert not _by(
+        _synth(NfsPVChart, load_env("prod-1")),
+        "PersistentVolume",
+        "dashcam-parked-nfs",
+    )
+
+
+def test_stage_parked_pv_is_soft_mounted_off_the_parked_export():
+    pv = _by(
+        _synth(NfsPVChart, load_env("stage-1")),
+        "PersistentVolume",
+        "dashcam-parked-nfs-stage",
+    )[0]
+    assert pv["spec"]["mountOptions"] == ["soft", "timeo=150", "retrans=3"]
+    assert pv["spec"]["nfs"]["path"] == "<parked export path>"
+    assert pv["spec"]["nfs"]["readOnly"] is True

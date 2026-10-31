@@ -1,4 +1,4 @@
-## In the beginning...
+## In the beginning
 
 Before you can start running this infrastructure on a brand new account, you must first prepare the account.
 This directory contains the code to bootstrap a new AWS account, including the S3 bucket, a DynamoDB table used as a mutex, and the initial admin accounts.

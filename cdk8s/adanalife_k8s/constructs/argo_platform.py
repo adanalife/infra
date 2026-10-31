@@ -1,0 +1,336 @@
+"""Argo CD Applications for the platform Helm stack (Argo-native delivery).
+
+Instead of cdk8s pre-rendering the upstream charts (the cdk8s.Helm path in
+`helm_platform.PlatformChart`) or the imperative `helm upgrade --install` in
+`task k8s:<env>:platform:up`, each platform Helm release becomes an Argo
+**Application with a multi-source Helm source**: the upstream chart (version
+pinned from `helm_platform.VERSIONS`) plus the in-repo `k8s/<component>/values*.yml`
+pulled via a `$values` ref. No rendered charts land in git — just these small
+Application objects. Synthesized to `dist/platform-argo.k8s.yaml` (offline, so it's
+committed + golden-gated like the app units).
+
+Scope (minipc only — development is on the k3d cluster, with its own Argo):
+  * cluster-scoped releases (ESO, cert-manager, node-exporter, victoria-metrics,
+    k8s-monitoring, tailscale-operator, kyverno) — installed once; values from prod-1
+    (stage rides prod's cluster-scoped platform).
+  * per-env releases (NATS) — one Application per env namespace, for prod-1 + stage-1.
+  * the `gitops` root Application, which tracks the Argo config dist files
+    (argocd.k8s.yaml + this file) so their drift reads OutOfSync in Argo.
+  * watch-only Applications over the other hand-applied dist files: `nfs-pv`
+    (the NFS PersistentVolumes) and `burrito-config` (the Burrito layer CRs).
+
+Excluded — not Argo-manageable (`HelmComponent.argo = False`):
+  * **cilium** (the CNI Argo itself rides on) and **argo-cd** (managing its own
+    install) — the bootstrap floor.
+  * **traefik** + **external-dns** — host-coupled via development only. prod-1 and
+    stage-1 commit their target (the node's location-independent alias) in
+    k8s/traefik/values.prod-1.yml and k8s/external-dns/<env>/config.yml, alongside
+    --force-default-targets. development is the env whose target is the host's own
+    public IP, written per-machine to a gitignored values.local.yml, so the pair
+    stays task-installed.
+
+The kustomize-only platform bits (local-path-provisioner, intel-gpu/xpu, ESO
+cluster-store, cert-manager ClusterIssuers) are out of scope here too — a later
+kustomize-source pass.
+
+**MONITOR-ONLY.** Manual sync; adoption of the live helm releases is deliberate
+and rehearsed on stage first — see `gitops/README.md`. The `platform` AppProject is
+intentionally broad (all namespaces, all cluster kinds) because installing the
+platform means creating CRDs / ClusterRoles / webhooks; it's separate from the
+restrictive `tripbot` app project.
+"""
+
+from __future__ import annotations
+
+import cdk8s
+from constructs import Construct
+
+from adanalife_k8s.config import load_env
+from adanalife_k8s.constructs.argocd import (
+    ARGO_NS,
+    ESO_DEFAULTS_IGNORE,
+    IN_CLUSTER,
+    REPO_URL,
+    TARGET_REVISION,
+)
+from adanalife_k8s.helm_platform import (
+    HelmComponent,
+    REPOS,
+    VERSIONS,
+    cluster_components,
+    env_components,
+)
+
+PROJECT = "platform"
+# Envs whose per-env platform charts (external-dns, NATS) Argo manages. minipc only
+# — development is on the k3d cluster, which runs its own separate Argo install.
+PLATFORM_ENVS = ("prod-1", "stage-1")
+# Cluster-scoped platform releases install once with prod-1's values (stage rides
+# prod's cluster-scoped platform — see stage-prod-cotenancy).
+CLUSTER_VALUES_ENV = "prod-1"
+# The app-of-apps root: one Application watching the Argo config itself, so
+# drift between the live AppProjects/ApplicationSets/Applications and the
+# committed dist reads OutOfSync instead of waiting for a `task gitops:diff`.
+ROOT_APP = "gitops"
+# The dist files `task gitops:apply` applies (the Taskfile's GITOPS_MANIFESTS).
+# argocd-k3d.k8s.yaml targets the dev cluster's own Argo and stays out.
+GITOPS_MANIFESTS = ("argocd.k8s.yaml", "platform-argo.k8s.yaml")
+# The NFS PersistentVolumes `task k8s:<env>:nfs-pv` applies, both envs in one
+# app (PVs are cluster-scoped, so the env split buys nothing).
+NFS_PV_APP = "nfs-pv"
+NFS_PV_MANIFESTS = ("prod-1-nfs-pv.k8s.yaml", "stage-1-nfs-pv.k8s.yaml")
+# The committed dist carries placeholder NFS coords (the task injects the real
+# ones from a gitignored env file), and the binder writes claimRef on a bound PV.
+NFS_PV_IGNORE = {
+    "kind": "PersistentVolume",
+    "jsonPointers": ["/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"],
+}
+# The Burrito config: watched and, on a manual sync, delivered by this app.
+BURRITO_APP = "burrito-config"
+BURRITO_MANIFESTS = ("burrito.k8s.yaml",)
+
+
+class ArgoPlatform(Construct):
+    def __init__(self, scope: Construct, id: str = "argo-platform"):
+        super().__init__(scope, id)
+        self._project()
+        self._oci_registries()
+        self._dist_application(
+            # The repo-registration ExternalSecrets carry ESO's schema defaults.
+            ROOT_APP,
+            GITOPS_MANIFESTS,
+            ARGO_NS,
+            ignore=[ESO_DEFAULTS_IGNORE],
+        )
+        # Watch-only: the apply stays the human gesture (manual sync), and with
+        # prune off Argo can never delete a PV. RespectIgnoreDifferences keeps
+        # a sync from writing the placeholder NFS coords over the real ones.
+        self._dist_application(
+            NFS_PV_APP,
+            NFS_PV_MANIFESTS,
+            "default",
+            ignore=[NFS_PV_IGNORE],
+            sync_options=("RespectIgnoreDifferences=true",),
+        )
+        # Its CRs need the CRDs the `burrito` Application installs, so sync
+        # that one first; SkipDryRunOnMissingResource lets the diff render
+        # before the CRDs exist.
+        self._dist_application(
+            BURRITO_APP,
+            BURRITO_MANIFESTS,
+            "burrito",
+            ignore=[ESO_DEFAULTS_IGNORE],
+            sync_options=("SkipDryRunOnMissingResource=true",),
+        )
+
+        # Cluster-scoped releases (one install for the whole minipc), skipping the
+        # bootstrap floor (cilium / argo-cd, argo=False).
+        for comp in cluster_components("minipc", load_env(CLUSTER_VALUES_ENV)):
+            if comp.argo:
+                self._application(comp.release, comp, comp.namespace)
+
+        # Per-env releases — name-qualified by env so prod-1/stage-1 don't collide
+        # on the Application name. Skips the non-Argo-manageable ones (external-dns:
+        # its --default-targets is a host-discovered node IP in gitignored
+        # values.local.yml), leaving NATS.
+        for env_name in PLATFORM_ENVS:
+            for comp in env_components(load_env(env_name)):
+                if comp.argo:
+                    self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
+
+    def _dist_application(
+        self,
+        name: str,
+        files: tuple[str, ...],
+        dest_ns: str,
+        *,
+        ignore: list[dict],
+        sync_options: tuple[str, ...] = (),
+    ):
+        """An Application over hand-applied dist files (the `gitops` root, which
+        tracks the Argo config this file included, and the watch-only units).
+
+        Manual sync and Prune=false, the posture of the `*-data` units: a sync
+        is the apply, and nothing is ever deleted by it. A synth bug that drops
+        an ApplicationSet must not cascade-delete the Applications (and prod
+        workloads) it generates, so removal stays `task gitops:prune`.
+        """
+        app = cdk8s.ApiObject(
+            self,
+            name,
+            api_version="argoproj.io/v1alpha1",
+            kind="Application",
+            metadata={"name": name, "namespace": ARGO_NS},
+        )
+        app.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "project": PROJECT,
+                    "source": {
+                        "repoURL": REPO_URL,
+                        "targetRevision": TARGET_REVISION,
+                        "path": "cdk8s/dist",
+                        # Only these files; every other dist file belongs to
+                        # an Application the Argo config generates.
+                        "directory": {
+                            "include": files[0]
+                            if len(files) == 1
+                            else "{" + ",".join(files) + "}"
+                        },
+                    },
+                    "destination": {"server": IN_CLUSTER, "namespace": dest_ns},
+                    "syncPolicy": {
+                        "syncOptions": [
+                            "CreateNamespace=false",
+                            "ServerSideApply=true",
+                            "Prune=false",
+                            *sync_options,
+                        ],
+                    },
+                    "ignoreDifferences": ignore,
+                },
+            )
+        )
+
+    def _oci_registries(self):
+        # Anonymous HTTP(S) chart repos need no Argo registration, but an OCI
+        # registry (scheme-less in REPOS) must be registered with enableOCI so
+        # the repo-server pulls charts from it as Helm OCI refs. Public
+        # registries, so the Secrets carry no credentials — one per OCI
+        # registry the component table references.
+        for registry in sorted({url for url in REPOS.values() if "://" not in url}):
+            # Slug the full registry path, not just the host — two registries
+            # on one host must not collide on the Secret name.
+            slug = registry.replace("/", "-").replace(".", "-")
+            secret = cdk8s.ApiObject(
+                self,
+                f"oci-registry-{slug}",
+                api_version="v1",
+                kind="Secret",
+                metadata={
+                    "name": f"argocd-repo-oci-{slug}",
+                    "namespace": ARGO_NS,
+                    "labels": {"argocd.argoproj.io/secret-type": "repository"},
+                },
+            )
+            secret.add_json_patch(
+                cdk8s.JsonPatch.add(
+                    "/stringData",
+                    {
+                        "name": f"oci-{slug}",
+                        "type": "helm",
+                        "url": registry,
+                        "enableOCI": "true",
+                    },
+                )
+            )
+
+    def _project(self):
+        proj = cdk8s.ApiObject(
+            self,
+            "project",
+            api_version="argoproj.io/v1alpha1",
+            kind="AppProject",
+            metadata={"name": PROJECT, "namespace": ARGO_NS},
+        )
+        proj.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "description": "shared cluster platform (Helm) reconciled by Argo CD",
+                    # The infra repo (values via $values) + every upstream chart repo.
+                    "sourceRepos": [REPO_URL, *sorted(set(REPOS.values()))],
+                    # The platform spans many namespaces; gate to in-cluster only.
+                    "destinations": [{"server": IN_CLUSTER, "namespace": "*"}],
+                    # Installing platform charts creates CRDs / ClusterRoles / webhooks.
+                    "clusterResourceWhitelist": [{"group": "*", "kind": "*"}],
+                    "namespaceResourceWhitelist": [{"group": "*", "kind": "*"}],
+                },
+            )
+        )
+
+    def _application(self, name: str, comp: HelmComponent, dest_ns: str):
+        helm: dict = {"releaseName": comp.release}
+        if comp.value_files:
+            # $values resolves to the infra repo root (the second source below), so
+            # the in-repo value files are referenced verbatim — no values rewrite.
+            helm["valueFiles"] = [f"$values/k8s/{vf}" for vf in comp.value_files]
+        if comp.values:
+            # Inline overrides (LAN IP, --default-targets) as structured values —
+            # applied after valueFiles, matching the cdk8s.Helm `-f ... --values`.
+            helm["valuesObject"] = comp.values
+
+        chart_source = {
+            "repoURL": REPOS[comp.repo_key],
+            "chart": comp.chart,
+            "targetRevision": VERSIONS[comp.version_key],
+            "helm": helm,
+        }
+        values_source = {
+            "repoURL": REPO_URL,
+            "targetRevision": TARGET_REVISION,
+            "ref": "values",
+        }
+        sources = [chart_source, values_source]
+
+        if comp.manifests:
+            # Custom resources of a CRD the chart ships (tailscale's ingress
+            # ProxyGroup, Kyverno's policies) ride the chart's own Application as
+            # a raw-manifest source: Argo applies CRDs ahead of custom resources
+            # within one sync, so syncing the operator syncs what it reconciles.
+            # `include` scopes the directory to the one file, leaving the chart's
+            # values.yml (fed to the chart source above) out of it.
+            directory, _, include = f"k8s/{comp.manifests}".rpartition("/")
+            sources.append(
+                {
+                    "repoURL": REPO_URL,
+                    "targetRevision": TARGET_REVISION,
+                    "path": directory,
+                    "directory": {"include": include},
+                }
+            )
+
+        app = cdk8s.ApiObject(
+            self,
+            name,
+            api_version="argoproj.io/v1alpha1",
+            kind="Application",
+            metadata={"name": name, "namespace": ARGO_NS},
+        )
+        app.add_json_patch(
+            cdk8s.JsonPatch.add(
+                "/spec",
+                {
+                    "project": PROJECT,
+                    "sources": sources,
+                    "destination": {"server": IN_CLUSTER, "namespace": dest_ns},
+                    "syncPolicy": {
+                        # MONITOR-ONLY: manual sync. CreateNamespace so Argo owns the
+                        # platform namespaces on a fresh cluster; ServerSideApply
+                        # because cert-manager's CRDs exceed the apply annotation cap.
+                        "syncOptions": [
+                            "CreateNamespace=true",
+                            "ServerSideApply=true",
+                        ],
+                    },
+                    # The apiserver defaults apiVersion: v1 / kind:
+                    # PersistentVolumeClaim onto every StatefulSet volumeClaimTemplate
+                    # at admission; the chart-rendered manifest omits them, so a
+                    # StatefulSet-bearing release (NATS, with its JetStream PVC) reads
+                    # perpetually OutOfSync on those two keys. Ignore exactly those
+                    # paths (same as the tripbot-data app set's postgres handling).
+                    # No-op on the non-StatefulSet releases.
+                    "ignoreDifferences": [
+                        {
+                            "group": "apps",
+                            "kind": "StatefulSet",
+                            "jqPathExpressions": [
+                                ".spec.volumeClaimTemplates[]?.apiVersion",
+                                ".spec.volumeClaimTemplates[]?.kind",
+                            ],
+                        },
+                    ],
+                },
+            )
+        )

@@ -1,0 +1,64 @@
+# Kyverno — the admission policy engine on adanalife-minipc. Chart version
+# pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered by the `kyverno`
+# Argo Application (dist/platform-argo.k8s.yaml), which also carries the
+# policies in k8s/kyverno/policies.yml.
+#
+# Fail-open by construction: this is a single-node cluster, so an admission
+# webhook that fails closed turns a Kyverno outage into "no pod anywhere can
+# be created or rescheduled", the stream included. Every webhook Kyverno
+# registers is forced to failurePolicy: Ignore, so with Kyverno down the
+# apiserver admits the request unevaluated (after the webhook timeout if the
+# pod is hung rather than gone). kube-system is excluded from the webhooks by
+# the chart's default namespaceSelector.
+features:
+  forceFailurePolicyIgnore:
+    enabled: true
+
+# Validation only: the background controller serves generate/mutate-existing
+# policies and the cleanup controller serves CleanupPolicies — neither is
+# used, so neither runs. The admission controller evaluates requests; the
+# reports controller runs the background scans that write PolicyReports.
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
+
+# Both controllers serve Prometheus metrics on :8000, and these annotations
+# are what makes alloy-metrics scrape them (the fleet convention — see
+# k8s/monitoring/prod-1/values.yml). The admission controller emits the
+# admission-time verdicts and webhook latency; the reports controller emits
+# kyverno_validating_policy_results_total from its background scans, the
+# per-policy pass/fail count. ~1k series into the local VictoriaMetrics; the
+# Grafana Cloud keep-list doesn't name kyverno_*, so only the generic up /
+# go_* series it keeps for every target go there.
+admissionController:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+
+reportsController:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+  rbac:
+    clusterRole:
+      # The reports controller reads through the built-in `view` role, which
+      # has no cluster-scoped PersistentVolumes — the NFS mount-option policy
+      # needs them for its background scan.
+      extraResources:
+        - apiGroups: [""]
+          resources: [persistentvolumes]
+
+# The kyverno-api subchart (the policies.kyverno.io CRDs) renders its labels
+# and annotations maps verbatim, and both default to empty. Server-side apply
+# stores no empty map, so a bare `labels: {}` / `annotations: {}` leaves those
+# CRDs permanently OutOfSync in Argo. One real entry keeps each rendered map
+# non-empty: the label matches the kyverno.io CRDs' part-of label, and the
+# annotation restates the Application's own ServerSideApply sync option.
+kyverno-api:
+  labels:
+    app.kubernetes.io/part-of: kyverno-crds
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true

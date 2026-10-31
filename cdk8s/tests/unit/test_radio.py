@@ -1,0 +1,192 @@
+"""Radio station tests — the station plays off the node-local music claim the
+album bed uses (never the NFS one), and every station mount the Liquidsoap
+script declares is pushed to the Icecast container in the same pod."""
+
+import re
+
+import pytest
+from cdk8s import Testing as K8sTesting
+
+from adanalife_k8s.charts import SupportingChart
+from adanalife_k8s.config import load_env
+from adanalife_k8s.constructs.music import LOCAL_CLAIM
+from adanalife_k8s.constructs.radio import (
+    CONTROL_PORT,
+    METRICS_PORT,
+    NAME,
+    PORT,
+    STATIONS,
+    _pattern,
+    _script,
+)
+
+
+def _synth(env_name):
+    app = K8sTesting.app()
+    return K8sTesting.synth(SupportingChart(app, "t", env=load_env(env_name)))
+
+
+def _deployment(objs):
+    hits = [
+        o for o in objs if o["kind"] == "Deployment" and o["metadata"]["name"] == NAME
+    ]
+    assert len(hits) == 1
+    return hits[0]
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_plays_off_the_local_music_claim(env_name):
+    spec = _deployment(_synth(env_name))["spec"]["template"]["spec"]
+    claims = [
+        v["persistentVolumeClaim"]
+        for v in spec["volumes"]
+        if "persistentVolumeClaim" in v
+    ]
+    assert claims == [{"claimName": LOCAL_CLAIM, "readOnly": True}]
+
+
+def test_not_rendered_without_the_music_volume():
+    assert not [o for o in _synth("development") if o["metadata"]["name"] == NAME]
+
+
+def test_script_pushes_every_station_to_the_pod_local_icecast():
+    script = _script()
+    assert script.count("output.icecast(") == len(STATIONS)
+    assert f'host = "127.0.0.1",\n  port = {PORT},' in script
+    for mount, folders, _ in STATIONS:
+        assert f'mount = "{mount}"' in script
+        assert f'station("{mount}", {_pattern(folders)})' in script
+
+
+def test_the_stream_station_shuffles_streambeats_and_woodercz():
+    script = _script()
+    assert 'mount = "adanalife",\n  name = "A Dana Life",' in script
+    assert (
+        r'station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)'
+        in script
+    )
+    # The Halloween station stays as it was: one directory.
+    assert (
+        r'station("halloween", r/^\/music\/(halloween)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)'
+        in script
+    )
+
+
+def test_a_station_directory_outside_the_safe_alphabet_is_refused():
+    with pytest.raises(ValueError):
+        _pattern(("ok", "../etc"))
+
+
+def test_an_empty_station_drops_its_mount_instead_of_airing_silence():
+    # mksafe would serve silence, which tripbot's reachability probe reads as a
+    # healthy stream, so the watchdog would swap back to it every cooldown.
+    script = _script()
+    assert "mksafe" not in script
+    assert script.count("fallible = true") == len(STATIONS)
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_every_container_runs_as_a_numeric_uid(env_name):
+    # Both images declare a named USER, which runAsNonRoot can't verify: the
+    # kubelet refuses to start a container without a numeric uid to check.
+    spec = _deployment(_synth(env_name))["spec"]["template"]["spec"]
+    pod_uid = spec["securityContext"].get("runAsUser")
+    for c in spec["initContainers"] + spec["containers"]:
+        uid = c.get("securityContext", {}).get("runAsUser", pod_uid)
+        assert isinstance(uid, int) and uid > 0, c["name"]
+
+
+def test_icecast_serves_utf8_titles():
+    # Without a mount charset Icecast transcodes MP3 titles to ISO8859-1, which
+    # tripbot's now-playing can't decode ("Blue Öyster Cult" loses its Ö).
+    spec = _deployment(_synth("prod-1"))["spec"]["template"]["spec"]
+    (icecast,) = [c for c in spec["containers"] if c["name"] == "icecast"]
+    assert (
+        '<mount type="default"><charset>UTF-8</charset></mount>'
+        in icecast["command"][-1]
+    )
+
+
+def test_icecast_takes_a_source_per_station():
+    # The image caps Icecast at 2 sources; past that a station's mount is
+    # refused with a 503 and that station goes silent.
+    spec = _deployment(_synth("prod-1"))["spec"]["template"]["spec"]
+    (icecast,) = [c for c in spec["containers"] if c["name"] == "icecast"]
+    assert f"<sources>{len(STATIONS)}</sources>" in icecast["command"][-1]
+
+
+def test_the_control_api_registers_every_verb_on_its_own_port():
+    script = _script()
+    assert f"control_port = {CONTROL_PORT}" in script
+    assert "port = control_port," in script
+    for method, route in [
+        ("GET", "/queue"),
+        ("GET", "/tracks"),
+        ("POST", "/skip"),
+        ("POST", "/back"),
+        ("POST", "/push"),
+        ("POST", "/drop/:rid"),
+    ]:
+        assert f'route("{method}", "{route}"' in script or (
+            f'route(\n  "{method}",\n  "{route}"' in script
+        ), route
+
+
+def test_a_pushed_file_must_be_one_of_the_stations_own_tracks():
+    # The API is unauthenticated, so a push never resolves a URI it was handed:
+    # only a file the station's own scan lists becomes a request.
+    script = _script()
+    assert "list.mem(wanted, st.known())" in script
+    assert "request.create(wanted)" in script
+    assert script.count("request.create(") == 2  # push, and back's replay
+
+
+def test_every_track_carries_the_full_shape():
+    # Clients decode artist/title/requested/rid as required on every entry,
+    # the shuffle remainder included.
+    script = _script()
+    for key in ("file", "artist", "title", "requested", "rid"):
+        assert f"    {key} = " in script
+    assert "entry(f, [])" in script
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_the_service_exposes_the_control_port_inside_the_cluster(env_name):
+    objs = _synth(env_name)
+    (svc,) = [
+        o for o in objs if o["kind"] == "Service" and o["metadata"]["name"] == NAME
+    ]
+    assert svc["spec"].get("type", "ClusterIP") == "ClusterIP"
+    ports = {p["name"]: p for p in svc["spec"]["ports"]}
+    assert ports["control"]["port"] == CONTROL_PORT
+    assert ports["control"]["targetPort"] == "control"
+    assert not [o for o in objs if o["kind"] == "Ingress" and NAME in str(o)]
+    spec = _deployment(objs)["spec"]["template"]["spec"]
+    (liq,) = [c for c in spec["containers"] if c["name"] == "liquidsoap"]
+    assert liq["ports"] == [
+        {"name": "control", "containerPort": CONTROL_PORT},
+        {"name": "metrics", "containerPort": METRICS_PORT},
+    ]
+
+
+@pytest.mark.parametrize("env_name", ["stage-1", "prod-1"])
+def test_the_pod_is_scraped_on_liquidsoaps_metrics_port(env_name):
+    meta = _deployment(_synth(env_name))["spec"]["template"]["metadata"]
+    assert meta["annotations"]["prometheus.io/scrape"] == "true"
+    assert meta["annotations"]["prometheus.io/port"] == str(METRICS_PORT)
+    assert f"settings.prometheus.server.port := {METRICS_PORT}" in _script()
+
+
+def test_a_station_plays_only_audio_files_inside_its_albums():
+    pattern = _pattern(("streambeats-*", "fifty-horizons"))
+    # Liquidsoap's r/…/i literal → Python's re, closely enough for these paths.
+    rx = re.compile(pattern[2:-2].replace(r"\/", "/"), re.IGNORECASE)
+    assert rx.search("/music/fifty-horizons/001 Maine - Atlantic Dawn.mp3")
+    assert rx.search("/music/streambeats-synthwave-rose/Rose - 17 Rad Panda.FLAC")
+    for skipped in (
+        "/music/fifty-horizons/cover.jpg",
+        "/music/streambeats-synthwave-rose/@eaDir/Rose - 17 Rad Panda.mp3@SynoEAStream",
+        "/music/loose.mp3",
+        "/music/halloween/spooky.mp3",
+    ):
+        assert not rx.search(skipped), skipped

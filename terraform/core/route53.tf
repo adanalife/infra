@@ -1,11 +1,21 @@
 # manage the dana.lol domain
 resource "aws_route53_zone" "primary" {
   name = var.domain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; the registrar delegation is set by hand.
+    prevent_destroy = true
+  }
 }
 
 # manage the whereisdana.today domain
 resource "aws_route53_zone" "secondary" {
   name = var.secondary_domain
+
+  lifecycle {
+    # Recreating the zone changes its nameservers; the registrar delegation is set by hand.
+    prevent_destroy = true
+  }
 }
 
 # use the prod nameservers so prod can manage its own routes
@@ -48,6 +58,23 @@ resource "aws_route53_record" "secondary_stage_nameservers" {
   records = var.secondary_stage_nameservers
 }
 
+# delegate dev.whereisdana.today to the dev zone managed in terraform/stage-1
+# (dev borrows the stage account). count-guarded because the nameservers
+# aren't known until that zone's first apply: apply stage-1, copy its
+# dev_route53_name_servers output into secondary_dev_nameservers below, then
+# apply here. Empty (the default) = no record yet, so this never errors on a
+# core apply done before the dev zone exists. dev has no dana.lol zone, so
+# there's no primary (dana.lol) counterpart.
+resource "aws_route53_record" "secondary_dev_nameservers" {
+  count   = length(var.secondary_dev_nameservers) > 0 ? 1 : 0
+  zone_id = aws_route53_zone.secondary.zone_id
+  name    = "dev.${aws_route53_zone.secondary.name}"
+  type    = "NS"
+  ttl     = "30"
+
+  records = var.secondary_dev_nameservers
+}
+
 resource "aws_route53_record" "primary_naked" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = var.domain
@@ -70,7 +97,7 @@ resource "aws_route53_record" "primary_naked_acm_cert_validation" {
   name    = var.primary_naked_acm_dns_name
   records = [var.primary_naked_acm_dns_record]
   ttl     = 60
-  type    = var.primary_naked_acm_dns_type
+  type    = "CNAME"
   zone_id = aws_route53_zone.primary.zone_id
 }
 
@@ -79,10 +106,9 @@ resource "aws_route53_record" "secondary_naked" {
   name    = var.secondary_domain
   type    = "A"
 
-  # https://docs.aws.amazon.com/general/latest/gr/s3.html#s3_website_region_endpoints
   alias {
-    name                   = "s3-website-us-east-1.amazonaws.com."
-    zone_id                = "Z3AQBSTGFYJSTF" # us-east-1
+    name                   = aws_cloudfront_distribution.secondary_naked_redirect.domain_name
+    zone_id                = aws_cloudfront_distribution.secondary_naked_redirect.hosted_zone_id
     evaluate_target_health = false
   }
 }
@@ -119,11 +145,67 @@ resource "aws_route53_record" "secondary_staging" {
   records = ["static.stage.${var.secondary_domain}"]
 }
 
+# guessr, the dashcam guessing game. Point at the Pages projects declared
+# in terraform/{prod-1,stage-1}/cloudflare-pages-guessr.tf; Cloudflare
+# validates the custom-domain TLS certs against these records. Production
+# moves only at a release tag; staging carries whatever is on main.
+resource "aws_route53_record" "guessr" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "guessr.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["adanalife-guessr.pages.dev"]
+}
+
+resource "aws_route53_record" "guessr_staging" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "stage.guessr.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["adanalife-guessr-staging.pages.dev"]
+}
+
+# Near misses at "guessr", pointed at the same production project. The name is
+# a misspelling to begin with and the game spreads by people retyping a URL they
+# heard on stream, so without these a typo fails at DNS — before the site gets a
+# chance to be forgiving about it.
+#
+# A deliberate handful rather than an enumeration of the space, though not for
+# want of room: Cloudflare's Universal SSL issues and renews a certificate per
+# custom domain for free, Pages allows 100 custom domains per project, and
+# Route53 bills per zone and per query rather than per record. So the list is a
+# judgement about which spellings a person actually produces from memory, not a
+# budget: the categories below are the ways a name like this gets mistyped, and
+# adding another later costs a line in each of two files and nothing else.
+#
+# Keep in sync with cloudflare_pages_domain.guessr_aliases in
+# terraform/prod-1/cloudflare-pages-guessr.tf. The CNAME resolves the hostname
+# and validates the cert; the Pages domain is what makes the project answer for
+# it. One without the other is a dead name.
+resource "aws_route53_record" "guessr_aliases" {
+  for_each = toset([
+    # the correct English word, and the word people remember
+    "guesser", "guess", "guessers",
+    # a dropped, doubled or tripled letter
+    "guesr", "gessr", "guessrr", "guesssr",
+    # adjacent letters swapped -- "geuss" is the classic one
+    "geussr", "gusesr",
+    # the other agent-noun ending, and a plural of the brand
+    "guessor", "guessrs",
+  ])
+
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = "${each.key}.${var.domain}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = ["adanalife-guessr.pages.dev"]
+}
+
 resource "aws_route53_record" "primary_www_acm_cert_validation" {
   name    = var.primary_www_acm_dns_name
   records = [var.primary_www_acm_dns_record]
   ttl     = 60
-  type    = var.primary_www_acm_dns_type
+  type    = "CNAME"
   zone_id = aws_route53_zone.primary.zone_id
 }
 
@@ -148,13 +230,37 @@ resource "aws_route53_record" "keybase" {
   records = ["keybase-site-verification=4c5lF70z6Zp4jBKt7lDhS9PT-fJ5xFTip_2H_qBkZ1c"]
 }
 
-# for verifying Brave browser
-resource "aws_route53_record" "brave" {
+# Route 53 holds one record set per name+type, so every apex TXT string --
+# the Brave browser verification and the SPF policy for ImprovMX -- shares
+# this resource. Adding another apex TXT resource would collide with it.
+resource "aws_route53_record" "apex_txt" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = var.domain
   type    = "TXT"
   ttl     = "300"
-  records = ["brave-ledger-verification=9422ad35f6a8d886d6636c1ef09d84e950b5c1bf2ab28d28f00d0acc613aac79"]
+  records = [
+    "brave-ledger-verification=9422ad35f6a8d886d6636c1ef09d84e950b5c1bf2ab28d28f00d0acc613aac79",
+    "v=spf1 include:spf.improvmx.com ~all",
+  ]
+}
+
+moved {
+  from = aws_route53_record.brave
+  to   = aws_route53_record.apex_txt
+}
+
+# ImprovMX forwards every address at the domain on to a real inbox. Apple
+# rejects free-provider addresses when enrolling an organization in the
+# Developer Program, so dana.lol needs to accept mail of its own.
+resource "aws_route53_record" "improvmx" {
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = var.domain
+  type    = "MX"
+  ttl     = "300"
+  records = [
+    "10 mx1.improvmx.com",
+    "20 mx2.improvmx.com",
+  ]
 }
 
 resource "aws_route53_record" "develop" {
@@ -166,7 +272,6 @@ resource "aws_route53_record" "develop" {
 }
 
 # this is just a friendly alias to make SSH easier
-#TODO: update stream server to set this programatically
 # stream.local.whereisdana.today
 resource "aws_route53_record" "stream_local" {
   zone_id = aws_route53_zone.secondary.zone_id
@@ -199,12 +304,3 @@ resource "aws_route53_record" "bluesky_verification" {
   ttl     = "300"
   records = ["did=did:plc:3eikvksr7ojyaywda47uz5t7"]
 }
-
-#TODO: is this being used anywhere?
-# resource aws_route53_record twitch_scripts {
-#   zone_id = aws_route53_zone.primary.zone_id
-#   name    = "twitch-scripts.${var.domain}"
-#   type    = "A"
-#   ttl     = "300"
-#   records = ["172.3.109.123"]
-# }

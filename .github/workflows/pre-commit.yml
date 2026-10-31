@@ -1,0 +1,22 @@
+name: pre-commit
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The local copy, so a change to the shared job is exercised by the PR that
+  # makes it. The repo root's mise pins are the k3d dev toolchain, which the
+  # hooks don't need; terraform is for the terraform_fmt hook.
+  pre-commit:
+    uses: ./.github/workflows/hooks.yml
+    with:
+      runs-on: ubuntu-latest
+      mise: false
+      terraform: true

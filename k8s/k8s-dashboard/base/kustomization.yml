@@ -1,4 +1,0 @@
-# this was downloaded from:
-# https://github.com/hashicorp/learn-terraform-provision-eks-cluster/blob/master/kubernetes-dashboard-admin.rbac.yaml
-resources:
-  - kubernetes-dashboard-admin.rbac.yml

@@ -1,0 +1,15 @@
+# prod-1 NATS overrides. Layers on top of k8s/nats/values.yml.
+#
+# Sized from the working set: prod's JetStream traffic holds nats-server at
+# 80-125Mi, so a 128Mi limit OOMKilled it. GOMEMLIMIT sits under the limit so
+# the Go GC tightens before the kernel kills the pod.
+
+container:
+  env:
+    GOMEMLIMIT: 230MiB
+  resources:
+    requests:
+      cpu: 10m
+      memory: 96Mi
+    limits:
+      memory: 256Mi

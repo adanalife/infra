@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vlc-dashcam-nfs-stage
+spec:
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 1Ti
+  mountOptions:
+    - soft
+    - timeo=150
+    - retrans=3
+  nfs:
+    path: <export path>
+    readOnly: true
+    server: <NFS server address>
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: obs-music-nfs-stage
+spec:
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 50Gi
+  mountOptions:
+    - soft
+    - timeo=150
+    - retrans=3
+  nfs:
+    path: <music export path>
+    readOnly: true
+    server: <NFS server address>
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: dashcam-parked-nfs-stage
+spec:
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 1Ti
+  mountOptions:
+    - soft
+    - timeo=150
+    - retrans=3
+  nfs:
+    path: <parked export path>
+    readOnly: true
+    server: <NFS server address>
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""

@@ -1,0 +1,34 @@
+# gha-runner-scale-set-controller — the ARC reconciler. A small always-on
+# controller, not a build workload; the runner pods it manages are bounded
+# separately (see ../runners/values.yml + the arc-runners LimitRange).
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# ARC's built-in Prometheus endpoints. With this stanza absent the chart still
+# passes --metrics-addr / --listener-metrics-addr / --listener-metrics-endpoint,
+# but empty, which disables metrics everywhere. controllerManagerAddr serves the
+# reconciler's own series; listenerAddr + listenerEndpoint are what the
+# controller stamps onto every listener pod it creates, and the listener is
+# where the pool series live (gha_busy_runners, gha_registered_runners,
+# gha_desired_runners, gha_job_startup_duration_seconds,
+# gha_job_execution_duration_seconds).
+metrics:
+  controllerManagerAddr: ":8080"
+  listenerAddr: ":8080"
+  listenerEndpoint: "/metrics"
+
+# What makes alloy-metrics scrape the controller (the fleet convention —
+# k8s/monitoring/prod-1/values.yml remaps the chart's k8s.grafana.com/* keys to
+# prometheus.io/*). The listener pod carries the same annotations, set from
+# ../runners/values.yml. These series stay in the in-cluster VictoriaMetrics;
+# Grafana Cloud takes an allowlist, so add a gha_* entry there only when a
+# dashboard or alert asks for one.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"

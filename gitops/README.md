@@ -1,0 +1,335 @@
+# GitOps delivery (Argo CD)
+
+The cdk8s app manifests are committed under `cdk8s/dist/` (the golden-file output
+of `task cdk8s:synth`). Argo CD reconciles them from git, so **deploying becomes
+"merge a PR that changes `dist/`"** — no `kubectl apply`, no toolchain in the
+cluster, and Argo's diff shows real Kubernetes YAML.
+
+This is the pre-render model (see `cdk8s/README.md`): Argo doesn't run cdk8s;
+it tracks the plain manifests cdk8s already produced. Same story would work for
+Flux pointed at `cdk8s/dist/` — Argo is chosen for the UI.
+
+> **Sync policy is per-env.** The Applications default to **manual sync** (no
+> automated prune/selfHeal): Argo shows Synced/OutOfSync + a diff and waits — no
+> workload is touched until you click Sync. That was the cutover safety net.
+> Post-cutover, **stage-1 apps run automated** (prune + selfHeal) so a merged
+> `dist/` change deploys itself; **prod-1 apps stay manual** until we're confident,
+> and **both `*-data` units stay manual + `Prune=false` forever** — that's the
+> guarantee a deploy can never delete the database or volumes.
+
+## What's here
+
+All the Argo config is authored in cdk8s (no hand-written YAML) and synthesized to
+**`cdk8s/dist/argocd.k8s.yaml`** — a committed, golden-gated deploy unit. Source:
+`cdk8s/adanalife_k8s/constructs/argocd.py`. It contains:
+
+- an **`AppProject`** (`tripbot`) — restrictive: only the infra repo, only the
+  in-cluster app + data namespaces (`prod-1`, `stage-1`, `prod-1-data`,
+  `stage-1-data`), and only the cluster-scoped kinds the apps use (PV,
+  StorageClass). Caps blast radius vs the wide-open `default` project. (The
+  `infra`/`platform` project names are reserved for shared cluster infrastructure;
+  these are tripbot-project app workloads.)
+- **one `ApplicationSet` per deploy-unit family** (15 on the minipc), so every
+  deploy unit is its own sync/health/URL:
+  - `tripbot-apps`, `platform-gateway`, `obs`, `playout` — git-files generators
+    that self-discover one Application per `cdk8s/dist/apps/<env>-<app>.json`
+    in the owning repo, each reconciling its own `<env>-<app>.k8s.yaml`. The
+    owning repo's synth decides which units (and platforms) exist.
+  - `tripbot-console`, `video-pipeline`, `flare` — one Application per env from
+    the owning private repo's committed dist.
+  - `mediamtx` — one Application per (env, platform) relay, from infra's dist.
+  - `tripbot-identity` — one Application per env from the tripbot repo (identity
+    Secrets + stream PriorityClass/quota). **`Prune=false`**, manual sync.
+  - `tripbot-supporting` — one Application per env (shared observability Secrets +
+    cert-manager Issuers).
+  - `tripbot-data` — one Application per env, targeting `env.data_ns` (the isolated
+    `<env>-data` namespace where it exists). **`Prune=false`** — never deletes the
+    postgres StatefulSet / PVCs.
+  - `ups-monitor`, `kmsg`, `t5-watchdog`, `arc` — one-element sets for the
+    minipc's cluster singletons.
+  - `tripbot-apps`, `platform-gateway`, `obs`, `playout`, `mediamtx`,
+    `tripbot-console`, `video-pipeline` and `flare` set
+    `preserveResourcesOnDeletion`,
+    so losing a generator element deletes the Application but orphans its
+    workloads instead of cascading. It only applies
+    to Applications the controller creates after the flag is set; an older
+    Application keeps its `resources-finalizer` until it is removed by hand.
+  - `ignoreDifferences` keeps two sets of apiserver-defaulted fields out of every
+    diff: ESO's `ExternalSecret` CRD schema defaults, and the
+    `apiVersion`/`kind` the apiserver stamps onto StatefulSet `volumeClaimTemplates`.
+- a **tailscale `Ingress`** — UI at `argocd-prod.<tailnet>.ts.net`.
+- a repo-registration **`ExternalSecret`** (IaC — see step 2).
+
+The NFS **PVs** (dashcam corpus, music, parked) are host-specific bootstrap infra
+synthed to `dist/<env>-nfs-pv.k8s.yaml` (which no ApplicationSet globs) and
+applied once per cluster via `task k8s:<env>:nfs-pv`, which injects the real NFS
+coords the committed dist replaces with placeholders. Argo **watches** them (the
+`nfs-pv` Application, below) but never syncs or prunes them unasked. The matching
+PVCs are Argo-managed (in the data / supporting units) and bind to the PVs by name.
+
+Argo CD itself is installed by the **cdk8s platform layer** (`PlatformChart`,
+minipc) — chart pinned in `helm_platform.py`, Helm values in `k8s/argo-cd/values.yml`.
+
+## The `gitops` root Application (app of apps)
+
+The Argo config is itself an Argo Application. **`gitops`** (project `platform`,
+in `platform-argo.k8s.yaml`, source `constructs/argo_platform.py`) tracks exactly
+the two files `task gitops:apply` applies — `cdk8s/dist/argocd.k8s.yaml` and
+`cdk8s/dist/platform-argo.k8s.yaml`, its own manifest included — via a
+`directory.include`, so no app unit's dist is picked up.
+
+- **Drift reads OutOfSync.** A merged change to either file, or a live object
+  edited by hand, shows as `gitops` OutOfSync in the Argo UI and the console's
+  Argo panel, with the diff — no `task gitops:diff` needed to notice it.
+- **A sync is the apply.** Syncing `gitops` from the Argo UI or the console's sync
+  button does what `task gitops:apply` does. It is **manual sync + `Prune=false`**,
+  the `*-data` posture: a sync never deletes, so a synth bug that drops an
+  ApplicationSet can't cascade into the prod Applications it generates. Removal
+  stays `task gitops:prune` (below).
+- It carries the ESO-defaults `ignoreDifferences` the app units use, for the
+  repo-registration ExternalSecrets.
+
+`task gitops:apply` still works and is how `gitops` itself is first created: it is
+the one object that needs a hand apply to bootstrap.
+
+## Watch-only Applications over hand-applied dist
+
+Two more Applications in `platform-argo.k8s.yaml` (created by a `gitops` sync)
+give the other hand-applied dist files the same treatment: drift reads OutOfSync
+in Argo and the console's Argo panel, and nothing changes until someone acts.
+Both are **manual sync + `Prune=false`**; their tasks stay the bootstrap and the
+apply.
+
+- **`nfs-pv`** tracks `prod-1-nfs-pv.k8s.yaml` and `stage-1-nfs-pv.k8s.yaml` (one
+  app for both envs; PVs are cluster-scoped). With prune off, Argo can never
+  delete a PV. `ignoreDifferences` covers `spec.nfs.server` / `spec.nfs.path`
+  (placeholders in the committed dist) and `spec.claimRef` (written by the
+  binder), and `RespectIgnoreDifferences=true` keeps a sync from writing the
+  placeholders over the real coords. A permanent OutOfSync here means a field
+  missing from that list; the Argo UI diff names it. The apply, including the
+  first one on a fresh cluster, stays `task k8s:<env>:nfs-pv`.
+- **`burrito-config`** tracks `burrito.k8s.yaml` (the TerraformRepository, every
+  TerraformLayer, the runner credentials, UI ingress). Its CRs need the CRDs the
+  `burrito` Application installs, so sync `burrito` first;
+  `SkipDryRunOnMissingResource=true` lets it render a diff before they exist.
+  The apply is a sync of this app (`argocd app sync burrito-config --core` or
+  the console's sync button); there is no task for it.
+
+Nearly all of this is declarative. The only out-of-band step is seeding the repo
+deploy key into SM + adding its public half to GitHub (a one-time bootstrap, like
+every other ESO-backed secret).
+
+## Bootstrap (one-time, on the mini-PC)
+
+1. **Install Argo CD** — `task k8s:prod:platform:up` installs it as part of the
+   platform bring-up (pinned argo-cd `9.5.17`, values `k8s/argo-cd/values.yml`); no
+   manual `helm repo add` / `helm install`. (It's also a component of the cdk8s
+   `PlatformChart` for when the platform itself cuts over to cdk8s.) It installs
+   idle: a controller watching nothing until the Applications below exist. The UI
+   comes up at `https://argocd-prod.<tailnet>.ts.net` via the tailscale Ingress
+   (applied in step 2) — or `kubectl -n argocd port-forward svc/argocd-server 8080:443`.
+
+2. **Register the infra repo — declaratively (IaC).** Argo auto-discovers repos
+   from Secrets labeled `argocd.argoproj.io/secret-type: repository`, and the repo
+   `ExternalSecret` (in `argocd.py`) makes ESO materialize exactly that from a
+   read-only SSH deploy key in AWS Secrets Manager. So you don't run
+   `argocd repo add` — just the one-time bootstrap (generate the deploy key, add the
+   public half to GitHub as read-only, store the private half at
+   `k8s/argocd/repo-ssh-key` in prod's SM). It's applied with the config below.
+
+3. **Apply the Argo config** (project + appsets + ingress + repo secret):
+
+   ```sh
+   task gitops:diff    # read-only preview of what the apply would change
+   task gitops:apply
+   ```
+
+   The ApplicationSets fan out into the per-unit Applications for each cutover
+   env, all reconciling from git. New ones come up
+   **OutOfSync** until synced — safe under manual sync. The apply also creates
+   the `gitops` root, so from then on a config change is a sync of `gitops`.
+
+## Cutover status
+
+Both minipc envs are **cut over** — `prod-1` and `stage-1` apps/supporting/data all
+run on cdk8s + Argo (the legacy Kustomize app manifests were deleted in
+[#660](https://github.com/adanalife/infra/pull/660)). Stage cut over first as the
+rehearsal; prod followed at a stream-off wipe that also moved postgres into the
+isolated `prod-1-data` namespace.
+
+`ServerSideApply=true` is on every unit so syncs **adopt** live objects (e.g. the
+postgres PVC) by name rather than replacing them.
+
+To flip an env's **apps** to continuous reconciliation, add it to
+`AUTOSYNC_ENVS` in `argocd.py`, re-synth + commit, re-apply. stage-1 is already
+there; prod-1 is held out deliberately. The **data** units stay manual forever.
+
+## Removing an AppProject or ApplicationSet
+
+`task gitops:apply` is a plain `kubectl apply` and a `gitops` sync runs with
+`Prune=false`, so neither **ever deletes**. Dropping
+a top-level Argo object from `cdk8s/dist` leaves the live one running, and an
+orphaned ApplicationSet keeps regenerating its Applications — deleting the child
+looks like it silently fails, because the generator puts it straight back.
+(Removing an *element* from a generator does prune; the appset controller owns
+that. Only top-level object removal strands.)
+
+`task gitops:prune` reports what's live in `argocd` but no longer declared:
+
+```sh
+task gitops:prune                 # read-only report
+task gitops:prune CONFIRM=yes     # delete, --cascade=orphan
+```
+
+It reads every manifest listed in the task's `GITOPS_MANIFESTS` var — currently
+`argocd.k8s.yaml` + `platform-argo.k8s.yaml`. **A new manifest declaring
+AppProjects or ApplicationSets must be added there**, or its objects get reported
+as orphans. Argo's built-in `default` AppProject is skipped via
+`GITOPS_PRUNE_SKIP`; it belongs to no manifest and is the fallback project.
+
+Deletion is `--cascade=orphan` on purpose: removing an ApplicationSet otherwise
+takes its generated Applications and their workloads with it, which is how
+[#847](https://github.com/adanalife/infra/pull/847/changes) dropped the prod
+stream for ~1 minute. The generated Applications survive the prune and are swept
+deliberately afterwards with `argocd app delete <name> --cascade=false`. This is
+also why pruning is its own gesture rather than a `--prune` flag on
+`gitops:apply` — a synth bug that dropped an appset would otherwise delete prod
+workloads on the next apply.
+
+## Emergency stop (pausing an autosynced app)
+
+Autosynced Applications selfHeal: a `kubectl scale --replicas=0` is reverted
+within seconds. Don't fight the controller — turn its autosync off first. The
+ApplicationSets carry `ignoreApplicationDifferences` on `/spec/syncPolicy`, so a
+manual policy change on a *generated* Application sticks instead of being
+stomped back by the ApplicationSet controller:
+
+```sh
+# 1. disable autosync on the noisy app(s) — survives the appset controller
+argocd app set stage-1-obs-youtube --sync-policy none   # or the UI toggle
+# 2. now scale down freely
+kubectl -n stage-1 scale deploy --all --replicas=0
+```
+
+(`argocd … --core` needs the kube-context namespace set to `argocd`; a
+`kubectl -n argocd patch application <app> --type=json -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'`
+does the same without the CLI.)
+
+Cluster-wide big red button — stops ALL reconciliation at once, when there's no
+time to pick apps:
+
+```sh
+kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
+```
+
+**Recovery** for either path: re-apply `cdk8s/dist/argocd.k8s.yaml` (re-stamps
+the declared sync policies) and/or scale the application-controller back up.
+Anything still autosynced reconciles back to git immediately — make sure the
+merged `dist/` describes the state you want *before* turning Argo back on.
+
+## Platform stack (Argo-native Helm)
+
+The git-declarable platform charts (ESO, cert-manager, node-exporter,
+victoria-metrics, k8s-monitoring, tailscale-operator, NATS, CNPG, ARC,
+metrics-server, Kyverno) are authored as **Argo Applications with
+a multi-source Helm source** — the upstream chart (version-pinned) + the in-repo
+`k8s/<component>/values.yml` via a `$values` ref. Argo runs `helm template`
+in-cluster, so **no rendered charts land in git** — only the small Application
+objects in `cdk8s/dist/platform-argo.k8s.yaml` (offline, committed, golden-gated).
+Source: `cdk8s/adanalife_k8s/constructs/argo_platform.py`; the chart table is
+`helm_platform.py` (shared with the legacy `cdk8s.Helm` render path). A separate,
+intentionally broad **`platform` AppProject** governs them (platform installs CRDs
+/ ClusterRoles / webhooks), distinct from the restrictive `tripbot` app project.
+
+An Application can carry in-repo raw manifests as an extra source when they are
+custom resources of a CRD its chart ships: `tailscale-operator` also delivers
+`k8s/tailscale-operator/proxygroup.yml` (the `ingress-proxies` ProxyGroup), so the
+proxy fleet syncs with the operator that reconciles it, and `kyverno` delivers
+`k8s/kyverno/policies.yml` (its admission policies, Audit-only). The file is the
+component's `manifests` field in `helm_platform.py`.
+
+**Not Argo-managed — they stay task-installed (`task k8s:<env>:platform:up`):**
+
+- **cilium** (the CNI Argo itself rides on) and **argo-cd** (its own install) — the
+  bootstrap floor.
+- **traefik** + **external-dns** — *host-coupled via `development` only*. prod-1 and
+  stage-1 commit their target — the node's location-independent alias, a CNAME onto
+  whichever location is active — in `k8s/traefik/values.prod-1.yml`
+  (`ingressEndpoint.hostname`) and `k8s/external-dns/<env>/config.yml`
+  (`--default-targets` plus `--force-default-targets`). `development` is the env whose
+  target is the host's own public IP, written per-machine to a gitignored
+  `values.local.yml`, so the pair stays task-installed.
+- The kustomize-only bits (local-path-provisioner, intel-gpu/xpu, ESO
+  cluster-store, cert-manager ClusterIssuers).
+
+**Argo is the delivery path for everything in the list above** — adoption of the
+live helm releases completed 2026-07-16. Day-2 changes (values edits, chart
+bumps, new platform charts) go: edit `helm_platform.py` / the values files →
+merge → sync `gitops` (if the Application specs changed; its diff is the
+preview, and `task gitops:apply` does the same) → sync the component in Argo. Do **not** `helm upgrade --install`
+an adopted release against the live cluster: Argo owns the objects via
+server-side apply, and helm's apply fails with `argocd-controller`
+field-manager conflicts. The remaining `helm upgrade --install` steps in
+`task k8s:<env>:platform:up` exist for day-0 bring-up of an empty cluster only
+(where Argo adopts them afterwards). Retiring them in favor of an
+argo-sync-based bring-up is still open.
+
+### Adoption (deliberate, NOT merge-and-forget)
+
+How the live helm releases were adopted (kept as the playbook for adopting any
+future not-yet-Argo-managed release). Argo *adopts* releases that
+`helm upgrade --install` owns, so the risk is Helm/SSA field-manager conflicts.
+Mirror the app cutover:
+
+1. `task gitops:apply` — the project + Applications
+   come up **OutOfSync, monitor-only**; nothing changes.
+2. Review each Application's diff vs the live release in the Argo UI.
+3. **Rehearse on stage** — sync `stage-1-nats` (the only stage-scoped Application now
+   that external-dns is excluded); confirm NATS stays healthy.
+4. Adopt the cluster-scoped charts one at a time in a maintenance window. Highest
+   care: **tailscale-operator** (serves the Argo UI's own tailnet Ingress — keep a
+   `kubectl port-forward` ready). `ServerSideApply=true` adopts live objects; sync
+   with **prune off** and verify the diff first.
+5. Once a release is cleanly Synced, retire its `helm upgrade --install` step.
+
+> Namespace pod-security labels (e.g. the NATS PSS hardening) are applied by
+> `bootstrap`, not these charts — `CreateNamespace=true` only creates a bare
+> namespace on a fresh cluster.
+
+## development on the k3d cluster (its own Argo)
+
+`development` runs a **separate, independent Argo CD install** on its local k3d
+cluster rather than being managed cross-cluster from the minipc. Each Argo targets
+its **own** cluster in-cluster (`https://kubernetes.default.svc`), so there's no
+inbound reachability to the residential dev box — it only needs outbound git, same
+as the minipc Argo. The dev cluster can be off whenever; when it's up, its Argo
+reconciles.
+
+The config is authored by the **same** `ArgoCD` construct, parameterized to a
+different env-set → `cdk8s/dist/argocd-k3d.k8s.yaml`: the `tripbot` project + the
+apps / identity / supporting / data / obs ApplicationSets scoped to
+`development` only, **no tailscale UI** (the dev
+cluster has no tailscale-operator — reach the UI by port-forward), and
+`development` apps on **automated sync** (the env is throwaway). The data unit
+stays `Prune=false`.
+
+Bring-up is folded into `task k8s:dev:platform:up`: it installs argo-cd on the dev
+cluster (`-f k8s/argo-cd/values.yml -f k8s/argo-cd/values.k3d.yml`) and applies
+`argocd-k3d.k8s.yaml`. The one out-of-band step is seeding the read-only repo
+deploy key at `k8s/argocd/repo-ssh-key` in the **stage** SM (dev borrows the
+adanalife-stage account); the same GitHub deploy key works.
+
+**UI:** a traefik Ingress at `http://argocd.dev.whereisdana.today:9080` (the `:9080`
+is the k3d port-map of traefik's `:80`; external-dns publishes the record to the
+LAN endpoint, no TLS). Mirrors the minipc's `argocd.prod.whereisdana.today` — no
+port-forward. (`kubectl -n argocd port-forward svc/argocd-server 8080:80` is the
+fallback.)
+
+**First sync:** `data` + `supporting` are manual (data is `Prune=false` forever);
+the apps autosync. `task k8s:dev:argo:sync` syncs them in dependency order
+(`development-data` → `development-supporting` → apps) via `argocd --core`.
+
+## Not covered yet
+
+- **traefik / external-dns / cilium / argo-cd** — stay task-installed (above).
+- **One-shot Jobs** — stay task-driven (they'd re-run on every sync).

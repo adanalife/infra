@@ -1,0 +1,59 @@
+name: platforms-contract
+
+# Keeps the generated contracts this repo syncs copies of in step with their
+# owners, through the shared contract-sync workflow: platforms.json (the
+# fleet-wide platform set, owned by platform-gateway's Go adapter registry) and
+# cdk8s/contract.json + cdk8s/metrics.json (owned by tripbot's pkg/contract). A
+# drifted copy becomes a PR on `bot/contract-sync`.
+#
+# The triggers are the point of this workflow: upstream drift lands with no PR
+# here to notice it. tripbot and platform-gateway send `contract-changed` when a
+# push to their main touches a contract, and the daily schedule catches a
+# missed dispatch. The PR-time checks are steps of the `gates` job in
+# pr-gates.yml.
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '17 13 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [contract-changed]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  platforms-contract:
+    uses: ./.github/workflows/contract-sync.yml
+    with:
+      runs-on: ubuntu-latest
+      # No towncrier here: this repo ships no releases, so the sync PR needs no fragment.
+      changelog: false
+      # cdk8s/ reads the synced contracts, so the sync PR carries a re-synthed dist/.
+      cdk8s: true
+      platforms: true
+      tripbot: contract.json metrics.json
+      tripbot-dir: cdk8s
+    secrets: inherit
+
+  alert:
+    needs: [platforms-contract]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Drift itself arrives as a bot PR; this fires when the sync can't run.
+      - name: Alert Discord on a failed contract sync
+        continue-on-error: true
+        uses: Ilshidur/action-discord@0.4.0
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          args: 'Contract sync failed in [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}): the synced copies may be behind their source of truth and no sync PR was opened. [run log]({{ RUN_URL }})'
