@@ -49,6 +49,13 @@ import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s import eso
+from adanalife_k8s.constructs.talosctl import (
+    FETCH_TALOSCTL,
+    TALOS_NODE,
+    TALOSCONFIG_PATH,
+    TALOSCTL_PATH,
+    TALOSCTL_URL,
+)
 from adanalife_k8s.naming import (
     CONFIG_HASH_ANNOTATION,
     config_hash,
@@ -58,40 +65,29 @@ from adanalife_k8s.naming import (
 
 NAME = "kmsg"
 NAMESPACE = "kmsg"
-# The minipc Talos node whose kernel log this streams. The only node with the T5
-# attached, and the only one with a Talos API endpoint on this LAN.
-TALOS_NODE = "192.168.40.111"
 # python:3.14-alpine — matches constructs/ups_monitor.py, so the node's image
 # cache is already warm and this adds no new supply-chain surface. Nothing here
 # is Python; the image is a base for the fetched binary and its initContainer.
 IMAGE = "python:3.14-alpine"
-# Pinned to the cluster's Talos version. The sibling pin in ups_monitor.py is
-# independent (it lags at v1.13.2) — these are deliberately not shared, so each
-# can track the node on its own schedule.
-TALOSCTL_VERSION = "v1.14.0"
-TALOSCTL_URL = (
-    f"https://github.com/siderolabs/talos/releases/download/{TALOSCTL_VERSION}"
-    "/talosctl-linux-amd64"
-)
-TALOSCTL_PATH = "/opt/talos/talosctl"  # placed by the initContainer
-TALOSCONFIG_PATH = "/talos/talosconfig"  # mounted from the (optional) Secret
 # The os:reader-scoped talosconfig, delivered by the ExternalSecret emitted in
 # KmsgShipper (cluster store → SSM /k8s/kmsg/talosconfig).
 TALOSCONFIG_SECRET = "kmsg-talosconfig"
 
-# initContainer: fetch the pinned talosctl into the shared volume, with stdlib
-# urllib from the same image. Verified-by-pin, not checksum — the same trade the
-# sibling UPS daemon makes for a LAN-only helper binary.
-_FETCH_TALOSCTL = """\
-import os
-import urllib.request
-
-url = os.environ["TALOSCTL_URL"]
-dst = os.environ["TALOSCTL_PATH"]
-print(f"fetching {url}", flush=True)
-urllib.request.urlretrieve(url, dst)
-os.chmod(dst, 0o755)
-print(f"talosctl -> {dst}", flush=True)
+# Reattach on any exit instead of letting the container die: a stream the API
+# closes reconnects after a short pause, and an absent talosconfig (the Secret
+# is optional, so an unseeded env still schedules) waits rather than crashes.
+# Both stay visible in the pod log; neither shows up as a restart.
+_RUN_SCRIPT = f"""\
+while :; do
+  if [ ! -s {TALOSCONFIG_PATH} ]; then
+    echo "kmsg: {TALOSCONFIG_PATH} is absent or empty; waiting for the Secret" >&2
+    sleep 60
+    continue
+  fi
+  {TALOSCTL_PATH} --talosconfig {TALOSCONFIG_PATH} --nodes {TALOS_NODE} dmesg --follow --tail
+  echo "kmsg: talosctl exited $?; reattaching" >&2
+  sleep 5
+done
 """
 
 
@@ -107,7 +103,7 @@ class KmsgShipper(Construct):
         labels = meta_labels(NAME, part_of="infra")
         sel = selector(NAME)
 
-        scripts = {"fetch-talosctl.py": _FETCH_TALOSCTL}
+        scripts = {"fetch-talosctl.py": FETCH_TALOSCTL}
         k8s.KubeConfigMap(
             self,
             "fetch",
@@ -159,18 +155,12 @@ class KmsgShipper(Construct):
             name=NAME,
             image=IMAGE,
             # The whole workload: stream kmsg to stdout and let alloy-logs do the
-            # rest. On a node reboot or an API blip talosctl exits, the container
-            # restarts, and `--tail` means it resumes without replaying the ring.
-            command=[
-                TALOSCTL_PATH,
-                "--talosconfig",
-                TALOSCONFIG_PATH,
-                "--nodes",
-                TALOS_NODE,
-                "dmesg",
-                "--follow",
-                "--tail",
-            ],
+            # rest. The loop is what keeps the restart count meaningful: the
+            # Talos API drops the stream every ~12h, and the credential mount is
+            # optional, so without it every drop and every unseeded environment
+            # reads as a crashloop. `--tail` means each reattach resumes without
+            # replaying the ring.
+            command=["sh", "-c", _RUN_SCRIPT],
             env=[k8s.EnvVar(name="HOME", value="/tmp")],
             security_context=secctx,
             resources=k8s.ResourceRequirements(

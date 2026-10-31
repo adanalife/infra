@@ -30,7 +30,7 @@
         "name": "deployment_environment",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
-        "query": "label_values(target_info{service_name=\"tripbot\"}, deployment_environment)",
+        "query": "label_values(target_info{job=\"tripbot/tripbot\"}, deployment_environment)",
         "current": { "text": "prod-1", "value": "prod-1" },
         "includeAll": true,
         "multi": false,
@@ -66,7 +66,7 @@
       "id": 1,
       "type": "heatmap",
       "title": "Command latency distribution",
-      "description": "Heatmap of tripbot_command_duration_seconds_bucket. Y = latency bucket, X = time, color = rate. Compare with the p50/p95/p99 lines on dashboard 11 — the heatmap reveals bimodal latency (fast path vs. DB-bound path) that the quantile lines smooth over.",
+      "description": "Heatmap of tripbot_command_duration_seconds_bucket. Y = latency bucket, X = time, color = rate. Compare with the p50/p95/p99 lines on the Application Latency dashboard — the heatmap reveals bimodal latency (fast path vs. DB-bound path) that the quantile lines smooth over.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
       "targets": [

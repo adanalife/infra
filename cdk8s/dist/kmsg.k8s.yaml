@@ -62,14 +62,19 @@ spec:
     spec:
       containers:
         - command:
-            - /opt/talos/talosctl
-            - --talosconfig
-            - /talos/talosconfig
-            - --nodes
-            - 192.168.40.111
-            - dmesg
-            - --follow
-            - --tail
+            - sh
+            - -c
+            - |
+              while :; do
+                if [ ! -s /talos/talosconfig ]; then
+                  echo "kmsg: /talos/talosconfig is absent or empty; waiting for the Secret" >&2
+                  sleep 60
+                  continue
+                fi
+                /opt/talos/talosctl --talosconfig /talos/talosconfig --nodes 192.168.40.111 dmesg --follow --tail
+                echo "kmsg: talosctl exited $?; reattaching" >&2
+                sleep 5
+              done
           env:
             - name: HOME
               value: /tmp

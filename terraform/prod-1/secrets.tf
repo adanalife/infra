@@ -25,7 +25,6 @@ locals {
   # parameter name (sans leading /) => description
   ssm_parameters = {
     "prod-1/cloudflare-api-token"          = "Cloudflare API token used by the cloudflare provider."
-    "prod-1/grafana-cloud-api"             = "Grafana Cloud admin API token + stack URL/slug for the grafana terraform provider."
     "k8s/grafana-cloud-otlp"               = "Grafana Cloud OTLP endpoint + bearer auth for in-cluster OTel exporters."
     "k8s/grafana-pdc-agent"                = "Grafana Cloud Private Data Source Connect agent credentials, for the in-cluster pdc-agent."
     "k8s/sentry-tripbot"                   = "Sentry DSN for the tripbot Go service. Consumed via the SENTRY_DSN env var."
@@ -39,11 +38,13 @@ locals {
     "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
     "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
     "k8s/tripbot/discord-bot-token"        = "Discord bot token for the prod tripbot Discord session."
+    "k8s/tripbot/radio-stations"           = "Background-audio radio station list for tripbot."
     "k8s/tripbot-console/ghcr-pull-token"  = "GitHub token (read:packages) for pulling the private tripbot-console image from GHCR. Keys: username, token."
     "k8s/platform-gateway/ghcr-pull-token" = "GitHub token (read:packages) for pulling the private platform-gateway image from GHCR. Keys: username, token."
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
     "k8s/arc/github-app"                   = "GitHub App credentials for the self-hosted runner controller (ARC). Keys: github_app_id, github_app_installation_id, github_app_private_key."
     "k8s/ups/talosconfig"                  = "Talosconfig for the ups-monitor graceful-shutdown trigger."
+    "release/sentry-org-token"             = "Sentry organization token for release tooling. Read by guessr's task ios:dsyms."
   }
 }
 
@@ -73,8 +74,8 @@ resource "aws_ssm_parameter" "mirror" {
 #
 # Password rotation: set/bump `keepers.rotation_id` on random_pet, then
 # apply. After the parameter updates, ESO syncs (≤1h or force) and then
-# `kubectl exec postgres-0 -- psql -c "ALTER USER tripbot WITH PASSWORD
-# '<new>';"` to bring pg_authid in line.
+# `kubectl -n prod-1-data exec pg-1 -c postgres -- psql -U postgres -c
+# "ALTER USER tripbot WITH PASSWORD '<new>';"` to bring pg_authid in line.
 
 resource "random_pet" "tripbot_db_password" {
   length    = 4
@@ -92,37 +93,14 @@ resource "aws_ssm_parameter" "tripbot_db_credentials" {
   })
 }
 
-# JSON array of email addresses, e.g. ["you@example.com"]. Whoever may open
-# guessr's /admin/ on the production game — the Access policy in
-# cloudflare-pages-guessr.tf includes one rule per address, and Access mails a
-# one-time PIN to it. Here rather than in the terraform because this repo is
-# public and these are personal addresses.
-#
-# Its own parameter rather than a read of the staging one, which lives in a
-# different AWS account: this list decides who can reshuffle the schedule players
-# are actually getting, and the two lists being separately editable is the point
-# rather than duplication to be tidied away. KEEP-IN-SYNC is not wanted here.
+# Who may sign in to the cluster's internal admin UIs through Cloudflare
+# Access — burrito today (burrito-oidc.tf).
 #
 # Outside the map above because the placeholder has to be valid JSON that
 # jsondecode can read pre-seed, and the map's is an object rather than an array.
 # The empty placeholder is NOT a usable value — a policy with no rules is
-# rejected — so the policy carries a precondition that says so.
-resource "aws_ssm_parameter" "guessr_admin_emails" {
-  name        = "/prod-1/guessr-admin-emails"
-  description = "Email addresses allowed through Cloudflare Access to guessr's /admin/ on production. JSON array of addresses."
-  type        = "SecureString"
-  value       = "[]"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-# Who may sign in to the cluster's internal admin UIs through Cloudflare
-# Access — burrito today (burrito-oidc.tf). Separate from the guessr list on
-# purpose: that one gates a game-scheduling surface, this one gates terraform.
-# Same empty-placeholder shape as guessr's, and the policy carries the
-# precondition that explains the two-apply bootstrap.
+# rejected — so the policy carries a precondition that explains the two-apply
+# bootstrap.
 resource "aws_ssm_parameter" "internal_admin_emails" {
   name        = "/prod-1/internal-admin-emails"
   description = "Email addresses allowed through Cloudflare Access to the cluster's internal admin UIs. JSON array of addresses."
@@ -184,10 +162,6 @@ data "aws_ssm_parameter" "discord_alerts_webhook" {
   name = "/k8s/tripbot/discord-alerts-webhook"
 }
 
-data "aws_ssm_parameter" "guessr_admin_emails" {
-  name = aws_ssm_parameter.guessr_admin_emails.name
-}
-
 data "aws_ssm_parameter" "internal_admin_emails" {
   name = aws_ssm_parameter.internal_admin_emails.name
 }
@@ -227,6 +201,8 @@ data "aws_iam_policy_document" "ci_terraform_secrets_read" {
     resources = [
       "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/obs/*",
       "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/external-dns/*",
+      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/burrito/*-secret-access-key",
     ]
   }
 }

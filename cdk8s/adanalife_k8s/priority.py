@@ -2,9 +2,8 @@
 
 The single-node minipc runs prod and stage as co-tenants, so under pod-count or
 CPU pressure the scheduler needs a fixed pecking order: which workloads get a
-slot, and which get preempted. These classes define it, above the default (0)
-tier every stage and batch pod stays on and the dashcam-cv-low (-10)
-most-preemptible tier:
+slot, and which get preempted. These classes define it around the default (0)
+tier every stage pod stays on:
 
   prod-stream  (1000)  live-stream-critical — tripbot, obs, playout, mediamtx,
                        gateway. Preempts default-priority co-tenants under node
@@ -15,6 +14,9 @@ most-preemptible tier:
   ci-low        (-10)  CI runner pods (the ARC scale set). Below default, so
                        prod preemption evicts a CI build before any stage
                        workload; a killed build is just a re-run.
+  dashcam-cv-low (-10) background batch — video-pipeline's embed/coords Jobs and
+                       the music localize/fill Jobs. Same tier as ci-low: any
+                       of it can be preempted and re-run.
 
 Cluster-scoped (one per cluster), so emitted once, in the prod-1 SupportingChart
 — the apiserver ignores the namespace cdk8s stamps on a cluster-scoped kind.
@@ -31,6 +33,7 @@ from adanalife_k8s.config import EnvConfig
 PROD_STREAM = "prod-stream"
 PROD_SUPPORT = "prod-support"
 CI_LOW = "ci-low"
+DASHCAM_CV_LOW = "dashcam-cv-low"
 
 
 def emit_priority_classes(scope: Construct, env: EnvConfig) -> None:
@@ -73,5 +76,16 @@ def emit_priority_classes(scope: Construct, env: EnvConfig) -> None:
             "CI runner pods (ARC) — most-preemptible tier, alongside "
             "dashcam-cv-low. Evicted before any default-priority workload; "
             "a killed build is just a re-run."
+        ),
+    )
+    k8s.KubePriorityClass(
+        scope,
+        "priority-dashcam-cv-low",
+        metadata=k8s.ObjectMeta(name=DASHCAM_CV_LOW),
+        value=-10,
+        global_default=False,
+        description=(
+            "Background batch (video-pipeline embed/coords, music Jobs) — "
+            "preemptible; never outranks live workloads."
         ),
     )

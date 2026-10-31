@@ -25,8 +25,10 @@ def _by(objs, kind, name):
 def test_shared_observability_secrets_and_issuers_on_eso_env():
     objs = _synth("prod-1")
     es = {o["metadata"]["name"] for o in objs if o["kind"] == "ExternalSecret"}
-    # cross-cutting observability secrets onscreens/tripbot envFrom
-    assert {"grafana-cloud-otlp", "sentry-tripbot", "sentry-onscreens-server"} <= es
+    # Sentry DSNs onscreens/tripbot envFrom
+    assert {"sentry-tripbot", "sentry-onscreens-server"} <= es
+    # the apps export to the in-cluster Alloy receiver; only monitoring holds the OTLP creds
+    assert "grafana-cloud-otlp" not in es
     # cert-manager app issuers (LE staging + prod) + their Route53 creds
     issuers = {o["metadata"]["name"] for o in objs if o["kind"] == "Issuer"}
     assert {"letsencrypt-staging-route53", "letsencrypt-route53"} <= issuers
@@ -43,3 +45,20 @@ def test_local_supporting_has_no_eso_or_issuers():
     assert not [o for o in objs if o["kind"] == "ExternalSecret"]
     assert not [o for o in objs if o["kind"] == "Issuer"]
     assert not _by(objs, "Secret", "tripbot-secret")
+
+
+def test_prod_supporting_owns_every_priority_class():
+    """infra is the single definition of the cluster's scheduling tiers — the
+    app repos reference a class by name and never emit one."""
+    tiers = {
+        o["metadata"]["name"]: o["value"]
+        for o in _synth("prod-1")
+        if o["kind"] == "PriorityClass"
+    }
+    assert tiers == {
+        "prod-stream": 1000,
+        "prod-support": 900,
+        "ci-low": -10,
+        "dashcam-cv-low": -10,
+    }
+    assert not [o for o in _synth("stage-1") if o["kind"] == "PriorityClass"]

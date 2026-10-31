@@ -1,6 +1,6 @@
 {
   "uid": "miles-leaderboard",
-  "title": "15 — Miles Leaderboard",
+  "title": "14 — Miles Leaderboard",
   "description": "All-time miles per viewer, read from tripbot's GET /api/stats/community over the tripbot-api Infinity datasource. The numbers are `users.miles` — the same authoritative column the onscreen leaderboard reads, with bots and opted-out accounts excluded — not the events-derived audit sum that cmd/backfill-miles computes. Top ten only: that is what the endpoint returns.",
   "tags": [
     "tripbot",

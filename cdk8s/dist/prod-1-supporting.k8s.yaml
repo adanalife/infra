@@ -1,23 +1,6 @@
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: grafana-cloud-otlp
-  namespace: prod-1
-spec:
-  dataFrom:
-    - extract:
-        key: /k8s/grafana-cloud-otlp
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: SecretStore
-    name: aws-parameterstore
-  target:
-    creationPolicy: Owner
-    name: grafana-cloud-otlp
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
   name: sentry-tripbot
   namespace: prod-1
 spec:
@@ -144,6 +127,15 @@ description: CI runner pods (ARC) — most-preemptible tier, alongside dashcam-c
 globalDefault: false
 value: -10
 ---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: dashcam-cv-low
+  namespace: prod-1
+description: Background batch (video-pipeline embed/coords, music Jobs) — preemptible; never outranks live workloads.
+globalDefault: false
+value: -10
+---
 apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
@@ -216,3 +208,534 @@ spec:
     requests:
       storage: 20Gi
   storageClassName: local-path
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: radio
+    app.kubernetes.io/part-of: tripbot
+  name: radio-config
+  namespace: prod-1
+data:
+  radio.liq: |
+    settings.log.stdout := true
+    settings.log.file := false
+    password = string.trim(file.contents("/run/radio/password"))
+    control_port = 8001
+    stations = ref([])
+    # Measures each track's integrated loudness as it is prepared, off air, into
+    # the `lufs_track_gain` that normalize_track_gain applies.
+    enable_lufs_track_gain_metadata()
+
+    settings.prometheus.server := true
+    settings.prometheus.server.port := 9599
+    station_ready = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "1 while the station has something to air, so its mount is up",
+      "station_ready"
+    )
+    station_tracks = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Library tracks the station's last rescan matched",
+      "station_tracks"
+    )
+    tracks_played = prometheus.counter(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Tracks the station has started airing",
+      "tracks_played_total"
+    )
+    track_gain = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Loudness gain applied to the track on air, in dB",
+      "track_gain_db"
+    )
+    station_listeners = prometheus.gauge(
+      namespace = "liquidsoap", labels = ["station"],
+      help = "Icecast listeners on the station's mount, OBS and probes included",
+      "station_listeners"
+    )
+    # Sets (gauge) or adds to (counter) one station's series.
+    def put(metric, station, value) =
+      set = metric(label_values = [station])
+      set(value)
+    end
+
+    # Icecast has no metrics endpoint of its own, so its status page is read here.
+    # It lists the mounts that are up: an array of them, a bare object when only one
+    # is, and no `source` at all when none are. A mount that is down reads 0.
+    def mounts(body) =
+      try
+        let json.parse (status : {
+          icestats: {source: [{listenurl: string, listeners: int}]}
+        }) = body
+        status.icestats.source
+      catch _ do
+        try
+          let json.parse (status : {
+            icestats: {source: {listenurl: string, listeners: int}}
+          }) = body
+          [status.icestats.source]
+        catch _ do
+          []
+        end
+      end
+    end
+    def poll_listeners() =
+      try
+        body = http.get("http://127.0.0.1:8000/status-json.xsl")
+        counts = list.map(
+          fun (s) -> (path.basename(s.listenurl), s.listeners),
+          mounts(body)
+        )
+        list.iter(
+          fun (st) -> put(station_listeners, fst(st), float(list.assoc(default = 0, fst(st), counts))),
+          stations()
+        )
+      catch err do
+        log.info("listener poll failed: #{err}")
+      end
+    end
+    thread.run(every = 15., poll_listeners)
+
+    # A station airs its request queue ahead of a shuffled playlist of every
+    # library track whose path matches `pattern`, reloaded when a rescan finds the
+    # set changed. With no tracks and no requests it is never ready, so its
+    # fallible output keeps the mount down.
+    def station(mount, pattern) =
+      shuffle = playlist.list(mode = "randomize", [])
+      known = ref([])
+      def rescan() =
+        tracks = list.filter(fun (f) -> pattern.test(f), playlist.files("/music"))
+        put(station_tracks, mount, float(list.length(tracks)))
+        if tracks != known() then
+          known := tracks
+          shuffle.reload(empty_queue = false, tracks)
+        end
+      end
+      thread.run(every = 60., rescan)
+      pending = request.queue(id = "#{mount}-queue", interactive = false)
+      # `back` replays through a queue of its own, ahead of the pending one:
+      # request.queue's set_queue destroys the request it has already loaded, so
+      # pushing to the front of `pending` would lose that request.
+      replay = request.queue(id = "#{mount}-replay", interactive = false)
+      aired = fallback([replay, pending, shuffle])
+      # Newest first, each with whether the request queue supplied it: the head is
+      # what is on air, the rest is history.
+      played = ref([])
+      def from_queue(m) =
+        list.exists(
+          fun (q) ->
+            begin
+              r = q.current()
+              null.defined(r) and string(request.id(null.get(r))) == m["rid"]
+            end,
+          [replay, pending]
+        )
+      end
+      aired.on_track(
+        synchronous = true,
+        fun (m) -> played := list.prefix(11, [(m, from_queue(m)), ...played()])
+      )
+      # The gain normalize_track_gain applies reads like "15.15 dB"; a track the
+      # resolver couldn't measure has none.
+      aired.on_track(
+        synchronous = true,
+        fun (m) ->
+          begin
+            put(tracks_played, mount, 1.)
+            gain_tag = m[settings.normalize_track_gain_metadata()]
+            gain = list.hd(default = "", string.split(separator = " ", gain_tag))
+            if gain != "" then put(track_gain, mount, float_of_string(default = 0., gain)) end
+          end
+      )
+      stations := [
+        ...stations(),
+        (
+          mount,
+          {
+            shuffle = shuffle,
+            known = known,
+            pending = pending,
+            replay = replay,
+            aired = aired,
+            played = played
+          }
+        )
+      ]
+      # A track's silent tail or intro airs at most 5s of silence: the ~20s some
+      # tracks carry reads to tripbot's audio watchdog as an outage, and it swaps
+      # the stream onto its fallback bed.
+      quiet_gaps_cut = blank.eat(max_blank = 5., threshold = -50., aired)
+      # Every track lands at the same loudness (settings.lufs.track_gain_target,
+      # -16 LUFS), so albums mastered years apart sit level; the limiter catches
+      # the peaks a quiet track's gain-up pushes toward clipping.
+      on_air = limit(normalize_track_gain(quiet_gaps_cut))
+      thread.run(
+        every = 15.,
+        fun () -> put(station_ready, mount, if on_air.is_ready() then 1. else 0. end)
+      )
+      on_air
+    end
+
+    def entry(~requested = false, ~rid = null, filename, m) =
+      {
+        file = filename,
+        artist = m["artist"],
+        title = m["title"],
+        requested = requested,
+        rid = rid
+      }
+    end
+
+    def played_track(p) =
+      let (m, requested) = p
+      entry(requested = requested, m["filename"], m)
+    end
+
+    def pending_track(r) =
+      entry(requested = true, rid = request.id(r), request.uri(r), request.metadata(r))
+    end
+
+    # A source's loaded request that is not the one on air: the fallback leaves it
+    # waiting while another source plays, and it airs when that source yields.
+    def waiting(s, on_air) =
+      r = s.current()
+      if
+        null.defined(r) and string(request.id(null.get(r))) != on_air
+      then
+        [null.get(r)]
+      else
+        []
+      end
+    end
+
+    def requests(st, on_air) =
+      [
+        ...waiting(st.replay, on_air),
+        ...st.replay.queue(),
+        ...waiting(st.pending, on_air),
+        ...st.pending.queue()
+      ]
+    end
+
+    def queue_json(st) =
+      on_air =
+        list.case(
+          st.played(),
+          "",
+          fun (p, _) ->
+            begin
+              let (m, _) = p
+              m["rid"]
+            end
+        )
+      pending =
+        list.map(pending_track, requests(st, on_air))
+      upcoming = [
+        ...list.map(
+          request.uri,
+          [...waiting(st.shuffle, on_air), ...st.shuffle.queue()]
+        ),
+        ...st.shuffle.remaining_files()
+      ]
+      shuffle = list.map(fun (f) -> entry(f, []), upcoming)
+      played = list.map(played_track, st.played())
+      {
+        now = list.case(played, null, fun (t, _) -> t),
+        next = list.prefix(50, [...pending, ...shuffle]),
+        history = list.tl(played)
+      }
+    end
+
+    # Writes the body by hand rather than through `res.json`, which would pin `res`
+    # to this one JSON shape for the handler sharing it.
+    def fail(res, code, msg) =
+      res.status_code(code)
+      res.content_type("application/json; charset=utf-8")
+      res.data(json.stringify(compact = true, {error = msg}))
+    end
+
+    def route(method, suffix, handler) =
+      harbor.http.register(
+        port = control_port,
+        method = method,
+        "/stations/:mount" ^ suffix,
+        fun (req, res) ->
+          begin
+            st = list.assoc.nullable(req.query["mount"], stations())
+            if
+              null.defined(st)
+            then
+              handler(null.get(st), req, res)
+            else
+              fail(res, 404, "no such station")
+            end
+          end
+      )
+    end
+
+    route("GET", "/queue", fun (st, _, res) -> res.json(queue_json(st)))
+
+    route(
+      "GET",
+      "/tracks",
+      fun (st, _, res) ->
+        res.json(
+          list.map(
+            fun (f) -> entry(f, []),
+            list.sort(fun (a, b) -> if a < b then -1 elsif a > b then 1 else 0 end, st.known())
+          )
+        )
+    )
+
+    route(
+      "POST",
+      "/skip",
+      fun (st, _, res) ->
+        begin
+          st.aired.skip()
+          res.status_code(204)
+        end
+    )
+
+    route(
+      "POST",
+      "/back",
+      fun (st, _, res) ->
+        begin
+          played = st.played()
+          if
+            list.length(played) < 2
+          then
+            fail(res, 409, "nothing to go back to")
+          else
+            let (previous, _) = list.nth(played, 1)
+            st.replay.push(request.create(previous["filename"]))
+            st.aired.skip()
+            res.status_code(204)
+          end
+        end
+    )
+
+    route(
+      "POST",
+      "/push",
+      fun (st, req, res) ->
+        begin
+          wanted =
+            try
+              let json.parse (body : {file: string}) = req.body()
+              body.file
+            catch _ do
+              ""
+            end
+          if
+            list.mem(wanted, st.known())
+          then
+            r = request.create(wanted)
+            st.pending.push(r)
+            res.json({rid = request.id(r)})
+          else
+            fail(res, 404, "not a track of this station")
+          end
+        end
+    )
+
+    route(
+      "POST",
+      "/drop/:rid",
+      fun (st, req, res) ->
+        begin
+          rid = int_of_string(default = -1, req.query["rid"])
+          if
+            list.exists(fun (r) -> request.id(r) == rid, requests(st, ""))
+          then
+            st.replay.remove_request_id(rid)
+            st.pending.remove_request_id(rid)
+            # Dropping the request a queue has loaded leaves it empty-handed until
+            # it fetches again, and a track ending in between would skip the queue.
+            st.replay.fetch()
+            st.pending.fetch()
+            res.status_code(204)
+          else
+            fail(res, 404, "no such request")
+          end
+        end
+    )
+
+    output.icecast(
+      %mp3(bitrate = 128),
+      host = "127.0.0.1",
+      port = 8000,
+      password = password,
+      mount = "adanalife",
+      name = "A Dana Life",
+      fallible = true,
+      station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
+    )
+    output.icecast(
+      %mp3(bitrate = 128),
+      host = "127.0.0.1",
+      port = 8000,
+      password = password,
+      mount = "halloween",
+      name = "Halloween",
+      fallible = true,
+      station("halloween", r/^\/music\/(halloween)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
+    )
+    output.icecast(
+      %mp3(bitrate = 128),
+      host = "127.0.0.1",
+      port = 8000,
+      password = password,
+      mount = "keep-it-spooky",
+      name = "Keep it Spooky",
+      fallible = true,
+      station("keep-it-spooky", r/^\/music\/(keep-it-spooky)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)
+    )
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: radio
+    app.kubernetes.io/part-of: tripbot
+  name: radio
+  namespace: prod-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: radio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: cc5eababd3
+        prometheus.io/port: "9599"
+        prometheus.io/scrape: "true"
+      labels:
+        app: radio
+    spec:
+      containers:
+        - command:
+            - sh
+            - -c
+            - c="$(sed -e 's|</icecast>|<mount type="default"><charset>UTF-8</charset></mount></icecast>|' -e 's|<sources>[0-9]*</sources>|<sources>3</sources>|' /etc/icecast.xml)" && printf '%s\n' "$c" > /etc/icecast.xml && p="$(cat /run/radio/password)"; export ICECAST_SOURCE_PASSWORD="$p" ICECAST_ADMIN_PASSWORD="$p" ICECAST_RELAY_PASSWORD="$p"; exec docker-entrypoint icecast -c /etc/icecast.xml
+          image: ghcr.io/libretime/icecast:2.5.0-alpine
+          name: icecast
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            periodSeconds: 10
+            tcpSocket:
+              port: http
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 20m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /run/radio
+              name: run
+        - args:
+            - /etc/radio/radio.liq
+          image: docker.io/savonet/liquidsoap:v2.4.6
+          name: liquidsoap
+          ports:
+            - containerPort: 8001
+              name: control
+            - containerPort: 9599
+              name: metrics
+          readinessProbe:
+            periodSeconds: 10
+            tcpSocket:
+              port: control
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsUser: 100
+          volumeMounts:
+            - mountPath: /run/radio
+              name: run
+            - mountPath: /etc/radio
+              name: config
+              readOnly: true
+            - mountPath: /music
+              name: music
+              readOnly: true
+      initContainers:
+        - command:
+            - sh
+            - -c
+            - head -c 24 /dev/urandom | base64 | tr -d '/+=' > /run/radio/password && chmod 444 /run/radio/password
+          image: ghcr.io/libretime/icecast:2.5.0-alpine
+          name: password
+          resources:
+            limits:
+              memory: 32Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /run/radio
+              name: run
+      nodeSelector:
+        kubernetes.io/hostname: adanalife-minipc
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - emptyDir:
+            medium: Memory
+          name: run
+        - configMap:
+            name: radio-config
+          name: config
+        - name: music
+          persistentVolumeClaim:
+            claimName: obs-music-local
+            readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: radio
+    app.kubernetes.io/part-of: tripbot
+  name: radio
+  namespace: prod-1
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+    - name: control
+      port: 8001
+      targetPort: control
+  selector:
+    app: radio

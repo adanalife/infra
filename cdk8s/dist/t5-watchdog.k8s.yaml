@@ -17,6 +17,60 @@ data:
     urllib.request.urlretrieve(url, dst)
     os.chmod(dst, 0o755)
     print(f"talosctl -> {dst}", flush=True)
+  nodeevent.py: |
+    import datetime
+    import json
+    import os
+    import ssl
+    import urllib.request
+
+    SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+
+    def emit(component, reason, message, timeout=5):
+        # True when the API accepted the Event. Never raises.
+        try:
+            with open(f"{SA}/token") as f:
+                token = f.read().strip()
+            with open(f"{SA}/namespace") as f:
+                ns = f.read().strip()
+            now = datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            body = {
+                "apiVersion": "v1",
+                "kind": "Event",
+                "metadata": {"generateName": f"{component}-", "namespace": ns},
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": ns,
+                    "name": os.environ.get("POD_NAME", component),
+                },
+                "reason": reason,
+                "message": message,
+                "type": "Warning",
+                "source": {"component": component},
+                "firstTimestamp": now,
+                "lastTimestamp": now,
+                "count": 1,
+            }
+            host = os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+            port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+            req = urllib.request.Request(
+                f"https://{host}:{port}/api/v1/namespaces/{ns}/events",
+                data=json.dumps(body).encode(),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            ctx = ssl.create_default_context(cafile=f"{SA}/ca.crt")
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx):
+                return True
+        except Exception as e:
+            print(f"event not written: {e}", flush=True)
+            return False
   t5probe.py: |
     import datetime
     import os
@@ -65,18 +119,33 @@ data:
         return [ln for ln in lines if ln.split()[-1] not in (".", "..", "NAME")]
 
 
+    OK, FAULT, UNKNOWN = "ok", "FAULT", "UNKNOWN"
+
+
+    def classify(rc, stdout, stderr):
+        # (state, detail). Only EIO and an empty listing are the disk; any other
+        # error is the probe failing to ask, which must never reboot the node.
+        if rc != 0:
+            err = stderr.strip()
+            state = FAULT if "input/output error" in err.lower() else UNKNOWN
+            return state, f"list rc={rc} err={err!r}"
+        found = entries(stdout)
+        if not found:
+            return FAULT, "list returned no entries — mount is gone"
+        return OK, f"{len(found)} entries"
+
+
     def probe():
-        # (healthy, detail). Unreadable and empty both count as a fault.
         try:
             r = talos("list", PATH, timeout=PROBE_TIMEOUT)
         except Exception as e:
-            return False, f"list FAILED: {e}"
-        if r.returncode != 0:
-            return False, f"list rc={r.returncode} err={r.stderr.strip()!r}"
-        found = entries(r.stdout)
-        if not found:
-            return False, "list returned no entries — mount is gone"
-        return True, f"{len(found)} entries"
+            return UNKNOWN, f"list FAILED: {e}"
+        return classify(r.returncode, r.stdout, r.stderr)
+
+
+    def step(fails, state):
+        # The fault streak after one probe: an UNKNOWN holds it where it was.
+        return 0 if state == OK else fails + 1 if state == FAULT else fails
 
 
     def may_reboot(fails, elapsed, triggered):
@@ -92,6 +161,9 @@ data:
             log(f"!! TRIGGER ({reason}) — DRY_RUN, would run: {cmd}")
             return False
         log(f"!! TRIGGER ({reason}) — ARMED, running: {cmd}")
+        from nodeevent import emit
+
+        emit("t5-watchdog", "NodeReboot", f"rebooting {NODE}: {reason}")
         try:
             r = talos("reboot", timeout=REBOOT_TIMEOUT)
             log(f"talosctl rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr.strip()!r}")
@@ -109,6 +181,20 @@ data:
         assert not may_reboot(CONFIRM, GRACE - 1, False), "fires inside the startup grace"
         assert not may_reboot(CONFIRM, GRACE + 1, True), "fires twice after latching"
         assert may_reboot(CONFIRM, GRACE + 1, False), "never fires"
+        # Failure classes: only EIO and an empty mount are the disk.
+        eio = "rpc error: open /var/mnt/data: input/output error"
+        assert classify(1, "", eio)[0] == FAULT
+        assert classify(0, ".\n", "")[0] == FAULT
+        assert classify(0, ".\npvc-abc\n", "")[0] == OK
+        for err in ("rpc error: code = Unavailable desc = connection refused",
+                    "rpc error: code = DeadlineExceeded desc = context deadline exceeded"):
+            assert classify(1, "", err)[0] == UNKNOWN, err
+        # An UNKNOWN neither counts toward the reboot nor clears a fault streak.
+        assert step(2, UNKNOWN) == 2 and step(2, FAULT) == 3 and step(2, OK) == 0
+        fails = 0
+        for _ in range(CONFIRM * 10):
+            fails = step(fails, UNKNOWN)
+        assert not may_reboot(fails, GRACE + 1, False), "API timeouts reboot the node"
         # The real single-node shape: no header, `.` first, then the dirents.
         assert entries(".\narc-work\nlocal-path-provisioner\n") == [
             "arc-work",
@@ -134,14 +220,17 @@ data:
             f"{GRACE:.0f}s of uptime). DRY_RUN={DRY_RUN}"
         )
         fails = 0
+        unknown = 0
         triggered = False
         while True:
-            healthy, detail = probe()
-            fails = 0 if healthy else fails + 1
+            state, detail = probe()
+            fails = step(fails, state)
+            unknown = unknown + 1 if state == UNKNOWN else 0
             elapsed = time.monotonic() - START
             log(
-                f"{PATH} {'ok' if healthy else 'FAULT'}: {detail}"
+                f"{PATH} {state}: {detail}"
                 + (f" [{fails}/{CONFIRM}]" if fails else "")
+                + (f" [unknown x{unknown}, not counted]" if unknown else "")
             )
             if may_reboot(fails, elapsed, triggered):
                 triggered = reboot(f"{PATH} unreadable x{fails}")
@@ -154,6 +243,48 @@ data:
         selftest()
     else:
         main()
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: t5-watchdog
+    app.kubernetes.io/part-of: infra
+  name: t5-watchdog
+  namespace: node-watchdog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t5-watchdog
+subjects:
+  - kind: ServiceAccount
+    name: t5-watchdog
+    namespace: node-watchdog
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -193,7 +324,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: 35d932477f
+        adanalife.dev/config-hash: 761284044a
       labels:
         app: t5-watchdog
     spec:
@@ -224,6 +355,10 @@ spec:
               value: "false"
             - name: HOME
               value: /tmp
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           image: python:3.14-alpine
           name: t5-watchdog
           resources:
@@ -281,6 +416,7 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
+      serviceAccountName: t5-watchdog
       volumes:
         - configMap:
             name: t5-watchdog

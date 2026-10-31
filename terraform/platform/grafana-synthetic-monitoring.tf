@@ -26,9 +26,9 @@ locals {
 }
 
 # Quota. The free tier covers 100k API test executions/month and bills per
-# probe per execution, so three probes cost 21.9k/month at a 120s pace and
-# 13.1k at 600s. The checks below come to ~92k. A fourth check wants a slower
-# pace on all of them rather than another 13k on top; past 100k it is $5/10k.
+# probe per execution, so one probe costs 14.6k/month at a 180s pace, 8.8k at
+# 300s and 4.4k at 600s. The checks below come to ~92k. Another check wants a
+# slower pace on all of them rather than more on top; past 100k it is $5/10k.
 
 # The target is the leaderboard endpoint and not the page, because it is the
 # one request that exercises both halves at once: Pages serving the deploy, and
@@ -41,14 +41,14 @@ locals {
 # deployment that is missing the whole API -- which is not hypothetical:
 # production answers /api/day exactly that way today, having never had it.
 #
-# Two minutes rather than one: the game is the endpoint a visitor is most
-# likely to be sitting in front of, so it gets the fastest pace the quota above
-# will carry.
+# Three minutes: the game is the endpoint a visitor is most likely to be
+# sitting in front of, so it gets the fastest pace the quota above will carry
+# alongside the channel-live checks.
 resource "grafana_synthetic_monitoring_check" "guessr" {
   job       = "guessr"
   target    = "https://guessr.dana.lol/api/leaderboard?board=daily"
   enabled   = true
-  frequency = 120000
+  frequency = 180000
   timeout   = 10000
   probes    = local.sm_probes
   labels = {
@@ -120,30 +120,22 @@ resource "grafana_synthetic_monitoring_check" "whalecore" {
 }
 
 # The other half of guessr that can break without the game noticing: the login
-# on /admin. That surface is fronted by Cloudflare Access on the pages.dev
-# hostname and by a JWT middleware on the custom domain, and the middleware
-# reads ACCESS_TEAM_DOMAIN and ACCESS_AUD from Pages bindings typed in by hand
-# -- terraform cannot write deployment_configs (see the guessr Pages project in
-# terraform/prod-1). A value dropped by a rollback or edited in the dashboard
-# leaves the middleware with no application to check a login against, and it
-# answers 503: closed to a stranger, and closed to Dana too.
+# on /admin. The game gates that surface on a Twitch bearer token and answers
+# 401 to a request that carries none -- closed to a stranger, open to Dana once
+# he signs in. 401 is therefore the healthy answer, not 200: a 2xx is the admin
+# surface answering a stranger, and anything else is the gate having moved (a
+# 302 is Cloudflare Access back in front of it; a 5xx is the Worker down). The
+# body assertion pins the refusal to *the game's* gate rather than any other
+# 401 on the path.
 #
-# guessr's smoke.sh asserts exactly this on every deploy, which is the gap this
-# fills -- a binding that rots between releases stays invisible until the next
+# guessr's smoke.sh asserts the same on every deploy, which is the gap this
+# fills -- a gate that rots between releases stays invisible until the next
 # tag.
 #
-# 403 is the healthy answer, not 200: the custom domain is where the middleware
-# refuses a request that reached it without a token. So the status code is the
-# whole signal, and 503 is the failure the check exists to catch. The body
-# assertion pins the refusal to *our* middleware rather than any other 403 on
-# the path -- Cloudflare's WAF or a future Access rule would answer with
-# something else.
-#
-# One probe, not local.sm_probes: a Pages binding is account configuration and
-# fails identically from every region, so the regional diversity the other
-# checks need buys nothing here. Ten minutes, not two, for the same reason --
-# a value typed by hand does not rot mid-hour. Together they cost ~4.4k
-# executions/month against the ~8k the quota note above leaves.
+# One probe, not local.sm_probes: the gate is the same from every region, so
+# the regional diversity the other checks need buys nothing here. Ten minutes,
+# not two, for the same reason. Together they cost ~4.4k executions/month,
+# included in the quota note's total above.
 resource "grafana_synthetic_monitoring_check" "guessr_admin" {
   job       = "guessr-admin"
   target    = "https://guessr.dana.lol/admin/"
@@ -159,8 +151,66 @@ resource "grafana_synthetic_monitoring_check" "guessr_admin" {
     http {
       method                          = "GET"
       ip_version                      = "V4"
-      valid_status_codes              = [403]
-      fail_if_body_not_matches_regexp = ["Access-protected"]
+      valid_status_codes              = [401]
+      fail_if_body_not_matches_regexp = ["sign in with Twitch"]
+    }
+  }
+}
+
+# Is the channel live, asked the way a viewer would. The in-cluster stream
+# rules read series the minipc pushes, so a minipc that cannot reach Grafana
+# Cloud reads as no data, and no data is OK on those rules -- both streams were
+# dark for 74 minutes on 2026-10-15 without `OBS: stream is down` firing. These
+# two depend on nothing in the house. The rule that pages on them is
+# "Every platform is off-air" in grafana-alerts.tf.
+#
+# Neither needs a credential. Twitch serves a channel's preview thumbnail with
+# 200 while it is live and 302s to a placeholder image while it is not, so the
+# check refuses redirects and wants the 200. YouTube's /live path renders the
+# live video while there is one, with a canonical link to its watch page, and
+# the channel page otherwise.
+#
+# One probe each, in the US: the answer is the same from every region, and
+# YouTube can put a consent page in front of a European probe. Five minutes,
+# which the off-air rule's window is sized against.
+resource "grafana_synthetic_monitoring_check" "twitch_live" {
+  job       = "twitch-live"
+  target    = "https://static-cdn.jtvnw.net/previews-ttv/live_user_adanalife_-80x45.jpg"
+  enabled   = true
+  frequency = 300000
+  timeout   = 10000
+  probes    = [data.grafana_synthetic_monitoring_probes.main.probes["NorthVirginia"]]
+  labels = {
+    tier = "production"
+  }
+
+  settings {
+    http {
+      method              = "GET"
+      ip_version          = "V4"
+      no_follow_redirects = true
+      valid_status_codes  = [200]
+    }
+  }
+}
+
+resource "grafana_synthetic_monitoring_check" "youtube_live" {
+  job       = "youtube-live"
+  target    = "https://www.youtube.com/channel/UC8Q7uFC1Xyr2ZnTWOk9Aizg/live"
+  enabled   = true
+  frequency = 300000
+  timeout   = 10000
+  probes    = [data.grafana_synthetic_monitoring_probes.main.probes["NorthVirginia"]]
+  labels = {
+    tier = "production"
+  }
+
+  settings {
+    http {
+      method                          = "GET"
+      ip_version                      = "V4"
+      valid_status_codes              = [200]
+      fail_if_body_not_matches_regexp = ["<link rel=\"canonical\" href=\"https://www\\.youtube\\.com/watch\\?v="]
     }
   }
 }

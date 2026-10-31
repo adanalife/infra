@@ -62,8 +62,9 @@ for name in targets:
                 app, f"{name}-mediamtx-{platform}", env=env, platform=platform
             )
     # dashcam NFS PV (nfs envs only) — cluster-scoped host-specific bootstrap
-    # infra, its own deploy unit OUTSIDE Argo (the apps/data ApplicationSets
-    # don't glob it). Applied via `task k8s:<env>:nfs-pv`. Committed dist
+    # infra, its own deploy unit the apps/data ApplicationSets don't glob (the
+    # manual-sync `nfs-pv` Application only watches it). Applied via
+    # `task k8s:<env>:nfs-pv`. Committed dist
     # carries NFS placeholders; the task injects real coords at synth time.
     if env.dashcam_mode == "nfs":
         NfsPVChart(app, f"{name}-nfs-pv", env=env)
@@ -95,22 +96,7 @@ if not only:
     # selfHeal off: dev autosync still deploys git changes, but a hand `kubectl
     # edit` sticks (Argo shows OutOfSync rather than stomping it) — dev is a
     # scratch env for manual experimentation.
-    ArgoCDChart(
-        app,
-        "argocd-k3d",
-        envs=("development",),
-        autosync_envs=("development",),
-        autosync_holdouts=(),  # the prod OBS holdout is minipc-only
-        selfheal=False,
-        notifications_secret=False,  # dev runs notifications.enabled=false
-        tailscale_ui=False,
-        lan_host=f"argocd.{load_env('development').dns_base}",
-        lan_tls=False,
-        ups_monitor=False,  # the k3d dev cluster can't reach the Synology NUT server
-        t5_watchdog=False,  # no Talos node on the k3d dev cluster to probe or reboot
-        arc=False,  # no runner host on the dev cluster; runners are minipc-only
-        kmsg=False,  # k3d has no Talos API; there is no kernel log to read
-    )
+    ArgoCDChart(app, "argocd-k3d", cluster="k3d")
     # Argo-native delivery of the platform Helm stack — one multi-source Helm
     # Application per release (offline: just Application objects, no rendered
     # charts). MONITOR-ONLY until adopted; see gitops/README.md.

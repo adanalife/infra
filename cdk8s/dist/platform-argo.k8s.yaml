@@ -17,6 +17,7 @@ spec:
     - https://helm.cilium.io
     - https://kubernetes-sigs.github.io/external-dns/
     - https://kubernetes-sigs.github.io/metrics-server/
+    - https://kyverno.github.io/kyverno
     - https://nats-io.github.io/k8s/helm/charts/
     - https://pkgs.tailscale.com/helmcharts
     - https://prometheus-community.github.io/helm-charts
@@ -57,6 +58,106 @@ stringData:
   type: helm
   url: ghcr.io/padok-team/charts
   enableOCI: "true"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: git@github.com:adanalife/infra.git
+    targetRevision: main
+    path: cdk8s/dist
+    directory:
+      include: "{argocd.k8s.yaml,platform-argo.k8s.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - Prune=false
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.target.deletionPolicy
+        - .spec.data[]?.remoteRef.conversionStrategy
+        - .spec.data[]?.remoteRef.decodingStrategy
+        - .spec.data[]?.remoteRef.metadataPolicy
+        - .spec.data[]?.remoteRef.nullBytePolicy
+        - .spec.dataFrom[]?.extract.conversionStrategy
+        - .spec.dataFrom[]?.extract.decodingStrategy
+        - .spec.dataFrom[]?.extract.metadataPolicy
+        - .spec.dataFrom[]?.extract.nullBytePolicy
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nfs-pv
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: git@github.com:adanalife/infra.git
+    targetRevision: main
+    path: cdk8s/dist
+    directory:
+      include: "{prod-1-nfs-pv.k8s.yaml,stage-1-nfs-pv.k8s.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - Prune=false
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - kind: PersistentVolume
+      jsonPointers:
+        - /spec/nfs/server
+        - /spec/nfs/path
+        - /spec/claimRef
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: burrito-config
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: git@github.com:adanalife/infra.git
+    targetRevision: main
+    path: cdk8s/dist
+    directory:
+      include: burrito.k8s.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: burrito
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - Prune=false
+      - SkipDryRunOnMissingResource=true
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.target.deletionPolicy
+        - .spec.data[]?.remoteRef.conversionStrategy
+        - .spec.data[]?.remoteRef.decodingStrategy
+        - .spec.data[]?.remoteRef.metadataPolicy
+        - .spec.data[]?.remoteRef.nullBytePolicy
+        - .spec.dataFrom[]?.extract.conversionStrategy
+        - .spec.dataFrom[]?.extract.decodingStrategy
+        - .spec.dataFrom[]?.extract.metadataPolicy
+        - .spec.dataFrom[]?.extract.nullBytePolicy
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -169,7 +270,7 @@ spec:
   sources:
     - repoURL: ghcr.io/padok-team/charts
       chart: burrito
-      targetRevision: 0.13.0
+      targetRevision: 0.14.0
       helm:
         releaseName: burrito
         valueFiles:
@@ -209,6 +310,11 @@ spec:
     - repoURL: git@github.com:adanalife/infra.git
       targetRevision: main
       ref: values
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      path: k8s/argo-workflows
+      directory:
+        include: console-rbac.yml
   destination:
     server: https://kubernetes.default.svc
     namespace: argo-workflows
@@ -276,6 +382,43 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: arc-runners
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://kyverno.github.io/kyverno
+      chart: kyverno
+      targetRevision: 3.9.1
+      helm:
+        releaseName: kyverno
+        valueFiles:
+          - $values/k8s/kyverno/values.yml
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      ref: values
+    - repoURL: git@github.com:adanalife/infra.git
+      targetRevision: main
+      path: k8s/kyverno
+      directory:
+        include: policies.yml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
   syncPolicy:
     syncOptions:
       - CreateNamespace=true

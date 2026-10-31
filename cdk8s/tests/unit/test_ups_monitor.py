@@ -13,23 +13,11 @@ from cdk8s import Chart
 from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import ArgoCDChart
+from adanalife_k8s.constructs.talosctl import TALOSCTL_VERSION
 from adanalife_k8s.constructs.ups_monitor import IMAGE, UpsMonitor
 from adanalife_k8s.naming import CONFIG_HASH_ANNOTATION, config_hash
 
-_DEV = dict(
-    envs=("development",),
-    autosync_envs=("development",),
-    autosync_holdouts=(),
-    selfheal=False,
-    notifications_secret=False,
-    tailscale_ui=False,
-    lan_host="argocd.dev.whereisdana.today",
-    lan_tls=False,
-    ups_monitor=False,
-    t5_watchdog=False,
-    arc=False,
-    kmsg=False,
-)
+_DEV = dict(cluster="k3d")
 
 
 def _synth():
@@ -149,7 +137,7 @@ def test_targets_only_the_minipc_node():
 def test_initcontainer_fetches_pinned_talosctl():
     init = _deploy(_synth())["spec"]["template"]["spec"]["initContainers"][0]
     url = next(e["value"] for e in init["env"] if e["name"] == "TALOSCTL_URL")
-    assert "v1.13.2" in url and "talosctl-linux-amd64" in url
+    assert TALOSCTL_VERSION in url and "talosctl-linux-amd64" in url
 
 
 def test_security_context_forbids_privilege_and_host_access():
@@ -238,3 +226,16 @@ def test_pod_template_carries_the_config_digest():
     cm = next(o for o in objs if o["kind"] == "ConfigMap")
     annotations = _deploy(objs)["spec"]["template"]["metadata"]["annotations"]
     assert annotations[CONFIG_HASH_ANNOTATION] == config_hash(cm["data"])
+
+
+def test_shutdown_leaves_an_event_first():
+    # The Event names the trigger before the power-off; the pod runs as the
+    # ServiceAccount whose Role can create it.
+    objs = _synth()
+    assert 'emit("ups-monitor", "NodeShutdown"' in _script(objs)
+    pod = _deploy(objs)["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "ups-monitor"
+    role = next(o for o in objs if o["kind"] == "Role")
+    assert role["rules"] == [
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create"]}
+    ]

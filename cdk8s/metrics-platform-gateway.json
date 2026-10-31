@@ -1,0 +1,19 @@
+{
+  "_comment": "Generated from internal/metrics via `task generate` — do not hand-edit. Every Prometheus series name the gateway's own collectors export (histograms split into _bucket/_count/_sum; the standard go_*/process_* collectors are not listed). infra syncs it so an alert rule naming a gateway metric that no longer exists fails pre-merge.",
+  "metrics": [
+    "platform_gateway_build_info",
+    "platform_gateway_chat_connected",
+    "platform_gateway_chat_sent_total",
+    "platform_gateway_helix_ratelimit_limit",
+    "platform_gateway_helix_ratelimit_remaining",
+    "platform_gateway_metadata_drift",
+    "platform_gateway_platform_enabled",
+    "platform_gateway_request_duration_seconds_bucket",
+    "platform_gateway_request_duration_seconds_count",
+    "platform_gateway_request_duration_seconds_sum",
+    "platform_gateway_requests_total",
+    "platform_gateway_sentry_events_dropped_total",
+    "platform_gateway_up",
+    "platform_gateway_upstream_errors_total"
+  ]
+}

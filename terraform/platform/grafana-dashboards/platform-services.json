@@ -1,7 +1,7 @@
 {
-  "title": "14 — Platform Services",
+  "title": "13 — Platform Services",
   "uid": "platform-services",
-  "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium"],
+  "tags": ["platform", "external-dns", "cert-manager", "external-secrets", "cilium", "traefik"],
   "schemaVersion": 39,
   "timezone": "browser",
   "refresh": "1m",
@@ -36,7 +36,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(external_dns_registry_endpoints_per_zone{cluster=~\"$cluster\"})" }
+        { "refId": "A", "expr": "sum(external_dns_registry_endpoints_total{cluster=~\"$cluster\"})" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -48,7 +48,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(external_dns_source_endpoints_per_zone{cluster=~\"$cluster\"})" }
+        { "refId": "A", "expr": "sum(external_dns_source_endpoints_total{cluster=~\"$cluster\"})" }
       ],
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
@@ -111,8 +111,8 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 5, "w": 12, "h": 7 },
       "targets": [
-        { "refId": "A", "expr": "sum(external_dns_source_endpoints_per_zone{cluster=~\"$cluster\"})", "legendFormat": "source" },
-        { "refId": "B", "expr": "sum(external_dns_registry_endpoints_per_zone{cluster=~\"$cluster\"})", "legendFormat": "registry" }
+        { "refId": "A", "expr": "sum(external_dns_source_endpoints_total{cluster=~\"$cluster\"})", "legendFormat": "source" },
+        { "refId": "B", "expr": "sum(external_dns_registry_endpoints_total{cluster=~\"$cluster\"})", "legendFormat": "registry" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
     },
@@ -207,7 +207,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 13, "w": 6, "h": 4 },
       "targets": [
-        { "refId": "A", "expr": "sum(increase(certmanager_acme_client_request_count{cluster=~\"$cluster\", status!~\"2..\"}[1h]))" }
+        { "refId": "A", "expr": "sum(increase(certmanager_http_acme_client_request_count{cluster=~\"$cluster\", status!~\"2..\"}[1h]))" }
       ],
       "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": {
@@ -274,7 +274,7 @@
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
       "targets": [
-        { "refId": "A", "expr": "sum by (status) (rate(certmanager_acme_client_request_count{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
+        { "refId": "A", "expr": "sum by (status) (rate(certmanager_http_acme_client_request_count{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{status}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
     },
@@ -339,7 +339,7 @@
       "id": 304,
       "type": "stat",
       "title": "ClusterSecretStore ready",
-      "description": "Should be 1 (the aws-secretsmanager store). 0 = ESO can't auth to AWS SM — check eso-aws-credentials Secret.",
+      "description": "Should be 1 (the aws-parameterstore-cluster store). 0 = ESO can't auth to AWS SSM — check eso-aws-credentials Secret.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 18, "y": 26, "w": 6, "h": 4 },
       "targets": [
@@ -642,6 +642,224 @@
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 700,
+      "type": "row",
+      "title": "kyverno (admission policy audit)",
+      "gridPos": { "x": 0, "y": 66, "w": 24, "h": 1 }
+    },
+    {
+      "id": 701,
+      "type": "stat",
+      "title": "Policies with failures (last 2h)",
+      "description": "Policies whose background scan failed at least one resource in the last 2h. The reports controller rescans every resource hourly (--backgroundScanInterval=1h), so a 2h window always spans a full scan. In Audit mode a failure only reports; a policy that holds at zero is a candidate for Enforce. Which resources failed is in `kubectl get polr -A` — the metric carries the resource kind, not its name.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 67, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(sum by (policy_name) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"fail\"}[2h])) > 0) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 702,
+      "type": "stat",
+      "title": "Admission requests denied (last 1h)",
+      "description": "Requests a policy in Enforce mode refused. Zero while every policy is in Audit; once one is flipped, a nonzero reading is a workload being blocked from rolling out.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 71, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(kyverno_admission_requests_total{cluster=~\"$cluster\", request_allowed=\"false\"}[1h])) or vector(0)" }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 703,
+      "type": "table",
+      "title": "Background-scan results by policy (last 2h)",
+      "description": "Pass and fail evaluations per policy across the scans in the window. These count evaluations, not distinct resources — one or two hourly scans land in 2h — so read Fail as zero / nonzero. Mode is Audit or Enforce.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 67, "w": 9, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"pass\"}[2h]))", "format": "table", "instant": true },
+        { "refId": "B", "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_validating_policy_results_total{cluster=~\"$cluster\", execution_cause=\"background_scan\", result=\"fail\"}[2h]))", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "indexByName": { "policy_name": 0, "policy_validation_mode": 1, "Value #A": 2, "Value #B": 3 },
+            "renameByName": { "policy_name": "Policy", "policy_validation_mode": "Mode", "Value #A": "Pass", "Value #B": "Fail" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Fail" },
+            "properties": [
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 704,
+      "type": "timeseries",
+      "title": "Admission webhook latency (p95)",
+      "description": "How long Kyverno takes to answer the apiserver. Its webhooks are fail-open with a 10s timeout, so latency approaching that is every pod create and update in the cluster waiting on it — the cost of the policy engine, independent of any verdict.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 15, "y": 67, "w": 9, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, request_webhook) (rate(kyverno_admission_review_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))", "legendFormat": "{{request_webhook}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 800,
+      "type": "row",
+      "title": "traefik (ingress)",
+      "gridPos": { "x": 0, "y": 75, "w": 24, "h": 1 }
+    },
+    {
+      "id": 801,
+      "type": "stat",
+      "title": "Request rate (5m)",
+      "description": "Everything arriving on the websecure entrypoint — every Ingress in the cluster fronts through it. The web entrypoint only redirects to https and the traefik entrypoint is the dashboard, so websecure is the number that matters.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 802,
+      "type": "stat",
+      "title": "5xx share (5m)",
+      "description": "Fraction of websecure responses that were 5xx. A 502/503/504 here is traefik failing to reach a backend pod (rollout gap, readiness flap, playout/OBS parked), not an app error — the app's own 5xx counts live on its service dashboard.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 6, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\", code=~\"5..\"}[5m])) / sum(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\"}[5m]))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 }]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 803,
+      "type": "stat",
+      "title": "p95 latency (5m)",
+      "description": "Entrypoint-level, so it includes the backend's own time. The console's long-polling and the gateway's EventSub callbacks sit in this histogram too, which is why it is a trend to watch rather than a threshold to page on.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(traefik_entrypoint_request_duration_seconds_bucket{cluster=~\"$cluster\", entrypoint=\"websecure\"}[5m])))" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 2 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 804,
+      "type": "stat",
+      "title": "Last config reload",
+      "description": "Age of traefik's last successful dynamic-config reload (an Ingress, Service or cert change). It only moves when something changes, so hours is normal; a reload that keeps failing shows as the age climbing while Ingresses are being edited.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 18, "y": 76, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(traefik_config_last_reload_success{cluster=~\"$cluster\"})" }
+      ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 805,
+      "type": "timeseries",
+      "title": "Requests by status class",
+      "description": "websecure requests per second, bucketed by the first digit of the status code. code=\"0\" is a connection that closed before any response was written (client hang-ups, aborted TLS handshakes) and is left out.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 0, "y": 80, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (class) (label_replace(rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\", entrypoint=\"websecure\", code=~\"[1-5]..\"}[5m]), \"class\", \"${1}xx\", \"code\", \"(.)..\"))", "legendFormat": "{{class}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0, "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "3xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      }
+    },
+    {
+      "id": 806,
+      "type": "timeseries",
+      "title": "Request rate by router (top 8)",
+      "description": "One router per Ingress host; the name is traefik's own (entrypoint-namespace-ingress-host). The console dominates by two orders of magnitude because its pages poll, so the others only read on a log scale.",
+      "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
+      "gridPos": { "x": 12, "y": 80, "w": 12, "h": 7 },
+      "targets": [
+        { "refId": "A", "expr": "topk(8, sum by (router) (rate(traefik_router_requests_total{cluster=~\"$cluster\"}[5m])))", "legendFormat": "{{router}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0, "custom": { "scaleDistribution": { "type": "log", "log": 10 } } },
+        "overrides": []
       }
     }
   ]

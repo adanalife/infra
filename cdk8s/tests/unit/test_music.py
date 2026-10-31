@@ -18,7 +18,7 @@ from cdk8s import Testing as K8sTesting
 
 from adanalife_k8s.charts import MusicLocalizeChart, SupportingChart
 from adanalife_k8s.constructs.music import (
-    _AUDIO_EXTS,
+    AUDIO_EXTS,
     _LOCALIZE_SCRIPT,
     INDEX_CONFIGMAP,
     INDEX_KEY,
@@ -149,19 +149,23 @@ def test_index_names_pod_paths_and_skips_what_is_not_a_track(tmp_path):
     (album / "01 Intro.mp3").write_text("track")
     (album / "cover.jpg").write_text("art")
     # The NAS is a Synology, which litters every directory with an @eaDir of
-    # sidecars named `<track>.mp3@SynoEAStream`. They copy across like anything
-    # else; what keeps them out of the index is that the extension test is on the
-    # whole name, so they match neither .mp3 nor anything else in _AUDIO_EXTS.
+    # sidecars named `<track>.mp3@SynoEAStream`. The mirror prunes those dirs,
+    # and removes one an earlier run copied, so liquidsoap's playlist scan never
+    # sees a file it can't decode.
     (album / "@eaDir").mkdir()
     (album / "@eaDir" / "01 Intro.mp3@SynoEAStream").write_text("junk")
     # The carhum lives at the share root, outside any album — it is the fallback
     # bed baked into the OBS image, not something the album bed should offer.
     (src / "carsounds.m4a").write_text("drone")
     dst.mkdir()
+    stale = dst / "streambeats-synthwave-lone wolf" / "@eaDir"
+    stale.mkdir(parents=True)
+    (stale / "02 Old.mp3@SynoEAStream").write_text("junk")
 
     index = _index(src, dst, tmp_path)
 
     assert list(index) == ["streambeats-synthwave-lone wolf"]
+    assert not (dst / "streambeats-synthwave-lone wolf" / "@eaDir").exists()
     # Absolute paths as OBS sees them, not paths on the share or in this Job —
     # tripbot hands them to OBS, which resolves them against its own mount.
     assert index["streambeats-synthwave-lone wolf"] == [
@@ -188,7 +192,7 @@ def test_index_covers_every_audio_extension_the_bed_plays(tmp_path):
     src, dst = tmp_path / "nfs", tmp_path / "local"
     album = src / "mixed"
     album.mkdir(parents=True)
-    for i, ext in enumerate(_AUDIO_EXTS):
+    for i, ext in enumerate(AUDIO_EXTS):
         (album / f"{i:02d} track.{ext}").write_text("track")
     dst.mkdir()
 
@@ -196,7 +200,7 @@ def test_index_covers_every_audio_extension_the_bed_plays(tmp_path):
 
     # The find expression is written out in the script; this is what stops it
     # drifting from the constant tripbot's bin/stage-streambeats agrees with.
-    assert len(index["mixed"]) == len(_AUDIO_EXTS)
+    assert len(index["mixed"]) == len(AUDIO_EXTS)
 
 
 def test_index_is_rebuilt_from_the_local_copy_not_the_share(tmp_path):

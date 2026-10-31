@@ -359,6 +359,73 @@ data:
       }
     }
 ---
+apiVersion: config.terraform.padok.cloud/v1alpha1
+kind: TerraformLayer
+metadata:
+  name: prod-1-data
+  namespace: burrito
+spec:
+  path: terraform/prod-1-data
+  branch: main
+  terraform:
+    version: 1.15.2
+  repository:
+    name: infra
+    namespace: burrito
+  remediationStrategy:
+    autoApply: false
+  overrideRunnerSpec:
+    serviceAccountName: burrito-runner
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: TF_PLUGIN_CACHE_DIR
+        value: /var/mnt/data/burrito-plugin-cache
+    envFrom:
+      - secretRef:
+          name: burrito-aws-prod
+    initContainers:
+      - name: chown-plugin-cache
+        image: ghcr.io/adanalife/mirror/ubuntu:24.04
+        command:
+          - chown
+          - 65532:65532
+          - /var/mnt/data/burrito-plugin-cache
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+          - name: plugin-cache
+            mountPath: /var/mnt/data/burrito-plugin-cache
+    volumes:
+      - name: plugin-cache
+        hostPath:
+          path: /var/mnt/data/burrito-plugin-cache
+          type: DirectoryOrCreate
+    volumeMounts:
+      - name: plugin-cache
+        mountPath: /var/mnt/data/burrito-plugin-cache
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: burrito-aws-prod
+  namespace: burrito
+spec:
+  data:
+    - remoteRef:
+        key: /k8s/burrito/prod-access-key-id
+      secretKey: AWS_ACCESS_KEY_ID
+    - remoteRef:
+        key: /k8s/burrito/prod-secret-access-key
+      secretKey: AWS_SECRET_ACCESS_KEY
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-parameterstore-cluster
+  target:
+    creationPolicy: Owner
+    name: burrito-aws-prod
+---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:

@@ -11,17 +11,14 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
-    "pyyaml>=6.0.3",  # already transitive via kubernetes; named so a dist-reading test can rely on it
-    "kubernetes>=36.0.3",
+    "pyyaml>=6.0.3",  # a dist-reading test relies on it
 ]
 
 [tool.uv]
 package = false
 
 [tool.pytest.ini_options]
-# Default run = synth-time tests only (unit + parity + contract). The
-# integration suite needs a live cluster with the cdk8s manifests applied, so
-# it's opt-in: `uv run pytest tests/integration --env stage-1` (an explicit path
-# arg overrides testpaths). Keeps the default run + CI offline.
+# Synth-time tests only (unit + parity + contract): no cluster, so CI runs them
+# offline. Live health is Argo's to report.
 testpaths = ["tests/unit"]
 pythonpath = ["."]

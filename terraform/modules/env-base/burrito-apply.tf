@@ -33,13 +33,9 @@ resource "aws_iam_access_key" "burrito_apply" {
   pgp_key = "keybase:adanalife"
 }
 
-data "aws_iam_policy" "burrito_apply_admin" {
-  name = "AdministratorAccess"
-}
-
 resource "aws_iam_user_policy_attachment" "burrito_apply_admin" {
   user       = aws_iam_user.burrito_apply.name
-  policy_arn = data.aws_iam_policy.burrito_apply_admin.arn
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
 # The one guardrail that survives an admin attachment, and it is worth keeping:
@@ -60,6 +56,8 @@ data "aws_iam_policy_document" "burrito_apply_deny_sensitive_parameters" {
     resources = [
       "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/obs/*",
       "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/grafana-cloud-metrics-write",
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/external-dns/*",
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/k8s/burrito/*-secret-access-key",
     ]
   }
 }

@@ -35,7 +35,7 @@ def _cluster(objs):
     return _by(objs, "Cluster", "pg")[0]
 
 
-# --- env gate: stage-1 only until the PITR drill passes ---
+# --- env gate: the isolated data envs ---
 
 
 def test_isolated_data_charts_emit_cnpg():
@@ -45,8 +45,8 @@ def test_isolated_data_charts_emit_cnpg():
         assert bool(_by(objs, "Cluster")) is expected
         assert bool(_by(objs, "ObjectStore")) is expected
         assert bool(_by(objs, "ScheduledBackup")) is expected
-        # the legacy StatefulSet stays in both — side-by-side migration
-        assert _by(objs, "StatefulSet", "postgres")
+        # the Cluster replaces the StatefulSet outright
+        assert not _by(objs, "StatefulSet", "postgres")
 
 
 # --- the Cluster spec ---
@@ -185,3 +185,11 @@ def test_wal_s3_secret_renders_the_barman_credential_keys():
 def test_everything_lands_in_the_data_namespace():
     for obj in _synth("stage-1"):
         assert obj["metadata"]["namespace"] == "stage-1-data"
+
+
+def test_only_prods_database_takes_the_prod_stream_tier():
+    # At priority 0 prod's own stream pods could preempt prod's database.
+    for env_name, expected in (("prod-1", "prod-stream"), ("stage-1", None)):
+        app = K8sTesting.app()
+        objs = K8sTesting.synth(DataChart(app, "t", env=load_env(env_name)))
+        assert _cluster(objs)["spec"].get("priorityClassName") == expected

@@ -1,10 +1,8 @@
 """Postgres construct tests.
 
-The load-bearing assertion is the prod-1 volumeClaimTemplate: this construct is
-applied via SSA to ADOPT the live prod StatefulSet that owns 50Gi of
-irreplaceable data, so the VCT (50Gi / local-path-retain), the StatefulSet
-name, serviceName, and selector/matchLabels must match the live spec exactly —
-a drift would risk a StatefulSet replacement and data loss.
+The StatefulSet renders only where the CNPG `pg` Cluster doesn't (development,
+local); its name, serviceName, selector and volumeClaimTemplate are immutable,
+so a drift there is a StatefulSet replacement.
 """
 
 from cdk8s import Chart
@@ -29,24 +27,21 @@ def _sts(objs):
     return _by(objs, "StatefulSet", "postgres")[0]
 
 
-# --- the SSA-adoption guard: prod VCT must be EXACTLY 50Gi / local-path-retain ---
+# --- cnpg envs: no StatefulSet; the CronJob's credentials stay ---
 
 
-def test_prod_volume_claim_template_is_50gi_retain():
-    sts = _sts(_synth("prod-1"))
-    vcts = sts["spec"]["volumeClaimTemplates"]
-    assert len(vcts) == 1
-    vct = vcts[0]
-    assert vct["metadata"]["name"] == "postgres-data"
-    assert vct["spec"]["accessModes"] == ["ReadWriteOnce"]
-    # The two values whose drift would orphan/replace the live data volume.
-    assert vct["spec"]["resources"]["requests"]["storage"] == "50Gi"
-    assert vct["spec"]["storageClassName"] == "local-path-retain"
+def test_cnpg_envs_render_no_statefulset_or_service():
+    for e in ("prod-1", "stage-1"):
+        objs = _synth(e)
+        assert not _by(objs, "StatefulSet", "postgres")
+        assert not _by(objs, "Service", "postgres")
+        # the backup CronJob (prod) envFroms it, against pg-rw
+        assert _by(objs, "ExternalSecret", "postgres-credentials")
 
 
 def test_statefulset_immutable_join_keys_match_render():
     # name / serviceName / selector / pod labels are the immutable adoption keys.
-    sts = _sts(_synth("prod-1"))
+    sts = _sts(_synth("development"))
     assert sts["metadata"]["name"] == "postgres"
     assert sts["spec"]["serviceName"] == "postgres"
     assert sts["spec"]["selector"]["matchLabels"] == {"app": "postgres"}
@@ -55,7 +50,7 @@ def test_statefulset_immutable_join_keys_match_render():
 
 
 def test_headless_service_matches_render():
-    svc = _by(_synth("prod-1"), "Service", "postgres")[0]
+    svc = _by(_synth("development"), "Service", "postgres")[0]
     assert svc["spec"]["clusterIP"] == "None"
     assert svc["spec"]["selector"] == {"app": "postgres"}
     port = svc["spec"]["ports"][0]
@@ -68,7 +63,7 @@ def test_headless_service_matches_render():
 
 
 def test_container_spec_matches_render():
-    c = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["containers"][0]
+    c = _sts(_synth("development"))["spec"]["template"]["spec"]["containers"][0]
     assert c["image"] == "ghcr.io/adanalife/mirror/pgvector:pg16"
     assert c["securityContext"]["allowPrivilegeEscalation"] is False
     assert c["ports"][0] == {"name": "postgres", "containerPort": 5432}
@@ -89,7 +84,7 @@ def test_container_spec_matches_render():
     assert "subPath" not in mount
     assert {"name": "PGDATA", "value": "/var/lib/postgresql/data/pgdata"} in c["env"]
     # pod-level seccomp hardening
-    pod_sc = _sts(_synth("prod-1"))["spec"]["template"]["spec"]["securityContext"]
+    pod_sc = _sts(_synth("development"))["spec"]["template"]["spec"]["securityContext"]
     assert pod_sc["seccompProfile"]["type"] == "RuntimeDefault"
 
 
