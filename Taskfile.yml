@@ -167,20 +167,22 @@ tasks:
   # `kubectl config use-context` needed.
   k8s:stage:verify-sha:
     desc: verify APP's stage-1 pods run the Deployment's image (APP=tripbot [CONTEXT=…])
+    requires:
+      vars: [APP]
     cmds:
       - task: k8s:_verify-sha
         vars: { ENV: stage-1, APP: '{{.APP}}', CONTEXT: '{{.CONTEXT}}' }
 
   k8s:prod:verify-sha:
     desc: verify APP's prod-1 pods run the Deployment's image (APP=tripbot [CONTEXT=…])
+    requires:
+      vars: [APP]
     cmds:
       - task: k8s:_verify-sha
         vars: { ENV: prod-1, APP: '{{.APP}}', CONTEXT: '{{.CONTEXT}}' }
 
   k8s:_verify-sha:
     internal: true
-    requires:
-      vars: [APP]
     vars:
       CONTEXT: '{{.CONTEXT | default "admin@adanalife-minipc"}}'
     preconditions:
