@@ -5583,8 +5583,9 @@ resource "grafana_rule_group" "synthetic_health" {
   rule {
     name = "A public endpoint is failing its synthetic probes"
     for  = "5m"
-    // Covers every check but guessr-admin, which has its own rule above
-    // because it alerts on a specific status code rather than on reachability.
+    // Covers every check but guessr-admin and the channel-live checks, which
+    // have their own rules: guessr-admin alerts on a specific status code, and
+    // one platform off-air is the in-cluster stream rules' to name.
     // no_data is OK for the same reason as above.
     condition      = "C"
     no_data_state  = "OK"
@@ -5615,7 +5616,7 @@ resource "grafana_rule_group" "synthetic_health" {
         // latching the rule for the whole window, and taking the min across
         // jobs-by-region still catches the regional edge failure the three
         // probe locations exist to find.
-        expr          = "min by (job) (avg_over_time(probe_success{job!=\"guessr-admin\"}[15m]))"
+        expr          = "min by (job) (avg_over_time(probe_success{job!~\"guessr-admin|.+-live\"}[15m]))"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -5635,6 +5636,67 @@ resource "grafana_rule_group" "synthetic_health" {
         conditions = [{
           type      = "query"
           evaluator = { type = "lt", params = [0.5] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
+  // The outside view of "is anyone watching anything": the twitch-live and
+  // youtube-live checks ask the platforms themselves, so this keeps working
+  // when the minipc cannot reach Grafana Cloud and every in-cluster stream rule
+  // reads no data.
+  rule {
+    name = "Every platform is off-air, seen from outside"
+    for  = "5m"
+    // no_data is OK: both checks silent is the stopped-reporting rule's to name.
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Neither Twitch nor YouTube shows the channel live"
+      description = "No twitch-live or youtube-live probe has seen the channel live in the last ten minutes. These checks ask Twitch (the preview thumbnail answers 200 only while live) and YouTube (/live carries a watch-page canonical link only while live) from a Synthetic Monitoring probe in North Virginia, so they see what a viewer sees and do not depend on the minipc reaching Grafana Cloud. If the in-cluster OBS rules are quiet at the same time, suspect the minipc's network first: the 2026-10-15 outage looked exactly like this, with only the metrics-absent rules firing. Check `console --env prod doctor`, then the node. When every platform is parked on purpose, add a Grafana silence."
+    }
+    labels = {
+      severity = "critical"
+      service  = "obs"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId = "A"
+        // Ten minutes spans two runs of the five-minute checks, so a single
+        // failed probe on one platform never trips it and one live answer
+        // anywhere in the window holds it off.
+        expr          = "max(max_over_time(probe_success{job=~\".+-live\"}[10m]))"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "lt", params = [1] }
           operator  = { type = "and" }
           query     = { params = ["A"] }
           reducer   = { type = "last", params = [] }
