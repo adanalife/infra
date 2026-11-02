@@ -71,7 +71,7 @@ jobs:
         working-directory: cdk8s
         run: mise trust && mise install
 
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+      - uses: astral-sh/setup-uv@v10.3.2 # no floating major tag published
       - uses: arduino/setup-task@v3
 
       - name: Synth
