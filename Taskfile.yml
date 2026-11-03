@@ -2903,6 +2903,12 @@ tasks:
   tripbot:dev:db:seed:
     desc: run the one-shot ESO-wired seed Job in the development namespace; idempotent — skips if the videos table already has real rows
     aliases: [tripbot:db:seed]
+    preconditions:
+      # The Job comes from the sibling checkout's working tree, so a checkout
+      # behind origin/main would apply a stale Job and succeed silently.
+      - &tripbot-dist-fresh
+        sh: git -C {{.SIBLINGS}}/tripbot fetch -q origin && git -C {{.SIBLINGS}}/tripbot diff --quiet origin/main -- cdk8s/dist/
+        msg: "{{.SIBLINGS}}/tripbot cdk8s/dist/ differs from origin/main — pull that checkout (or push its change) first; applying from it runs a stale seed Job"
     cmds:
       # The seed Job is authored in the tripbot repo's cdk8s now (per-env, with
       # the namespace baked in); applied from its committed dist in the sibling
@@ -2924,6 +2930,8 @@ tasks:
 
   tripbot:stage:db:seed:
     desc: run the one-shot ESO-wired seed Job in the stage-1 namespace; idempotent — skips if the videos table already has real rows
+    preconditions:
+      - *tripbot-dist-fresh
     cmds:
       - kubectl delete job tripbot-seed -n stage-1 --ignore-not-found
       - kubectl apply -f {{.SIBLINGS}}/tripbot/cdk8s/dist/stage-1-job-seed.k8s.yaml -n stage-1
