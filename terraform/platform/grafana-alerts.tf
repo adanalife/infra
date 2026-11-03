@@ -5774,7 +5774,7 @@ resource "grafana_rule_group" "synthetic_health" {
 // reads. Cloudflare's invocation analytics count it, so this reads that count.
 //
 // The synthetic guessr check samples the leaderboard from three regions every
-// two minutes and fires on more than half of one region failing, so an API
+// five minutes and fires on more than half of one region failing, so an API
 // failing a third of its requests can pass it for hours; this one counts every
 // request.
 //
