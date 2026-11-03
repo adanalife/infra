@@ -65,7 +65,7 @@ def test_the_stream_station_shuffles_streambeats_and_woodercz():
         r'station("adanalife", r/^\/music\/(streambeats-[^\/]*|fifty-horizons|wyoming-miles)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)'
         in script
     )
-    # The Halloween station stays as it was: one directory.
+    # The Halloween station is a single directory.
     assert (
         r'station("halloween", r/^\/music\/(halloween)\/.*\.(mp3|flac|m4a|ogg|opus)$/i)'
         in script

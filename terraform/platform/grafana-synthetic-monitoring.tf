@@ -34,15 +34,14 @@ locals {
 # rather than more on top; past 100k it is $5/10k.
 
 # The target is the leaderboard endpoint and not the page, because it is the
-# one request that exercises both halves at once: Pages serving the deploy, and
-# the D1 binding answering behind it. A page-only check stays green through a
-# database the game cannot read.
+# one request that exercises both halves at once: the API Worker answering, and
+# the D1 database behind it. A page-only check stays green through a database
+# the game cannot read.
 #
 # `fail_if_body_not_matches_regexp` is the load-bearing line, not belt and
 # braces. Pages answers a path with no file with **200 and the site's own
 # HTML**, so a check asserting only on the status code passes against a
-# deployment that is missing the whole API -- which is not hypothetical:
-# production answers /api/day exactly that way today, having never had it.
+# deployment whose API route is missing.
 #
 # Five minutes, the same pace as the channel-live checks: it is the costliest
 # check here (three probes), so it is the one that gives way when the quota

@@ -85,7 +85,7 @@ PLATFORM_GATEWAY_PROJECT = "platform-gateway"
 # The cluster-scoped kinds each project's apps create. Scoped per project from
 # the dist each repo emits: tripbot's identity unit + video-pipeline each declare
 # the prod-stream PriorityClass; infra's data/supporting use a StorageClass (its
-# NFS PersistentVolumes are applied out of band, never by Argo); the console
+# NFS PersistentVolumes belong to the platform project's `nfs-pv` app); the console
 # creates nothing cluster-scoped.
 STORAGE_CLASS = {"group": "storage.k8s.io", "kind": "StorageClass"}
 PRIORITY_CLASS = {"group": "scheduling.k8s.io", "kind": "PriorityClass"}

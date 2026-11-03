@@ -43,7 +43,6 @@ jobs:
           repositories: ${{ inputs.repositories }}
           permission-contents: write
 
-      # curl rather than `gh api`: not every runner image ships the gh CLI.
       - name: Send ${{ inputs.event-type }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}

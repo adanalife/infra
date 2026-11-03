@@ -199,7 +199,7 @@ class Postgres(Construct):
                     },
                     # 1Gi was too low: the bulk HNSW index build on a
                     # frame_embeddings restore OOM-killed prod at 1Gi and lost the
-                    # PVC (2026-06-15). The seed:vectors task now forces a bounded
+                    # PVC (2026-06-15). The seed:vectors task forces a bounded
                     # on-disk build so it fits, but give headroom on the SSD-backed
                     # minipc so a faster in-memory build is an option and steady
                     # state has breathing room.
