@@ -96,7 +96,7 @@ class EnvConfig:
     # When True, a node-local `vlc-dashcam-local` PVC (local-path, on the minipc)
     # is emitted beside the NFS PVC, and the one-shot copy Job (DashcamLocalizeChart)
     # is rendered. It's the durable corpus *cache* — vlc can serve the stream off
-    # local NVMe instead of the NAS. The cache persists across the mount flip, so
+    # the T5 USB SSD instead of the NAS. The cache persists across the mount flip, so
     # toggling vlc back to NFS never discards it; the NFS PVC always stays defined
     # as the instant fallback while the local copy is (re)populated. Which source
     # vlc actually mounts is the tripbot repo's `dashcam_source` flag — this flag
@@ -138,7 +138,7 @@ ENVS: dict[str, EnvConfig] = {
         name="prod-1",
         namespace="prod-1",
         cluster="minipc",
-        dashcam_local_enabled=True,  # serve the corpus off the minipc's local NVMe
+        dashcam_local_enabled=True,  # serve the corpus off the minipc's T5 USB SSD
         dns_base="prod.whereisdana.today",
         dashcam_mode="nfs",
         postgres_size="50Gi",
