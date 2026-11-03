@@ -19,6 +19,11 @@ vars:
   # tracks exactly these files (constructs/argo_platform.py GITOPS_MANIFESTS;
   # test_argo_platform.py pins the two lists together).
   GITOPS_MANIFESTS: cdk8s/dist/argocd.k8s.yaml cdk8s/dist/platform-argo.k8s.yaml
+  # Prefix for a synth that writes the committed dist/: drops the real NAS
+  # coordinates a shell may carry from dashcam-nfs.local.env, so config.py's
+  # placeholders render instead and the coords never reach this public repo.
+  # An env given its own nfs_path_env var needs that var added here too.
+  PLACEHOLDER_NFS: env -u NFS_SERVER -u NFS_PATH -u MUSIC_NFS_PATH -u PARKED_NFS_PATH
   # Parent of the sibling checkouts (tripbot, platform-gateway, …) that the
   # *:sync tasks copy from. They sit next to this repo's *main* worktree, which
   # is not the working directory when a task runs from ~/adanalife/worktrees/ —
@@ -75,7 +80,7 @@ tasks:
       # mid-way would leave every committed dist file showing as deleted. Render
       # into a scratch dir and swap it in only on success (same in the two synth
       # tasks below).
-      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - '{{.PLACEHOLDER_NFS}} mise exec -- uv run npx cdk8s synth --output .dist.tmp'
       - rm -rf dist && mv .dist.tmp dist
 
   cdk8s:synth:platform:
@@ -85,7 +90,7 @@ tasks:
     env:
       CDK8S_PLATFORM: "1"
     cmds:
-      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
+      - '{{.PLACEHOLDER_NFS}} mise exec -- uv run npx cdk8s synth --output .dist.tmp'
       - rm -rf dist && mv .dist.tmp dist
 
   # The NFS PersistentVolumes (dashcam corpus + background-music share) are
@@ -310,13 +315,8 @@ tasks:
   cdk8s:check:
     desc: Assert the committed dist/ deploy units match a fresh synth (golden-file gate)
     dir: cdk8s
-    deps: [cdk8s:imports]
-    env:
-      NFS_SERVER: '<NFS server address>'
-      NFS_PATH: '<export path>'
     cmds:
-      - mise exec -- uv run npx cdk8s synth --output .dist.tmp
-      - rm -rf dist && mv .dist.tmp dist
+      - task: cdk8s:synth
       - git diff --exit-code -- dist/ || { echo "dist/ is stale — run task cdk8s:synth and commit"; exit 1; }
 
   # Schema-validate the committed dist/ (what Argo actually applies) against
