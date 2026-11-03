@@ -94,7 +94,7 @@ resource "github_actions_secret" "discord_webhook" {
 #
 # Worth knowing before adding it back: a Dependabot-authored `pull_request` event
 # is granted Actions *variables* but not Actions *secrets*, so a workflow minting
-# the App token on such a PR sees `vars.AUTOMATION_APP_ID` resolve while
+# the App token on such a PR sees `vars.AUTOMATION_APP_CLIENT_ID` resolve while
 # `secrets.AUTOMATION_APP_PRIVATE_KEY` arrives empty and the mint step fails.
 # Mirroring the key into Dependabot's store is the fix for a gate that genuinely
 # needs the App on a bump PR — and it costs the App a `dependabot_secrets`
