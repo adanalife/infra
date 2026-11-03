@@ -27,8 +27,11 @@ locals {
 
 # Quota. The free tier covers 100k API test executions/month and bills per
 # probe per execution, so one probe costs 14.6k/month at a 180s pace, 8.8k at
-# 300s and 4.4k at 600s. The checks below come to ~92k. Another check wants a
-# slower pace on all of them rather than more on top; past 100k it is $5/10k.
+# 300s and 4.4k at 600s. The checks below come to ~75k by that arithmetic, but
+# the API's own count runs higher: it refused a new check with the four web
+# checks alone at 95,040, ~21k above this math. Budget against the API's figure
+# (the quota error prints it). Another check wants a slower pace on all of them
+# rather than more on top; past 100k it is $5/10k.
 
 # The target is the leaderboard endpoint and not the page, because it is the
 # one request that exercises both halves at once: Pages serving the deploy, and
@@ -41,14 +44,14 @@ locals {
 # deployment that is missing the whole API -- which is not hypothetical:
 # production answers /api/day exactly that way today, having never had it.
 #
-# Three minutes: the game is the endpoint a visitor is most likely to be
-# sitting in front of, so it gets the fastest pace the quota above will carry
-# alongside the channel-live checks.
+# Five minutes, the same pace as the channel-live checks: it is the costliest
+# check here (three probes), so it is the one that gives way when the quota
+# above needs room.
 resource "grafana_synthetic_monitoring_check" "guessr" {
   job       = "guessr"
   target    = "https://guessr.dana.lol/api/leaderboard?board=daily"
   enabled   = true
-  frequency = 180000
+  frequency = 300000
   timeout   = 10000
   probes    = local.sm_probes
   labels = {

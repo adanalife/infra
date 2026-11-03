@@ -2305,7 +2305,7 @@ tasks:
   # MIN_BYTES is the blank threshold; SCREENSHOT_DIR keeps the PNGs for
   # eyeballing (nothing is written without it).
   obs:prod:screenshot:check:
-    desc: screenshot every prod-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    desc: screenshot every prod-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=, SKIP=)
     preconditions:
       - *minipc-context-guard
     cmds:
@@ -2317,7 +2317,7 @@ tasks:
           SCREENSHOT_DIR: '{{.SCREENSHOT_DIR}}'
 
   obs:stage:screenshot:check:
-    desc: screenshot every stage-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=)
+    desc: screenshot every stage-1 OBS source and fail on blank ones (override PLATFORM=, default twitch; MIN_BYTES=, SCREENSHOT_DIR=, SKIP=)
     preconditions:
       - *minipc-context-guard
     cmds:
@@ -2330,6 +2330,10 @@ tasks:
 
   obs:screenshot:check:_run:
     internal: true
+    vars:
+      # Overlays that render nothing between updates: prod's browser refresher
+      # logs these four blank on every pass, so they'd fail every run.
+      SKIP: '{{.SKIP | default "GPS,leaderboard,Middle Text Onscreen - Center,Timewarp Onscreen - Center"}}'
     requires:
       vars: [NAMESPACE, PLATFORM, MIN_BYTES]
     preconditions:
@@ -2350,6 +2354,7 @@ tasks:
         sleep 1
         OBS_WEBSOCKET_HOST=localhost \
         OBS_SCREENSHOT_MIN_BYTES={{.MIN_BYTES}} \
+        OBS_SCREENSHOT_SKIP='{{.SKIP}}' \
         SCREENSHOT_DIR='{{.SCREENSHOT_DIR}}' \
         OBS_WEBSOCKET_PASSWD=$(kubectl get configmap obs-{{.PLATFORM}}-config -n {{.NAMESPACE}} -o jsonpath='{.data.OBS_WEBSOCKET_PASSWD}') \
         uv run --with obsws-python \

@@ -61,10 +61,24 @@ METRICS_PORT = 9998
 
 
 def _config(hls: bool) -> str:
-    # Everything about the HLS muxer beyond the switch and the address is left
-    # at MediaMTX's defaults: the low-latency variant, no always-remux (so the
-    # muxer only exists while someone reads), and the 60s idle close.
-    hls_block = f"hls: yes\nhlsAddress: :{HLS_PORT}" if hls else "hls: no"
+    # The muxer cuts a segment at the first keyframe at least
+    # hlsSegmentDuration in, and locks EXT-X-TARGETDURATION to the rounded
+    # length of its first segments; it can only grow after that, and Apple
+    # players stall when it does. Playout's clips carry a 2s GOP, but a clip
+    # splice lands a keyframe off that grid. At the 1s default a steady segment
+    # is 2s and a splice keyframe under 1s in pushes the cut to ~3s (2s -> 3s).
+    # At 2.2s a steady segment is 4s and the longest a splice can make is
+    # ~4.2s, which still rounds to 4. Four 4s segments hold the same ~15s of
+    # stream in RAM as the default seven 2s ones.
+    # Everything else is MediaMTX's defaults: the low-latency variant, no
+    # always-remux (so the muxer only exists while someone reads), and the 60s
+    # idle close.
+    hls_block = (
+        f"hls: yes\nhlsAddress: :{HLS_PORT}\n"
+        "hlsSegmentDuration: 2200ms\nhlsSegmentCount: 4"
+        if hls
+        else "hls: no"
+    )
     return f"""\
 rtsp: yes
 rtspAddress: :{RTSP_PORT}
