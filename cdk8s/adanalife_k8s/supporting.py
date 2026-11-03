@@ -12,7 +12,9 @@ from __future__ import annotations
 from constructs import Construct
 
 import imports.io.cert_manager as cm
+import imports.k8s as k8s
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.constructs.arc import RUNNER_SA, RUNNERS_NS
 from adanalife_k8s.eso import ESData, external_secret
 
 # Sentry DSNs for tripbot / onscreens-server — dataFrom.extract from SSM
@@ -43,6 +45,46 @@ def emit_supporting(scope: Construct, env: EnvConfig) -> None:
         )
 
     _app_issuers(scope, env, ns)
+    if env.name == "stage-1":
+        _ci_rollout_rbac(scope, env.namespace)
+
+
+# Stage runs every workload off a floating `:main` image with
+# imagePullPolicy: Always, so a merge reaches it only when a pod restarts. The
+# shared image workflow's `roll-stage` job (.github/workflows/image.yml) runs
+# on the ARC pool after each :main push and patches the pod template's
+# restartedAt annotation, the same gesture as `kubectl rollout restart` and the
+# console's restart button; this is the grant that lets the runner pods do it.
+# Stage only: prod pins release tags and rolls by sync.
+CI_ROLLOUT_ROLE = "ci-stage-rollout"
+
+
+def _ci_rollout_rbac(scope: Construct, ns: str) -> None:
+    k8s.KubeRole(
+        scope,
+        "ci-rollout-role",
+        metadata=k8s.ObjectMeta(name=CI_ROLLOUT_ROLE, namespace=ns),
+        rules=[
+            # get to read the rollout back, patch for the restart annotation.
+            k8s.PolicyRule(
+                api_groups=["apps"], resources=["deployments"], verbs=["get", "patch"]
+            ),
+            # The new pods' image digests, so the job can prove stage runs the
+            # image this run pushed rather than a :main the build raced.
+            k8s.PolicyRule(api_groups=[""], resources=["pods"], verbs=["list"]),
+        ],
+    )
+    k8s.KubeRoleBinding(
+        scope,
+        "ci-rollout-rolebinding",
+        metadata=k8s.ObjectMeta(name=CI_ROLLOUT_ROLE, namespace=ns),
+        role_ref=k8s.RoleRef(
+            api_group="rbac.authorization.k8s.io", kind="Role", name=CI_ROLLOUT_ROLE
+        ),
+        subjects=[
+            k8s.Subject(kind="ServiceAccount", name=RUNNER_SA, namespace=RUNNERS_NS)
+        ],
+    )
 
 
 def _app_issuers(scope: Construct, env: EnvConfig, ns: str | None) -> None:
