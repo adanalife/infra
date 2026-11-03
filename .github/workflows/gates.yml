@@ -254,6 +254,11 @@ jobs:
       - name: Synth
         id: synth
         if: steps.changed.outputs.cdk8s == 'true'
+        # A Python cdk8s app runs jsii, which refuses its disk cache when any parent
+        # dir is world-writable — true of the ARC runners' /home/runner. Ephemeral
+        # runners gain nothing from the cache, so skip it.
+        env:
+          JSII_RUNTIME_PACKAGE_CACHE: disabled
         run: task cdk8s:synth
 
       - name: Verify cdk8s/dist/ is committed in sync
