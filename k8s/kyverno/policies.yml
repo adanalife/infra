@@ -1,10 +1,11 @@
 # Admission policies encoding rules the platform already follows by
 # convention. Delivered with the chart by the `kyverno` Argo Application.
 #
-# Every policy is Audit-only: a violation is recorded in a PolicyReport
+# A policy starts Audit-only: a violation is recorded in a PolicyReport
 # (`kubectl get polr -A`, `kubectl get cpolr` for cluster-scoped objects) and
 # the request is admitted. A policy moves to Deny on its own once its reports
-# read clean. failurePolicy Ignore matches the chart's forced fail-open.
+# read clean. failurePolicy Ignore matches the chart's forced fail-open, so a
+# Kyverno outage never blocks admission.
 #
 # ValidatingPolicy (CEL) rather than kyverno.io/v1 ClusterPolicy, which is
 # deprecated as of Kyverno 1.19.
@@ -51,7 +52,7 @@ kind: ValidatingPolicy
 metadata:
   name: prod-nfs-pv-soft-mount
 spec:
-  validationActions: [Audit]
+  validationActions: [Deny]
   failurePolicy: Ignore
   matchConstraints:
     resourceRules:
@@ -124,7 +125,7 @@ kind: ValidatingPolicy
 metadata:
   name: require-pinned-image
 spec:
-  validationActions: [Audit]
+  validationActions: [Deny]
   failurePolicy: Ignore
   matchConstraints:
     resourceRules:

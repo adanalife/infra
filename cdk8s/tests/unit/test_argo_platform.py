@@ -222,7 +222,11 @@ def test_only_the_stage_console_may_submit_a_workflow():
                 assert doc["metadata"]["name"] == "tripbot-console-workflows-submit"
 
 
-def test_kyverno_policies_audit_only_and_fail_open():
+# Policies whose PolicyReports read clean, so they refuse admission.
+DENY_POLICIES = {"prod-nfs-pv-soft-mount", "require-pinned-image"}
+
+
+def test_kyverno_policies_deny_only_when_listed_and_fail_open():
     # Moving a policy to Deny is a deliberate per-policy change once its
     # PolicyReports read clean; this makes that change show up here too. A
     # policy that fails closed would let a Kyverno outage block admission on
@@ -230,7 +234,10 @@ def test_kyverno_policies_audit_only_and_fail_open():
     path = Path(__file__).resolve().parents[3] / "k8s/kyverno/policies.yml"
     policies = [d for d in yaml.safe_load_all(path.read_text()) if d]
     assert policies
+    assert DENY_POLICIES <= {p["metadata"]["name"] for p in policies}
     for p in policies:
         assert p["kind"] == "ValidatingPolicy", p["metadata"]["name"]
-        assert p["spec"]["validationActions"] == ["Audit"], p["metadata"]["name"]
-        assert p["spec"]["failurePolicy"] == "Ignore", p["metadata"]["name"]
+        name = p["metadata"]["name"]
+        expected = ["Deny"] if name in DENY_POLICIES else ["Audit"]
+        assert p["spec"]["validationActions"] == expected, name
+        assert p["spec"]["failurePolicy"] == "Ignore", name
