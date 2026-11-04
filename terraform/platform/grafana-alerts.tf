@@ -5252,9 +5252,8 @@ resource "grafana_rule_group" "error_rate" {
 // one: it keeps saying so while the login is still waiting, and it catches a
 // login the owner already denied coming back.
 # Application latency, read off tripbot's two OTel histograms. Both panels
-# live on dashboard 12 (app-latency); these are the rules the item that
-# built the panels left for later. Thresholds come from a week of prod
-# (2026-10-07 → 10-14, VictoriaMetrics):
+# live on dashboard 12 (app-latency); these rules alert on the same series.
+# Thresholds come from a week of prod (2026-10-07 → 10-14, VictoriaMetrics):
 #   - DB: the worst 5-minute p95 across every operation was 14 ms, and the
 #     per-operation 7-day p95s sit at 1–8 ms. 100 ms is 7× the weekly worst
 #     and still well under what a viewer would feel on a command.

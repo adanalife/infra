@@ -1,7 +1,7 @@
 # Builds one linux/amd64 image and pushes it to GHCR under the org — the
 # floating :main image a private repo's dev-image.yml publishes on every main
-# push, which stage-1 deploys (imagePullPolicy: Always picks up rebuilds under
-# the tag).
+# push, which stage-1 deploys (imagePullPolicy: Always, so a pod start pulls the
+# newest build under the tag).
 #
 # linux/amd64 only: stage-1 is the amd64 minipc, and this fires on every merge,
 # so an emulated arm64 leg would roughly double the longest job in CI for an

@@ -32,10 +32,10 @@ repos:
       - id: detect-private-key
 
   # Python lint + format for the repo's Python: the cdk8s authoring layer and the
-  # standalone diagnostics in scripts/. Mirrors super-linter's
-  # PYTHON_RUFF / PYTHON_RUFF_FORMAT so the same issues are caught locally before
-  # push — both point at .github/linters/.ruff.toml (line-length 88) so the two
-  # agree. rev pinned to super-linter's ruff (0.15.8).
+  # standalone diagnostics in scripts/. ruff-check runs only here (the sweep's
+  # PYTHON_RUFF is off in .github/super-linter.env); ruff-format mirrors the
+  # sweep's PYTHON_RUFF_FORMAT, both reading .github/linters/.ruff.toml
+  # (line-length 88) so the two agree. rev pinned to super-linter's ruff (0.15.8).
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.8
     hooks:
