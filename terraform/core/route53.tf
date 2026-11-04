@@ -209,7 +209,6 @@ resource "aws_route53_record" "primary_www_acm_cert_validation" {
   zone_id = aws_route53_zone.primary.zone_id
 }
 
-
 resource "aws_route53_record" "status" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = var.status_domain
@@ -242,11 +241,6 @@ resource "aws_route53_record" "apex_txt" {
     "brave-ledger-verification=9422ad35f6a8d886d6636c1ef09d84e950b5c1bf2ab28d28f00d0acc613aac79",
     "v=spf1 include:spf.improvmx.com ~all",
   ]
-}
-
-moved {
-  from = aws_route53_record.brave
-  to   = aws_route53_record.apex_txt
 }
 
 # ImprovMX forwards every address at the domain on to a real inbox. Apple

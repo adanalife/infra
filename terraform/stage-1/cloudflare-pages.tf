@@ -43,26 +43,6 @@ module "pages" {
   }
 }
 
-moved {
-  from = cloudflare_pages_project.stage_1
-  to   = module.pages.cloudflare_pages_project.this
-}
-
-moved {
-  from = cloudflare_pages_domain.stage_1_whalecore_www
-  to   = module.pages.cloudflare_pages_domain.this["www.whalecore.com"]
-}
-
-moved {
-  from = cloudflare_pages_domain.stage_1_staging_dana_lol
-  to   = module.pages.cloudflare_pages_domain.this["staging.dana.lol"]
-}
-
-moved {
-  from = cloudflare_dns_record.stage_1_whalecore_www_pages
-  to   = module.pages.cloudflare_dns_record.this[0]
-}
-
 output "pages_url" {
   description = "Cloudflare Pages URL"
   value       = module.pages.pages_url
