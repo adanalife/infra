@@ -43,6 +43,11 @@ jobs:
   synth:
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 30
+    # A Python cdk8s app runs jsii, which refuses its disk cache when any parent
+    # dir is world-writable — true of the ARC runners' /home/runner. Ephemeral
+    # runners gain nothing from the cache, so skip it (synth and the tests both).
+    env:
+      JSII_RUNTIME_PACKAGE_CACHE: disabled
     steps:
       # continue-on-error: Dependabot PRs can't read repo secrets, so the mint
       # fails there and the run verifies instead of pushing.
