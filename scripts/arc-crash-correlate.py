@@ -150,18 +150,36 @@ def fetch_jobs(since, label):
     return jobs
 
 
-def load_jobs(cache, since, label, refresh):
+def cache_covers(cached, since, label, newest_death):
+    """A cache answers only if it was fetched after every death could have a job."""
+    fetched = cached.get("fetched_at")
+    return (
+        cached.get("since") == since
+        and cached.get("label") == label
+        and fetched is not None
+        and (
+            newest_death is None or parse_ts(fetched) > newest_death + DEATH_UNCERTAINTY
+        )
+    )
+
+
+def load_jobs(cache, since, label, refresh, newest_death):
     """Cached `fetch_jobs` — the fetch is ~500 API calls and a couple of minutes."""
     if not refresh and cache.exists():
         cached = json.loads(cache.read_text())
-        if cached.get("since") == since and cached.get("label") == label:
+        if cache_covers(cached, since, label, newest_death):
             print(
                 f"using cached jobs from {cache} (--refresh to re-fetch)",
                 file=sys.stderr,
             )
             return cached["jobs"]
+    fetched_at = fmt(datetime.now(timezone.utc))
     jobs = fetch_jobs(since, label)
-    cache.write_text(json.dumps({"since": since, "label": label, "jobs": jobs}))
+    cache.write_text(
+        json.dumps(
+            {"since": since, "label": label, "fetched_at": fetched_at, "jobs": jobs}
+        )
+    )
     return jobs
 
 
@@ -270,6 +288,18 @@ def self_check():
     done = dict(job, completed=fmt(start + timedelta(minutes=1)))
     assert running_at([job, done], death) == [job]
     assert active_step(job, death) == "Run pre-commit"
+
+    cached = {"since": "2026-08-22", "label": "arc-amd64", "fetched_at": fmt(start)}
+    assert cache_covers(cached, "2026-08-22", "arc-amd64", None)
+    assert not cache_covers(
+        cached, "2026-08-22", "arc-amd64", death
+    )  # death after fetch
+    assert not cache_covers(
+        {k: v for k, v in cached.items() if k != "fetched_at"},
+        "2026-08-22",
+        "arc-amd64",
+        None,
+    )
     print("self-check ok")
 
 
@@ -342,7 +372,13 @@ def main():
     deaths = find_deaths(samples)
     jobs = [
         j
-        for j in load_jobs(args.cache, args.since, args.label, args.refresh)
+        for j in load_jobs(
+            args.cache,
+            args.since,
+            args.label,
+            args.refresh,
+            max((d for d, _ in deaths), default=None),
+        )
         if j["started"]
     ]
 
