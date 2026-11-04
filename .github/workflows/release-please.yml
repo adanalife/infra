@@ -151,6 +151,10 @@ jobs:
           # still served by the shared uv cache under $HOME/.cache.
           UV_TOOL_DIR: ${{ runner.temp }}/uv-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/uv-tool-bin
+          # A cdk8s stage runs jsii, which refuses its disk cache when any parent
+          # dir is world-writable — true of the ARC runners' /home/runner.
+          # Ephemeral runners gain nothing from the cache, so skip it.
+          JSII_RUNTIME_PACKAGE_CACHE: disabled
         run: |
           set -euo pipefail
           # release-please bumped the manifest on this branch — that version is
