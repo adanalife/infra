@@ -16,7 +16,7 @@ data:
     hls: yes
     hlsAddress: :8888
     hlsSegmentDuration: 2200ms
-    hlsSegmentCount: 4
+    hlsSegmentCount: 7
     webrtc: no
     srt: no
     metrics: yes
@@ -63,7 +63,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: ad2076ac5a
+        adanalife.dev/config-hash: 70ff59a582
         prometheus.io/port: "9998"
         prometheus.io/scrape: "true"
       labels:
