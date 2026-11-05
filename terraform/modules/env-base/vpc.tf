@@ -9,11 +9,3 @@ resource "aws_default_vpc" "default" {
     Name = "default"
   }
 }
-
-# Keeps state pointing at the same underlying default VPC for any workspace
-# still holding the module address. Both sides are aws_default_vpc, so this is
-# a state move and never a destroy/create.
-moved {
-  from = module.default_vpc.aws_default_vpc.this[0]
-  to   = aws_default_vpc.default
-}

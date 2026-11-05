@@ -37,16 +37,6 @@ module "pages" {
   domains = ["www.${var.primary_domain}"]
 }
 
-moved {
-  from = cloudflare_pages_project.prod_1
-  to   = module.pages.cloudflare_pages_project.this
-}
-
-moved {
-  from = cloudflare_pages_domain.prod_1_dana_lol_www
-  to   = module.pages.cloudflare_pages_domain.this["www.dana.lol"]
-}
-
 output "pages_url" {
   description = "Cloudflare Pages URL"
   value       = module.pages.pages_url
