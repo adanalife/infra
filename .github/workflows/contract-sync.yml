@@ -146,7 +146,7 @@ jobs:
         uses: jdx/mise-action@v4
 
       - if: steps.fetch.outputs.stale == 'true' && (inputs.regenerate != '' || inputs.cdk8s)
-        uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+        uses: astral-sh/setup-uv@v10.3.2 # no floating major tag published
 
       - name: Regenerate
         if: steps.fetch.outputs.stale == 'true' && inputs.regenerate != ''
