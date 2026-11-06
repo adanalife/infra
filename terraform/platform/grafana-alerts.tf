@@ -500,6 +500,8 @@ resource "grafana_rule_group" "go_runtime" {
 // purpose: those series are dropped by the Mimir active-series cap (see the
 // metrics-budget note below), but logs ride a separate, uncapped path. severity
 // = critical so it escalates to ntfy (phone) as well as Discord.
+// A kubelet stat of a stale NFS volume reports the same words when the NAS is
+// down; the NFS mount path excludes those so this stays a T5 signal.
 resource "grafana_rule_group" "host_storage" {
   name             = "host-storage"
   folder_uid       = grafana_folder.tripbot.uid
@@ -535,7 +537,7 @@ resource "grafana_rule_group" "host_storage" {
       query_type = "instant"
       model = jsonencode({
         refId         = "A"
-        expr          = "sum(count_over_time({cluster=\"adanalife-minipc\"} |= \"input/output error\" [5m]))"
+        expr          = "sum(count_over_time({cluster=\"adanalife-minipc\"} |= \"input/output error\" != \"kubernetes.io~nfs\" [5m]))"
         queryType     = "instant"
         instant       = true
         intervalMs    = 60000
