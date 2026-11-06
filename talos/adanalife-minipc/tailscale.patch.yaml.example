@@ -32,10 +32,10 @@ environment:
   # Name the node in the tailnet (matches the Talos hostname / MagicDNS name).
   - TS_HOSTNAME=adanalife-minipc
   # Advertise the current-location home LAN so tailnet clients reach the node
-  # (192.168.40.111 on the Maine/tallman network) and the Synology (.40.100),
+  # (192.168.40.111 on the current network, site-1) and the Synology (.40.100),
   # etc. without changing any cert SANs or endpoints. Auto-approved by the
   # tag:k8s autoApprovers.routes rule. Advertise exactly the subnet the node is
-  # on — update on a move (Texas/shadyglen was 192.168.1.0/24).
+  # on — update on a move (site-2 was 192.168.1.0/24).
   - TS_ROUTES=192.168.40.0/24
   # Kernel networking — required for subnet routing (userspace is the extension
   # default and won't route a subnet). Pairs with the ip_forward sysctls in
