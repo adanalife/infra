@@ -5936,3 +5936,75 @@ resource "grafana_rule_group" "radio_health" {
     }
   }
 }
+
+// The in-cluster prober (cdk8s/adanalife_k8s/constructs/gatus.py). Gatus only
+// evaluates; this is what makes a failing endpoint page. The inside view of what
+// the synthetic-health group watches from outside: a data-plane service by its
+// cluster DNS name, or a *.prod.whereisdana.today host through traefik with its
+// cert more than 14 days from expiry.
+//
+// Two arms, either one fires:
+//   - an endpoint whose conditions have failed (gatus_results_endpoint_success 0).
+//   - the gatus Deployment has no available pod. The success series go stale with
+//     the pod, so the endpoint arm alone would read NoData and stay quiet.
+//
+// gatus_results_endpoint_success is allowlisted into the cloud for this rule
+// (k8s/monitoring/prod-1/values.yml). `for = 5m` is five failed 60s checks.
+resource "grafana_rule_group" "gatus_health" {
+  name             = "gatus-health"
+  folder_uid       = grafana_folder.tripbot.uid
+  interval_seconds = local.alert_eval_interval_seconds
+
+  rule {
+    name           = "Gatus: an in-cluster endpoint is failing"
+    for            = "5m"
+    condition      = "C"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "Gatus: {{ $labels.group }}/{{ $labels.name }}{{ $labels.deployment }} failing for 5m"
+      description = "Either a Gatus endpoint has failed its conditions for 5 minutes, or the gatus Deployment has no available pod. The dashboard at https://gatus.prod.whereisdana.today (LAN or tailnet) shows which condition failed: [CONNECTED] for the data group (postgres, nats), [STATUS]/[BODY] for the apps, and [CERTIFICATE_EXPIRATION] > 336h on the lan-ingress hosts, where a cert under 14 days means cert-manager's renewal is stuck (`kubectl get certificate -A`). For the pod arm, start with `kubectl --context admin@adanalife-minipc -n gatus get pod`; the gatus Argo Application is synced by hand."
+    }
+    labels = {
+      severity = "warning"
+      service  = "gatus"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      model = jsonencode({
+        refId         = "A"
+        expr          = "(1 - max by (group, name) (gatus_results_endpoint_success{namespace=\"gatus\"})) or (max by (deployment) (kube_deployment_status_replicas_available{namespace=\"gatus\", deployment=\"gatus\"}) == bool 0)"
+        instant       = true
+        intervalMs    = 60000
+        maxDataPoints = 43200
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [0] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+}

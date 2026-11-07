@@ -33,6 +33,7 @@ from adanalife_k8s.constructs.music import (
     emit_music_pv,
     emit_music_pvc,
 )
+from adanalife_k8s.constructs.gatus import Gatus
 from adanalife_k8s.constructs.kmsg import KmsgShipper
 from adanalife_k8s.constructs.radio import Radio
 from adanalife_k8s.constructs.postgres import Postgres
@@ -281,6 +282,17 @@ class KmsgChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         KmsgShipper(self)
+
+
+class GatusChart(Chart):
+    """The in-cluster endpoint prober — a cluster-singleton in its own `gatus`
+    namespace. Env-agnostic, synthed to dist/gatus.k8s.yaml and delivered by a
+    dedicated minipc-only Argo Application (its targets are prod-1's). See
+    constructs/gatus.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        Gatus(self)
 
 
 class T5WatchdogChart(Chart):
