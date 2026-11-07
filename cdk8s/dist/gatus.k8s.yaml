@@ -11,6 +11,9 @@ data:
     metrics: true
     web:
       port: 8080
+    storage:
+      type: sqlite
+      path: /data/data.db
     ui:
       title: 'adanalife: inside'
       header: adanalife (prod, in-cluster)
@@ -97,10 +100,12 @@ spec:
   selector:
     matchLabels:
       app: gatus
+  strategy:
+    type: Recreate
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: b543bd5d76
+        adanalife.dev/config-hash: 3bcff619b7
         prometheus.io/port: "8080"
         prometheus.io/scrape: "true"
       labels:
@@ -137,13 +142,35 @@ spec:
             - mountPath: /config
               name: config
               readOnly: true
+            - mountPath: /data
+              name: data
       securityContext:
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       volumes:
         - configMap:
             name: gatus
           name: config
+        - name: data
+          persistentVolumeClaim:
+            claimName: gatus-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: gatus
+    app.kubernetes.io/part-of: infra
+  name: gatus-data
+  namespace: gatus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
 ---
 apiVersion: v1
 kind: Service

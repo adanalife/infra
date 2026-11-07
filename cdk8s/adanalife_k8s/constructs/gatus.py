@@ -12,8 +12,9 @@ stays with Synthetic Monitoring. Its alerting is Grafana's: Gatus only evaluates
 and exports `gatus_results_endpoint_success` (one series per endpoint) on
 /metrics, which annotation autodiscovery scrapes and the `gatus-health` rule group
 in grafana-alerts.tf pages on. No Gatus alerting providers are configured, so
-there is one pager. Results live in memory; a restart clears the dashboard's
-history, not the record in Prometheus.
+there is one pager. Results persist in SQLite on a local-path claim, so the
+dashboard's uptime history survives a restart; the series in Prometheus are the
+long-term record.
 
 Only always-on targets belong here. The per-platform apps (tripbot, playout,
 onscreens, OBS, mediamtx) are scaled to zero by the console's mode switch and for
@@ -44,6 +45,7 @@ IMAGE = "ghcr.io/twin/gatus:v5.38.0"
 PORT = 8080
 LAN_HOST = "gatus.prod.whereisdana.today"
 INTERVAL = "60s"
+DATA_CLAIM = "gatus-data"
 # cert-manager renews 30 days out, so under 14 days left means renewal is failing.
 CERT_FLOOR = "[CERTIFICATE_EXPIRATION] > 336h"
 
@@ -98,6 +100,7 @@ ENDPOINTS = [
 CONFIG = {
     "metrics": True,
     "web": {"port": PORT},
+    "storage": {"type": "sqlite", "path": "/data/data.db"},
     "ui": {"title": "adanalife: inside", "header": "adanalife (prod, in-cluster)"},
     "endpoints": ENDPOINTS,
 }
@@ -146,7 +149,8 @@ class Gatus(Construct):
                 limits={"memory": k8s.Quantity.from_string("128Mi")},
             ),
             volume_mounts=[
-                k8s.VolumeMount(name="config", mount_path="/config", read_only=True)
+                k8s.VolumeMount(name="config", mount_path="/config", read_only=True),
+                k8s.VolumeMount(name="data", mount_path="/data"),
             ],
         )
 
@@ -156,6 +160,8 @@ class Gatus(Construct):
             metadata=k8s.ObjectMeta(name=NAME, namespace=NAMESPACE, labels=labels),
             spec=k8s.DeploymentSpec(
                 replicas=1,
+                # RWO claim, and SQLite wants one writer.
+                strategy=k8s.DeploymentStrategy(type="Recreate"),
                 selector=k8s.LabelSelector(match_labels=sel),
                 template=k8s.PodTemplateSpec(
                     metadata=k8s.ObjectMeta(
@@ -170,15 +176,38 @@ class Gatus(Construct):
                     spec=k8s.PodSpec(
                         security_context=k8s.PodSecurityContext(
                             seccomp_profile=k8s.SeccompProfile(type="RuntimeDefault"),
+                            # Group-own the claim so the non-root user can write.
+                            fs_group=65534,
                         ),
                         containers=[container],
                         volumes=[
                             k8s.Volume(
                                 name="config",
                                 config_map=k8s.ConfigMapVolumeSource(name=NAME),
-                            )
+                            ),
+                            k8s.Volume(
+                                name="data",
+                                persistent_volume_claim=k8s.PersistentVolumeClaimVolumeSource(
+                                    claim_name=DATA_CLAIM
+                                ),
+                            ),
                         ],
                     ),
+                ),
+            ),
+        )
+
+        k8s.KubePersistentVolumeClaim(
+            self,
+            "data",
+            metadata=k8s.ObjectMeta(
+                name=DATA_CLAIM, namespace=NAMESPACE, labels=labels
+            ),
+            spec=k8s.PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                storage_class_name="local-path",
+                resources=k8s.ResourceRequirements(
+                    requests={"storage": k8s.Quantity.from_string("1Gi")}
                 ),
             ),
         )

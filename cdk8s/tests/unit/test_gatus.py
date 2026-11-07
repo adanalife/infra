@@ -60,3 +60,11 @@ def _argo_appsets(cluster):
 def test_minipc_only():
     assert "gatus" in _argo_appsets("minipc")
     assert "gatus" not in _argo_appsets("k3d")
+
+
+def test_history_persists_on_a_claim():
+    objs = _synth()
+    assert _config(objs)["storage"]["type"] == "sqlite"
+    assert any(o["kind"] == "PersistentVolumeClaim" for o in objs)
+    deploy = next(o for o in objs if o["kind"] == "Deployment")
+    assert deploy["spec"]["strategy"]["type"] == "Recreate"
