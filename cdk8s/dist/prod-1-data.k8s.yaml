@@ -264,6 +264,13 @@ spec:
       ports:
         - port: 9187
           protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gatus
+      ports:
+        - port: 5432
+          protocol: TCP
   podSelector: {}
   policyTypes:
     - Ingress
