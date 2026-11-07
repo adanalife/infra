@@ -291,8 +291,9 @@ class ArgoCD(Construct):
         # The minipc singletons, each off on k3d: the dev cluster can't reach
         # the Synology NUT server (UPS monitor), has no Talos node to probe or
         # reboot (T5 watchdog), no runner host (ARC — runners are minipc-only),
-        # and no Talos API, so no kernel log to read (kmsg).
-        ups_monitor = t5_watchdog = arc = kmsg = minipc
+        # no Talos API, so no kernel log to read (kmsg), and no prod-1 to
+        # probe (gatus).
+        ups_monitor = t5_watchdog = arc = kmsg = gatus = minipc
         self.envs = envs
         # Whether the autosync block reconciles live drift (selfHeal). True on the
         # minipc (prod/stage must match git). False on the throwaway k3d dev
@@ -355,13 +356,18 @@ class ArgoCD(Construct):
             + (["ups"] if ups_monitor else [])
             + (["node-watchdog"] if t5_watchdog else [])
             + (["arc-systems", "arc-runners"] if arc else [])
-            + (["kmsg"] if kmsg else []),
+            + (["kmsg"] if kmsg else [])
+            + (["gatus"] if gatus else []),
             # + Namespace when a singleton rides this project: its Namespace
             # objects (owned by the unit, or via CreateNamespace=true) are
             # gated by this clusterResourceWhitelist, so a sync fails without
             # the entry.
             cluster_resources=[STORAGE_CLASS, PRIORITY_CLASS]
-            + ([NAMESPACE_KIND] if (ups_monitor or t5_watchdog or arc or kmsg) else []),
+            + (
+                [NAMESPACE_KIND]
+                if (ups_monitor or t5_watchdog or arc or kmsg or gatus)
+                else []
+            ),
         )
         if self.console_envs:
             self._app_project(
@@ -567,6 +573,20 @@ class ArgoCD(Construct):
                 app_name_tmpl="kmsg",
                 include_tmpl="kmsg.k8s.yaml",
                 dest_ns_tmpl="kmsg",
+                prune_disabled=False,
+                create_namespace=True,
+            )
+        # The in-cluster endpoint prober — same singleton shape, minipc-only
+        # (its targets are prod-1's). Synced by hand, like the other singletons.
+        if gatus:
+            self._application_set(
+                id="appset-gatus",
+                name="gatus",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="gatus",
+                include_tmpl="gatus.k8s.yaml",
+                dest_ns_tmpl="gatus",
                 prune_disabled=False,
                 create_namespace=True,
             )

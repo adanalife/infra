@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: gatus
+    app.kubernetes.io/part-of: infra
+  name: gatus
+  namespace: gatus
+data:
+  config.yaml: |
+    metrics: true
+    web:
+      port: 8080
+    ui:
+      title: 'adanalife: inside'
+      header: adanalife (prod, in-cluster)
+    endpoints:
+    - name: postgres
+      group: data
+      url: tcp://pg-rw.prod-1-data.svc.cluster.local:5432
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: nats
+      group: data
+      url: tcp://nats.prod-1-platform.svc.cluster.local:4222
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: tripbot-console
+      group: apps
+      url: http://tripbot-console.prod-1.svc.cluster.local:8080/health/ready
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[BODY].status == ok'
+    - name: radio
+      group: apps
+      url: http://radio.prod-1.svc.cluster.local:8000/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+    - name: console
+      group: lan-ingress
+      url: https://console.prod.whereisdana.today/health/ready
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+      - '[BODY].status == ok'
+    - name: argocd
+      group: lan-ingress
+      url: https://argocd.prod.whereisdana.today/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: burrito
+      group: lan-ingress
+      url: https://burrito.prod.whereisdana.today/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: hubble
+      group: lan-ingress
+      url: https://hubble.prod.whereisdana.today/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: argo-workflows
+      group: lan-ingress
+      url: https://argo-workflows.prod.whereisdana.today/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: gatus
+      group: lan-ingress
+      url: https://gatus.prod.whereisdana.today/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: gatus
+    app.kubernetes.io/part-of: infra
+  name: gatus
+  namespace: gatus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gatus
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: b543bd5d76
+        prometheus.io/port: "8080"
+        prometheus.io/scrape: "true"
+      labels:
+        app: gatus
+    spec:
+      containers:
+        - env:
+            - name: GATUS_CONFIG_PATH
+              value: /config/config.yaml
+          image: ghcr.io/twin/gatus:v5.38.0
+          name: gatus
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+          volumeMounts:
+            - mountPath: /config
+              name: config
+              readOnly: true
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - configMap:
+            name: gatus
+          name: config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: gatus
+    app.kubernetes.io/part-of: infra
+  name: gatus
+  namespace: gatus
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app: gatus
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: gatus.prod.whereisdana.today
+  labels:
+    app.kubernetes.io/name: gatus
+    app.kubernetes.io/part-of: infra
+  name: gatus
+  namespace: gatus
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: gatus.prod.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: gatus
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - gatus.prod.whereisdana.today
+      secretName: gatus-tls

@@ -22,6 +22,7 @@ from adanalife_k8s.charts import (
     ArgoCDChart,
     BurritoChart,
     DashcamLocalizeChart,
+    GatusChart,
     KmsgChart,
     NfsPVChart,
     DataChart,
@@ -123,6 +124,10 @@ if not only:
     # up for Loki. Minipc-only (the k3d dev Argo has no Talos API to read). See
     # constructs/kmsg.py.
     KmsgChart(app, "kmsg")
+    # In-cluster endpoint prober — cluster-singleton in the `gatus` namespace,
+    # probing prod-1's data plane and LAN ingress hosts. Minipc-only. See
+    # constructs/gatus.py.
+    GatusChart(app, "gatus")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with
