@@ -11,6 +11,9 @@ data:
     metrics: true
     web:
       port: 8080
+    storage:
+      type: sqlite
+      path: /data/data.db
     ui:
       title: 'adanalife: inside'
       header: adanalife (prod, in-cluster)
@@ -83,6 +86,149 @@ data:
       conditions:
       - '[STATUS] == 200'
       - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: minipc.whereisdana.today
+      group: dns
+      url: 1.1.1.1
+      interval: 60s
+      dns:
+        query-name: minipc.whereisdana.today
+        query-type: A
+      conditions:
+      - '[DNS_RCODE] == NOERROR'
+      - '[BODY] == 192.168.40.111'
+    - name: console.prod.whereisdana.today
+      group: dns
+      url: 1.1.1.1
+      interval: 60s
+      dns:
+        query-name: console.prod.whereisdana.today
+        query-type: CNAME
+      conditions:
+      - '[DNS_RCODE] == NOERROR'
+      - '[BODY] == pat(*minipc.whereisdana.today*)'
+    - name: dana.lol
+      group: domains
+      url: tcp://dana.lol:443
+      interval: 1h
+      conditions:
+      - '[DOMAIN_EXPIRATION] > 720h'
+    - name: whereisdana.today
+      group: domains
+      url: tcp://whereisdana.today:443
+      interval: 1h
+      conditions:
+      - '[DOMAIN_EXPIRATION] > 720h'
+    - name: whalecore.com
+      group: domains
+      url: tcp://whalecore.com:443
+      interval: 1h
+      conditions:
+      - '[DOMAIN_EXPIRATION] > 720h'
+    - name: twitch-ingest-list
+      group: upstream
+      url: https://ingest.twitch.tv/ingests
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - len([BODY].ingests) > 0
+    - name: twitch-ingest
+      group: upstream
+      url: tcp://ingest.global-contribute.live-video.net:1935
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: youtube-ingest
+      group: upstream
+      url: tcp://a.rtmps.youtube.com:443
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: twitch-api
+      group: upstream
+      url: https://api.twitch.tv/helix/streams
+      interval: 60s
+      conditions:
+      - '[STATUS] == 401'
+    - name: ghcr
+      group: upstream
+      url: https://ghcr.io/v2/
+      interval: 60s
+      conditions:
+      - '[STATUS] == 401'
+    - name: grafana-cloud
+      group: upstream
+      url: https://adanalife.grafana.net/api/health
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+    - name: letsencrypt
+      group: upstream
+      url: https://acme-v02.api.letsencrypt.org/directory
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+    - name: aws-ssm
+      group: upstream
+      url: https://ssm.us-east-1.amazonaws.com/
+      interval: 60s
+      conditions:
+      - '[STATUS] < 500'
+    - name: internet
+      group: upstream
+      url: tcp://1.1.1.1:53
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: dana.lol
+      group: public
+      url: https://dana.lol
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[BODY] == pat(*A Dana Life*)'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: www.whalecore.com
+      group: public
+      url: https://www.whalecore.com
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[BODY] == pat(*A Dana Life*)'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: guessr-leaderboard
+      group: public
+      url: https://guessr.dana.lol/api/leaderboard?board=daily
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[BODY] == pat(*"board"*)'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
+    - name: dsm
+      group: nas
+      url: tcp://192.168.40.100:5001
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: nfs
+      group: nas
+      url: tcp://192.168.40.100:2049
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: nut
+      group: nas
+      url: tcp://192.168.40.100:3493
+      interval: 60s
+      conditions:
+      - '[CONNECTED] == true'
+    - name: console
+      group: stage
+      url: https://console.stage.whereisdana.today/health/ready
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[BODY].status == ok'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -97,10 +243,12 @@ spec:
   selector:
     matchLabels:
       app: gatus
+  strategy:
+    type: Recreate
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: b543bd5d76
+        adanalife.dev/config-hash: d72b0aad54
         prometheus.io/port: "8080"
         prometheus.io/scrape: "true"
       labels:
@@ -137,13 +285,35 @@ spec:
             - mountPath: /config
               name: config
               readOnly: true
+            - mountPath: /data
+              name: data
       securityContext:
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       volumes:
         - configMap:
             name: gatus
           name: config
+        - name: data
+          persistentVolumeClaim:
+            claimName: gatus-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: gatus
+    app.kubernetes.io/part-of: infra
+  name: gatus-data
+  namespace: gatus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
 ---
 apiVersion: v1
 kind: Service

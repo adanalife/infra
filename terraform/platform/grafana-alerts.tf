@@ -5944,7 +5944,10 @@ resource "grafana_rule_group" "radio_health" {
 // cert more than 14 days from expiry.
 //
 // Two arms, either one fires:
-//   - an endpoint whose conditions have failed (gatus_results_endpoint_success 0).
+//   - an endpoint in a paging group whose conditions have failed
+//     (gatus_results_endpoint_success 0). The group list mirrors PAGING_GROUPS in
+//     gatus.py (a cdk8s test holds them equal); upstream, public, nas and stage
+//     are on the dashboard for context and never page.
 //   - the gatus Deployment has no available pod. The success series go stale with
 //     the pod, so the endpoint arm alone would read NoData and stay quiet.
 //
@@ -5964,7 +5967,7 @@ resource "grafana_rule_group" "gatus_health" {
 
     annotations = {
       summary     = "Gatus: {{ $labels.group }}/{{ $labels.name }}{{ $labels.deployment }} failing for 5m"
-      description = "Either a Gatus endpoint has failed its conditions for 5 minutes, or the gatus Deployment has no available pod. The dashboard at https://gatus.prod.whereisdana.today (LAN or tailnet) shows which condition failed: [CONNECTED] for the data group (postgres, nats), [STATUS]/[BODY] for the apps, and [CERTIFICATE_EXPIRATION] > 336h on the lan-ingress hosts, where a cert under 14 days means cert-manager's renewal is stuck (`kubectl get certificate -A`). For the pod arm, start with `kubectl --context admin@adanalife-minipc -n gatus get pod`; the gatus Argo Application is synced by hand."
+      description = "Either a Gatus endpoint has failed its conditions for 5 minutes, or the gatus Deployment has no available pod. The dashboard at https://gatus.prod.whereisdana.today (LAN or tailnet) shows which condition failed: [CONNECTED] for the data group (postgres, nats), [STATUS]/[BODY] for the apps, and [CERTIFICATE_EXPIRATION] > 336h on the lan-ingress hosts, where a cert under 14 days means cert-manager's renewal is stuck (`kubectl get certificate -A`); the dns group, where *.whereisdana.today no longer resolves to the minipc's LAN address (external-dns or Route53); and the domains group, where a registration under 30 days from expiry means auto-renew failed. Check the upstream group on the same dashboard before digging in: a red Twitch ingest, GHCR or internet check points away from the cluster. For the pod arm, start with `kubectl --context admin@adanalife-minipc -n gatus get pod`; the gatus Argo Application is synced by hand."
     }
     labels = {
       severity = "warning"
@@ -5980,7 +5983,7 @@ resource "grafana_rule_group" "gatus_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "(1 - max by (group, name) (gatus_results_endpoint_success{namespace=\"gatus\"})) or (max by (deployment) (kube_deployment_status_replicas_available{namespace=\"gatus\", deployment=\"gatus\"}) == bool 0)"
+        expr          = "(1 - max by (group, name) (gatus_results_endpoint_success{namespace=\"gatus\", group=~\"data|apps|lan-ingress|dns|domains\"})) or (max by (deployment) (kube_deployment_status_replicas_available{namespace=\"gatus\", deployment=\"gatus\"}) == bool 0)"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200

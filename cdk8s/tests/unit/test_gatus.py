@@ -60,3 +60,34 @@ def _argo_appsets(cluster):
 def test_minipc_only():
     assert "gatus" in _argo_appsets("minipc")
     assert "gatus" not in _argo_appsets("k3d")
+
+
+def test_alert_pages_on_exactly_the_paging_groups():
+    # The rule's group regex and PAGING_GROUPS are two copies of one list.
+    import pathlib
+    import re
+
+    from adanalife_k8s.constructs.gatus import PAGING_GROUPS
+
+    tf = (
+        pathlib.Path(__file__).parents[3] / "terraform/platform/grafana-alerts.tf"
+    ).read_text()
+    m = re.search(r'gatus_results_endpoint_success\{[^}]*group=~\\"([^\\]+)\\"', tf)
+    assert m, "gatus-health rule lost its group filter"
+    assert set(m.group(1).split("|")) == set(PAGING_GROUPS)
+
+
+def test_every_endpoint_group_is_known():
+    from adanalife_k8s.constructs.gatus import PAGING_GROUPS
+
+    context = {"upstream", "public", "nas", "stage"}
+    groups = {e["group"] for e in _config(_synth())["endpoints"]}
+    assert groups <= set(PAGING_GROUPS) | context
+
+
+def test_history_persists_on_a_claim():
+    objs = _synth()
+    assert _config(objs)["storage"]["type"] == "sqlite"
+    assert any(o["kind"] == "PersistentVolumeClaim" for o in objs)
+    deploy = next(o for o in objs if o["kind"] == "Deployment")
+    assert deploy["spec"]["strategy"]["type"] == "Recreate"
