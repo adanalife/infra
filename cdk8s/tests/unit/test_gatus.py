@@ -91,3 +91,27 @@ def test_history_persists_on_a_claim():
     assert any(o["kind"] == "PersistentVolumeClaim" for o in objs)
     deploy = next(o for o in objs if o["kind"] == "Deployment")
     assert deploy["spec"]["strategy"]["type"] == "Recreate"
+
+
+def _data_policy_sources(env_name):
+    import pathlib
+
+    doc = pathlib.Path(__file__).parents[2] / "dist" / f"{env_name}-data.k8s.yaml"
+    policy = next(
+        o
+        for o in yaml.safe_load_all(doc.read_text())
+        if o and o["kind"] == "NetworkPolicy"
+    )
+    return {
+        peer.get("namespaceSelector", {})
+        .get("matchLabels", {})
+        .get("kubernetes.io/metadata.name")
+        for rule in policy["spec"]["ingress"]
+        for peer in rule["from"]
+    }
+
+
+def test_postgres_policy_admits_gatus_in_prod_only():
+    # A missing rule fails as a silent TCP timeout, not an error.
+    assert "gatus" in _data_policy_sources("prod-1")
+    assert "gatus" not in _data_policy_sources("stage-1")

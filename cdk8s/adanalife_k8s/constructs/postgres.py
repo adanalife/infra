@@ -298,7 +298,8 @@ class Postgres(Construct):
         #     as default-deny ingress on every pod in the data namespace,
         #     allowing only same-namespace traffic (the backup CronJob), the
         #     env's OWN app namespace on the postgres port, the operator on the
-        #     status port, and the monitoring namespace on the metrics port.
+        #     status port, the monitoring namespace on the metrics port, and
+        #     (prod only) the gatus prober on the postgres port.
         #     Cilium enforces it. Anything that needs to reach this namespace
         #     needs a rule here — a missing one fails as silence, not an error.
         #     Co-located envs skip it: a default-deny in the shared app
@@ -379,6 +380,31 @@ class Postgres(Construct):
                                     protocol="TCP",
                                 )
                             ],
+                        ),
+                        # Gatus (constructs/gatus.py) TCP-probes prod's postgres
+                        # port; it reads prod-1 only, so stage stays closed to it.
+                        *(
+                            [
+                                k8s.NetworkPolicyIngressRule(
+                                    from_=[
+                                        k8s.NetworkPolicyPeer(
+                                            namespace_selector=k8s.LabelSelector(
+                                                match_labels={
+                                                    "kubernetes.io/metadata.name": "gatus"
+                                                }
+                                            )
+                                        )
+                                    ],
+                                    ports=[
+                                        k8s.NetworkPolicyPort(
+                                            port=k8s.IntOrString.from_number(PORT),
+                                            protocol="TCP",
+                                        )
+                                    ],
+                                )
+                            ]
+                            if env.name == "prod-1"
+                            else []
                         ),
                     ],
                 ),
