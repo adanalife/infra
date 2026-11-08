@@ -561,9 +561,9 @@ class ArgoCD(Construct):
             )
         # The kernel-log shipper — a cluster-SINGLETON in the same shape as the
         # UPS monitor, minipc-only (the k3d dev Argo passes kmsg=False; that
-        # cluster has no Talos API to read). Autosynced, unlike the UPS monitor:
-        # this pod only ever reads, so there's no arming step that must be a hand
-        # sync. CreateNamespace=true so Argo owns the `kmsg` namespace.
+        # cluster has no Talos API to read). Synced by hand like the other
+        # singletons: there is no automated block on this ApplicationSet.
+        # CreateNamespace=true so Argo owns the `kmsg` namespace.
         if kmsg:
             self._application_set(
                 id="appset-kmsg",
