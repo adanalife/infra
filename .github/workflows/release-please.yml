@@ -134,7 +134,7 @@ jobs:
           working_directory: ${{ inputs.mise-dir }}
 
       # For `uvx towncrier` in repos whose mise pins carry no uv.
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag published
         if: ${{ steps.release-branch.outputs.exists == 'true' }}
 
       - name: Stage the release on its PR branch
