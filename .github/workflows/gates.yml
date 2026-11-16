@@ -256,7 +256,7 @@ jobs:
         if: steps.changed.outputs.cdk8s == 'true'
         # A Python cdk8s app runs jsii, which refuses its disk cache when any parent
         # dir is world-writable — true of the ARC runners' /home/runner. Ephemeral
-        # runners gain nothing from the cache, so skip it.
+        # runners gain nothing from the cache, so skip it (the tests below too).
         env:
           JSII_RUNTIME_PACKAGE_CACHE: disabled
         run: task cdk8s:synth
@@ -269,6 +269,8 @@ jobs:
       - name: Synth-time checks
         id: cdk8s-tests
         if: steps.changed.outputs.cdk8s == 'true' && inputs.cdk8s-tests
+        env:
+          JSII_RUNTIME_PACKAGE_CACHE: disabled
         run: task cdk8s:test
 
       - name: Validate manifests (kubeconform)
