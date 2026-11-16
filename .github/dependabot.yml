@@ -33,15 +33,13 @@ updates:
   #                   end state. Security updates run on their own cadence, so
   #                   they still arrive within the day.
   #
-  # Minor and patch bumps batch into one PR per run; a major is left out of
-  # every non-Actions group so it arrives on its own, where a breaking change is
-  # attributable to a single dependency instead of hiding among a dozen safe
-  # ones. Security updates ignore `groups` entirely and always arrive alone.
-  #
-  # The Actions group takes majors too, unlike the others. An action major is
-  # normally a runner or Node version bump rather than an API break, so the
-  # attributability that keeps majors solo elsewhere buys little here — and
-  # holding them out produced a standing queue of one-line PRs nobody merged.
+  # Every ecosystem batches into one PR per run, majors included, and a second
+  # group per ecosystem catches security updates, which Dependabot otherwise
+  # opens one PR per advisory on whatever day it lands. Each solo PR costs a
+  # full CI run and touches the same lockfile as its siblings, so the first
+  # merge leaves the rest conflicting -- and rebase-strategy is disabled, so
+  # nothing repairs them. A red group is bisected by hand; that is cheaper
+  # than the queue of single-bump PRs it replaces.
   # The composite actions under .github/actions/ pin actions of their own, which
   # a scan of `/` alone never sees.
   - package-ecosystem: github-actions
@@ -54,6 +52,10 @@ updates:
       actions:
         patterns:
           - "*"
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
@@ -63,8 +65,8 @@ updates:
   # riding along with a core one. The group name carries the env so the PR title
   # says which plan it is.
   #
-  # Majors stay ungrouped: a provider major can rewrite a plan wholesale, and
-  # that review wants a single dependency in front of it.
+  # A provider major joins its directory's group like any other bump; the
+  # per-environment split is what keeps it attributable to one plan.
   - package-ecosystem: terraform
     directory: terraform/core
     schedule:
@@ -75,9 +77,10 @@ updates:
       core-providers:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      core-providers-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
@@ -91,9 +94,10 @@ updates:
       stage-1-providers:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      stage-1-providers-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
@@ -107,9 +111,10 @@ updates:
       prod-1-providers:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      prod-1-providers-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
@@ -126,9 +131,10 @@ updates:
       platform-providers:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      platform-providers-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
@@ -142,9 +148,10 @@ updates:
       prod-1-data-providers:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      prod-1-data-providers-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
@@ -165,9 +172,10 @@ updates:
       cdk8s:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      cdk8s-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
       semver-major-days: 14
@@ -187,9 +195,10 @@ updates:
       python:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     cooldown:
       default-days: 7
       semver-major-days: 14
