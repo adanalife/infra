@@ -4033,6 +4033,86 @@ resource "grafana_rule_group" "batch_health" {
     }
   }
 
+  rule {
+    name      = "guessr: the daily smoke game has not been played in 25h"
+    for       = "1h"
+    condition = "C"
+    // The two rules above watch whether there will be a game; this one watches
+    // whether today's can be played. guessr's prod-smoke workflow runs smoke.sh
+    // against guessr.dana.lol every day at 07:37 UTC and, as its last step,
+    // plays the day's five rounds as a real player — so a game on record is a
+    // run in which every check passed, and its age is the one number that moves
+    // both when a run fails and when no run happens at all.
+    //
+    // Found by its pin and not its player id: the id is the game's only
+    // credential and stays in the repo's Actions secrets, while smoke.sh always
+    // guesses exactly 40, -100, a point no hand lands on.
+    //
+    // Alerting on no data because the query COALESCEs "never played" to 9999:
+    // a missing row means the datasource stopped answering.
+    no_data_state  = "Alerting"
+    exec_err_state = "Error"
+
+    annotations = {
+      summary     = "guessr prod has not passed its daily smoke game in over 25 hours"
+      description = "The prod-smoke workflow in the guessr repo plays today's game on guessr.dana.lol once a day and records it only when every check before it passed. No such game has been recorded in over 25 hours, so either the last run failed — the live game may not be playable — or the workflow did not run. Read the latest run with `gh run list --repo adanalife/guessr --workflow prod-smoke.yml --limit 3`, then `gh run view <id> --log-failed`; its log names the assertion that failed. To reproduce the read-only half from a laptop: `task smoke -- https://guessr.dana.lol` in the guessr repo. Re-run with `gh workflow run prod-smoke.yml --repo adanalife/guessr` once fixed. A value of 9999 means no smoke game has ever been recorded."
+    }
+    labels = {
+      severity = "warning"
+      service  = "guessr"
+    }
+
+    data {
+      ref_id = "A"
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      datasource_uid = grafana_data_source.guessr_d1.uid
+      // The same Infinity shape as the schedule rule above.
+      model = jsonencode({
+        refId  = "A"
+        type   = "json"
+        source = "url"
+        format = "table"
+        parser = "backend"
+        url    = "/${local.guessr_d1_production}/query"
+        url_options = {
+          method            = "POST"
+          body_type         = "raw"
+          body_content_type = "application/json"
+          data              = jsonencode({ sql = "SELECT COALESCE(CAST((julianday('now') - julianday(MAX(played_at))) * 24 AS INTEGER), 9999) AS hours FROM plays WHERE guess_lat = 40 AND guess_lng = -100" })
+        }
+        root_selector = "result.0.results"
+        columns       = [{ selector = "hours", text = "hours", type = "number" }]
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "C"
+        type       = "threshold"
+        expression = "A"
+        // Whole hours, so "over 25" is 26: a day plus two hours for a scheduled
+        // run GitHub started late. With the hour of `for` a failed 07:37 run
+        // reaches a phone around 10:40 UTC; Discord has it at once, from the
+        // workflow itself.
+        conditions = [{
+          type      = "query"
+          evaluator = { type = "gt", params = [25] }
+          operator  = { type = "and" }
+          query     = { params = ["A"] }
+          reducer   = { type = "last", params = [] }
+        }]
+      })
+    }
+  }
+
   // Prod Postgres dumps hourly to S3 from an in-cluster CronJob — the logical
   // complement to the CNPG WAL archive (pitr-health group), in a separate
   // failure domain. The PVC has been lost outright twice (a talosctl upgrade
