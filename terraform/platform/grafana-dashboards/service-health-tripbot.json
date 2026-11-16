@@ -887,7 +887,7 @@
       "id": 44,
       "type": "timeseries",
       "title": "EventSub notices vs chat shouts (per hour)",
-      "description": "The two halves of the announcement path, which should track each other: every subscribe / follow notice that persists a row should also land a thank-you in chat. Shouts running below notices means outbound chat accepted the call and posted nothing — the one leg of this path with no other signal, since a shout's only other trace is ordinary bot chat text. Compares sub+follow only: gift and resub shouts open no subscribed interval, so they have no events-table row to compare against (see the by-kind panel for those).",
+      "description": "The two halves of the announcement path, which should track each other: every subscribe / follow notice that persists a row should also land a thank-you in chat, except a gift recipient's: a gift bomb is thanked once by its gift shout, so it shows here as notices above shouts by the number of subs gifted, with a gift shout at the same hour on the by-kind panel. Shouts running below notices means outbound chat accepted the call and posted nothing — the one leg of this path with no other signal, since a shout's only other trace is ordinary bot chat text. Compares sub+follow only: gift and resub shouts open no subscribed interval, so they have no events-table row to compare against (see the by-kind panel for those).",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 0, "y": 73, "w": 12, "h": 8 },
       "targets": [
@@ -913,7 +913,7 @@
       "id": 45,
       "type": "timeseries",
       "title": "Chat shouts by kind (per hour)",
-      "description": "Thank-you shouts posted to chat, split by what triggered them. Sub, gift and resub are rare enough on a quiet day that flat zero is normal — read this against the notices panel beside it rather than in isolation. Gift counts one per gift event, not per sub gifted, because that is how many shouts go out; sub counts gift recipients too, matching channel.subscribe.",
+      "description": "Thank-you shouts posted to chat, split by what triggered them. Sub, gift and resub are rare enough on a quiet day that flat zero is normal — read this against the notices panel beside it rather than in isolation. Gift counts one per gift event, not per sub gifted, because that is how many shouts go out; sub counts organic subs only, since gift recipients are not shouted one by one.",
       "datasource": { "type": "prometheus", "uid": "__DS_PROMETHEUS__" },
       "gridPos": { "x": 12, "y": 73, "w": 12, "h": 8 },
       "targets": [
