@@ -13,7 +13,7 @@ terraform {
     # google provider configured in the calling root.
     google = {
       source  = "hashicorp/google"
-      version = "~> 8.2"
+      version = "~> 8.10"
     }
   }
 }
