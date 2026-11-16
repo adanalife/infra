@@ -128,7 +128,7 @@ jobs:
             echo "cdk8s=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag published
         if: inputs.changelog || inputs.cdk8s
 
       # Require every PR to add a towncrier changelog fragment under
