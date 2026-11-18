@@ -48,6 +48,17 @@ controller:
       # Keep failed pods for their logs; successful ones have nothing to say.
       podGC:
         strategy: OnWorkflowSuccess
+      # Every run posts its outcome to Discord when it ends (the
+      # workflow-notify ClusterWorkflowTemplate in extraObjects below). A
+      # workflow that sets its own `onExit` runs that instead — Argo takes
+      # `onExit` over `hooks.exit` — and one that sets its own `hooks.exit`
+      # replaces this one.
+      hooks:
+        exit:
+          templateRef:
+            name: workflow-notify
+            template: notify
+            clusterScope: true
   # Grafana Explore deep links into Loki, so a workflow's logs stay reachable
   # after podGC deletes its pods and after the ttlStrategy deletes the Workflow
   # itself (Loki keeps them for its own retention). Alloy labels each stream
@@ -65,14 +76,18 @@ controller:
       url: https://adanalife.grafana.net/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22grafanacloud-logs%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22%7Bnamespace%3D%5C%22${metadata.namespace}%5C%22%2C%20instance%3D~%5C%22${metadata.namespace}%2F${metadata.name}-.%2A%5C%22%7D%22%2C%22queryType%22%3A%22range%22%2C%22datasource%22%3A%7B%22type%22%3A%22loki%22%2C%22uid%22%3A%22grafanacloud-logs%22%7D%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22${status.startedAtEpoch}%22%2C%22to%22%3A%22${status.finishedAtEpoch}%22%7D%7D%7D
   metricsConfig:
     enabled: true
-  # Workflow tracing: a `workflow` trace per run with a `node` span per DAG node
-  # (attributes `name` = the Workflow, `node_id`), pushed to the cluster's OTLP
-  # receiver and on to Tempo. The traces-only endpoint, not the generic
-  # OTEL_EXPORTER_OTLP_ENDPOINT: that one also turns on an OTLP metrics push,
-  # duplicating the scrape above. Argo marks tracing beta, and a span that
-  # outlives a controller restart is lost. Workload containers carry no OTEL_*
-  # (they get Argo's TRACEPARENT either way), so the per-pod executor spans stay
-  # off.
+  # Workflow tracing, pushed to the cluster's OTLP receiver and on to Tempo: the
+  # controller emits a `node` span per DAG node (attributes `name` = the
+  # Workflow, `node_id`) under one `workflow` span per run. A run queued behind
+  # `parallelism` above never gets that `workflow` span, so each of its node
+  # spans is a root trace of its own and the Workflow carries no trace-id
+  # annotation; only a run that started straight away is one trace. The
+  # traces-only endpoint, not the generic OTEL_EXPORTER_OTLP_ENDPOINT: that one
+  # also turns on an OTLP metrics push, duplicating the scrape. Argo marks
+  # tracing beta, and a span that outlives a controller restart is lost. These
+  # vars reach the controller only; a workload container that sets the same
+  # traces-only vars itself (every video-pipeline container does) also exports
+  # the executor's spans and its own under the TRACEPARENT Argo sets in the pod.
   extraEnv:
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: http://k8s-monitoring-alloy-receiver.monitoring.svc:4318/v1/traces
@@ -183,3 +198,89 @@ extraObjects:
       tls:
         - hosts:
             - argo-workflows-prod
+  # The exit hook every workflow runs (workflowDefaults above): one Discord
+  # message per finished run, to the alerts channel Argo CD's notifications and
+  # the Grafana alerts post to. The chart passes extraObjects through `tpl`, so
+  # Argo's own {{workflow.*}} variables are escaped as {{`...`}} to reach the
+  # cluster intact. The script swallows its own errors and an absent webhook
+  # Secret is optional, so a Discord outage never turns a green run red.
+  - apiVersion: argoproj.io/v1alpha1
+    kind: ClusterWorkflowTemplate
+    metadata:
+      name: workflow-notify
+    spec:
+      templates:
+        - name: notify
+          script:
+            # Already on the node for the kmsg / t5-watchdog / ups-monitor pods.
+            image: python:3.14-alpine
+            command: [python]
+            env:
+              - name: WEBHOOK_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: workflow-notify
+                    key: webhook-url
+                    optional: true
+              - name: WF_NAME
+                value: "{{`{{workflow.name}}`}}"
+              - name: WF_NAMESPACE
+                value: "{{`{{workflow.namespace}}`}}"
+              - name: WF_STATUS
+                value: "{{`{{workflow.status}}`}}"
+              - name: WF_DURATION
+                value: "{{`{{workflow.duration}}`}}"
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 64Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 65534
+            source: |
+              import json, os, urllib.request
+
+              try:
+                  name, ns, phase = (os.environ[k] for k in ("WF_NAME", "WF_NAMESPACE", "WF_STATUS"))
+                  mins = round(float(os.environ["WF_DURATION"]) / 60)
+                  icon = "✅" if phase == "Succeeded" else "❌"
+                  text = (
+                      f"{icon} workflow `{name}` {phase} after {mins // 60}h{mins % 60:02d}m in {ns} "
+                      f"<https://argo-workflows.prod.whereisdana.today/workflows/{ns}/{name}>"
+                  )
+                  print(text)
+                  if url := os.environ.get("WEBHOOK_URL"):
+                      # Discord's edge refuses urllib's default User-Agent.
+                      headers = {"Content-Type": "application/json", "User-Agent": "argo-workflows-notify"}
+                      body = json.dumps({"content": text}).encode()
+                      urllib.request.urlopen(urllib.request.Request(url, body, headers), timeout=10)
+              except Exception as e:
+                  print(f"notify failed: {e!r}")
+  # The webhook, from the parameter Argo CD's notifications and tripbot's
+  # reportCmd read. The hook pod runs in the workflow's own namespace, so the
+  # Secret has to live there: stage-1 reads it through its own SecretStore.
+  # argo-workflows has no store that may read it (the cluster store's namespace
+  # allowlist leaves it out), so a run there logs its message and posts nothing.
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: workflow-notify
+      namespace: stage-1
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        kind: SecretStore
+        name: aws-parameterstore
+      target:
+        name: workflow-notify
+      data:
+        - secretKey: webhook-url
+          remoteRef:
+            key: /k8s/tripbot/discord-alerts-webhook
