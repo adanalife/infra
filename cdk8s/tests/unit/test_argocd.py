@@ -201,7 +201,7 @@ def test_minipc_apps_autosync_except_prod_obs():
     assert '(eq .env "stage-1")' in patch
     assert '(eq .env "prod-1")' in patch
     # ...and tripbot-apps carries no obs unit — OBS is delivered by the
-    # obs repo's own appset (OBS_REVISIONS), so there's no obs carve-out here.
+    # obs repo's own appset (OBS_ENVS), so there's no obs carve-out here.
     assert "obs" not in patch
     # selfHeal is uniformly ON (both minipc envs match git for image/config/
     # existence drift) — no per-env or per-app selfHeal carve-out. Scaling no
@@ -442,7 +442,7 @@ def test_console_argo_rbac_scopes_to_applications_for_console_sas():
 
 
 def test_no_console_argo_rbac_on_dev():
-    # dev's console isn't Argo-managed (CONSOLE_REVISIONS is prod/stage only), so
+    # dev's console isn't Argo-managed (CONSOLE_ENVS is prod/stage only), so
     # the dev Argo grants no console→Applications access.
     objs = _synth(**_DEV)
     assert not any(
