@@ -185,6 +185,8 @@ jobs:
               main = d["spec"]["template"]["spec"]["containers"][0]["name"]
               running = {c["imageID"].rsplit("@", 1)[-1]
                          for p in pods if p["status"].get("phase") == "Running"
+                         # An outgoing pod still reads Running while it terminates.
+                         and not p["metadata"].get("deletionTimestamp")
                          for c in p["status"].get("containerStatuses", []) if c["name"] == main}
               if digest and running != {digest}:
                   print(f"::error::{name} runs {sorted(running)}, this run pushed {digest}: :main points elsewhere")
