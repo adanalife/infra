@@ -218,6 +218,10 @@ for _name, _env in ENVS.items():
             f"{SUPPORTED_PLATFORMS} — add an adapter in platform-gateway + run `task platforms:sync`"
         )
 
+# The envs on the minipc cluster (prod-1, stage-1), in ENVS order — the set the
+# minipc Argo install manages.
+MINIPC_ENVS = tuple(name for name, env in ENVS.items() if env.cluster == "minipc")
+
 
 def load_env(name: str) -> EnvConfig:
     try:

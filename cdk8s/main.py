@@ -55,7 +55,7 @@ for name in targets:
     DataChart(app, f"{name}-data", env=env)
     # Per-platform MediaMTX RTSP relays (playout publishes in, OBS pulls out) —
     # minipc envs only, matching where the playout repo deploys (see
-    # constructs/argocd.py PLAYOUT_REVISIONS). One deploy unit / Argo
+    # constructs/argocd.py PLAYOUT_ENVS). One deploy unit / Argo
     # Application per (env, platform), like obs/playout (appset-mediamtx).
     if env.cluster == "minipc":
         for platform in env.platforms:

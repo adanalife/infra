@@ -45,6 +45,7 @@ import imports.io.external_secrets as esx
 import imports.k8s as k8s
 from constructs import Construct
 
+from adanalife_k8s.config import MINIPC_ENVS
 from adanalife_k8s.eso import CLUSTER_STORE, ESData, external_secret
 
 REPO_URL = "git@github.com:adanalife/infra.git"
@@ -93,15 +94,11 @@ STORAGE_CLASS = {"group": "storage.k8s.io", "kind": "StorageClass"}
 PRIORITY_CLASS = {"group": "scheduling.k8s.io", "kind": "PriorityClass"}
 NAMESPACE_KIND = {"group": "", "kind": "Namespace"}
 IN_CLUSTER = "https://kubernetes.default.svc"
-# The minipc Argo manages these envs in-cluster. development runs its OWN Argo on
+# The minipc Argo manages MINIPC_ENVS in-cluster. development runs its OWN Argo on
 # the k3d dev cluster (a separate install reconciling development against that
 # cluster's own in-cluster API — no cross-cluster networking). The ArgoCD construct
 # is parameterized by env-set so both instances share one authoring path; see
 # main.py (argocd = minipc, argocd-k3d = the dev cluster).
-ENVS = ("prod-1", "stage-1")
-# Envs on the per-component topology (one Application per component rather than
-# one per env).
-CUTOVER_ENVS = ENVS
 # Envs whose *apps* run automated (prune + selfHeal) — a merged dist/ change
 # deploys itself. Applied per-env via a templatePatch on the apps ApplicationSet,
 # so the rest stay manual. The DATA units NEVER autosync (Prune=false is their
@@ -110,7 +107,7 @@ AUTOSYNC_ENVS = ("stage-1", "prod-1")
 # (env, app) pairs held out of autosync even when their env is automated. Empty:
 # tripbot-apps carries only what tripbot's cdk8s synths, and the one holdout that
 # exists — the live prod OBS encoder — lives on the obs repo's own ApplicationSet
-# (see OBS_REVISIONS), not here.
+# (see OBS_ENVS), not here.
 AUTOSYNC_HOLDOUTS: tuple[tuple[str, str], ...] = ()
 TAILNET_HOST = "argocd-prod"  # -> argocd-prod.<tailnet>.ts.net
 # LAN-reachable UI host published by external-dns to the cluster's LAN endpoint.
@@ -128,18 +125,18 @@ NOTIFICATIONS_SM_KEY = "/k8s/tripbot/discord-alerts-webhook"
 # design: the console repo owns its own deployment; infra owns everything else.
 CONSOLE_REPO_URL = "git@github.com:adanalife/tripbot-console.git"
 CONSOLE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-console"
-# Per-env git revision for the console units. Trunk-based (release-please), so
-# both envs track main; prod stays release-gated by the image pin in
-# versions.yaml (bumped only at release), not by a separate branch — stage
-# floats the :main image, prod deploys the pinned tag.
-CONSOLE_REVISIONS = {"prod-1": "main", "stage-1": "main"}
+# Envs with a console unit. Trunk-based (release-please), so both envs track
+# main; prod stays release-gated by the image pin in versions.yaml (bumped only
+# at release), not by a separate branch — stage floats the :main image, prod
+# deploys the pinned tag.
+CONSOLE_ENVS = ("prod-1", "stage-1")
 # The private video-pipeline repo — another cross-repo source (same split as the
 # console: the repo owns its own cdk8s/dist deploy units). The repo is
 # trunk-based (release-please), so both envs track main: stage carries the
 # batch stack + a scaled-to-zero !find embed responder, prod just the responder.
 VIDEO_PIPELINE_REPO_URL = "git@github.com:adanalife/video-pipeline.git"
 VIDEO_PIPELINE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-video-pipeline"
-VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
+VIDEO_PIPELINE_ENVS = ("stage-1", "prod-1")
 # The private platform-gateway repo — another cross-repo source (same split as
 # the console: the repo owns its own cdk8s/dist deploy units, one
 # <env>-gateway-<platform>.k8s.yaml per instance plus <env>-gateway-shared
@@ -148,18 +145,18 @@ VIDEO_PIPELINE_REVISIONS = {"stage-1": "main", "prod-1": "main"}
 # release-gated by the image pin in versions.yaml, stage floats the :main image.
 PLATFORM_GATEWAY_REPO_URL = "git@github.com:adanalife/platform-gateway.git"
 PLATFORM_GATEWAY_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-platform-gateway"
-PLATFORM_GATEWAY_REVISIONS = {"prod-1": "main", "stage-1": "main"}
+PLATFORM_GATEWAY_ENVS = ("prod-1", "stage-1")
 # The private flare repo — the social-video renderer's in-cluster unit (a render
 # WorkflowTemplate, its PVCs, the hosted editor) — stage-1 only; there is no
 # prod flare. Trunk-based like the rest: stage tracks main.
 FLARE_PROJECT = "flare"
 FLARE_REPO_URL = "git@github.com:adanalife/flare.git"
 FLARE_REPO_SM_KEY = "/k8s/argocd/repo-ssh-key-flare"
-FLARE_REVISIONS = {"stage-1": "main"}
+FLARE_ENVS = ("stage-1",)
 # The obs repo — the OBS streaming encoder. PUBLIC, so Argo fetches it over
 # anonymous HTTPS — no deploy key / repo Secret (unlike the private
 # console/video-pipeline/gateway SSH sources, so no _repo_external_secret below).
-# OBS_REVISIONS is the single source of truth for which envs the obs repo
+# OBS_ENVS is the single source of truth for which envs the obs repo
 # delivers: an env listed here is delivered by the obs repo's own ApplicationSet.
 # tripbot-apps only ever delivers what tripbot's cdk8s synths, so it never
 # carries an obs unit to collide with. Prod obs is a manual-sync holdout on that
@@ -170,7 +167,7 @@ OBS_REPO_URL = "https://github.com/adanalife/obs.git"
 # {{.env}}-obs-<platform> Application per instance). Trunk-based
 # (release-please): every env tracks main; prod stays release-gated by the image
 # pin in versions.yaml, not by a separate branch.
-OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
+OBS_ENVS = ("stage-1", "prod-1", "development")
 # The playout repo — the Rust/GStreamer playout server (vlc-server's successor):
 # it publishes the dashcam stream over RTSP into the MediaMTX relay, and OBS
 # pulls from the relay. PUBLIC like obs, so Argo fetches it over anonymous
@@ -182,12 +179,7 @@ OBS_REVISIONS = {"stage-1": "main", "prod-1": "main", "development": "main"}
 # a deliberate manual sync (same reasoning as prod obs).
 PLAYOUT_PROJECT = "playout"
 PLAYOUT_REPO_URL = "https://github.com/adanalife/playout.git"
-PLAYOUT_REVISIONS = {"stage-1": "main", "prod-1": "main"}
-# Envs running the per-platform MediaMTX relays (infra-authored,
-# dist/<env>-mediamtx-<platform>.k8s.yaml) — the minipc envs, matching where playout
-# deploys. Unlike the other infra units (supporting/data, manual sync), the
-# relay autosyncs: restarts are cheap and it should self-heal.
-MEDIAMTX_ENVS = ("prod-1", "stage-1")
+PLAYOUT_ENVS = ("stage-1", "prod-1")
 # The tripbot repo — Argo's source for the APP workloads built from it (tripbot +
 # onscreens-server). It's PUBLIC, so Argo fetches it over anonymous https — no
 # deploy key / repo Secret (unlike the infra + console SSH sources). tripbot's
@@ -198,7 +190,6 @@ TRIPBOT_REPO_URL = "https://github.com/adanalife/tripbot.git"
 # by the image pin in versions.yaml (bumped only at release), stage + dev float
 # the :main image — same philosophy as the console + the image-tag pins. (local
 # isn't Argo-managed — it kubectl-applies tripbot's dist directly.)
-TRIPBOT_REVISIONS = {"prod-1": "main", "stage-1": "main", "development": "main"}
 # Envs whose APP workloads + identity Secrets Argo reads from the tripbot repo
 # instead of infra: prod-1/stage-1 on the minipc, development on the k3d cluster.
 # infra authors no tripbot app manifests — it delivers them cross-repo (see the
@@ -274,7 +265,7 @@ class ArgoCD(Construct):
         # separate in-cluster install managing only development, where every
         # app autosyncs since the env is throwaway. The prod OBS holdout is
         # minipc-only.
-        envs = CUTOVER_ENVS if minipc else ("development",)
+        envs = MINIPC_ENVS if minipc else ("development",)
         autosync_envs = AUTOSYNC_ENVS if minipc else ("development",)
         autosync_holdouts = AUTOSYNC_HOLDOUTS if minipc else ()
         # UI exposure: tailnet Ingress on the minipc only (no tailscale-operator
@@ -305,32 +296,34 @@ class ArgoCD(Construct):
         # emergency brake (ignoreApplicationDifferences) still applies on top.
         self._selfheal = minipc
         # Envs whose console (the cross-repo tripbot-console unit) this Argo
-        # delivers — the envs with a defined console revision. Resolves empty on
+        # delivers — the envs in CONSOLE_ENVS. Resolves empty on
         # the k3d dev instance (development deploys via `task deploy:dev` in the
         # console repo; the dev cluster carries no private-repo deploy key).
-        self.console_envs = tuple(e for e in envs if e in CONSOLE_REVISIONS)
+        self.console_envs = tuple(e for e in envs if e in CONSOLE_ENVS)
         # Envs whose video-pipeline (cross-repo) unit this Argo delivers — empty
         # off any cluster not running stage-1 (development deploys via task).
-        self.video_pipeline_envs = tuple(
-            e for e in envs if e in VIDEO_PIPELINE_REVISIONS
-        )
+        self.video_pipeline_envs = tuple(e for e in envs if e in VIDEO_PIPELINE_ENVS)
         # Envs whose platform-gateway (cross-repo) unit this Argo delivers — both
         # prod-1 + stage-1 run gateway-twitch; empty on the k3d dev instance (no
         # private-repo deploy key; a dev instance runs locally via `task`).
         self.platform_gateway_envs = tuple(
-            e for e in envs if e in PLATFORM_GATEWAY_REVISIONS
+            e for e in envs if e in PLATFORM_GATEWAY_ENVS
         )
         # Envs whose flare unit this Argo delivers — stage-1 on the minipc only.
-        self.flare_envs = tuple(e for e in envs if e in FLARE_REVISIONS)
+        self.flare_envs = tuple(e for e in envs if e in FLARE_ENVS)
         # Envs whose OBS is delivered from the standalone (public) obs repo —
         # every env, including the k3d dev instance (the obs repo is public, so
         # dev fetches it anonymously).
-        self.obs_envs = tuple(e for e in envs if e in OBS_REVISIONS)
+        self.obs_envs = tuple(e for e in envs if e in OBS_ENVS)
         # Envs whose playout (the public playout repo) this Argo delivers —
         # minipc-only; empty on the k3d dev instance.
-        self.playout_envs = tuple(e for e in envs if e in PLAYOUT_REVISIONS)
-        # Envs whose MediaMTX relays (infra-authored) this Argo delivers.
-        self.mediamtx_envs = tuple(e for e in envs if e in MEDIAMTX_ENVS)
+        self.playout_envs = tuple(e for e in envs if e in PLAYOUT_ENVS)
+        # Envs running the per-platform MediaMTX relays (infra-authored,
+        # dist/<env>-mediamtx-<platform>.k8s.yaml) — every minipc env, matching
+        # where playout deploys. Unlike the other infra units (supporting/data,
+        # manual sync), the relay autosyncs: restarts are cheap and it should
+        # self-heal.
+        self.mediamtx_envs = envs if minipc else ()
         # Envs whose apps this Argo reads from the tripbot repo (so the AppProject
         # allows that source). Resolves to () on any cluster not running a
         # cut-over env.
@@ -489,7 +482,7 @@ class ArgoCD(Construct):
                 name="tripbot-identity",
                 project=TRIPBOT_PROJECT,
                 elements=[
-                    {"env": e, "revision": TRIPBOT_REVISIONS[e]}
+                    {"env": e, "revision": TARGET_REVISION}
                     for e in self.tripbot_apps_envs
                 ],
                 app_name_tmpl="{{.env}}-tripbot-identity",
@@ -638,8 +631,7 @@ class ArgoCD(Construct):
                 name="tripbot-console",
                 project=CONSOLE_PROJECT,
                 elements=[
-                    {"env": e, "revision": CONSOLE_REVISIONS[e]}
-                    for e in self.console_envs
+                    {"env": e, "revision": TARGET_REVISION} for e in self.console_envs
                 ],
                 app_name_tmpl="{{.env}}-console",
                 include_tmpl="{{.env}}.k8s.yaml",
@@ -664,7 +656,7 @@ class ArgoCD(Construct):
                 name="video-pipeline",
                 project=VIDEO_PIPELINE_PROJECT,
                 elements=[
-                    {"env": e, "revision": VIDEO_PIPELINE_REVISIONS[e]}
+                    {"env": e, "revision": TARGET_REVISION}
                     for e in self.video_pipeline_envs
                 ],
                 app_name_tmpl="{{.env}}-video-pipeline",
@@ -688,7 +680,7 @@ class ArgoCD(Construct):
                 name="flare",
                 project=FLARE_PROJECT,
                 elements=[
-                    {"env": e, "revision": FLARE_REVISIONS[e]} for e in self.flare_envs
+                    {"env": e, "revision": TARGET_REVISION} for e in self.flare_envs
                 ],
                 app_name_tmpl="{{.env}}-flare",
                 include_tmpl="{{.env}}.k8s.yaml",

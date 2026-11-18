@@ -45,7 +45,7 @@ from __future__ import annotations
 import cdk8s
 from constructs import Construct
 
-from adanalife_k8s.config import load_env
+from adanalife_k8s.config import MINIPC_ENVS, load_env
 from adanalife_k8s.constructs.argocd import (
     ARGO_NS,
     ESO_DEFAULTS_IGNORE,
@@ -62,9 +62,6 @@ from adanalife_k8s.helm_platform import (
 )
 
 PROJECT = "platform"
-# Envs whose per-env platform charts (external-dns, NATS) Argo manages. minipc only
-# — development is on the k3d cluster, which runs its own separate Argo install.
-PLATFORM_ENVS = ("prod-1", "stage-1")
 # Cluster-scoped platform releases install once with prod-1's values (stage rides
 # prod's cluster-scoped platform — see stage-prod-cotenancy).
 CLUSTER_VALUES_ENV = "prod-1"
@@ -132,8 +129,9 @@ class ArgoPlatform(Construct):
         # Per-env releases — name-qualified by env so prod-1/stage-1 don't collide
         # on the Application name. Skips the non-Argo-manageable ones (external-dns:
         # its --default-targets is a host-discovered node IP in gitignored
-        # values.local.yml), leaving NATS.
-        for env_name in PLATFORM_ENVS:
+        # values.local.yml), leaving NATS. minipc envs only — development is on the
+        # k3d cluster, which runs its own separate Argo install.
+        for env_name in MINIPC_ENVS:
             for comp in env_components(load_env(env_name)):
                 if comp.argo:
                     self._application(f"{env_name}-{comp.chart}", comp, comp.namespace)
