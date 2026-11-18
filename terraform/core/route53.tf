@@ -137,14 +137,6 @@ resource "aws_route53_record" "primary_staging" {
   records = ["dana-lol-staging.pages.dev"]
 }
 
-resource "aws_route53_record" "secondary_staging" {
-  zone_id = aws_route53_zone.secondary.zone_id
-  name    = "staging.${var.secondary_domain}"
-  type    = "CNAME"
-  ttl     = "300"
-  records = ["static.stage.${var.secondary_domain}"]
-}
-
 # guessr, the dashcam guessing game. Point at the Pages projects declared
 # in terraform/{prod-1,stage-1}/cloudflare-pages-guessr.tf; Cloudflare
 # validates the custom-domain TLS certs against these records. Production
@@ -273,22 +265,6 @@ resource "aws_route53_record" "stream_local" {
   type    = "A"
   ttl     = "300"
   records = ["10.111.253.168"]
-}
-
-resource "aws_route53_record" "hawthorne" {
-  zone_id = aws_route53_zone.primary.zone_id
-  name    = "hawthorne.${var.domain}"
-  type    = "A"
-  ttl     = "300"
-  records = ["68.239.30.152"]
-}
-
-resource "aws_route53_record" "certbot" {
-  zone_id = aws_route53_zone.primary.zone_id
-  name    = "_acme-challenge.${var.domain}"
-  type    = "TXT"
-  ttl     = "300"
-  records = ["3DnnRt02WD645OYeOEAuR2cw7--WiWT3YSP_RMlaNu0"]
 }
 
 resource "aws_route53_record" "bluesky_verification" {
