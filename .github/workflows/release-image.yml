@@ -143,20 +143,34 @@ jobs:
   # list nobody is watching. `if: failure()` runs when any job above failed,
   # including when a later one was skipped as a result; `notify` cannot trip
   # it, since continue-on-error keeps a dead webhook out of that job's status.
+  #
+  # A private caller alerts from arc-amd64: when an Actions budget stops GitHub
+  # starting the hosted jobs above, they report `failure` with no steps, and an
+  # alert on the hosted pool is refused the same way. A public caller stays
+  # hosted — its minutes are free, and the org's runner group excludes public
+  # repos.
   alert:
     needs: [build, notify]
     if: failure()
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ${{ github.event.repository.private && 'arc-amd64' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
     steps:
+      # curl rather than Ilshidur/action-discord: that is a Docker container
+      # action, and the arc-amd64 pool has no Docker daemon. Both pools carry
+      # curl and jq.
       - name: Alert Discord on failure
+        if: env.DISCORD_WEBHOOK != ''
         continue-on-error: true
-        uses: Ilshidur/action-discord@0.4.0
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          REPO: ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           VERSION_TAG: ${{ needs.build.outputs.tag || inputs.tag || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          # Points at the log rather than naming what failed: any job above can
-          # be the one, and naming it would go stale as the jobs change.
-          args: 'Release failed for [{{ EVENT_PAYLOAD.repository.full_name }}]({{ EVENT_PAYLOAD.repository.html_url }}) at {{ VERSION_TAG }}: [run log]({{ RUN_URL }})'
+        # Points at the log rather than naming what failed: any job above can
+        # be the one, and naming it would go stale as the jobs change.
+        run: |
+          set -euo pipefail
+          jq -n --arg c "Release failed for [${REPO}](${REPO_URL}) at ${VERSION_TAG}: [run log](${RUN_URL})" '{content: $c}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$DISCORD_WEBHOOK"
