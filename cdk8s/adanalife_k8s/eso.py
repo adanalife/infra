@@ -12,6 +12,9 @@ appear in the legacy manifests, all covered here:
   3. bare `remoteRef` — one parameter → one Secret key (obs stream-key).
      `data=[ESData(secret_key, key)]`.
 
+A fourth shape, per-key `remoteRef` + a `target.template` that renames the keys
+(postgres, CNPG), goes through `templated_external_secret`.
+
 SecretStore stays a `cdk8s.ApiObject`: its CRD bundles every ESO provider and one
 (`keepersecurity.getByTitleFallback`) trips jsii's getXxx-name check, so the CRD
 can't be imported. We only use the AWS provider and emit one SecretStore, so the
@@ -37,6 +40,9 @@ import imports.io.external_secrets as esx
 # remoteRef keys are the secret names with a leading slash (SSM parameter
 # name format).
 DEFAULT_STORE = ("aws-parameterstore", "SecretStore")
+# The cluster-wide platform store, for ExternalSecrets outside the app namespaces
+# (per k8s-platform-stack).
+CLUSTER_STORE = ("aws-parameterstore-cluster", "ClusterSecretStore")
 
 _STORE_KIND = {
     "SecretStore": esx.ExternalSecretSpecSecretStoreRefKind.SECRET_STORE,
@@ -164,3 +170,56 @@ def external_secret(
         ),
     )
     return esx.ExternalSecret(scope, id, metadata=meta, spec=spec)
+
+
+def templated_external_secret(
+    scope: Construct,
+    id: str,
+    name: str,
+    ns: str | None,
+    labels: dict[str, str] | None,
+    *,
+    target: str,
+    data: list[tuple[str, str, str]],
+    template: dict[str, str],
+    secret_type: str = "Opaque",
+):
+    """ExternalSecret on the namespaced store whose `target.template` remaps SSM
+    JSON properties onto the materialized Secret's keys (postgres, CNPG).
+    `data` is `(secret_key, key, property)` triples; `secret_type` lets CNPG ask
+    for kubernetes.io/basic-auth. Emitted as an ApiObject + a /spec JSON patch,
+    so the rendered keys keep this insertion order rather than the typed
+    construct's alphabetical one."""
+    meta: dict = {"name": name}
+    if ns:
+        meta["namespace"] = ns
+    if labels:
+        meta["labels"] = labels
+    es = cdk8s.ApiObject(
+        scope,
+        id,
+        api_version="external-secrets.io/v1",
+        kind="ExternalSecret",
+        metadata=meta,
+    )
+    es.add_json_patch(
+        cdk8s.JsonPatch.add(
+            "/spec",
+            {
+                "refreshInterval": "1h",
+                "secretStoreRef": {
+                    "name": DEFAULT_STORE[0],
+                    "kind": DEFAULT_STORE[1],
+                },
+                "target": {
+                    "name": target,
+                    "template": {"type": secret_type, "data": template},
+                },
+                "data": [
+                    {"secretKey": sk, "remoteRef": {"key": k, "property": p}}
+                    for sk, k, p in data
+                ],
+            },
+        )
+    )
+    return es

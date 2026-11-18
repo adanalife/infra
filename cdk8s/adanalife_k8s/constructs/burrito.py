@@ -61,9 +61,10 @@ import json
 from dataclasses import dataclass
 
 import cdk8s
-import imports.io.external_secrets as esx
 import imports.k8s as k8s
 from constructs import Construct
+
+from adanalife_k8s.eso import CLUSTER_STORE, ESData, external_secret
 
 BURRITO_API = "config.terraform.padok.cloud/v1alpha1"
 # The tenant namespace (CRs + runner pods) — created by the chart, which reads
@@ -407,35 +408,23 @@ class Burrito(Construct):
         # The runner's AWS credential (a ReadOnlyAccess IAM user), shaped as
         # the AWS_* env vars terraform reads. Same cluster-store pattern as the
         # Argo repo keys.
-        esx.ExternalSecret(
+        external_secret(
             self,
             f"runner-secret-{layer.name}",
-            metadata={"name": layer.secret_name, "namespace": TENANT_NS},
-            spec=esx.ExternalSecretSpec(
-                refresh_interval="1h",
-                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-parameterstore-cluster",
-                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
+            name=layer.secret_name,
+            namespace=TENANT_NS,
+            store=CLUSTER_STORE,
+            creation_policy="Owner",
+            data=[
+                ESData(
+                    "AWS_ACCESS_KEY_ID",
+                    f"/k8s/burrito/{layer.sm_key_prefix}-access-key-id",
                 ),
-                target=esx.ExternalSecretSpecTarget(
-                    name=layer.secret_name,
-                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
+                ESData(
+                    "AWS_SECRET_ACCESS_KEY",
+                    f"/k8s/burrito/{layer.sm_key_prefix}-secret-access-key",
                 ),
-                data=[
-                    esx.ExternalSecretSpecData(
-                        secret_key="AWS_ACCESS_KEY_ID",
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=f"/k8s/burrito/{layer.sm_key_prefix}-access-key-id"
-                        ),
-                    ),
-                    esx.ExternalSecretSpecData(
-                        secret_key="AWS_SECRET_ACCESS_KEY",
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=f"/k8s/burrito/{layer.sm_key_prefix}-secret-access-key"
-                        ),
-                    ),
-                ],
-            ),
+            ],
         )
 
     def _oidc_client_secret(self):
@@ -448,29 +437,14 @@ class Burrito(Construct):
         # The key IS the env var name — the chart mounts this Secret with
         # envFrom, so BURRITO_SERVER_OIDC_CLIENTSECRET is what reaches the
         # process.
-        esx.ExternalSecret(
+        external_secret(
             self,
             "oidc-client-secret",
-            metadata={"name": OIDC_SECRET, "namespace": SYSTEM_NS},
-            spec=esx.ExternalSecretSpec(
-                refresh_interval="1h",
-                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-parameterstore-cluster",
-                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
-                ),
-                target=esx.ExternalSecretSpecTarget(
-                    name=OIDC_SECRET,
-                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
-                ),
-                data=[
-                    esx.ExternalSecretSpecData(
-                        secret_key="BURRITO_SERVER_OIDC_CLIENTSECRET",
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=OIDC_SECRET_SM_KEY
-                        ),
-                    ),
-                ],
-            ),
+            name=OIDC_SECRET,
+            namespace=SYSTEM_NS,
+            store=CLUSTER_STORE,
+            creation_policy="Owner",
+            data=[ESData("BURRITO_SERVER_OIDC_CLIENTSECRET", OIDC_SECRET_SM_KEY)],
         )
 
     def _datastore_s3_secret(self):
@@ -484,30 +458,17 @@ class Burrito(Construct):
         # The keys ARE the env var names — the chart mounts this Secret with
         # envFrom (datastore.deployment.envFrom in k8s/burrito/values.yml), and
         # the AWS SDK reads them from the environment.
-        esx.ExternalSecret(
+        external_secret(
             self,
             "datastore-s3-secret",
-            metadata={"name": DATASTORE_SECRET, "namespace": SYSTEM_NS},
-            spec=esx.ExternalSecretSpec(
-                refresh_interval="1h",
-                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-parameterstore-cluster",
-                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
-                ),
-                target=esx.ExternalSecretSpecTarget(
-                    name=DATASTORE_SECRET,
-                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
-                ),
-                data=[
-                    esx.ExternalSecretSpecData(
-                        secret_key=key,
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=DATASTORE_SECRET_SM_KEY, property=key
-                        ),
-                    )
-                    for key in DATASTORE_SECRET_KEYS
-                ],
-            ),
+            name=DATASTORE_SECRET,
+            namespace=SYSTEM_NS,
+            store=CLUSTER_STORE,
+            creation_policy="Owner",
+            data=[
+                ESData(key, DATASTORE_SECRET_SM_KEY, key)
+                for key in DATASTORE_SECRET_KEYS
+            ],
         )
 
     def _console_rbac(self):

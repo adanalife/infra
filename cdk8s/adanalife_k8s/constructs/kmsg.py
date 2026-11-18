@@ -119,7 +119,7 @@ class KmsgShipper(Construct):
             "talosconfig-secret",
             name=TALOSCONFIG_SECRET,
             namespace=NAMESPACE,
-            store=("aws-parameterstore-cluster", "ClusterSecretStore"),
+            store=eso.CLUSTER_STORE,
             labels=labels,
             data=[eso.ESData(secret_key="talosconfig", key="/k8s/kmsg/talosconfig")],
         )
