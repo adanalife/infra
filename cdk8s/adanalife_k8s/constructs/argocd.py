@@ -45,6 +45,8 @@ import imports.io.external_secrets as esx
 import imports.k8s as k8s
 from constructs import Construct
 
+from adanalife_k8s.eso import CLUSTER_STORE, ESData, external_secret
+
 REPO_URL = "git@github.com:adanalife/infra.git"
 TARGET_REVISION = "main"
 ARGO_NS = "argocd"
@@ -1193,29 +1195,15 @@ class ArgoCD(Construct):
         # k8s/argo-cd/values.yml, which sets notifications.secret.create=false):
         # ESO materializes argocd-notifications-secret from the shared Discord
         # webhook in SM. The notifier references it as $discord-webhook-url.
-        esx.ExternalSecret(
+        external_secret(
             self,
             "notifications-secret",
-            metadata={"name": "argocd-notifications", "namespace": ARGO_NS},
-            spec=esx.ExternalSecretSpec(
-                refresh_interval="1h",
-                secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-parameterstore-cluster",
-                    kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
-                ),
-                target=esx.ExternalSecretSpecTarget(
-                    name="argocd-notifications-secret",
-                    creation_policy=esx.ExternalSecretSpecTargetCreationPolicy.OWNER,
-                ),
-                data=[
-                    esx.ExternalSecretSpecData(
-                        secret_key="discord-webhook-url",
-                        remote_ref=esx.ExternalSecretSpecDataRemoteRef(
-                            key=NOTIFICATIONS_SM_KEY
-                        ),
-                    )
-                ],
-            ),
+            name="argocd-notifications",
+            namespace=ARGO_NS,
+            store=CLUSTER_STORE,
+            target_name="argocd-notifications-secret",
+            creation_policy="Owner",
+            data=[ESData("discord-webhook-url", NOTIFICATIONS_SM_KEY)],
         )
 
     def _repo_external_secret(
@@ -1237,7 +1225,7 @@ class ArgoCD(Construct):
             spec=esx.ExternalSecretSpec(
                 refresh_interval="1h",
                 secret_store_ref=esx.ExternalSecretSpecSecretStoreRef(
-                    name="aws-parameterstore-cluster",
+                    name=CLUSTER_STORE[0],
                     kind=esx.ExternalSecretSpecSecretStoreRefKind.CLUSTER_SECRET_STORE,
                 ),
                 target=esx.ExternalSecretSpecTarget(

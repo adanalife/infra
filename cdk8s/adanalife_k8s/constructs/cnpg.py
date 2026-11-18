@@ -39,6 +39,7 @@ import cdk8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.eso import templated_external_secret
 from adanalife_k8s.naming import meta_labels
 from adanalife_k8s.priority import PROD_STREAM
 
@@ -86,7 +87,8 @@ class CnpgCluster(Construct):
         # CNPG expects the app-user secret as kubernetes.io/basic-auth with
         # username/password keys. Same credentials as the legacy
         # postgres-secret — no password change rides this migration.
-        self._external_secret(
+        templated_external_secret(
+            self,
             "app-creds",
             "pg-app-creds",
             ns,
@@ -104,7 +106,8 @@ class CnpgCluster(Construct):
         )
 
         # --- postgres-wal-s3: barman's S3 credentials ---
-        self._external_secret(
+        templated_external_secret(
+            self,
             "wal-s3-credentials",
             "postgres-wal-s3-credentials",
             ns,
@@ -303,46 +306,6 @@ class CnpgCluster(Construct):
                     # restore without a base to replay onto.
                     "immediate": True,
                     "backupOwnerReference": "self",
-                },
-            )
-        )
-
-    # ---- helpers ----
-    def _external_secret(
-        self, id, name, ns, labels, *, target, data, template, secret_type="Opaque"
-    ):
-        # Same raw-ApiObject idiom as postgres.py's ExternalSecrets (the ESO
-        # CRD isn't in imports/k8s); this variant can emit non-Opaque types
-        # (CNPG wants its app-creds secret as kubernetes.io/basic-auth).
-        meta: dict = {"name": name}
-        if ns:
-            meta["namespace"] = ns
-        if labels:
-            meta["labels"] = labels
-        es = cdk8s.ApiObject(
-            self,
-            id,
-            api_version="external-secrets.io/v1",
-            kind="ExternalSecret",
-            metadata=meta,
-        )
-        es.add_json_patch(
-            cdk8s.JsonPatch.add(
-                "/spec",
-                {
-                    "refreshInterval": "1h",
-                    "secretStoreRef": {
-                        "name": "aws-parameterstore",
-                        "kind": "SecretStore",
-                    },
-                    "target": {
-                        "name": target,
-                        "template": {"type": secret_type, "data": template},
-                    },
-                    "data": [
-                        {"secretKey": sk, "remoteRef": {"key": k, "property": p}}
-                        for sk, k, p in data
-                    ],
                 },
             )
         )

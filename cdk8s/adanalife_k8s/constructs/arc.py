@@ -35,7 +35,7 @@ import cdk8s
 import imports.k8s as k8s
 from constructs import Construct
 
-from adanalife_k8s.eso import external_secret
+from adanalife_k8s.eso import CLUSTER_STORE, external_secret
 
 SYSTEMS_NS = "arc-systems"
 RUNNERS_NS = "arc-runners"
@@ -60,8 +60,6 @@ GITHUB_APP_SECRET = "arc-github-app"
 # pulls every key verbatim). Lives in the account the cluster store reads.
 GITHUB_APP_SM_KEY = "/k8s/arc/github-app"
 
-# Platform components read the cluster-scoped store, not a per-namespace one.
-CLUSTER_STORE = ("aws-parameterstore-cluster", "ClusterSecretStore")
 # The reaper needs `find` and `rm` and nothing else. Reusing the ubuntu mirror
 # the postgres backup already pulls keeps this to zero new mirrored packages
 # (each one costs two manual UI clicks to set up)

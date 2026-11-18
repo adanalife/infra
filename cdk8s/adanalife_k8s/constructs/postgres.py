@@ -27,11 +27,11 @@ Per-env shape:
 
 from __future__ import annotations
 
-import cdk8s
 import imports.k8s as k8s
 from constructs import Construct
 
 from adanalife_k8s.config import EnvConfig
+from adanalife_k8s.eso import templated_external_secret
 from adanalife_k8s.naming import meta_labels, selector
 from adanalife_k8s.priority import PROD_STREAM
 
@@ -121,9 +121,9 @@ class Postgres(Construct):
             )
         else:
             # ESO maps the SM JSON {user,password,db} onto POSTGRES_* keys via
-            # target.template — a shape the eso.external_secret helper doesn't
-            # cover, so (like obs.py's stream-key) emit it as a raw ApiObject.
-            self._external_secret(
+            # target.template.
+            templated_external_secret(
+                self,
                 "credentials",
                 "postgres-credentials",
                 ns,
@@ -427,7 +427,8 @@ class Postgres(Construct):
     def _backup_external_secret(self, ns):
         # No metadata labels — this overlay-only resource isn't covered by the
         # base kustomization's `labels:` directive (matches the render).
-        self._external_secret(
+        templated_external_secret(
+            self,
             "backup-credentials",
             "postgres-backup-s3-credentials",
             ns,
@@ -445,43 +446,6 @@ class Postgres(Construct):
                 "AWS_DEFAULT_REGION": "{{ .AWS_DEFAULT_REGION }}",
                 "S3_BUCKET": "{{ .S3_BUCKET }}",
             },
-        )
-
-    def _external_secret(self, id, name, ns, labels, *, target, data, template):
-        # ExternalSecret with a target.template that remaps SM JSON properties
-        # onto the materialized Secret's keys. ESO CRD isn't in imports/k8s, so
-        # emit via ApiObject + a /spec JSON patch (same idiom as obs.py / eso.py).
-        meta: dict = {"name": name}
-        if ns:
-            meta["namespace"] = ns
-        if labels:
-            meta["labels"] = labels
-        es = cdk8s.ApiObject(
-            self,
-            id,
-            api_version="external-secrets.io/v1",
-            kind="ExternalSecret",
-            metadata=meta,
-        )
-        es.add_json_patch(
-            cdk8s.JsonPatch.add(
-                "/spec",
-                {
-                    "refreshInterval": "1h",
-                    "secretStoreRef": {
-                        "name": "aws-parameterstore",
-                        "kind": "SecretStore",
-                    },
-                    "target": {
-                        "name": target,
-                        "template": {"type": "Opaque", "data": template},
-                    },
-                    "data": [
-                        {"secretKey": sk, "remoteRef": {"key": k, "property": p}}
-                        for sk, k, p in data
-                    ],
-                },
-            )
         )
 
     def _backup_cronjob(self, ns, *, cnpg):
