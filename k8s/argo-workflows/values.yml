@@ -48,6 +48,17 @@ controller:
       # Keep failed pods for their logs; successful ones have nothing to say.
       podGC:
         strategy: OnWorkflowSuccess
+      # Every run posts its outcome to Discord when it ends (the
+      # workflow-notify ClusterWorkflowTemplate in extraObjects below). A
+      # workflow that sets its own `onExit` runs that instead — Argo takes
+      # `onExit` over `hooks.exit` — and one that sets its own `hooks.exit`
+      # replaces this one.
+      hooks:
+        exit:
+          templateRef:
+            name: workflow-notify
+            template: notify
+            clusterScope: true
   # Grafana Explore deep links into Loki, so a workflow's logs stay reachable
   # after podGC deletes its pods and after the ttlStrategy deletes the Workflow
   # itself (Loki keeps them for its own retention). Alloy labels each stream
@@ -183,3 +194,89 @@ extraObjects:
       tls:
         - hosts:
             - argo-workflows-prod
+  # The exit hook every workflow runs (workflowDefaults above): one Discord
+  # message per finished run, to the alerts channel Argo CD's notifications and
+  # the Grafana alerts post to. The chart passes extraObjects through `tpl`, so
+  # Argo's own {{workflow.*}} variables are escaped as {{`...`}} to reach the
+  # cluster intact. The script swallows its own errors and an absent webhook
+  # Secret is optional, so a Discord outage never turns a green run red.
+  - apiVersion: argoproj.io/v1alpha1
+    kind: ClusterWorkflowTemplate
+    metadata:
+      name: workflow-notify
+    spec:
+      templates:
+        - name: notify
+          script:
+            # Already on the node for the kmsg / t5-watchdog / ups-monitor pods.
+            image: python:3.14-alpine
+            command: [python]
+            env:
+              - name: WEBHOOK_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: workflow-notify
+                    key: webhook-url
+                    optional: true
+              - name: WF_NAME
+                value: "{{`{{workflow.name}}`}}"
+              - name: WF_NAMESPACE
+                value: "{{`{{workflow.namespace}}`}}"
+              - name: WF_STATUS
+                value: "{{`{{workflow.status}}`}}"
+              - name: WF_DURATION
+                value: "{{`{{workflow.duration}}`}}"
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 64Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 65534
+            source: |
+              import json, os, urllib.request
+
+              try:
+                  name, ns, phase = (os.environ[k] for k in ("WF_NAME", "WF_NAMESPACE", "WF_STATUS"))
+                  mins = round(float(os.environ["WF_DURATION"]) / 60)
+                  icon = "✅" if phase == "Succeeded" else "❌"
+                  text = (
+                      f"{icon} workflow `{name}` {phase} after {mins // 60}h{mins % 60:02d}m in {ns} "
+                      f"<https://argo-workflows.prod.whereisdana.today/workflows/{ns}/{name}>"
+                  )
+                  print(text)
+                  if url := os.environ.get("WEBHOOK_URL"):
+                      # Discord's edge refuses urllib's default User-Agent.
+                      headers = {"Content-Type": "application/json", "User-Agent": "argo-workflows-notify"}
+                      body = json.dumps({"content": text}).encode()
+                      urllib.request.urlopen(urllib.request.Request(url, body, headers), timeout=10)
+              except Exception as e:
+                  print(f"notify failed: {e!r}")
+  # The webhook, from the parameter Argo CD's notifications and tripbot's
+  # reportCmd read. The hook pod runs in the workflow's own namespace, so the
+  # Secret has to live there: stage-1 reads it through its own SecretStore.
+  # argo-workflows has no store that may read it (the cluster store's namespace
+  # allowlist leaves it out), so a run there logs its message and posts nothing.
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: workflow-notify
+      namespace: stage-1
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        kind: SecretStore
+        name: aws-parameterstore
+      target:
+        name: workflow-notify
+      data:
+        - secretKey: webhook-url
+          remoteRef:
+            key: /k8s/tripbot/discord-alerts-webhook
