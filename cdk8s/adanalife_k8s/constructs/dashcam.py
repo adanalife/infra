@@ -97,20 +97,21 @@ LOCALIZE_WORKERS = 8
 # leaves a truncated file that looks done; a size check skips clips already fully
 # present, so re-running after an interrupt (or to top up new clips) only does the
 # remaining work. Coreutils + GNU find only — no rsync, so the mirrored ubuntu base
-# needs nothing installed at runtime.
+# needs nothing installed at runtime. SRC/DST are overridable (and exported so the
+# xargs body sees them) so tests/unit/test_dashcam.py can run this against tmp dirs.
 _LOCALIZE_SCRIPT = """
 set -eu
-SRC=/nfs
-DST=/local
+export SRC="${SRC:-/nfs}"
+export DST="${DST:-/local}"
 mkdir -p "$DST"
 total=$(find "$SRC" -maxdepth 1 -type f -name '*.MP4' | wc -l)
 echo "dashcam-localize: $total clip(s) on NFS -> $DST (workers=$WORKERS)"
 find "$SRC" -maxdepth 1 -type f -name '*.MP4' -printf '%f\\n' | xargs -P "$WORKERS" -I{} sh -c '
   f="$1"
-  src="/nfs/$f"
-  dst="/local/$f"
+  src="$SRC/$f"
+  dst="$DST/$f"
   if [ -f "$dst" ] && [ "$(stat -c%s "$src")" = "$(stat -c%s "$dst")" ]; then exit 0; fi
-  cp "$src" "/local/.$f.partial" && mv "/local/.$f.partial" "$dst"
+  cp "$src" "$DST/.$f.partial" && mv "$DST/.$f.partial" "$dst"
 ' _ {}
 echo "dashcam-localize done: $(find "$DST" -maxdepth 1 -type f -name '*.MP4' | wc -l) clip(s) local"
 """.lstrip("\n")  # no leading blank line → cdk8s won't emit a trailing-whitespace row
