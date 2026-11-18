@@ -203,9 +203,10 @@ resource "aws_ssm_parameter" "tailscale_operator_oauth" {
 #    TS_AUTHKEY), NOT via ESO — k8s/ESO don't exist yet at node-join time. So
 #    after TF mints or rotates this key you must re-seal the new value into
 #    that patch (`task talos:minipc:secrets:encrypt`) and commit.
-# ⚠️ Auth keys expire (90 days max). The key must be valid AT wipe time, so
-#    before a post-expiry wipe run `terraform apply -replace=tailscale_tailnet_key.node`
-#    to mint a fresh one, then re-seal.
+# ⚠️ Auth keys expire (90 days max). Once expired the provider reads the key as
+#    invalid and the next apply replaces it (reusable keys recreate by default),
+#    so rotation is just an apply followed by the re-seal above. The key must be
+#    valid AT wipe time; a node already joined is unaffected by rotation.
 resource "tailscale_tailnet_key" "node" {
   reusable      = true
   ephemeral     = false
@@ -215,11 +216,6 @@ resource "tailscale_tailnet_key" "node" {
   description   = "adanalife-minipc Talos node join key"
 
   depends_on = [tailscale_acl.this]
-
-  lifecycle {
-    # The key is sealed into a committed SOPS machine-config patch; a new one strands the node until it is wiped and rejoined.
-    prevent_destroy = true
-  }
 }
 
 resource "aws_ssm_parameter" "tailscale_node_authkey" {
