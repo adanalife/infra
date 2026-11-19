@@ -13,6 +13,12 @@
 # correct link/redirect generation.
 global:
   domain: argocd-prod.tail020deb.ts.net
+  # Chart 10 creates NetworkPolicies for every component by default, and Cilium
+  # enforces them. Pinned off so a chart bump doesn't change who can reach Argo's
+  # pods; turning them on is its own change, tested against the Tailscale ingress
+  # proxy and the alloy scrape of the controller's metrics port.
+  networkPolicy:
+    create: false
 
 configs:
   # No login on the UI/API. Access is already gated by the Tailscale Ingress
