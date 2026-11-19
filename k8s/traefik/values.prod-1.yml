@@ -79,12 +79,21 @@ providers:
 # Override the chart default of 8000/8443 to bind real 80/443 under
 # hostNetwork.
 ports:
+  # No accept-grace on shutdown: with one hostNetwork replica and Recreate there
+  # is no second pod to take traffic during the grace window, so it would only
+  # lengthen every restart.
   web:
     port: 80
     hostPort: 80
+    transport:
+      lifeCycle:
+        requestAcceptGraceTimeout: 0
   websecure:
     port: 443
     hostPort: 443
+    transport:
+      lifeCycle:
+        requestAcceptGraceTimeout: 0
   # Expose the api/dashboard entrypoint on the traefik Service (chart
   # default is expose.default=false) so the dashboard Ingress in
   # k8s/traefik/prod-1/dashboard-ingress.yaml can route to it. Still
