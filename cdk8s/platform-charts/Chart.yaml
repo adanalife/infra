@@ -31,7 +31,7 @@ dependencies:
     version: 4.1.4
     repository: https://grafana.github.io/helm-charts
   - name: prometheus-node-exporter
-    version: 4.55.0
+    version: 5.1.0
     repository: https://prometheus-community.github.io/helm-charts
   # The CNI: an upgrade restarts the agent on the node carrying the stream.
   - name: cilium
