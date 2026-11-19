@@ -1,6 +1,6 @@
 # Argo Workflows — the batch engine for spare-compute work on the minipc (the
 # video-pipeline passes that today are hand-applied one-shot Jobs). Chart
-# version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered by the
+# version pinned in cdk8s/platform-charts/Chart.yaml; delivered by the
 # `argo-workflows` Argo Application (dist/platform-argo.k8s.yaml).
 #
 # Two things the install deliberately does NOT have yet, because neither is

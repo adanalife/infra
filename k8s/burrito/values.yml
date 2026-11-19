@@ -1,5 +1,5 @@
 # Burrito (padok-team/burrito) — terraform GitOps controller, plan/drift-detect
-# trial. Chart version pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered
+# trial. Chart version pinned in cdk8s/platform-charts/Chart.yaml; delivered
 # by the `burrito` Argo Application (platform-argo.k8s.yaml). The
 # TerraformRepository/TerraformLayer CRs it reconciles live in
 # cdk8s/dist/burrito.k8s.yaml (the manual-sync `burrito-config` Application).

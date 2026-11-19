@@ -1,0 +1,86 @@
+# The version pin for every platform Helm chart, in the one format Dependabot's
+# `helm` ecosystem reads (.github/dependabot.yml). Nothing installs this chart:
+# adanalife_k8s/helm_platform.py loads `dependencies` as its version table, and
+# the day-0 tasks in the root Taskfile read the same entries with yq.
+#
+# `repository` is where Dependabot looks for newer versions; it must agree with
+# REPOS in helm_platform.py (tests/unit/test_chart_pins.py holds the two
+# together). OCI registries carry the oci:// scheme here.
+#
+# A merged bump reaches the cluster through Argo for most charts. cilium,
+# argo-cd, traefik and external-dns are task-installed, so theirs needs a
+# targeted `helm upgrade` as well.
+apiVersion: v2
+name: platform-charts
+description: Version pins for the platform Helm charts (never installed).
+version: 0.0.0
+dependencies:
+  - name: external-secrets
+    version: 2.6.0
+    repository: https://charts.external-secrets.io
+  - name: traefik
+    version: 40.2.0
+    repository: https://traefik.github.io/charts
+  - name: external-dns
+    version: 1.21.1
+    repository: https://kubernetes-sigs.github.io/external-dns/
+  - name: cert-manager
+    version: v1.20.2
+    repository: https://charts.jetstack.io
+  - name: k8s-monitoring
+    version: 4.1.4
+    repository: https://grafana.github.io/helm-charts
+  - name: prometheus-node-exporter
+    version: 4.55.0
+    repository: https://prometheus-community.github.io/helm-charts
+  # The CNI: an upgrade restarts the agent on the node carrying the stream.
+  - name: cilium
+    version: 1.19.4
+    repository: https://helm.cilium.io
+  # Talos-only (k3s bundles its own).
+  - name: metrics-server
+    version: 3.13.1
+    repository: https://kubernetes-sigs.github.io/metrics-server/
+  - name: nats
+    version: 2.14.0
+    repository: https://nats-io.github.io/k8s/helm/charts/
+  # kubectl over the tailnet + tailnet Ingress.
+  - name: tailscale-operator
+    version: 1.98.3
+    repository: https://pkgs.tailscale.com/helmcharts
+  # The GitOps controller (minipc).
+  - name: argo-cd
+    version: 9.5.17
+    repository: https://argoproj.github.io/argo-helm
+  # CNPG operator + its barman-cloud CNPG-I plugin (WAL archiving / PITR to S3).
+  - name: cloudnative-pg
+    version: 0.29.0
+    repository: https://cloudnative-pg.github.io/charts
+  - name: plugin-barman-cloud
+    version: 0.7.0
+    repository: https://cloudnative-pg.github.io/charts
+  - name: victoria-metrics-single
+    version: 0.42.0
+    repository: https://victoriametrics.github.io/helm-charts/
+  # The batch engine for spare-compute work.
+  - name: argo-workflows
+    version: 2.0.2
+    repository: https://argoproj.github.io/argo-helm
+  # Terraform GitOps controller: hourly drift plans on every layer, applies on
+  # stage-1/prod-1 (constructs/burrito.py). Pre-1.0, so minors can break —
+  # read the release notes before merging a bump.
+  - name: burrito
+    version: 0.14.0
+    repository: oci://ghcr.io/padok-team/charts
+  # ARC — self-hosted GHA runners for the private repos' CI + release
+  # workflows. The controller and the runner set move together.
+  - name: gha-runner-scale-set-controller
+    version: 0.14.2
+    repository: oci://ghcr.io/actions/actions-runner-controller-charts
+  - name: gha-runner-scale-set
+    version: 0.14.2
+    repository: oci://ghcr.io/actions/actions-runner-controller-charts
+  # Admission policy engine.
+  - name: kyverno
+    version: 3.9.1
+    repository: https://kyverno.github.io/kyverno
