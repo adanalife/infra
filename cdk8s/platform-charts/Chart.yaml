@@ -22,7 +22,7 @@ dependencies:
     version: 40.2.0
     repository: https://traefik.github.io/charts
   - name: external-dns
-    version: 1.21.1
+    version: 1.23.0
     repository: https://kubernetes-sigs.github.io/external-dns/
   - name: cert-manager
     version: v1.21.3
