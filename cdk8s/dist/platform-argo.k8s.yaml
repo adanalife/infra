@@ -302,7 +302,7 @@ spec:
   sources:
     - repoURL: https://argoproj.github.io/argo-helm
       chart: argo-workflows
-      targetRevision: 2.0.2
+      targetRevision: 2.0.18
       helm:
         releaseName: argo-workflows
         valueFiles:

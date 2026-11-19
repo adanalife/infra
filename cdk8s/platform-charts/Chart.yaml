@@ -64,7 +64,7 @@ dependencies:
     repository: https://victoriametrics.github.io/helm-charts/
   # The batch engine for spare-compute work.
   - name: argo-workflows
-    version: 2.0.2
+    version: 2.0.18
     repository: https://argoproj.github.io/argo-helm
   # Terraform GitOps controller: hourly drift plans on every layer, applies on
   # stage-1/prod-1 (constructs/burrito.py). Pre-1.0, so minors can break —
