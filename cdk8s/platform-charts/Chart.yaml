@@ -70,7 +70,7 @@ dependencies:
   # stage-1/prod-1 (constructs/burrito.py). Pre-1.0, so minors can break —
   # read the release notes before merging a bump.
   - name: burrito
-    version: 0.14.0
+    version: 0.15.0
     repository: oci://ghcr.io/padok-team/charts
   # ARC — self-hosted GHA runners for the private repos' CI + release
   # workflows. The controller and the runner set move together.
