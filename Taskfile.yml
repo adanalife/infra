@@ -1166,6 +1166,10 @@ tasks:
 
   k8s:stage:platform-env:up:
     desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
+    vars:
+      # Chart versions come from the pin file the cdk8s layer reads.
+      NATS_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"nats\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
     preconditions:
       - *minipc-context-guard
     deps: [k8s:stage:bootstrap-secrets]
@@ -1202,7 +1206,7 @@ tasks:
       - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update nats
       - helm upgrade --install nats nats/nats
-          --version 2.14.0
+          --version {{.NATS_CHART_VERSION}}
           -n stage-1-platform --create-namespace
           -f k8s/nats/values.yml
           -f k8s/nats/stage-1/values.yml
@@ -1481,6 +1485,12 @@ tasks:
   # works regardless of inbound network state — only serving TLS does.
   k8s:dev:platform:up:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the dev cluster
+    vars:
+      # Chart versions come from the pin file the cdk8s layer reads.
+      NATS_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"nats\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      ARGOCD_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"argo-cd\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
     deps: [k8s:dev:bootstrap-secrets]
     preconditions:
       # Guard: k3d dev cluster only — never the minipc (Talos). See the
@@ -1577,7 +1587,7 @@ tasks:
       # own development-platform namespace mirroring stage-1-platform /
       # prod-1-platform (see k8s/nats/values.yml for the phase-0 framing).
       - helm upgrade --install nats nats/nats
-          --version 2.14.0
+          --version {{.NATS_CHART_VERSION}}
           -n development-platform --create-namespace
           -f k8s/nats/values.yml
           -f k8s/nats/development/values.yml
@@ -1588,12 +1598,12 @@ tasks:
       # against this cluster's own API, same as the minipc Argo does for
       # prod/stage). dev borrows the stage AWS account, so the repo deploy key must
       # live at k8s/argocd/repo-ssh-key in the stage SM (the cluster-store reads
-      # it). Version pinned to match cdk8s/adanalife_k8s/helm_platform.py. UI via
+      # it). Version read from cdk8s/platform-charts/Chart.yaml. UI via
       # port-forward (no tailscale on the dev cluster). See gitops/README.md.
       - helm repo add argo https://argoproj.github.io/argo-helm
       - helm repo update argo
       - helm upgrade --install argocd argo/argo-cd
-          --version 9.5.17
+          --version {{.ARGOCD_CHART_VERSION}}
           -n argocd --create-namespace
           -f k8s/argo-cd/values.yml
           -f k8s/argo-cd/values.k3d.yml
@@ -1680,6 +1690,12 @@ tasks:
   # everything else Argo adopts.
   k8s:prod:platform:up:
     desc: "day-0 bring-up of an empty cluster (live releases are Argo-owned — see gitops/README.md)"
+    vars:
+      # Chart versions come from the pin file the cdk8s layer reads.
+      NATS_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"nats\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      ARGOCD_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"argo-cd\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
     deps: [k8s:prod:bootstrap-secrets]
     preconditions:
       - *minipc-context-guard
@@ -1824,7 +1840,7 @@ tasks:
       # above) so prod-1 stays app-only. Stage runs its own NATS in
       # stage-1-platform via k8s:stage:platform-env:up — namespaces isolate the two.
       - helm upgrade --install nats nats/nats
-          --version 2.14.0
+          --version {{.NATS_CHART_VERSION}}
           -n prod-1-platform --create-namespace
           -f k8s/nats/values.yml
           -f k8s/nats/prod-1/values.yml
@@ -1846,13 +1862,13 @@ tasks:
       # part of the platform bring-up so there's no manual `helm repo add`. Comes
       # up idle (monitor-only); the ApplicationSets + repo cred + UI Ingress are
       # applied separately via `task gitops:apply` (cdk8s/dist/argocd.k8s.yaml).
-      # Version pinned to match cdk8s/adanalife_k8s/helm_platform.py. See
+      # Version read from cdk8s/platform-charts/Chart.yaml. See
       # gitops/README.md. (When the platform itself cuts over to cdk8s, this
       # step is superseded by PlatformChart's argo-cd component.)
       - helm repo add argo https://argoproj.github.io/argo-helm
       - helm repo update argo
       - helm upgrade --install argocd argo/argo-cd
-          --version 9.5.17
+          --version {{.ARGOCD_CHART_VERSION}}
           -n argocd --create-namespace
           -f k8s/argo-cd/values.yml
       - kubectl wait --for=condition=Available --timeout=180s deployment --all -n argocd

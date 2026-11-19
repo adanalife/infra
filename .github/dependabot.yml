@@ -155,6 +155,27 @@ updates:
     cooldown:
       default-days: 7
     rebase-strategy: disabled
+  # The platform Helm charts. Their pins live in a Chart.yaml that nothing
+  # installs, because Chart.yaml dependencies are what this ecosystem reads;
+  # the cdk8s layer loads its version table from the same file. The directory
+  # holds that one file so no values.yml is scanned for image tags.
+  # Cooldown is the flat 7: this ecosystem ignores the semver-* keys.
+  # A bump moves a targetRevision in cdk8s/dist/, and a Dependabot run cannot
+  # push the re-synth, so cdk8s-synth is red on the PR until `task cdk8s:synth`
+  # is committed to the branch.
+  - package-ecosystem: helm
+    directory: cdk8s/platform-charts
+    schedule:
+      interval: weekly
+      day: monday
+      time: "13:00"
+    groups:
+      platform-charts:
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 7
+    rebase-strategy: disabled
   # The cdk8s CLI and its jsii toolchain. Dependabot has no mise backend, so
   # this is only reachable because the CLI is pinned in package-lock.json
   # rather than cdk8s/.mise.toml. cdk8s-synth re-synths on the bump PR, so a

@@ -14,9 +14,9 @@ Two deploy units (mirrors the legacy split):
     `<env>-platform` namespace (external-dns, NATS), with the LAN IP injected
     from `EnvConfig` (replacing the gitignored `values.local.yml`).
 
-Version pins captured 2026-06-02 from the chart repos. Bump deliberately;
-re-capture from a live `helm list -A` before a cutover to confirm they match
-what's deployed.
+Version pins live in `platform-charts/Chart.yaml`, where Dependabot bumps them.
+Confirm against a live `helm list -A` before a cutover that they match what's
+deployed.
 
 The kustomize-only platform bits (local-path-provisioner, intel-gpu-plugin,
 intel-xpu-manager, the ESO cluster-store, cert-manager ClusterIssuers) are NOT
@@ -29,7 +29,9 @@ platform chart before apps, exactly as the legacy task ordering did.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
+import yaml
 from cdk8s import Chart, Helm
 from constructs import Construct
 
@@ -60,51 +62,13 @@ REPOS = {
     "kyverno": "https://kyverno.github.io/kyverno",
 }
 
-# --- Version pins, RE-CAPTURED 2026-06-10 from the live minipc (`helm list -A`)
-# so adoption is pin == deployed (no up/down-grade on first sync). The
-# legacy platform tasks install ESO / cert-manager / node-exporter /
-# k8s-monitoring WITHOUT --version (floating latest), so they drift up over time;
-# re-capture before each adoption pass. Deltas since the 2026-06-02 capture:
-# external-secrets 2.5.0 -> 2.6.0, k8s-monitoring 4.1.3 -> 4.1.4 (both floated up).
-# All others match live: cert-manager v1.20.2, node-exporter 4.55.0, nats 2.14.0,
-# tailscale-operator 1.98.3, argo-cd 9.5.17 (+ the excluded traefik 40.2.0 /
-# external-dns 1.21.1 / cilium 1.19.4). ---
-VERSIONS = {
-    "external-secrets": "2.6.0",
-    "traefik": "40.2.0",
-    "external-dns": "1.21.1",
-    "cert-manager": "v1.20.2",
-    "k8s-monitoring": "4.1.4",
-    "prometheus-node-exporter": "4.55.0",
-    "cilium": "1.19.4",
-    "metrics-server": "3.13.1",  # app v0.8.1 — Talos-only (k3s bundles its own)
-    "nats": "2.14.0",  # already pinned in the legacy task
-    "tailscale-operator": "1.98.3",  # kubectl over the tailnet + tailnet Ingress
-    "argo-cd": "9.5.17",  # Argo CD v3.4.3 — the GitOps controller (minipc)
-    # CNPG — operator v1.30.0 + the barman-cloud CNPG-I plugin v0.13.0 (WAL
-    # archiving / PITR to S3). Verified latest stable at add time (2026-07-10).
-    "cloudnative-pg": "0.29.0",
-    "plugin-barman-cloud": "0.7.0",
-    # VM app v1.147.0 — latest stable at add time (2026-07-15), matches the
-    # live minipc release.
-    "victoria-metrics-single": "0.42.0",
-    # Argo Workflows app v4.1.2 — the batch engine for spare-compute work.
-    # Latest stable at add time (2026-08-22).
-    "argo-workflows": "2.0.2",
-    # Burrito v0.14.0 — terraform GitOps controller: hourly drift plans on
-    # every layer, applies on stage-1/prod-1 (constructs/burrito.py).
-    # Latest stable as of 2026-09-25; pre-1.0, so minors can break —
-    # read the release notes before bumping.
-    "burrito": "0.14.0",
-    # ARC — self-hosted GHA runners for the private repos' CI + release
-    # workflows. Latest stable at re-add time (2026-08-22); same pin the
-    # retired rpi5 stack ran.
-    "arc-controller": "0.14.2",
-    "arc-runner-set": "0.14.2",
-    # Kyverno v1.19.1 — admission policy engine. Latest stable at add time
-    # (2026-09-23).
-    "kyverno": "3.9.1",
-}
+# --- Version pins: platform-charts/Chart.yaml, keyed by chart name. They live
+# there rather than in a dict here because that is the format Dependabot's
+# `helm` ecosystem reads, so a newer chart arrives as a PR. ---
+PINS = yaml.safe_load(
+    (Path(__file__).parent.parent / "platform-charts/Chart.yaml").read_text()
+)["dependencies"]
+VERSIONS = {d["name"]: str(d["version"]) for d in PINS}
 
 
 @dataclass(frozen=True)
@@ -292,7 +256,7 @@ def cluster_components(
                 "arc-controller",
                 "actions-runner",
                 "gha-runner-scale-set-controller",
-                "arc-controller",
+                "gha-runner-scale-set-controller",
                 "arc-systems",
                 value_files=("arc/controller/values.yml",),
             )
@@ -302,7 +266,7 @@ def cluster_components(
                 "arc-amd64",
                 "actions-runner",
                 "gha-runner-scale-set",
-                "arc-runner-set",
+                "gha-runner-scale-set",
                 "arc-runners",
                 value_files=("arc/runners/values.yml",),
             )

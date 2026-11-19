@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -9,25 +9,23 @@ source = { virtual = "." }
 dependencies = [
     { name = "cdk8s" },
     { name = "constructs" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
-    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cdk8s", specifier = ">=2.70.89" },
     { name = "constructs", specifier = ">=10.8.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "attrs"

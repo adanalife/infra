@@ -68,7 +68,7 @@ coords the committed dist replaces with placeholders. Argo **watches** them (the
 PVCs are Argo-managed (in the data / supporting units) and bind to the PVs by name.
 
 Argo CD itself is installed by the **cdk8s platform layer** (`PlatformChart`,
-minipc) — chart pinned in `helm_platform.py`, Helm values in `k8s/argo-cd/values.yml`.
+minipc) — chart pinned in `cdk8s/platform-charts/Chart.yaml`, Helm values in `k8s/argo-cd/values.yml`.
 
 ## The `gitops` root Application (app of apps)
 
@@ -264,7 +264,7 @@ component's `manifests` field in `helm_platform.py`.
 
 **Argo is the delivery path for everything in the list above** — adoption of the
 live helm releases completed 2026-07-16. Day-2 changes (values edits, chart
-bumps, new platform charts) go: edit `helm_platform.py` / the values files →
+bumps, new platform charts) go: edit `helm_platform.py` / `cdk8s/platform-charts/Chart.yaml` (the version pins) / the values files →
 merge → sync `gitops` (if the Application specs changed; its diff is the
 preview, and `task gitops:apply` does the same) → sync the component in Argo. Do **not** `helm upgrade --install`
 an adopted release against the live cluster: Argo owns the objects via

@@ -1,5 +1,5 @@
 # Kyverno — the admission policy engine on adanalife-minipc. Chart version
-# pinned in cdk8s/adanalife_k8s/helm_platform.py; delivered by the `kyverno`
+# pinned in cdk8s/platform-charts/Chart.yaml; delivered by the `kyverno`
 # Argo Application (dist/platform-argo.k8s.yaml), which also carries the
 # policies in k8s/kyverno/policies.yml.
 #
