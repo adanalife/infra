@@ -19,7 +19,7 @@ dependencies:
     version: 2.6.0
     repository: https://charts.external-secrets.io
   - name: traefik
-    version: 40.2.0
+    version: 42.4.1
     repository: https://traefik.github.io/charts
   - name: external-dns
     version: 1.21.1
