@@ -75,10 +75,10 @@ dependencies:
   # ARC — self-hosted GHA runners for the private repos' CI + release
   # workflows. The controller and the runner set move together.
   - name: gha-runner-scale-set-controller
-    version: 0.14.2
+    version: 0.15.1
     repository: oci://ghcr.io/actions/actions-runner-controller-charts
   - name: gha-runner-scale-set
-    version: 0.14.2
+    version: 0.15.1
     repository: oci://ghcr.io/actions/actions-runner-controller-charts
   # Admission policy engine.
   - name: kyverno
