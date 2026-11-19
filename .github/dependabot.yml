@@ -53,7 +53,7 @@ updates:
   #                   end state. Security updates run on their own cadence, so
   #                   they still arrive within the day.
   #
-  # Every ecosystem batches into one PR per run, majors included, and a second
+  # Every ecosystem but helm batches into one PR per run, majors included, and a second
   # group per ecosystem catches security updates, which Dependabot otherwise
   # opens one PR per advisory on whatever day it lands. Each solo PR costs a
   # full CI run and touches the same lockfile as its siblings, so the first
@@ -190,10 +190,17 @@ updates:
       interval: weekly
       day: monday
       time: "13:00"
+    # One PR per chart, unlike every other entry here: each chart is its own
+    # rollout with its own release notes to read, and the bumps touch separate
+    # lines, so one merging does not conflict the rest. The limit is raised
+    # from the default 5 so every stale chart is visible at once. The two ARC
+    # charts are the exception -- controller and runner set must run the same
+    # version.
+    open-pull-requests-limit: 20
     groups:
-      platform-charts:
+      arc:
         patterns:
-          - "*"
+          - "gha-runner-scale-set*"
     cooldown:
       default-days: 7
     rebase-strategy: disabled
