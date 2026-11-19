@@ -12,8 +12,13 @@ node = "24"
 # lockfile also makes the CLI bot-bumpable: Dependabot has no mise backend, but
 # it does have npm. Kept in lockstep with tripbot/cdk8s/package-lock.json so
 # both repos synth against the same toolchain.
-# helm is needed only for the platform-chart phase (cdk8s.Helm renders via
-# `helm template`); pin it now so it's ready. Bump to 4.x deliberately later.
+# helm is needed only for the opt-in platform render (`task cdk8s:synth:platform`,
+# where cdk8s.Helm runs `helm template`); the committed dist/ never invokes it.
+# Held on 3.x because helm 4 prints `Pulled:` / `Digest:` to stdout when it
+# fetches an OCI chart (burrito, the ARC charts), and cdk8s.Helm parses stdout
+# as YAML, so the render fails (`Cannot read properties of undefined (reading
+# 'split')`). helm 4 has no flag to silence it. Rendered output is otherwise
+# identical between 3.16 and 4.2 for every pinned chart.
 helm = "3.16.4"
 # kubeconform validates the synthed dist/ against the k8s API schemas
 # (task cdk8s:validate, mirrored in cdk8s-synth.yml).
