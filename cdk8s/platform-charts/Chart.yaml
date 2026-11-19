@@ -39,7 +39,7 @@ dependencies:
     repository: https://helm.cilium.io
   # Talos-only (k3s bundles its own).
   - name: metrics-server
-    version: 3.13.1
+    version: 3.14.0
     repository: https://kubernetes-sigs.github.io/metrics-server/
   - name: nats
     version: 2.14.0
