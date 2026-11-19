@@ -2,6 +2,26 @@
 # https://help.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 
 version: 2
+# Update jobs reach only hosts on Dependabot's egress allowlist, and a chart
+# repository named only in Chart.yaml is not on it: the job gets a 403 for the
+# index, finds no versions, and still reports success. Declaring the host here
+# is what allows it, anonymous access included.
+registries:
+  helm-cilium:
+    type: helm-registry
+    url: https://helm.cilium.io
+  helm-cloudnative-pg:
+    type: helm-registry
+    url: https://cloudnative-pg.github.io
+  helm-nats:
+    type: helm-registry
+    url: https://nats-io.github.io
+  helm-tailscale:
+    type: helm-registry
+    url: https://pkgs.tailscale.com
+  helm-victoria-metrics:
+    type: helm-registry
+    url: https://victoriametrics.github.io
 updates:
   # Three settings are repeated on every entry below, since Dependabot has no
   # place to state a default once:
@@ -165,6 +185,7 @@ updates:
   # is committed to the branch.
   - package-ecosystem: helm
     directory: cdk8s/platform-charts
+    registries: "*"
     schedule:
       interval: weekly
       day: monday
