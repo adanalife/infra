@@ -16,7 +16,7 @@ description: Version pins for the platform Helm charts (never installed).
 version: 0.0.0
 dependencies:
   - name: external-secrets
-    version: 2.6.0
+    version: 2.15.0
     repository: https://charts.external-secrets.io
   - name: traefik
     version: 40.2.0
