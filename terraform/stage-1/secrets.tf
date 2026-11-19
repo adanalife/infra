@@ -46,6 +46,7 @@
 #     table, not here.
 #   - k8s/tripbot/google-maps-api-key — JSON {"GOOGLE_MAPS_API_KEY": "AIza..."}.
 #     Stage and prod are distinct keys, restricted to Geocoding + Maps JS.
+#   - k8s/tripbot/output-denylist — JSON {"OUTPUT_DENYLIST": "term one,term two"}.
 #   - k8s/tripbot/youtube-creds — JSON {"YOUTUBE_CLIENT_ID": ...,
 #     "YOUTUBE_CLIENT_SECRET": ..., optionally "YOUTUBE_CHANNEL_ID": ...}.
 #   - k8s/tripbot/discord-alerts-webhook — one webhook URL, consumed by
@@ -79,6 +80,7 @@ locals {
     "k8s/sentry-playout"                   = "Sentry DSN for the playout service. Consumed via the SENTRY_DSN env var."
     "k8s/tripbot/twitch-creds"             = "Twitch app credentials for tripbot. Keys: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET."
     "k8s/tripbot/google-maps-api-key"      = "Google Maps API key for tripbot. Key holds GOOGLE_MAPS_API_KEY."
+    "k8s/tripbot/output-denylist"          = "Terms tripbot masks in its chat and overlay output. Key holds OUTPUT_DENYLIST."
     "k8s/tripbot/youtube-creds"            = "YouTube OAuth client credentials for tripbot. Keys: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, optionally YOUTUBE_CHANNEL_ID."
     "k8s/tripbot/discord-alerts-webhook"   = "Discord webhook for infra alerts (Grafana contact point) and tripbot's !report command."
     "k8s/tripbot/discord-bot-token"        = "Discord bot token for the staging tripbot Discord session."
