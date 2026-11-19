@@ -1168,6 +1168,8 @@ tasks:
     desc: install the stage-1 env-platform (external-dns + NATS) into the mini-PC cluster — apps are Argo-managed
     vars:
       # Chart versions come from the pin file the cdk8s layer reads.
+      EXTERNAL_DNS_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"external-dns\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
       NATS_CHART_VERSION:
         sh: "yq -e '.dependencies[] | select(.name == \"nats\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
     preconditions:
@@ -1191,6 +1193,7 @@ tasks:
       - kubectl wait --for=condition=Ready --timeout=120s
           externalsecret/external-dns-aws-credentials -n stage-1-platform
       - helm upgrade --install external-dns-stage external-dns/external-dns
+          --version {{.EXTERNAL_DNS_CHART_VERSION}}
           -n stage-1-platform
           -f k8s/external-dns/stage-1/config.yml
       - kubectl wait --for=condition=Available --timeout=120s
@@ -1487,6 +1490,18 @@ tasks:
     desc: install ESO + traefik + external-dns + cert-manager + grafana-k8s-monitoring into the dev cluster
     vars:
       # Chart versions come from the pin file the cdk8s layer reads.
+      ESO_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"external-secrets\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      TRAEFIK_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"traefik\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      EXTERNAL_DNS_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"external-dns\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      CERT_MANAGER_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"cert-manager\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      NODE_EXPORTER_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"prometheus-node-exporter\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      K8S_MONITORING_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"k8s-monitoring\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
       NATS_CHART_VERSION:
         sh: "yq -e '.dependencies[] | select(.name == \"nats\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
       ARGOCD_CHART_VERSION:
@@ -1516,6 +1531,7 @@ tasks:
       - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
+          --version {{.ESO_CHART_VERSION}}
           -n external-secrets --create-namespace
           -f k8s/external-secrets/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
@@ -1526,6 +1542,7 @@ tasks:
       - kubectl apply -k k8s/external-secrets/cluster-store
       - echo "ESO up. ClusterSecretStore aws-parameterstore-cluster is ready for platform ExternalSecret consumers; per-namespace SecretStores come up with each env's apply."
       - helm upgrade --install traefik traefik/traefik
+          --version {{.TRAEFIK_CHART_VERSION}}
           -n kube-system
           -f k8s/traefik/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
@@ -1535,6 +1552,7 @@ tasks:
       - kubectl wait --for=condition=Ready --timeout=120s
           externalsecret/external-dns-aws-credentials -n kube-system
       - helm upgrade --install external-dns external-dns/external-dns
+          --version {{.EXTERNAL_DNS_CHART_VERSION}}
           -n kube-system
           -f k8s/external-dns/development/config.yml
           -f k8s/external-dns/development/values.local.yml
@@ -1542,6 +1560,7 @@ tasks:
           deployment/external-dns -n kube-system
       - 'echo "external-dns up. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
       - helm upgrade --install cert-manager jetstack/cert-manager
+          --version {{.CERT_MANAGER_CHART_VERSION}}
           -n kube-system
           -f k8s/cert-manager/development/config.yml
       - kubectl wait --for=condition=Available --timeout=120s
@@ -1562,6 +1581,7 @@ tasks:
       - kubectl apply -f k8s/monitoring/host-namespace.yml
       - kubectl apply -k k8s/monitoring/development
       - helm upgrade --install node-exporter prometheus-community/prometheus-node-exporter
+          --version {{.NODE_EXPORTER_CHART_VERSION}}
           -n monitoring-host
           -f k8s/monitoring/node-exporter/values.yml
       - kubectl rollout status daemonset/node-exporter-prometheus-node-exporter
@@ -1578,6 +1598,7 @@ tasks:
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
           || { echo "ExternalSecret didn't materialize. Seed it with: aws ssm put-parameter --overwrite --type SecureString --name /k8s/grafana-cloud-metrics-write"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
+          --version {{.K8S_MONITORING_CHART_VERSION}}
           -n monitoring
           -f k8s/monitoring/development/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
@@ -1692,6 +1713,20 @@ tasks:
     desc: "day-0 bring-up of an empty cluster (live releases are Argo-owned — see gitops/README.md)"
     vars:
       # Chart versions come from the pin file the cdk8s layer reads.
+      CILIUM_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"cilium\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      ESO_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"external-secrets\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      TRAEFIK_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"traefik\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      EXTERNAL_DNS_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"external-dns\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      CERT_MANAGER_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"cert-manager\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      NODE_EXPORTER_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"prometheus-node-exporter\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
+      K8S_MONITORING_CHART_VERSION:
+        sh: "yq -e '.dependencies[] | select(.name == \"k8s-monitoring\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
       NATS_CHART_VERSION:
         sh: "yq -e '.dependencies[] | select(.name == \"nats\") | .version' {{.ROOT_DIR}}/cdk8s/platform-charts/Chart.yaml"
       ARGOCD_CHART_VERSION:
@@ -1714,6 +1749,7 @@ tasks:
       - helm repo add cilium https://helm.cilium.io/
       - helm repo update
       - helm upgrade --install cilium cilium/cilium
+          --version {{.CILIUM_CHART_VERSION}}
           -n kube-system
           -f k8s/cilium/values.yml
       - kubectl -n kube-system rollout status daemonset/cilium --timeout=180s
@@ -1736,6 +1772,7 @@ tasks:
       - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
       - helm repo update
       - helm upgrade --install external-secrets external-secrets/external-secrets
+          --version {{.ESO_CHART_VERSION}}
           -n external-secrets --create-namespace
           -f k8s/external-secrets/values.yml
       - kubectl wait --for=condition=Available --timeout=120s
@@ -1757,6 +1794,7 @@ tasks:
       - for i in $(seq 1 30); do kubectl get secret operator-oauth -n tailscale >/dev/null 2>&1 && break; sleep 2; done
       - 'echo "operator-oauth Secret materialized in the tailscale namespace; the operator comes up on the first Argo sync. kubectl over tailnet: tailscale configure kubeconfig tailscale-operator"'
       - helm upgrade --install traefik traefik/traefik
+          --version {{.TRAEFIK_CHART_VERSION}}
           -n kube-system
           -f k8s/traefik/values.yml
           -f k8s/traefik/values.prod-1.yml
@@ -1785,12 +1823,14 @@ tasks:
       - kubectl wait --for=condition=Ready --timeout=120s
           externalsecret/external-dns-aws-credentials -n prod-1-platform
       - helm upgrade --install external-dns external-dns/external-dns
+          --version {{.EXTERNAL_DNS_CHART_VERSION}}
           -n prod-1-platform
           -f k8s/external-dns/prod-1/config.yml
       - kubectl wait --for=condition=Available --timeout=120s
           deployment/external-dns -n prod-1-platform
       - 'echo "external-dns up in prod-1-platform. Annotate an Ingress with external-dns.alpha.kubernetes.io/hostname to publish a Route53 record."'
       - helm upgrade --install cert-manager jetstack/cert-manager
+          --version {{.CERT_MANAGER_CHART_VERSION}}
           -n kube-system
           -f k8s/cert-manager/prod-1/config.yml
       - kubectl wait --for=condition=Available --timeout=120s
@@ -1811,6 +1851,7 @@ tasks:
       - kubectl apply -f k8s/monitoring/host-namespace.yml
       - kubectl apply -k k8s/monitoring/prod-1
       - helm upgrade --install node-exporter prometheus-community/prometheus-node-exporter
+          --version {{.NODE_EXPORTER_CHART_VERSION}}
           -n monitoring-host
           -f k8s/monitoring/node-exporter/values.yml
       - kubectl rollout status daemonset/node-exporter-prometheus-node-exporter
@@ -1827,6 +1868,7 @@ tasks:
         kubectl get secret grafana-cloud-metrics-write -n monitoring >/dev/null \
           || { echo "ExternalSecret didn't materialize. Seed it with: aws ssm put-parameter --overwrite --type SecureString --name /k8s/grafana-cloud-metrics-write (prod account)"; exit 1; }
       - helm upgrade --install k8s-monitoring grafana/k8s-monitoring
+          --version {{.K8S_MONITORING_CHART_VERSION}}
           -n monitoring
           -f k8s/monitoring/prod-1/values.yml
       - echo "grafana-k8s-monitoring up. Cluster metrics + pod logs shipping to Grafana Cloud."
