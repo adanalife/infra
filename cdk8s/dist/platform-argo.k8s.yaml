@@ -339,7 +339,7 @@ spec:
   sources:
     - repoURL: ghcr.io/actions/actions-runner-controller-charts
       chart: gha-runner-scale-set-controller
-      targetRevision: 0.14.2
+      targetRevision: 0.15.1
       helm:
         releaseName: arc-controller
         valueFiles:
@@ -371,7 +371,7 @@ spec:
   sources:
     - repoURL: ghcr.io/actions/actions-runner-controller-charts
       chart: gha-runner-scale-set
-      targetRevision: 0.14.2
+      targetRevision: 0.15.1
       helm:
         releaseName: arc-amd64
         valueFiles:
