@@ -82,5 +82,5 @@ dependencies:
     repository: oci://ghcr.io/actions/actions-runner-controller-charts
   # Admission policy engine.
   - name: kyverno
-    version: 3.9.1
+    version: 3.10.0
     repository: https://kyverno.github.io/kyverno
