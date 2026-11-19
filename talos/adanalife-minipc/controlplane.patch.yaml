@@ -9,7 +9,7 @@
 # the PKI material this patch doesn't.
 #
 # NIC uses DHCP. Stable IP is enforced by a DHCP reservation at the router
-# (MAC 58:47:ca:7d:7b:b0 → 192.168.40.111 on the Maine network). A move needs an
+# (MAC 58:47:ca:7d:7b:b0 → 192.168.40.111 on the current network). A move needs an
 # equivalent reservation on the new router; the reservation address does not have
 # to be preserved, because what is baked into the generated controlplane.yaml is
 # the alias endpoint https://minipc.whereisdana.today:6443, not an address. That
@@ -84,7 +84,7 @@ machine:
     kubespan:
       enabled: true
   # IP forwarding for the Tailscale subnet router (TS_ROUTES=192.168.40.0/24 in
-  # tailscale.patch.yaml — the current Maine/tallman LAN). Tailscale advertises
+  # tailscale.patch.yaml — the current LAN, site-1). Tailscale advertises
   # the home LAN so off-LAN tailnet clients reach 192.168.40.111 (and the
   # Synology, etc.) with no cert-SAN/endpoint changes; forwarding lets the node
   # route to *other* LAN hosts. Host-level (machine.sysctls), not pod-level —
@@ -94,7 +94,7 @@ machine:
     net.ipv6.conf.all.forwarding: "1"
   # Extra cert SANs so kubectl/talosctl can reach the API by the node's Tailscale
   # identity or the stable LAN-DNS pointer, not just 192.168.40.111 — works from
-  # any tailnet device with no subnet route, and survives the Maine move (the
+  # any tailnet device with no subnet route, and survives a location move (the
   # tailnet name/IP and the LAN-DNS pointer are location-independent; the LAN IP
   # is not). machine.certSANs covers the Talos API (apid); cluster.apiServer.certSANs
   # (below) covers kube-apiserver. The IP is the current tailscale0 address; the
