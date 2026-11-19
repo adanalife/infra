@@ -50,7 +50,7 @@ dependencies:
     repository: https://pkgs.tailscale.com/helmcharts
   # The GitOps controller (minipc).
   - name: argo-cd
-    version: 9.5.17
+    version: 10.18.1
     repository: https://argoproj.github.io/argo-helm
   # CNPG operator + its barman-cloud CNPG-I plugin (WAL archiving / PITR to S3).
   - name: cloudnative-pg
