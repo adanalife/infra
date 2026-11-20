@@ -23,9 +23,12 @@ on:
   workflow_call:
     inputs:
       runs-on:
+        # arc-release is the one-runner pool kept for this job, so a release
+        # PR never queues behind CI on arc-amd64 (k8s/arc/runners/release.yml).
+        # Public repos pass ubuntu-latest: the org's runner group excludes them.
         description: Runner label.
         type: string
-        default: arc-amd64
+        default: arc-release
       changelog:
         description: Build the towncrier changelog from changelog.d/ onto the release PR branch.
         type: boolean
