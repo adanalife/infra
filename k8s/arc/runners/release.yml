@@ -1,0 +1,12 @@
+# The release-please pool, layered over values.yml: the same runner pod, cache
+# mounts and per-pod workspace, registered as its own scale set so a
+# release-please job never queues behind CI on arc-amd64's two slots. Every
+# push to main runs one, and its release PR (and the changelog on it) is what
+# Dana is usually waiting on.
+#
+# One runner is enough: release-please is serial per repo (its reusable
+# workflow holds a `release-please` concurrency group) and finishes in about a
+# minute, and a light job is the only kind this pool takes. minRunners stays 0
+# for the reason values.yml gives — a warm runner can go stale invisibly.
+runnerScaleSetName: arc-release
+maxRunners: 1
