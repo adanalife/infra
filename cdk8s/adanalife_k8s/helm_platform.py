@@ -246,9 +246,10 @@ def cluster_components(
 
     # ARC (Actions Runner Controller) — self-hosted GitHub Actions runners for
     # the private repos (free-plan minutes are metered there). Two OCI charts:
-    # the reconciler in arc-systems, plus one amd64 runner scale set registered
-    # at the ORG level so a single pool serves every private repo
-    # (runs-on: arc-amd64). The supporting namespaces / LimitRange /
+    # the reconciler in arc-systems, plus two amd64 runner scale sets registered
+    # at the ORG level so each pool serves every private repo: arc-amd64 for CI
+    # and arc-release for release-please alone, so a release PR never queues
+    # behind CI. The supporting namespaces / LimitRange /
     # GitHub App ExternalSecret are the ArcChart singleton (constructs/arc.py).
     if minipc:
         components.append(
@@ -269,6 +270,16 @@ def cluster_components(
                 "gha-runner-scale-set",
                 "arc-runners",
                 value_files=("arc/runners/values.yml",),
+            )
+        )
+        components.append(
+            HelmComponent(
+                "arc-release",
+                "actions-runner",
+                "gha-runner-scale-set",
+                "gha-runner-scale-set",
+                "arc-runners",
+                value_files=("arc/runners/values.yml", "arc/runners/release.yml"),
             )
         )
 
