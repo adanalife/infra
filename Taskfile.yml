@@ -2937,7 +2937,12 @@ tasks:
       NS: '{{.NS | default "prod-1-data"}}'
       PG_POD:
         sh: kubectl -n {{.NS}} get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[*].metadata.name}'
+    # pg_restore --clean drops and recreates every table from the dump: rows
+    # written since the dump are gone, and frame_embeddings comes back empty
+    # because the hourly dumps carry its schema without its data.
+    prompt: "Overwrite the prod-1 tripbot database in {{.NS}} from an S3 dump? Rows newer than the dump are lost and frame_embeddings is emptied (reseed with tripbot:stage:db:seed:vectors NS=prod-1-data)."
     preconditions:
+      - *minipc-context-guard
       - sh: '[ -n "{{.PG_POD}}" ]'
         msg: "no CNPG primary for cluster pg in {{.NS}} — bring the cluster up first (override NS= if it is elsewhere)"
     cmds:
