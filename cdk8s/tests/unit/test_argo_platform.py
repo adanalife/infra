@@ -123,6 +123,12 @@ def test_nfs_pv_app_watches_both_envs_pvs_and_never_prunes():
     assert {"/spec/nfs/server", "/spec/nfs/path", "/spec/claimRef"} <= set(
         ignore["jsonPointers"]
     )
+    # A server-side diff dry-runs those placeholders and the apiserver rejects
+    # them before ignoreDifferences applies, so the app must diff client-side.
+    assert (
+        app["metadata"]["annotations"]["argocd.argoproj.io/compare-options"]
+        == "ServerSideDiff=false"
+    )
 
 
 def test_burrito_config_app_is_manual_and_tolerates_missing_crds():
