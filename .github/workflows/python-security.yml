@@ -55,10 +55,11 @@ jobs:
         # Audit the synced runtime env directly — no requirements re-resolution
         # against PyPI, which keeps the audit on exactly the locked versions
         # (and works for a dependency PyPI can't resolve, like torch's +cpu
-        # builds from a custom index).
+        # builds from a custom index). The explicit --cache-dir skips
+        # platformdirs, which refuses an ARC runner's group-writable $HOME.
         run: |
           uv sync --frozen --no-dev
-          uv run --no-sync --with pip-audit pip-audit
+          uv run --no-sync --with pip-audit pip-audit --cache-dir "$RUNNER_TEMP/pip-audit-cache"
 
   # Scheduled runs only: a PR or push red already shows on the PR or commit.
   alert:
