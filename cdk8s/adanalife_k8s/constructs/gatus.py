@@ -21,7 +21,7 @@ gatus-health rule pages on them; the rest are context for reading an incident:
 `upstream` (the services the stream and the cluster lean on, to answer "us or
 them?"), `public` (the public sites from inside, to read beside Synthetic
 Monitoring, which already pages on them), `nas` (the live path must not depend on
-it, per the NAS ADR) and `stage`. A new group is non-paging until it is listed.
+it, per the NAS ADR), `stage` and `forum` (a toy that must not page). A new group is non-paging until it is listed.
 
 Only always-on targets belong here. The per-platform apps (tripbot, playout,
 onscreens, OBS, mediamtx) are scaled to zero by the console's mode switch and for
@@ -211,6 +211,14 @@ ENDPOINTS = [
     _tcp("dsm", "nas", NAS_IP, 5001),
     _tcp("nfs", "nas", NAS_IP, 2049),
     _tcp("nut", "nas", NAS_IP, 3493),
+    # The health route skips Rails' host check and needs no login.
+    _http(
+        "forum",
+        "forum",
+        "https://forum.prod.whereisdana.today/up",
+        "[STATUS] == 200",
+        CERT_FLOOR,
+    ),
     _http(
         "console",
         "stage",

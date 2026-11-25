@@ -80,7 +80,7 @@ def test_alert_pages_on_exactly_the_paging_groups():
 def test_every_endpoint_group_is_known():
     from adanalife_k8s.constructs.gatus import PAGING_GROUPS
 
-    context = {"upstream", "public", "nas", "stage"}
+    context = {"upstream", "public", "nas", "stage", "forum"}
     groups = {e["group"] for e in _config(_synth())["endpoints"]}
     assert groups <= set(PAGING_GROUPS) | context
 

@@ -221,6 +221,13 @@ data:
       interval: 60s
       conditions:
       - '[CONNECTED] == true'
+    - name: forum
+      group: forum
+      url: https://forum.prod.whereisdana.today/up
+      interval: 60s
+      conditions:
+      - '[STATUS] == 200'
+      - '[CERTIFICATE_EXPIRATION] > 336h'
     - name: console
       group: stage
       url: https://console.stage.whereisdana.today/health/ready
@@ -248,7 +255,7 @@ spec:
   template:
     metadata:
       annotations:
-        adanalife.dev/config-hash: d72b0aad54
+        adanalife.dev/config-hash: 987819bfeb
         prometheus.io/port: "8080"
         prometheus.io/scrape: "true"
       labels:
