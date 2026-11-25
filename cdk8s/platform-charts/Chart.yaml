@@ -35,7 +35,7 @@ dependencies:
     repository: https://prometheus-community.github.io/helm-charts
   # The CNI: an upgrade restarts the agent on the node carrying the stream.
   - name: cilium
-    version: 1.19.4
+    version: 1.20.1
     repository: https://helm.cilium.io
   # Talos-only (k3s bundles its own).
   - name: metrics-server
