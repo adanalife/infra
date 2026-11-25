@@ -285,8 +285,8 @@ class ArgoCD(Construct):
         # the Synology NUT server (UPS monitor), has no Talos node to probe or
         # reboot (T5 watchdog), no runner host (ARC — runners are minipc-only),
         # no Talos API, so no kernel log to read (kmsg), and no prod-1 to
-        # probe (gatus).
-        ups_monitor = t5_watchdog = arc = kmsg = gatus = minipc
+        # probe (gatus). The forum is minipc-only because its image is amd64.
+        ups_monitor = t5_watchdog = arc = kmsg = gatus = forum = minipc
         self.envs = envs
         # Whether the autosync block reconciles live drift (selfHeal). True on the
         # minipc (prod/stage must match git). False on the throwaway k3d dev
@@ -352,7 +352,8 @@ class ArgoCD(Construct):
             + (["node-watchdog"] if t5_watchdog else [])
             + (["arc-systems", "arc-runners"] if arc else [])
             + (["kmsg"] if kmsg else [])
-            + (["gatus"] if gatus else []),
+            + (["gatus"] if gatus else [])
+            + (["forum"] if forum else []),
             # + Namespace when a singleton rides this project: its Namespace
             # objects (owned by the unit, or via CreateNamespace=true) are
             # gated by this clusterResourceWhitelist, so a sync fails without
@@ -360,7 +361,7 @@ class ArgoCD(Construct):
             cluster_resources=[STORAGE_CLASS, PRIORITY_CLASS]
             + (
                 [NAMESPACE_KIND]
-                if (ups_monitor or t5_watchdog or arc or kmsg or gatus)
+                if (ups_monitor or t5_watchdog or arc or kmsg or gatus or forum)
                 else []
             ),
         )
@@ -583,6 +584,20 @@ class ArgoCD(Construct):
                 include_tmpl="gatus.k8s.yaml",
                 dest_ns_tmpl="gatus",
                 prune_disabled=False,
+                create_namespace=True,
+            )
+        # The forum — same singleton shape, synced by hand. Prune=false: the
+        # unit holds its Postgres cluster and upload claim.
+        if forum:
+            self._application_set(
+                id="appset-forum",
+                name="forum",
+                project=INFRA_PROJECT,
+                elements=[{}],
+                app_name_tmpl="forum",
+                include_tmpl="forum.k8s.yaml",
+                dest_ns_tmpl="forum",
+                prune_disabled=True,
                 create_namespace=True,
             )
         # The T5 watchdog — the same cluster-singleton shape as the UPS monitor

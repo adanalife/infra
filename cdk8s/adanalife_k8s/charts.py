@@ -33,6 +33,7 @@ from adanalife_k8s.constructs.music import (
     emit_music_pv,
     emit_music_pvc,
 )
+from adanalife_k8s.constructs.forum import Forum
 from adanalife_k8s.constructs.gatus import Gatus
 from adanalife_k8s.constructs.kmsg import KmsgShipper
 from adanalife_k8s.constructs.radio import Radio
@@ -282,6 +283,16 @@ class KmsgChart(Chart):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
         KmsgShipper(self)
+
+
+class ForumChart(Chart):
+    """The forum and its Postgres — a cluster-singleton in its own `forum`
+    namespace. Env-agnostic, synthed to dist/forum.k8s.yaml and delivered by a
+    dedicated minipc-only Argo Application. See constructs/forum.py."""
+
+    def __init__(self, scope: Construct, id: str):
+        super().__init__(scope, id)
+        Forum(self)
 
 
 class GatusChart(Chart):

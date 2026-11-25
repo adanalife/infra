@@ -1,0 +1,277 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: pg
+  namespace: forum
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-202608240816-standard-bookworm
+  storage:
+    size: 5Gi
+    storageClass: local-path-retain
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  bootstrap:
+    initdb:
+      database: forum
+      owner: forum
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum-cable
+  namespace: forum
+spec:
+  name: forum_cable
+  owner: forum
+  cluster:
+    name: pg
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum-cache
+  namespace: forum
+spec:
+  name: forum_cache
+  owner: forum
+  cluster:
+    name: pg
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum-queue
+  namespace: forum
+spec:
+  name: forum_queue
+  owner: forum
+  cluster:
+    name: pg
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum-secret-key-base
+  namespace: forum
+spec:
+  length: 64
+  symbols: 0
+  allowRepeat: true
+  noUpper: false
+  secretKeys:
+    - SECRET_KEY_BASE
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum-secret-key-base
+  namespace: forum
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: forum-secret-key-base
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: forum-secret-key-base
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum
+  namespace: forum
+data:
+  zz_host.rb: |
+    Rails.application.configure do
+      config.hosts += ["forum.prod.whereisdana.today"]
+      config.action_cable.allowed_request_origins = ["https://forum.prod.whereisdana.today"]
+      config.action_mailer.default_url_options = { host: "forum.prod.whereisdana.today", protocol: "https" }
+    end
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum
+  namespace: forum
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: forum
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        adanalife.dev/config-hash: 6b1fcfea33
+      labels:
+        app: forum
+    spec:
+      containers:
+        - env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: uri
+                  name: pg-app
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: pg-app
+            - name: CABLE_DATABASE_URL
+              value: postgresql://forum:$(PG_PASSWORD)@pg-rw:5432/forum_cable
+            - name: CACHE_DATABASE_URL
+              value: postgresql://forum:$(PG_PASSWORD)@pg-rw:5432/forum_cache
+            - name: QUEUE_DATABASE_URL
+              value: postgresql://forum:$(PG_PASSWORD)@pg-rw:5432/forum_queue
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  key: SECRET_KEY_BASE
+                  name: forum-secret-key-base
+            - name: SOLID_QUEUE_IN_PUMA
+              value: "1"
+          image: ghcr.io/adanalife/forum:864b251083ba38cf5cc8af10b0189facd257c816
+          livenessProbe:
+            httpGet:
+              path: /up
+              port: http
+            periodSeconds: 30
+          name: forum
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /up
+              port: http
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 50m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1000
+          startupProbe:
+            failureThreshold: 30
+            httpGet:
+              path: /up
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - mountPath: /rails/config/initializers/zz_host.rb
+              name: config
+              readOnly: true
+              subPath: zz_host.rb
+            - mountPath: /rails/storage/dis-cache
+              name: storage
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - configMap:
+            name: forum
+          name: config
+        - name: storage
+          persistentVolumeClaim:
+            claimName: forum-storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum-storage
+  namespace: forum
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path-retain
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum
+  namespace: forum
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app: forum
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+    external-dns.alpha.kubernetes.io/hostname: forum.prod.whereisdana.today
+  labels:
+    app.kubernetes.io/name: forum
+    app.kubernetes.io/part-of: infra
+  name: forum
+  namespace: forum
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: forum.prod.whereisdana.today
+      http:
+        paths:
+          - backend:
+              service:
+                name: forum
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - forum.prod.whereisdana.today
+      secretName: forum-tls
