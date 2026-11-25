@@ -22,6 +22,7 @@ from adanalife_k8s.charts import (
     ArgoCDChart,
     BurritoChart,
     DashcamLocalizeChart,
+    ForumChart,
     GatusChart,
     KmsgChart,
     NfsPVChart,
@@ -128,6 +129,9 @@ if not only:
     # probing prod-1's data plane and LAN ingress hosts. Minipc-only. See
     # constructs/gatus.py.
     GatusChart(app, "gatus")
+    # The forum (a Rails message board + its own Postgres) — cluster-singleton
+    # in the `forum` namespace. Minipc-only. See constructs/forum.py.
+    ForumChart(app, "forum")
 
 # Platform Helm stack is opt-in: it renders charts via `helm template` (needs
 # helm + network), so the default apps synth stays fast and offline. Enable with
