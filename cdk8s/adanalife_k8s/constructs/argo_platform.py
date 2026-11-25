@@ -102,12 +102,17 @@ class ArgoPlatform(Construct):
         # Watch-only: the apply stays the human gesture (manual sync), and with
         # prune off Argo can never delete a PV. RespectIgnoreDifferences keeps
         # a sync from writing the placeholder NFS coords over the real ones.
+        # Client-side diff: a server-side one dry-run-applies the placeholder
+        # coords, which the apiserver rejects (not an absolute path, and a PV's
+        # source is immutable) before ignoreDifferences can drop them, leaving
+        # the app at sync Unknown with a ComparisonError.
         self._dist_application(
             NFS_PV_APP,
             NFS_PV_MANIFESTS,
             "default",
             ignore=[NFS_PV_IGNORE],
             sync_options=("RespectIgnoreDifferences=true",),
+            annotations={"argocd.argoproj.io/compare-options": "ServerSideDiff=false"},
         )
         # Its CRs need the CRDs the `burrito` Application installs, so sync
         # that one first; SkipDryRunOnMissingResource lets the diff render
@@ -144,6 +149,7 @@ class ArgoPlatform(Construct):
         *,
         ignore: list[dict],
         sync_options: tuple[str, ...] = (),
+        annotations: dict[str, str] | None = None,
     ):
         """An Application over hand-applied dist files (the `gitops` root, which
         tracks the Argo config this file included, and the watch-only units).
@@ -158,7 +164,7 @@ class ArgoPlatform(Construct):
             name,
             api_version="argoproj.io/v1alpha1",
             kind="Application",
-            metadata={"name": name, "namespace": ARGO_NS},
+            metadata={"name": name, "namespace": ARGO_NS, "annotations": annotations},
         )
         app.add_json_patch(
             cdk8s.JsonPatch.add(
