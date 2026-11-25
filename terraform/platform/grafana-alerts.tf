@@ -50,6 +50,31 @@ locals {
   // rather than a silent un-arming.
   obs_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
 
+  // Stamps a `cause` label on a frame-skip rule's result: "pipeline" when an
+  // Argo Workflows pod was working beside the stream over the window the rule
+  // reads, "unexplained" otherwise. The batch workflows (video-pipeline's
+  // stages, the Glacier fetches) share the single node and its iGPU with prod
+  // OBS and are the one co-tenant known to make it skip, so the label separates
+  // "a batch is running, stop it or wait it out" from "nothing is running and
+  // it is skipping anyway".
+  //
+  // argo_workflows_pods_gauge is the workflow controller's count of its own
+  // Running pods, one series for the cluster. It is averaged over the window
+  // rather than read at the instant: a workflow that only checks whether it may
+  // start runs one pod for a few seconds, and that is not load. With the
+  // series missing the left side is empty and every result reads
+  // "unexplained", which is the label to see when the explanation is unknown.
+  //
+  // Multiplying by a vector of 1 leaves the rate untouched; the parentheses a
+  // rule puts around its own expression are load-bearing, because `*` binds
+  // tighter than the mode gate's `and`.
+  obs_skip_cause = "* on () group_left (cause) (label_replace(vector(1) and on () (max(avg_over_time(argo_workflows_pods_gauge{phase=\"Running\"}[10m])) > 0.5), \"cause\", \"pipeline\", \"\", \"\") or on () label_replace(vector(1), \"cause\", \"unexplained\", \"\", \"\"))"
+  // The same for the rule that reads an hour: a quarter of the hour with a
+  // workflow pod running.
+  obs_skip_cause_1h = "* on () group_left (cause) (label_replace(vector(1) and on () (max(avg_over_time(argo_workflows_pods_gauge{phase=\"Running\"}[1h])) > 0.25), \"cause\", \"pipeline\", \"\", \"\") or on () label_replace(vector(1), \"cause\", \"unexplained\", \"\", \"\"))"
+  // The clause a skip rule's summary ends on, read off that label.
+  obs_skip_cause_note = "{{ if eq $labels.cause \"pipeline\" }}while a pipeline workflow is running{{ else }}with no pipeline workflow running{{ end }}"
+
   // Relay-side variant of the mode gate, for the playout rules. Keyed on the
   // mediamtx component rather than obs: mediamtx is up in both dark and live,
   // and no console mode runs mediamtx without playout, so this arms a playout
@@ -1501,7 +1526,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state  = "Error"
 
     annotations = {
-      summary     = "OBS stream output is skipping frames"
+      summary     = "OBS stream output is skipping frames ${local.obs_skip_cause_note}"
       description = "Sustained stream-output skipped-frame rate > 0.5/s for 5m. Encoder is falling behind — check OBS CPU, encoder preset, output bitrate."
     }
     labels = {
@@ -1518,7 +1543,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(obs_stream_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])) ${local.obs_mode_gate}"
+        expr          = "(max by (service_platform, deployment_environment) (rate(obs_stream_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])) ${local.obs_mode_gate}) ${local.obs_skip_cause}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1562,7 +1587,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state  = "Error"
 
     annotations = {
-      summary     = "OBS render thread is skipping frames"
+      summary     = "OBS render thread is skipping frames ${local.obs_skip_cause_note}"
       description = "Sustained render-thread skipped-frame rate > 0.1/s for 5m. OBS can't composite at the canvas framerate — usually iGPU contention from co-tenant workloads (stage VLC/OBS, dashcam-cv) or host CPU pressure. Check intel_gpu_top on the minipc and what else is running on the node."
     }
     labels = {
@@ -1585,7 +1610,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])) ${local.obs_mode_gate}"
+        expr          = "(max by (service_platform, deployment_environment) (rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])) ${local.obs_mode_gate}) ${local.obs_skip_cause}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1622,7 +1647,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state  = "Error"
 
     annotations = {
-      summary     = "OBS output thread is skipping frames (encoder lag)"
+      summary     = "OBS output thread is skipping frames (encoder lag) ${local.obs_skip_cause_note}"
       description = "Sustained output-thread skipped-frame rate > 0.1/s for 5m. The encoder can't keep up with the render thread — check the encode engine (vaapi on the shared iGPU), co-tenant encode load, and the encoder preset."
     }
     labels = {
@@ -1645,7 +1670,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform, deployment_environment) (rate(obs_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])) ${local.obs_mode_gate}"
+        expr          = "(max by (service_platform, deployment_environment) (rate(obs_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])) ${local.obs_mode_gate}) ${local.obs_skip_cause}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
@@ -1710,7 +1735,7 @@ resource "grafana_rule_group" "stream_health" {
     exec_err_state = "Error"
 
     annotations = {
-      summary     = "Prod stream has been dropping frames heavily for ~1h+ (unwatchable)"
+      summary     = "Prod stream has been dropping frames heavily for ~1h+ (unwatchable) ${local.obs_skip_cause_note}"
       description = "The 1h-average OBS skipped-frame rate on prod-1 is above 1/s on the render thread, the output thread, or both — at 60fps that is at least ~1.7% of frames gone every second for an hour, so the stream has been visibly stuttering for an extended period rather than in a transient burst. Almost always iGPU contention from a co-tenant workload (a video-pipeline transcode/calibrate job, stage VLC/OBS) or sustained host CPU pressure. Check `kubectl get pods -A | grep -E 'transcode|calibrate|pipeline'` and intel_gpu_top on the minipc; stop the offending job to restore real-time encode. The two muted early-warning rules show which thread is skipping and since when."
     }
     labels = {
@@ -1727,7 +1752,7 @@ resource "grafana_rule_group" "stream_health" {
       datasource_uid = data.grafana_data_source.prometheus.uid
       model = jsonencode({
         refId         = "A"
-        expr          = "max by (service_platform) (label_replace(avg_over_time(rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]), \"thread\", \"render\", \"\", \"\") or label_replace(avg_over_time(rate(obs_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]), \"thread\", \"output\", \"\", \"\")) ${local.obs_mode_gate}"
+        expr          = "(max by (service_platform) (label_replace(avg_over_time(rate(obs_render_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]), \"thread\", \"render\", \"\", \"\") or label_replace(avg_over_time(rate(obs_output_skipped_frames{service_name=\"tripbot\", deployment_environment=\"prod-1\"}[5m])[1h:1m]), \"thread\", \"output\", \"\", \"\")) ${local.obs_mode_gate}) ${local.obs_skip_cause_1h}"
         instant       = true
         intervalMs    = 60000
         maxDataPoints = 43200
