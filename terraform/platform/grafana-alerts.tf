@@ -50,30 +50,33 @@ locals {
   // rather than a silent un-arming.
   obs_mode_gate = "and on (service_platform) (console_platform_component_up{component=\"obs\", deployment_environment=\"prod-1\"} > 0)"
 
-  // Stamps a `cause` label on a frame-skip rule's result: "pipeline" when an
-  // Argo Workflows pod was working beside the stream over the window the rule
-  // reads, "unexplained" otherwise. The batch workflows (video-pipeline's
-  // stages, the Glacier fetches) share the single node and its iGPU with prod
-  // OBS and are the one co-tenant known to make it skip, so the label separates
-  // "a batch is running, stop it or wait it out" from "nothing is running and
-  // it is skipping anyway".
+  // Stamps a `cause` label on a frame-skip rule's result: "pipeline" when a
+  // heavy video-pipeline step was working beside the stream over the window
+  // the rule reads, "unexplained" otherwise. The pipeline's batches share the
+  // single node with prod OBS and are the one co-tenant known to make it skip,
+  // so the label separates "a batch is working, stop it or wait it out" from
+  // "nothing heavy is running and it is skipping anyway".
   //
-  // argo_workflows_pods_gauge is the workflow controller's count of its own
-  // Running pods, one series for the cluster. It is averaged over the window
-  // rather than read at the instant: a workflow that only checks whether it may
-  // start runs one pod for a few seconds, and that is not load. With the
-  // series missing the left side is empty and every result reads
+  // argo_workflows_video_pipeline_heavy_step_seconds is a gauge the
+  // workflow controller exports for the pipeline's heavy steps (auto-trim,
+  // render, embed): the seconds one has been running, per `step`. It keeps its
+  // last value after the step ends, so the test is whether it moved, not
+  // whether it exists. Scraped once a minute, it changes once for each minute
+  // a step runs: more than 4 changes in 10m is a step that ran for most of the
+  // last ten minutes. A pipeline pod that is only waiting for a quiet audience,
+  // or a batch's own bookkeeping pod, exports nothing and does not count. With
+  // the series missing the left side is empty and every result reads
   // "unexplained", which is the label to see when the explanation is unknown.
   //
   // Multiplying by a vector of 1 leaves the rate untouched; the parentheses a
   // rule puts around its own expression are load-bearing, because `*` binds
   // tighter than the mode gate's `and`.
-  obs_skip_cause = "* on () group_left (cause) (label_replace(vector(1) and on () (max(avg_over_time(argo_workflows_pods_gauge{phase=\"Running\"}[10m])) > 0.5), \"cause\", \"pipeline\", \"\", \"\") or on () label_replace(vector(1), \"cause\", \"unexplained\", \"\", \"\"))"
+  obs_skip_cause = "* on () group_left (cause) (label_replace(vector(1) and on () (sum(changes(argo_workflows_video_pipeline_heavy_step_seconds[10m])) > 4), \"cause\", \"pipeline\", \"\", \"\") or on () label_replace(vector(1), \"cause\", \"unexplained\", \"\", \"\"))"
   // The same for the rule that reads an hour: a quarter of the hour with a
-  // workflow pod running.
-  obs_skip_cause_1h = "* on () group_left (cause) (label_replace(vector(1) and on () (max(avg_over_time(argo_workflows_pods_gauge{phase=\"Running\"}[1h])) > 0.25), \"cause\", \"pipeline\", \"\", \"\") or on () label_replace(vector(1), \"cause\", \"unexplained\", \"\", \"\"))"
+  // heavy step running.
+  obs_skip_cause_1h = "* on () group_left (cause) (label_replace(vector(1) and on () (sum(changes(argo_workflows_video_pipeline_heavy_step_seconds[1h])) > 14), \"cause\", \"pipeline\", \"\", \"\") or on () label_replace(vector(1), \"cause\", \"unexplained\", \"\", \"\"))"
   // The clause a skip rule's summary ends on, read off that label.
-  obs_skip_cause_note = "{{ if eq $labels.cause \"pipeline\" }}while a pipeline workflow is running{{ else }}with no pipeline workflow running{{ end }}"
+  obs_skip_cause_note = "{{ if eq $labels.cause \"pipeline\" }}while a heavy pipeline step is running{{ else }}with no heavy pipeline step running{{ end }}"
 
   // Relay-side variant of the mode gate, for the playout rules. Keyed on the
   // mediamtx component rather than obs: mediamtx is up in both dark and live,
