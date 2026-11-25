@@ -76,7 +76,7 @@ variable "secondary_stage_nameservers" {
 # moves to a different physical network.
 variable "minipc_active_location" {
   type    = string
-  default = "tallman-local"
+  default = "site-1"
 }
 
 # dev.whereisdana.today nameservers — obtained from terraform/stage-1's
