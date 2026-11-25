@@ -63,6 +63,10 @@
 #   - k8s/video-pipeline/glacier-fetch — JSON {"AWS_ACCESS_KEY_ID": ...,
 #     "AWS_SECRET_ACCESS_KEY": ...} for the core account's GlacierFetchUser;
 #     mint + seed commands in core/glacier-fetch.tf.
+#   - k8s/video-pipeline/console-token — JSON {"CONSOLE_TOKEN": "<token>"},
+#     the token prod's console lists as `video-pipeline` in its
+#     CONSOLE_SERVICE_TOKENS. Prod's, although this is the stage account: the
+#     pipeline runs in stage-1 beside prod's stream and reads prod's console.
 #   - ESO picks up new values within 1h; force with
 #     `kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`.
 
@@ -89,6 +93,7 @@ locals {
     "k8s/video-pipeline/ghcr-pull-token"   = "GitHub token (read:packages) for pulling the private video-pipeline image from GHCR. Keys: username, token."
     "k8s/flare/ghcr-pull-token"            = "GitHub token (read:packages) for pulling the private flare image from GHCR. Keys: username, token."
     "k8s/video-pipeline/glacier-fetch"     = "Core-account GlacierFetchUser key for the glacier-fetch CronJob (video-pipeline cdk8s). Keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY."
+    "k8s/video-pipeline/console-token"     = "Console service token for the video-pipeline batch's audience check. Key holds CONSOLE_TOKEN."
   }
 }
 
