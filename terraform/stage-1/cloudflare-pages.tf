@@ -1,7 +1,7 @@
 # Cloudflare Pages project for dana.lol static site
 #
-# This creates "dana-lol-staging" on Cloudflare Pages, available at
-# dana-lol-staging.pages.dev. PR preview deployments are automatic for any
+# This creates "dana-lol-stage-1" on Cloudflare Pages, available at
+# dana-lol-stage-1.pages.dev. PR preview deployments are automatic for any
 # non-production branch. The production project lives in terraform/prod-1/.
 
 variable "cloudflare_account_id" {
